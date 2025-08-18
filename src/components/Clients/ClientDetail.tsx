@@ -55,6 +55,8 @@ type ClientStatsShape = {
   netAmount: number;
   pendingPaymentsCount?: number;
   overduePaymentsCount?: number;
+  pendingAmount?: number;
+  overdueAmount?: number;
   paidPayments?: number;
   totalPayments?: number;
   lastPaymentDate?: string | null;
@@ -83,7 +85,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
 
-  // 👇 новый фильтр по статусу
   const [statusFilter, setStatusFilter] = useState<'all' | NormalizedStatus>('all');
 
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -95,7 +96,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     const base = stats as unknown as ClientStatsShape;
 
     const all = base.recentPayments ?? [];
-    const visible = all.filter(matchesFilter).sort((a, b) => +new Date(a.date) - +new Date(b.date)); // по возрастанию
+    const visible = all.filter(matchesFilter).sort((a, b) => +new Date(a.date) - +new Date(b.date));
 
     const withList = { ...base, recentPayments: visible, lastPaymentDate: maxDate(visible) };
     setLocalStats(recomputeAggregates(withList, visible));
@@ -141,22 +142,43 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return okCase && okFrom && okTo && okStatus;
   };
 
-  /** Подсчёты по отображаемому списку с учётом вашей логики */
+  type Totals = {
+    income: number;
+    expense: number;
+    pending: number;
+    overdue: number;
+    total: number;
+    pendingAmount: number;
+    overdueAmount: number;
+  };
+
   function recomputeAggregates(base: ClientStatsShape, items: Payment[]): ClientStatsShape {
-    const totals = items.reduce(
+    const totals = items.reduce<Totals>(
       (acc, p) => {
         const s = normalizeStatus(p.status);
         if (s === 'completed') {
           if (p.type === 'Income') acc.income += p.amount;
           if (p.type === 'Expense') acc.expense += p.amount;
+        } else if (s === 'pending') {
+          acc.pending += 1;
+          acc.pendingAmount += p.amount;
+        } else if (s === 'overdue') {
+          acc.overdue += 1;
+          acc.overdueAmount += p.amount;
         }
-        if (s === 'pending') acc.pending += 1;
-        if (s === 'overdue') acc.overdue += 1;
 
         acc.total += 1;
         return acc;
       },
-      { income: 0, expense: 0, pending: 0, overdue: 0, total: 0 },
+      {
+        income: 0,
+        expense: 0,
+        pending: 0,
+        overdue: 0,
+        total: 0,
+        pendingAmount: 0,
+        overdueAmount: 0,
+      },
     );
 
     return {
@@ -166,6 +188,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       netAmount: totals.income - totals.expense,
       pendingPaymentsCount: totals.pending,
       overduePaymentsCount: totals.overdue,
+      pendingAmount: totals.pendingAmount,
+      overdueAmount: totals.overdueAmount,
       paidPayments: undefined,
       totalPayments: totals.total,
     };
@@ -368,11 +392,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               </div>
               <p className="text-sm font-medium text-gray-600">Ожидается</p>
               <p className="md:hidden text-lg font-bold text-amber-600">
-                {view.pendingPaymentsCount ?? 0}
+                {formatCurrency(view.pendingAmount ?? 0)}
               </p>
             </div>
             <p className="hidden md:block mt-3 text-2xl font-bold text-amber-600">
-              {view.pendingPaymentsCount ?? 0}
+              {formatCurrency(view.pendingAmount ?? 0)}
             </p>
           </div>
 
@@ -384,11 +408,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               </div>
               <p className="text-sm font-medium text-gray-600">Просрочено</p>
               <p className="md:hidden text-lg font-bold text-purple-700">
-                {view.overduePaymentsCount ?? 0}
+                {formatCurrency(view.overdueAmount ?? 0)}
               </p>
             </div>
             <p className="hidden md:block mt-3 text-2xl font-bold text-purple-700">
-              {view.overduePaymentsCount ?? 0}
+              {formatCurrency(view.overdueAmount ?? 0)}
             </p>
           </div>
         </div>
