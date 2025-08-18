@@ -81,6 +81,7 @@ export interface Payment {
   incomeType?: IncomeType;
   paymentSource?: PaymentSource;
   paymentStatusEntity?: PaymentStatusEntity;
+  account?: string;
 }
 
 export interface ClientStats {

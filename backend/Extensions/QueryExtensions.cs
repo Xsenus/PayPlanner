@@ -28,7 +28,8 @@ namespace PayPlanner.Api.Extensions
                 search = search.Trim();
                 q = q.Where(p =>
                     (p.Description != null && EF.Functions.Like(p.Description, $"%{search}%")) ||
-                    (p.Notes != null && EF.Functions.Like(p.Notes, $"%{search}%")));
+                    (p.Notes != null && EF.Functions.Like(p.Notes, $"%{search}%")) ||
+                    (p.Account != null && EF.Functions.Like(p.Account, $"%{search}%")));
             }
             return q;
         }

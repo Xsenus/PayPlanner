@@ -357,6 +357,29 @@ export class ApiService {
   async deleteDict(kind: DictKind, id: number): Promise<void> {
     await this.request<void>(`${pathForKind(kind)}/${id}`, { method: 'DELETE' });
   }
+
+  // ===== Accounts (подсказки для поля "Счёт") =====
+  async getAccounts(params?: { clientId?: number; caseId?: number; q?: string; take?: number }) {
+    const q = buildQuery({
+      clientId: params?.clientId,
+      caseId: params?.caseId,
+      q: params?.q?.trim(),
+      take: params?.take,
+    });
+    return this.request<string[]>(`/accounts${q}`);
+  }
+
+  async getAccountSuggestions(
+    q?: string,
+    opts?: { clientId?: number; caseId?: number; take?: number },
+  ) {
+    return this.getAccounts({
+      q,
+      clientId: opts?.clientId,
+      caseId: opts?.caseId,
+      take: opts?.take ?? 10,
+    });
+  }
 }
 
 export const apiService = new ApiService();
@@ -373,5 +396,5 @@ import type {
   PaymentStatusEntity,
   MonthlyStats,
   ClientCase,
-} from '../types';import { BaseDictItem } from '../types/dictionaries';
-
+} from '../types';
+import { BaseDictItem } from '../types/dictionaries';

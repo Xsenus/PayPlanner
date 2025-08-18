@@ -28,6 +28,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(p => p.Account).HasMaxLength(120);
 
             // Связь с клиентом
             entity.HasOne(e => e.Client)
@@ -65,7 +66,8 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.PaymentStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- Индексы ----
+            // ---- Индексы Account
+            entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Payments_Date");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Payments_CreatedAt");
             entity.HasIndex(e => e.DealTypeId).HasDatabaseName("IX_Payments_DealTypeId");

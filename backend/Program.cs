@@ -115,6 +115,7 @@ app.MapGet("/api/payments/{id}", async (PaymentContext context, int id, Cancella
 
 app.MapPost("/api/payments", async (PaymentContext context, Payment payment) =>
 {
+    payment.Account = string.IsNullOrWhiteSpace(payment.Account) ? null : payment.Account.Trim();
     context.Payments.Add(payment);
     await context.SaveChangesAsync();
     return Results.Created($"/api/payments/{payment.Id}", payment);
@@ -134,11 +135,12 @@ app.MapPut("/api/payments/{id}", async (PaymentContext context, int id, Payment 
     existing.PaidDate = payment.PaidDate;
     existing.Notes = payment.Notes;
     existing.ClientId = payment.ClientId;
-    existing.ClientCaseId = payment.ClientCaseId; // <-- привязка к делу
+    existing.ClientCaseId = payment.ClientCaseId;
     existing.DealTypeId = payment.DealTypeId;
     existing.IncomeTypeId = payment.IncomeTypeId;
     existing.PaymentSourceId = payment.PaymentSourceId;
     existing.PaymentStatusId = payment.PaymentStatusId;
+    existing.Account = string.IsNullOrWhiteSpace(payment.Account) ? null : payment.Account.Trim();
 
     await context.SaveChangesAsync();
     return Results.Ok(existing);
@@ -154,8 +156,44 @@ app.MapDelete("/api/payments/{id}", async (PaymentContext context, int id) =>
     return Results.NoContent();
 });
 
-// -------------------- CLIENTS --------------------
+// -------------------- ACCOUNTS --------------------
+app.MapGet("/api/accounts", async (
+    PaymentContext db,
+    int? clientId,
+    int? caseId,
+    string? q,
+    int take = 10,
+    CancellationToken ct = default
+) =>
+{
+    var query = db.Payments.AsNoTracking()
+        .Where(p => p.Account != null && p.Account != "");
 
+    if (clientId.HasValue)
+        query = query.Where(p => p.ClientId == clientId.Value);
+
+    if (caseId.HasValue)
+        query = query.Where(p => p.ClientCaseId == caseId.Value);
+
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim().ToLower();
+        query = query.Where(p => p.Account!.ToLower().Contains(term));
+    }
+
+    var accounts = await query
+        .GroupBy(p => p.Account!)
+        .Select(g => new { Account = g.Key, Count = g.Count() })
+        .OrderByDescending(x => x.Count)
+        .ThenBy(x => x.Account)
+        //.Take(Math.Clamp(take, 1, 50))
+        .Select(x => x.Account)
+        .ToListAsync(ct);
+
+    return Results.Ok(accounts);
+});
+
+// -------------------- CLIENTS --------------------
 app.MapGet("/api/clients", async (PaymentContext context, CancellationToken ct) =>
     await context.Clients.AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
 
@@ -411,6 +449,7 @@ paymentsV1.MapGet("/{id:int}", async (PaymentContext db, int id, CancellationTok
 
 paymentsV1.MapPost("", async (PaymentContext db, Payment model) =>
 {
+    model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
     db.Payments.Add(model);
     await db.SaveChangesAsync();
     return Results.Created($"/api/v1/payments/{model.Id}", model);
@@ -435,6 +474,7 @@ paymentsV1.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
     e.IncomeTypeId = model.IncomeTypeId;
     e.PaymentSourceId = model.PaymentSourceId;
     e.PaymentStatusId = model.PaymentStatusId;
+    e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
 
     await db.SaveChangesAsync();
     return Results.Ok(e);
@@ -630,6 +670,7 @@ paymentsV2.MapGet("/{id:int}", async (PaymentContext db, int id, CancellationTok
 
 paymentsV2.MapPost("", async (PaymentContext db, Payment model) =>
 {
+    model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
     db.Payments.Add(model);
     await db.SaveChangesAsync();
     return Results.Created($"/api/v2/payments/{model.Id}", model);
@@ -654,6 +695,7 @@ paymentsV2.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
     e.IncomeTypeId = model.IncomeTypeId;
     e.PaymentSourceId = model.PaymentSourceId;
     e.PaymentStatusId = model.PaymentStatusId;
+    e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
 
     await db.SaveChangesAsync();
     return Results.Ok(e);

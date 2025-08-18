@@ -6,6 +6,11 @@ namespace PayPlanner.Api.Models
     public class Payment
     {
         /// <summary>
+        /// —чет.
+        /// </summary>
+        public string? Account { get; set; }
+
+        /// <summary>
         /// —умма платежа (в валюте учЄта).
         /// </summary>
         public decimal Amount { get; set; }

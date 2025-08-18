@@ -56,7 +56,37 @@ export function PaymentModal({
     paymentSourceId: '',
     paymentStatusId: '',
     type: (type ?? 'Income') as PaymentKind,
+    account: '',
   });
+
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountOpts, setAccountOpts] = useState<string[]>([]);
+  const [accountLoading, setAccountLoading] = useState(false);
+
+  useEffect(() => {
+    let stop = false;
+    const t = setTimeout(async () => {
+      try {
+        setAccountLoading(true);
+        const cid = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+        const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
+        const data = await apiService.getAccounts({
+          clientId: cid,
+          caseId,
+          q: formData.account,
+          take: 10,
+        });
+        if (!stop) setAccountOpts(Array.from(new Set(data)));
+      } finally {
+        if (!stop) setAccountLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      stop = true;
+      clearTimeout(t);
+    };
+  }, [formData.account, formData.clientId, formData.clientCaseId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -77,6 +107,7 @@ export function PaymentModal({
         paymentSourceId: payment.paymentSourceId?.toString() || '',
         paymentStatusId: payment.paymentStatusId?.toString() || '',
         type: (payment.type as PaymentKind) ?? type ?? 'Income',
+        account: payment.account ?? '',
       });
     } else {
       setFormData({
@@ -94,6 +125,7 @@ export function PaymentModal({
         paymentSourceId: '',
         paymentStatusId: '',
         type: (type ?? 'Income') as PaymentKind,
+        account: '',
       });
     }
 
@@ -172,6 +204,7 @@ export function PaymentModal({
         paymentStatusId: formData.paymentStatusId
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
+        account: formData.account?.trim() || undefined,
       } as Omit<Payment, 'id' | 'createdAt'>;
 
       if (payment) {
@@ -322,6 +355,60 @@ export function PaymentModal({
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* СЧЁТ */}
+            <div className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('account') ?? 'Счёт'}
+              </label>
+              <input
+                name="account"
+                value={formData.account}
+                onChange={handleChange}
+                onFocus={() => setAccountOpen(true)}
+                onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                placeholder="Например: INV-2025-001"
+                maxLength={120}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+
+              {accountOpen &&
+                (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
+                  <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
+                    {accountLoading && (
+                      <div className="px-3 py-2 text-sm text-gray-500">Загрузка…</div>
+                    )}
+
+                    {/* Предложение создать новый вариант, если точного совпадения нет */}
+                    {formData.account &&
+                      !accountOpts.some(
+                        (x) => x.toLowerCase() === formData.account.trim().toLowerCase(),
+                      ) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setAccountOpen(false)}>
+                          Создать «{formData.account.trim()}»
+                        </button>
+                      )}
+
+                    {accountOpts.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setFormData((s) => ({ ...s, account: opt }));
+                          setAccountOpen(false);
+                        }}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
             </div>
 
             <div>

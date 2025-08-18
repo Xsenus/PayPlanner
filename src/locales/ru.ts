@@ -25,6 +25,7 @@ export const ru = {
   downPaymentTooLarge: 'Первоначальный взнос больше суммы',
   saveError: 'Ошибка сохранения',
   clear: 'Очистить',
+  account: 'Счёт',
   // Navigation
   calendar: 'Календарь',
   reports: 'Отчёты',
