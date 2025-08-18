@@ -34,12 +34,41 @@ function computeMonthlyStatsFrom(payments: Payment[]): MonthlyStats {
   const profit = income - expense;
   const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
 
+  const { completedAmount, pendingAmount, overdueAmount } = computeAmounts(payments);
+
   return {
     income,
     expense,
     profit,
     completionRate,
     counts: { completed, pending, overdue, total },
+    completedAmount,
+    pendingAmount,
+    overdueAmount,
+  };
+}
+
+function computeAmounts(payments: Payment[]) {
+  const income = payments
+    .filter((p) => p.type === 'Income' && p.isPaid)
+    .reduce((s, p) => s + (p.amount ?? 0), 0);
+
+  const expense = payments
+    .filter((p) => p.type === 'Expense' && p.isPaid)
+    .reduce((s, p) => s + (p.amount ?? 0), 0);
+
+  const pendingAmount = payments
+    .filter((p) => !p.isPaid && p.status === 'Pending')
+    .reduce((s, p) => s + (p.amount ?? 0), 0);
+
+  const overdueAmount = payments
+    .filter((p) => !p.isPaid && p.status === 'Overdue')
+    .reduce((s, p) => s + (p.amount ?? 0), 0);
+
+  return {
+    completedAmount: income - expense,
+    pendingAmount,
+    overdueAmount,
   };
 }
 
@@ -65,7 +94,6 @@ export function Calendar({ onOpenClient }: CalendarProps) {
 
   const {
     payments,
-    loading,
     createPayment,
     updatePayment,
     deletePayment,
@@ -156,17 +184,13 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const hasFilters = deferredSearch.trim().length > 0 || statusFilter !== 'All';
 
   const effectiveStats = useMemo<MonthlyStats | null>(() => {
-    if (hasFilters) return computeMonthlyStatsFrom(filteredPayments);
-    return stats;
-  }, [hasFilters, filteredPayments, stats]);
+    if (!stats && !payments.length) return null;
+    const base = hasFilters ? computeMonthlyStatsFrom(filteredPayments) : (stats as MonthlyStats);
+    const source = hasFilters ? filteredPayments : payments;
+    const amounts = computeAmounts(source);
 
-  if (loading && !payments.length) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">{t('loading')}</div>
-      </div>
-    );
-  }
+    return { ...base, ...amounts };
+  }, [hasFilters, filteredPayments, stats, payments]);
 
   return (
     <div className="min-h-screen bg-gray-50">

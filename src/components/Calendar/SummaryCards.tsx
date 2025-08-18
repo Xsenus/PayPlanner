@@ -43,25 +43,25 @@ export function SummaryCards({ stats }: SummaryCardsProps) {
       bg: 'bg-red-50',
     },
     {
-      title: 'Выполнено',
-      value: `${stats.profit ?? 0}`,
+      title: 'Итог',
+      value: formatCurrency(stats.completedAmount ?? 0),
       icon: Check,
-      color: stats.profit >= 0 ? 'text-emerald-600' : 'text-green-600',
-      bg: stats.profit >= 0 ? 'bg-emerald-50' : 'bg-green-50',
+      color: (stats.completedAmount ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600',
+      bg: (stats.completedAmount ?? 0) >= 0 ? 'bg-emerald-50' : 'bg-red-50',
     },
     {
       title: 'Ожидается',
-      value: `${stats.counts?.pending ?? 0}`,
+      value: formatCurrency(stats.pendingAmount ?? 0),
       icon: Loader,
       color: 'text-orange-600',
       bg: 'bg-orange-50',
     },
     {
       title: 'Просрочено',
-      value: `${stats.counts?.overdue ?? 0}`,
+      value: formatCurrency(stats.overdueAmount ?? 0),
       icon: AlertTriangle,
-      color: 'text-red-600',
-      bg: 'bg-red-50',
+      color: 'text-purple-700',
+      bg: 'bg-purple-50',
     },
   ];
 

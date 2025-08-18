@@ -107,6 +107,9 @@ export interface MonthlyStats {
     overdue: number;
     total: number;
   };
+  completedAmount?: number;
+  pendingAmount?: number;
+  overdueAmount?: number;
 }
 
 export interface InstallmentRequest {
