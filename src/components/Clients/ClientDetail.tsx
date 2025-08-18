@@ -63,7 +63,6 @@ type ClientStatsShape = {
   recentPayments: Payment[];
 };
 
-/** ── Нормализация статуса (как в CalendarGrid) ─────────────────────────── */
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
@@ -71,7 +70,6 @@ function normalizeStatus(s?: string): NormalizedStatus {
   if (v.includes('overdue') || v.includes('проср')) return 'overdue';
   return 'pending';
 }
-/** ──────────────────────────────────────────────────────────────────────── */
 
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
@@ -231,7 +229,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
       const visible = all
         .filter(matchesFilter)
-        .sort((a, b) => +new Date(a.date) - +new Date(b.date)); // по возрастанию
+        .sort((a, b) => +new Date(a.date) - +new Date(b.date));
 
       const withList = { ...prev, recentPayments: visible, lastPaymentDate: maxDate(visible) };
       return recomputeAggregates(withList, visible);
@@ -321,9 +319,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        {/* KPI-карточки */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          {/* Доходы (completed Income) */}
           <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div className="p-2.5 md:p-3 rounded-lg bg-emerald-50">
@@ -339,7 +335,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </p>
           </div>
 
-          {/* Расходы (completed Expense) */}
           <div className="bg-white rounded-xl p-4 md:p-6 shadowсм border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div className="p-2.5 md:p-3 rounded-lg bg-red-50">
@@ -355,7 +350,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </p>
           </div>
 
-          {/* Итог = Доходы - Расходы */}
           <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div
@@ -384,7 +378,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </p>
           </div>
 
-          {/* Ожидается (pending) — счётчик */}
           <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div className="p-2.5 md:p-3 rounded-lg bg-amber-50">
@@ -400,7 +393,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </p>
           </div>
 
-          {/* Просрочено (overdue) — счётчик */}
           <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div className="p-2.5 md:p-3 rounded-lg bg-purple-50">
@@ -417,7 +409,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        {/* Фильтры + кнопки */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
           <div className="p-6 flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap gap-2">
@@ -450,7 +441,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </div>
 
             <div className="ml-auto flex items-center gap-3 flex-wrap">
-              {/* Диапазон месяцев */}
               <MonthRangePicker
                 value={{ from: monthFrom || undefined, to: monthTo || undefined }}
                 onChange={(r) => {
@@ -461,7 +451,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 yearsForward={1}
               />
 
-              {/* 👇 селект статуса */}
               <div className="relative w-full sm:w-56">
                 <select
                   value={statusFilter}

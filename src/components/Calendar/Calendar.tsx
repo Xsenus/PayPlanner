@@ -1,11 +1,12 @@
 import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
 import { SummaryCards } from './SummaryCards';
 import { PaymentModal } from './PaymentModal';
 import { usePayments } from '../../hooks/usePayments';
 import { useMonthlyStats } from '../../hooks/useMonthlyStats';
 import { useTranslation } from '../../hooks/useTranslation';
+import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { MonthlyStats, Payment } from '../../types';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
@@ -72,6 +73,15 @@ function computeAmounts(payments: Payment[]) {
   };
 }
 
+function ymStart(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toISOString().split('T')[0];
+}
+function ymEnd(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m, 0).toISOString().split('T')[0];
+}
+
 export function Calendar({ onOpenClient }: CalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,13 +92,35 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
 
+  const [range, setRange] = useState<MonthRange>({});
+
   const { t, formatMonth } = useTranslation();
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
-
   const startOfMonth = new Date(year, month - 1, 1);
   const endOfMonth = new Date(year, month, 0);
+
+  const fromDateStr =
+    range.from && !range.to
+      ? ymStart(range.from)
+      : range.from && range.to
+      ? ymStart(range.from)
+      : startOfMonth.toISOString().split('T')[0];
+
+  const toDateStr =
+    range.to && !range.from
+      ? ymEnd(range.to)
+      : range.from && range.to
+      ? ymEnd(range.to)
+      : endOfMonth.toISOString().split('T')[0];
+
+  const formatRange = () => {
+    if (range.from && range.to) return `${range.from} — ${range.to}`;
+    if (range.from) return `${range.from} →`;
+    if (range.to) return `→ ${range.to}`;
+    return formatMonth(currentDate);
+  };
 
   const pollInterval = isModalOpen ? 0 : 5000;
 
@@ -98,15 +130,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     updatePayment,
     deletePayment,
     refresh: refreshPayments,
-  } = usePayments(
-    startOfMonth.toISOString().split('T')[0],
-    endOfMonth.toISOString().split('T')[0],
-    { pollInterval },
-  );
+  } = usePayments(fromDateStr, toDateStr, { pollInterval });
 
-  const { stats, refresh: refreshStats } = useMonthlyStats(year, month, {
-    pollInterval,
-  });
+  const { stats, refresh: refreshStats } = useMonthlyStats(year, month, { pollInterval });
 
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   const prevIdsRef = useRef<Set<number>>(new Set());
@@ -181,16 +207,18 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     });
   }, [payments, deferredSearch, statusFilter]);
 
-  const hasFilters = deferredSearch.trim().length > 0 || statusFilter !== 'All';
+  const hasFilters =
+    deferredSearch.trim().length > 0 || statusFilter !== 'All' || !!range.from || !!range.to;
 
   const effectiveStats = useMemo<MonthlyStats | null>(() => {
     if (!stats && !payments.length) return null;
     const base = hasFilters ? computeMonthlyStatsFrom(filteredPayments) : (stats as MonthlyStats);
     const source = hasFilters ? filteredPayments : payments;
     const amounts = computeAmounts(source);
-
     return { ...base, ...amounts };
   }, [hasFilters, filteredPayments, stats, payments]);
+
+  const clearRange = () => setRange({});
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -202,23 +230,29 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             </h1>
 
             <div className="flex items-center gap-4 sm:gap-6">
-              <button
-                type="button"
-                onClick={() => navigateMonth('prev')}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                aria-label="Previous month">
-                <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-              </button>
+              {!range.from && !range.to && (
+                <button
+                  type="button"
+                  onClick={() => navigateMonth('prev')}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                  aria-label="Previous month">
+                  <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
+                </button>
+              )}
+
               <h2 className="text-lg sm:text-xl font-semibold text-gray-900 text-center truncate max-w-[70vw] sm:max-w-none">
-                {formatMonth(currentDate)}
+                {range.from || range.to ? formatRange() : formatMonth(currentDate)}
               </h2>
-              <button
-                type="button"
-                onClick={() => navigateMonth('next')}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                aria-label="Next month">
-                <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />
-              </button>
+
+              {!range.from && !range.to && (
+                <button
+                  type="button"
+                  onClick={() => navigateMonth('next')}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                  aria-label="Next month">
+                  <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -248,6 +282,24 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               <option value="Completed">{t('completed') ?? 'Completed'}</option>
               <option value="Overdue">{t('overdue') ?? 'Overdue'}</option>
             </select>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <MonthRangePicker
+                value={{ from: range.from, to: range.to }}
+                onChange={(r) => setRange(r)}
+                yearsBack={8}
+                yearsForward={1}
+              />
+              {(range.from || range.to) && (
+                <button
+                  type="button"
+                  onClick={clearRange}
+                  className="inline-flex items-center gap-1 px-2 py-2 text-sm rounded-lg bg-white border border-gray-300 hover:bg-gray-50"
+                  title={t('clear') ?? 'Clear'}>
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

@@ -24,6 +24,7 @@ export const ru = {
   confirmSaveAllPayments: 'Сохранить все платежи?',
   downPaymentTooLarge: 'Первоначальный взнос больше суммы',
   saveError: 'Ошибка сохранения',
+  clear: 'Очистить',
   // Navigation
   calendar: 'Календарь',
   reports: 'Отчёты',
