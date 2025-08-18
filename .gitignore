@@ -76,6 +76,8 @@ appsettings.Development.json
 *.db
 *.sqlite
 *.sqlite-journal
+*.db-shm
+*.db-wal
 
 # ---- Misc ----
 # /build/
