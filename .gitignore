@@ -1,0 +1,86 @@
+# ---- Node / React (Vite) ----
+node_modules/
+dist/
+.build/
+.cache/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+*.tsbuildinfo
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Testing / coverage
+coverage/
+.cypress/
+.playwright/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ---- JetBrains Rider / ReSharper / CodeRush ----
+.ReSharper*/
+*_ReSharper*/
+*.DotSettings.user
+.cr/  # DevExpress CodeRush artifacts
+
+# ---- .NET / C# ----
+bin/
+obj/
+*.user
+*.suo
+*.rsuser
+*.userprefs
+*.ide
+*.pdb
+*.cache
+*.dll
+*.exe
+
+# Visual Studio
+.vs/
+
+# NuGet
+*.nupkg
+# packages/
+
+# Logs
+TestResult*/
+*.trx
+
+# Publish profiles (often contain machine-specific paths/secrets)
+**/Properties/PublishProfiles/
+**/*.pubxml
+**/*.pubxml.user
+
+# Publish output
+**/Publish/
+**/publish/
+
+# Local settings
+appsettings.*.local.json
+appsettings.Development.json
+
+# Databases (на случай локальной SQLite)
+*.db
+*.sqlite
+*.sqlite-journal
+
+# ---- Misc ----
+# /build/
+
+# Кеши инструментов
+.sass-cache/
+.stylelintcache
+.eslintcache
