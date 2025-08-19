@@ -74,6 +74,7 @@ export function PaymentModal({
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
 
+  /* -------------------- Подсказки по счёту -------------------- */
   useEffect(() => {
     let stop = false;
     const timer = setTimeout(async () => {
@@ -134,70 +135,112 @@ export function PaymentModal({
     };
   }, [formData.account, formData.clientId, formData.clientCaseId]);
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const prevOpenRef = useRef(false);
+  const paymentRef = useRef<Payment | null>(null);
 
-    if (payment) {
-      setFormData({
-        date: toDateInputValue(payment.date) || todayYMD(),
-        amount: payment.amount.toString(),
-        status: payment.status,
-        description: payment.description,
-        isPaid: payment.isPaid,
-        paidDate: toDateInputValue(payment.paidDate) || '',
-        notes: payment.notes || '',
-        clientId: payment.clientId?.toString() || '',
-        clientCaseId: payment.clientCaseId?.toString() || '',
-        dealTypeId: payment.dealTypeId?.toString() || '',
-        incomeTypeId: payment.incomeTypeId?.toString() || '',
-        paymentSourceId: payment.paymentSourceId?.toString() || '',
-        paymentStatusId: payment.paymentStatusId?.toString() || '',
-        type: (payment.type as PaymentKind) ?? type ?? 'Income',
-        account: payment.account ?? '',
-        accountDate: toDateInputValue(payment.accountDate) || '',
-      });
-    } else {
-      setFormData({
-        date: todayYMD(),
-        amount: '',
-        status: 'Pending',
-        description: '',
-        isPaid: false,
-        paidDate: '',
-        notes: '',
-        clientId: defaultClientId?.toString() || '',
-        clientCaseId: defaultClientCaseId?.toString() || '',
-        dealTypeId: '',
-        incomeTypeId: '',
-        paymentSourceId: '',
-        paymentStatusId: '',
-        type: (type ?? 'Income') as PaymentKind,
-        account: '',
-        accountDate: '',
-      });
+  useEffect(() => {
+    if (paymentRef.current?.id !== payment?.id) {
+      paymentRef.current = payment ?? null;
+    }
+  }, [payment]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      prevOpenRef.current = false;
+      return;
     }
 
-    setCases([]);
-  }, [isOpen, payment, defaultClientId, defaultClientCaseId, type]);
+    if (!prevOpenRef.current) {
+      const p = paymentRef.current;
+
+      if (p) {
+        setFormData({
+          date: toDateInputValue(p.date) || todayYMD(),
+          amount: p.amount.toString(),
+          status: p.status,
+          description: p.description,
+          isPaid: p.isPaid,
+          paidDate: toDateInputValue(p.paidDate) || '',
+          notes: p.notes || '',
+          clientId: p.clientId?.toString() || '',
+          clientCaseId: p.clientCaseId?.toString() || '',
+          dealTypeId: p.dealTypeId?.toString() || '',
+          incomeTypeId: p.incomeTypeId?.toString() || '',
+          paymentSourceId: p.paymentSourceId?.toString() || '',
+          paymentStatusId: p.paymentStatusId?.toString() || '',
+          type: (p.type as PaymentKind) ?? type ?? 'Income',
+          account: p.account ?? '',
+          accountDate: toDateInputValue(p.accountDate) || '',
+        });
+      } else {
+        setFormData({
+          date: todayYMD(),
+          amount: '',
+          status: 'Pending',
+          description: '',
+          isPaid: false,
+          paidDate: '',
+          notes: '',
+          clientId: defaultClientId?.toString() || '',
+          clientCaseId: defaultClientCaseId?.toString() || '',
+          dealTypeId: '',
+          incomeTypeId: '',
+          paymentSourceId: '',
+          paymentStatusId: '',
+          type: (type ?? 'Income') as PaymentKind,
+          account: '',
+          accountDate: '',
+        });
+      }
+
+      prevOpenRef.current = true;
+    }
+  }, [isOpen, defaultClientId, defaultClientCaseId, type]);
+
+  const clientIdRef = useRef(formData.clientId);
+  useEffect(() => {
+    clientIdRef.current = formData.clientId;
+  }, [formData.clientId]);
+
+  const caseIdRef = useRef(formData.clientCaseId);
+  useEffect(() => {
+    caseIdRef.current = formData.clientCaseId;
+  }, [formData.clientCaseId]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const currentClientId = clientIdRef.current;
+    const initialCaseId = caseIdRef.current;
+
     const load = async () => {
-      const cid = Number(formData.clientId);
+      const cid = Number(currentClientId);
       if (!cid) {
-        setCases([]);
-        setFormData((s) => ({ ...s, clientCaseId: '' }));
+        if (!cancelled) {
+          setCases([]);
+          setFormData((s) => ({ ...s, clientCaseId: '' }));
+        }
         return;
       }
+
       const list = await apiService.getCases(cid);
+      if (cancelled) return;
+
       setCases(list || []);
 
-      if (formData.clientCaseId) {
-        const ok = (list || []).some((c) => String(c.id) === formData.clientCaseId);
-        if (!ok) setFormData((s) => ({ ...s, clientCaseId: '' }));
+      if (initialCaseId && !(list || []).some((c) => String(c.id) === initialCaseId)) {
+        setFormData((s) => {
+          if (s.clientId !== currentClientId) return s;
+          if (s.clientCaseId !== initialCaseId) return s;
+          return { ...s, clientCaseId: '' };
+        });
       }
     };
+
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
   }, [formData.clientId]);
 
   const markPaid = () =>
@@ -311,6 +354,7 @@ export function PaymentModal({
 
   const canDelete = !!payment && !!onDelete;
   if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -391,6 +435,7 @@ export function PaymentModal({
                 {t('case') ?? 'Дело'}
               </label>
               <select
+                key={formData.clientId || 'no-client'}
                 name="clientCaseId"
                 value={formData.clientCaseId}
                 onChange={handleChange}
@@ -501,7 +546,7 @@ export function PaymentModal({
                                 }));
                               }
                             } catch {
-                              /*  */
+                              /* no-op */
                             }
                           }}>
                           {human}
