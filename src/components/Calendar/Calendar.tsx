@@ -8,6 +8,7 @@ import { useMonthlyStats } from '../../hooks/useMonthlyStats';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { MonthlyStats, Payment } from '../../types';
+import { formatLocalYMD } from '../../utils/dateUtils';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
@@ -75,11 +76,11 @@ function computeAmounts(payments: Payment[]) {
 
 function ymStart(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  return new Date(y, m - 1, 1).toISOString().split('T')[0];
+  return formatLocalYMD(new Date(y, (m ?? 1) - 1, 1));
 }
 function ymEnd(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  return new Date(y, m, 0).toISOString().split('T')[0];
+  return formatLocalYMD(new Date(y, m ?? 1, 0));
 }
 
 export function Calendar({ onOpenClient }: CalendarProps) {
@@ -97,23 +98,23 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const { t, formatMonth } = useTranslation();
 
   const year = currentDate.getFullYear();
-  const month = currentDate.getMonth() + 1;
-  const startOfMonth = new Date(year, month - 1, 1);
-  const endOfMonth = new Date(year, month, 0);
+  const m0 = currentDate.getMonth(); // 0..11 — для расчёта дат
+  const m1 = m0 + 1; // 1..12 — для API статистики
+  const startOfMonth = new Date(year, m0, 1);
+  const endOfMonth = new Date(year, m0 + 1, 0);
 
   const fromDateStr =
     range.from && !range.to
       ? ymStart(range.from)
       : range.from && range.to
       ? ymStart(range.from)
-      : startOfMonth.toISOString().split('T')[0];
-
+      : formatLocalYMD(startOfMonth);
   const toDateStr =
     range.to && !range.from
       ? ymEnd(range.to)
       : range.from && range.to
       ? ymEnd(range.to)
-      : endOfMonth.toISOString().split('T')[0];
+      : formatLocalYMD(endOfMonth);
 
   const formatRange = () => {
     if (range.from && range.to) return `${range.from} — ${range.to}`;
@@ -132,7 +133,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     refresh: refreshPayments,
   } = usePayments(fromDateStr, toDateStr, { pollInterval });
 
-  const { stats, refresh: refreshStats } = useMonthlyStats(year, month, { pollInterval });
+  const { stats, refresh: refreshStats } = useMonthlyStats(year, m1, { pollInterval });
 
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   const prevIdsRef = useRef<Set<number>>(new Set());
