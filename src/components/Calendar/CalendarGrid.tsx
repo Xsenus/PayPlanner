@@ -4,6 +4,7 @@ import { PaymentCard } from './PaymentCard';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { Payment } from '../../types';
 import { CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { toDateInputValue } from '../../utils/dateUtils';
 
 interface CalendarGridProps {
   currentDate: Date;
@@ -92,11 +93,17 @@ export function CalendarGrid({
   const paymentsByDate = useMemo(() => {
     const acc: Record<number, Payment[]> = {};
     for (const p of payments) {
-      const d = new Date(p.date).getDate();
+      const ymd = toDateInputValue(p.date);
+      if (!ymd) continue;
+      const [ys, ms, ds] = ymd.split('-');
+      const y = +ys,
+        m = +ms - 1,
+        d = +ds;
+      if (y !== year || m !== month) continue;
       (acc[d] ||= []).push(p);
     }
     return acc;
-  }, [payments]);
+  }, [payments, year, month]);
 
   const weekDays = [
     t('sunday'),
