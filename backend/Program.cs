@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
-using System.Linq;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,13 +21,25 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+static string NormalizeSqliteConnection(string raw)
+{
+    var b = new SqliteConnectionStringBuilder(raw);
+    if (!Path.IsPathRooted(b.DataSource))
+    {
+        b.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, b.DataSource));
+    }
+    return b.ToString();
+}
+
 // DbContext (SQLite)
-builder.Services.AddDbContext<PaymentContext>(options =>
-    options.UseSqlite("Data Source=payplanner.db"));
+var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
+var normalizedCs = NormalizeSqliteConnection(rawCs);
+builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(normalizedCs));
 
 // Services
 builder.Services.AddScoped<InstallmentService>(); 
-builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<PaymentStatusUpdater>(); 
+builder.Services.AddHostedService<DatabaseBackupService>();
 
 // CORS
 builder.Services.AddCors(options =>

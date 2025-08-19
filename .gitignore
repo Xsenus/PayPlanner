@@ -68,10 +68,6 @@ TestResult*/
 **/Publish/
 **/publish/
 
-# Local settings
-appsettings.*.local.json
-appsettings.Development.json
-
 # Databases (на случай локальной SQLite)
 *.db
 *.sqlite
