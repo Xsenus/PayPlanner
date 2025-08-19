@@ -359,26 +359,85 @@ export class ApiService {
   }
 
   // ===== Accounts (подсказки для поля "Счёт") =====
-  async getAccounts(params?: { clientId?: number; caseId?: number; q?: string; take?: number }) {
+  async getAccounts(params?: {
+    clientId?: number;
+    caseId?: number;
+    q?: string;
+    take?: number;
+    withDate?: false;
+    dedupe?: boolean;
+  }): Promise<string[]>;
+
+  async getAccounts(params: {
+    clientId?: number;
+    caseId?: number;
+    q?: string;
+    take?: number;
+    withDate: true;
+    dedupe?: boolean;
+  }): Promise<AccountSuggestion[]>;
+
+  async getAccounts(params?: {
+    clientId?: number;
+    caseId?: number;
+    q?: string;
+    take?: number;
+    withDate?: boolean;
+    dedupe?: boolean;
+  }): Promise<string[] | AccountSuggestion[]> {
     const q = buildQuery({
       clientId: params?.clientId,
       caseId: params?.caseId,
       q: params?.q?.trim(),
       take: params?.take,
+      withDate: params?.withDate,
+      dedupe: params?.dedupe,
     });
+
+    if (params?.withDate) {
+      return this.request<AccountSuggestion[]>(`/accounts${q}`);
+    }
     return this.request<string[]>(`/accounts${q}`);
   }
 
   async getAccountSuggestions(
     q?: string,
-    opts?: { clientId?: number; caseId?: number; take?: number },
-  ) {
-    return this.getAccounts({
+    opts?: {
+      clientId?: number;
+      caseId?: number;
+      take?: number;
+      withDate?: false;
+      dedupe?: boolean;
+    },
+  ): Promise<string[]>;
+
+  async getAccountSuggestions(
+    q?: string,
+    opts?: { clientId?: number; caseId?: number; take?: number; withDate: true; dedupe?: boolean },
+  ): Promise<AccountSuggestion[]>;
+
+  async getAccountSuggestions(
+    q?: string,
+    opts?: {
+      clientId?: number;
+      caseId?: number;
+      take?: number;
+      withDate?: boolean;
+      dedupe?: boolean;
+    },
+  ): Promise<string[] | AccountSuggestion[]> {
+    const base = {
       q,
       clientId: opts?.clientId,
       caseId: opts?.caseId,
       take: opts?.take ?? 10,
-    });
+      dedupe: opts?.dedupe ?? true,
+    };
+
+    if (opts?.withDate === false) {
+      return this.getAccounts({ ...base, withDate: false });
+    }
+    return this.getAccounts({ ...base, withDate: true });
   }
 }
 
@@ -396,5 +455,6 @@ import type {
   PaymentStatusEntity,
   MonthlyStats,
   ClientCase,
+  AccountSuggestion,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';

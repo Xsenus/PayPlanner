@@ -153,6 +153,7 @@ app.MapPut("/api/payments/{id}", async (PaymentContext context, int id, Payment 
     existing.PaymentSourceId = payment.PaymentSourceId;
     existing.PaymentStatusId = payment.PaymentStatusId;
     existing.Account = string.IsNullOrWhiteSpace(payment.Account) ? null : payment.Account.Trim();
+    existing.AccountDate = payment.AccountDate;
 
     await context.SaveChangesAsync();
     return Results.Ok(existing);
@@ -169,14 +170,8 @@ app.MapDelete("/api/payments/{id}", async (PaymentContext context, int id) =>
 });
 
 // -------------------- ACCOUNTS --------------------
-app.MapGet("/api/accounts", async (
-    PaymentContext db,
-    int? clientId,
-    int? caseId,
-    string? q,
-    int take = 10,
-    CancellationToken ct = default
-) =>
+app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId, string? q, bool withDate = false,
+    bool dedupe = false, int take = 50, CancellationToken ct = default) =>
 {
     var query = db.Payments.AsNoTracking()
         .Where(p => p.Account != null && p.Account != "");
@@ -193,16 +188,40 @@ app.MapGet("/api/accounts", async (
         query = query.Where(p => p.Account!.ToLower().Contains(term));
     }
 
-    var accounts = await query
-        .GroupBy(p => p.Account!)
-        .Select(g => new { Account = g.Key, Count = g.Count() })
-        .OrderByDescending(x => x.Count)
+    if (!withDate)
+    {
+        var accounts = await query
+            .GroupBy(p => p.Account!)
+            .Select(g => new { Account = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Account)
+            //.Take(Math.Clamp(take, 1, 200))
+            .Select(x => x.Account)
+            .ToListAsync(ct);
+
+        return Results.Ok(accounts);
+    }
+
+    var pairsQuery = query
+        .Select(p => new
+        {
+            Account = p.Account!,
+            AccountDate = p.AccountDate, 
+            SortDate = p.AccountDate ?? p.Date
+        });
+
+    if (dedupe)
+        pairsQuery = pairsQuery.Distinct();
+
+    var result = await pairsQuery
+        .OrderByDescending(x => x.SortDate)
         .ThenBy(x => x.Account)
-        //.Take(Math.Clamp(take, 1, 50))
-        .Select(x => x.Account)
+        //.Take(Math.Clamp(take, 1, 500))
+        .Select(x => new { account = x.Account, accountDate = x.AccountDate })
+        .OrderByDescending(o => o.accountDate)
         .ToListAsync(ct);
 
-    return Results.Ok(accounts);
+    return Results.Ok(result);
 });
 
 // -------------------- CLIENTS --------------------
@@ -487,6 +506,7 @@ paymentsV1.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
     e.PaymentSourceId = model.PaymentSourceId;
     e.PaymentStatusId = model.PaymentStatusId;
     e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+    e.AccountDate = model.AccountDate;
 
     await db.SaveChangesAsync();
     return Results.Ok(e);
@@ -708,6 +728,7 @@ paymentsV2.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
     e.PaymentSourceId = model.PaymentSourceId;
     e.PaymentStatusId = model.PaymentStatusId;
     e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+    e.AccountDate = model.AccountDate;
 
     await db.SaveChangesAsync();
     return Results.Ok(e);

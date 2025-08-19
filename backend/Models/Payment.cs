@@ -11,6 +11,11 @@ namespace PayPlanner.Api.Models
         public string? Account { get; set; }
 
         /// <summary>
+        /// Дата счета.
+        /// </summary>
+        public DateTime? AccountDate { get; set; }
+
+        /// <summary>
         /// Сумма платежа (в валюте учёта).
         /// </summary>
         public decimal Amount { get; set; }

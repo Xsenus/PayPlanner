@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
 import type { Payment, PaymentStatus, ClientCase } from '../../types';
-import { toDateInputValue, fromInputToApiDate, todayYMD } from '../../utils/dateUtils';
+import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 
 type PaymentKind = 'Income' | 'Expense';
+type AccountOption = { account: string; accountDate?: string | null };
 
 interface PaymentModalProps {
   defaultClientId?: number;
@@ -34,6 +35,15 @@ export function PaymentModal({
   defaultClientCaseId,
   type,
 }: PaymentModalProps) {
+  const accountInputRef = useRef<HTMLInputElement>(null);
+
+  function suppressBrowserAutocomplete() {
+    const el = accountInputRef.current;
+    if (!el) return;
+    el.setAttribute('readonly', 'true');
+    setTimeout(() => el.removeAttribute('readonly'), 80);
+  }
+
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
@@ -57,26 +67,62 @@ export function PaymentModal({
     paymentStatusId: '',
     type: (type ?? 'Income') as PaymentKind,
     account: '',
+    accountDate: '',
   });
 
   const [accountOpen, setAccountOpen] = useState(false);
-  const [accountOpts, setAccountOpts] = useState<string[]>([]);
+  const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
 
   useEffect(() => {
     let stop = false;
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         setAccountLoading(true);
         const cid = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
         const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
-        const data = await apiService.getAccounts({
+
+        const params = {
           clientId: cid,
           caseId,
           q: formData.account,
-          take: 10,
-        });
-        if (!stop) setAccountOpts(Array.from(new Set(data)));
+          take: 20,
+          withDate: true,
+          dedupe: true,
+        };
+
+        const dataRaw = (await apiService.getAccounts(
+          params as unknown as Parameters<typeof apiService.getAccounts>[0],
+        )) as unknown;
+
+        let normalized: AccountOption[] = [];
+        if (Array.isArray(dataRaw)) {
+          normalized = dataRaw
+            .map((x): AccountOption | null => {
+              if (typeof x === 'string') {
+                const acc = x.trim();
+                return acc ? { account: acc } : null;
+              }
+              if (x && typeof x === 'object') {
+                const obj = x as { account?: unknown; accountDate?: unknown };
+                const acc = typeof obj.account === 'string' ? obj.account.trim() : '';
+                if (!acc) return null;
+                const accDate =
+                  typeof obj.accountDate === 'string' && obj.accountDate ? obj.accountDate : null;
+                return { account: acc, accountDate: accDate };
+              }
+              return null;
+            })
+            .filter((v): v is AccountOption => v !== null);
+        }
+
+        const uniq = new Map<string, AccountOption>();
+        for (const it of normalized) {
+          const key = `${it.account}__${it.accountDate ?? ''}`;
+          if (!uniq.has(key)) uniq.set(key, it);
+        }
+
+        if (!stop) setAccountOpts(Array.from(uniq.values()));
       } finally {
         if (!stop) setAccountLoading(false);
       }
@@ -84,7 +130,7 @@ export function PaymentModal({
 
     return () => {
       stop = true;
-      clearTimeout(t);
+      clearTimeout(timer);
     };
   }, [formData.account, formData.clientId, formData.clientCaseId]);
 
@@ -108,6 +154,7 @@ export function PaymentModal({
         paymentStatusId: payment.paymentStatusId?.toString() || '',
         type: (payment.type as PaymentKind) ?? type ?? 'Income',
         account: payment.account ?? '',
+        accountDate: toDateInputValue(payment.accountDate) || '',
       });
     } else {
       setFormData({
@@ -126,6 +173,7 @@ export function PaymentModal({
         paymentStatusId: '',
         type: (type ?? 'Income') as PaymentKind,
         account: '',
+        accountDate: '',
       });
     }
 
@@ -205,6 +253,7 @@ export function PaymentModal({
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
         account: formData.account?.trim() || undefined,
+        accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
       } as Omit<Payment, 'id' | 'createdAt'>;
 
       if (payment) {
@@ -262,7 +311,6 @@ export function PaymentModal({
 
   const canDelete = !!payment && !!onDelete;
   if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -280,7 +328,7 @@ export function PaymentModal({
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 {t('type') ?? 'Тип'}
@@ -362,14 +410,24 @@ export function PaymentModal({
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 {t('account') ?? 'Счёт'}
               </label>
+
               <input
+                ref={accountInputRef}
                 name="account"
                 value={formData.account}
                 onChange={handleChange}
-                onFocus={() => setAccountOpen(true)}
+                onFocus={() => {
+                  suppressBrowserAutocomplete();
+                  setAccountOpen(true);
+                }}
+                onClick={suppressBrowserAutocomplete}
                 onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
-                placeholder="Например: INV-2025-001"
+                placeholder="Например: Счет № 12345"
                 maxLength={120}
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
 
@@ -380,10 +438,9 @@ export function PaymentModal({
                       <div className="px-3 py-2 text-sm text-gray-500">Загрузка…</div>
                     )}
 
-                    {/* Предложение создать новый вариант, если точного совпадения нет */}
                     {formData.account &&
                       !accountOpts.some(
-                        (x) => x.toLowerCase() === formData.account.trim().toLowerCase(),
+                        (x) => x.account.toLowerCase() === formData.account.trim().toLowerCase(),
                       ) && (
                         <button
                           type="button"
@@ -394,21 +451,79 @@ export function PaymentModal({
                         </button>
                       )}
 
-                    {accountOpts.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          setFormData((s) => ({ ...s, account: opt }));
-                          setAccountOpen(false);
-                        }}>
-                        {opt}
-                      </button>
-                    ))}
+                    {accountOpts.map((opt) => {
+                      const key = `${opt.account}__${opt.accountDate ?? ''}`;
+                      const human =
+                        opt.account + (opt.accountDate ? ` от ${toRuDate(opt.accountDate)}` : '');
+
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={async () => {
+                            setFormData((s) => ({ ...s, account: opt.account }));
+                            setAccountOpen(false);
+
+                            if (opt.accountDate) {
+                              setFormData((s) => ({
+                                ...s,
+                                accountDate: toDateInputValue(opt.accountDate),
+                              }));
+                              return;
+                            }
+
+                            try {
+                              const cid = formData.clientId
+                                ? parseInt(formData.clientId, 10)
+                                : undefined;
+                              const caseId = formData.clientCaseId
+                                ? parseInt(formData.clientCaseId, 10)
+                                : undefined;
+
+                              const resp = await apiService.getAccounts({
+                                clientId: cid,
+                                caseId,
+                                q: opt.account,
+                                take: 50,
+                                withDate: true as const,
+                                dedupe: false,
+                              });
+
+                              const found = resp.find(
+                                (x) => x.account === opt.account && x.accountDate,
+                              );
+                              if (found?.accountDate) {
+                                setFormData((s) => ({
+                                  ...s,
+                                  accountDate: toDateInputValue(found.accountDate),
+                                }));
+                              }
+                            } catch {
+                              /*  */
+                            }
+                          }}>
+                          {human}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
+            </div>
+
+            {/* ДАТА СЧЁТА */}
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('accountDate') ?? 'Дата счёта'}
+              </label>
+              <input
+                type="date"
+                name="accountDate"
+                value={formData.accountDate}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
             </div>
 
             <div>

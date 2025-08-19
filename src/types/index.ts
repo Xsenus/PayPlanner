@@ -82,7 +82,13 @@ export interface Payment {
   paymentSource?: PaymentSource;
   paymentStatusEntity?: PaymentStatusEntity;
   account?: string;
+  accountDate?: string;
 }
+
+export type AccountSuggestion = {
+  account: string;
+  accountDate: string | null;
+};
 
 export interface ClientStats {
   clientId: number;

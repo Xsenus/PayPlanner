@@ -26,6 +26,7 @@ export const ru = {
   saveError: 'Ошибка сохранения',
   clear: 'Очистить',
   account: 'Счёт',
+  accountDate: 'Дата счёта',
   // Navigation
   calendar: 'Календарь',
   reports: 'Отчёты',
