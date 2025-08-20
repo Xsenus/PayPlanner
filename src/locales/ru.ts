@@ -29,6 +29,8 @@ export const ru = {
   accountDate: 'Дата счёта',
   nothingFound: 'Ничего не найдено',
   tryAnotherQuery: 'Попробуйте другой запрос',
+  selectAccount: 'Выберите счёт',
+  enterAccount: 'Введите счёт',
   // Navigation
   calendar: 'Календарь',
   reports: 'Отчёты',

@@ -1,10 +1,54 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator as CalcIcon, Save, Loader2, Info, AlertTriangle } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { InstallmentRequest, InstallmentResponse, ClientCase } from '../../types';
-import { toDateInputValue } from '../../utils/dateUtils';
+import { toDateInputValue, fromInputToApiDate } from '../../utils/dateUtils';
+
+type AccountOption = { account: string; accountDate?: string | null };
+
+type PaymentCreate = {
+  date: string;
+  amount: number;
+  type: 'Income' | 'Expense';
+  status?: string;
+  description?: string;
+  isPaid?: boolean;
+  notes?: string;
+  clientId: number;
+  clientCaseId?: number;
+  account?: string;
+  accountDate?: string | null;
+};
+
+type AccountApiItem = string | { account?: unknown; accountDate?: unknown };
+
+function toAccountOption(x: unknown): AccountOption | null {
+  if (typeof x === 'string') {
+    const acc = x.trim();
+    return acc ? { account: acc } : null;
+  }
+  if (x && typeof x === 'object') {
+    const obj = x as { account?: unknown; accountDate?: unknown };
+    const acc = typeof obj.account === 'string' ? obj.account.trim() : '';
+    if (!acc) return null;
+    const accDate = typeof obj.accountDate === 'string' && obj.accountDate ? obj.accountDate : null;
+    return { account: acc, accountDate: accDate };
+  }
+  return null;
+}
+
+function isAccountWithDate(x: unknown, acc: string): x is { account: string; accountDate: string } {
+  if (typeof x !== 'object' || x === null) return false;
+  const obj = x as { account?: unknown; accountDate?: unknown };
+  return (
+    typeof obj.account === 'string' &&
+    obj.account === acc &&
+    typeof obj.accountDate === 'string' &&
+    !!obj.accountDate
+  );
+}
 
 export function Calculator() {
   const { t, formatCurrency } = useTranslation();
@@ -26,6 +70,95 @@ export function Calculator() {
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string>('');
+
+  const [selectedAccount, setSelectedAccount] = useState<string>('');
+  const [selectedAccountDate, setSelectedAccountDate] = useState<string>('');
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const accountInputRef = useRef<HTMLInputElement>(null);
+
+  function suppressBrowserAutocomplete() {
+    const el = accountInputRef.current;
+    if (!el) return;
+    el.readOnly = true;
+    requestAnimationFrame(() => {
+      el.readOnly = false;
+    });
+  }
+
+  useEffect(() => {
+    let ignore = false;
+    setCases([]);
+
+    if (!selectedClientId) {
+      setSelectedCaseId('');
+      return;
+    }
+
+    (async () => {
+      try {
+        const rows = await apiService.getCases?.(Number(selectedClientId));
+        if (ignore) return;
+        const list = rows || [];
+        setCases(list);
+
+        if (selectedCaseId && !list.some((c) => String(c.id) === selectedCaseId)) {
+          setSelectedCaseId('');
+        }
+      } catch (e) {
+        console.warn('getCases failed', e);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClientId]);
+
+  useEffect(() => {
+    let stop = false;
+    const timer = setTimeout(async () => {
+      try {
+        setAccountLoading(true);
+        const cid = selectedClientId ? parseInt(selectedClientId, 10) : undefined;
+        const caseId = selectedCaseId ? parseInt(selectedCaseId, 10) : undefined;
+
+        const params: Parameters<typeof apiService.getAccounts>[0] = {
+          clientId: cid,
+          caseId,
+          q: selectedAccount,
+          take: 20,
+          withDate: true,
+          dedupe: true,
+        };
+
+        const dataRaw = await apiService.getAccounts(params);
+        let normalized: AccountOption[] = [];
+
+        if (Array.isArray(dataRaw)) {
+          const arr: AccountApiItem[] = dataRaw as AccountApiItem[];
+          normalized = arr.map(toAccountOption).filter((v): v is AccountOption => v !== null);
+        }
+
+        const uniq = new Map<string, AccountOption>();
+        for (const it of normalized) {
+          const key = `${it.account}__${it.accountDate ?? ''}`;
+          if (!uniq.has(key)) uniq.set(key, it);
+        }
+
+        if (!stop) setAccountOpts(Array.from(uniq.values()));
+      } finally {
+        if (!stop) setAccountLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [selectedAccount, selectedClientId, selectedCaseId]);
 
   const mockResult: InstallmentResponse = {
     overpay: 11686,
@@ -117,7 +250,7 @@ export function Calculator() {
     setSavingPayments(true);
     try {
       for (const item of editableResults.items) {
-        await apiService.createPayment({
+        const payload: PaymentCreate = {
           date: toDateInputValue(item.date as unknown as string),
           amount: item.payment,
           type: 'Income',
@@ -129,7 +262,13 @@ export function Calculator() {
           )}`,
           clientId: parseInt(selectedClientId, 10),
           clientCaseId: selectedCaseId ? parseInt(selectedCaseId, 10) : undefined,
-        });
+          account: selectedAccount || undefined,
+          accountDate: selectedAccountDate ? fromInputToApiDate(selectedAccountDate) : undefined,
+        };
+
+        await apiService.createPayment(
+          payload as unknown as Parameters<typeof apiService.createPayment>[0],
+        );
       }
       alert(t('paymentsSaved'));
     } catch (err) {
@@ -139,26 +278,6 @@ export function Calculator() {
       setSavingPayments(false);
     }
   };
-
-  useEffect(() => {
-    let ignore = false;
-    setCases([]);
-    setSelectedCaseId('');
-    if (!selectedClientId) return;
-
-    (async () => {
-      try {
-        const rows = await apiService.getCases?.(Number(selectedClientId));
-        if (!ignore && rows) setCases(rows);
-      } catch (e) {
-        console.warn('getCases failed', e);
-      }
-    })();
-
-    return () => {
-      ignore = true;
-    };
-  }, [selectedClientId]);
 
   const monthlyPayment = useMemo(
     () =>
@@ -351,14 +470,19 @@ export function Calculator() {
                 </div>
 
                 <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {t('client')}
                       </label>
                       <select
                         value={selectedClientId}
-                        onChange={(e) => setSelectedClientId(e.target.value)}
+                        onChange={(e) => {
+                          setSelectedClientId(e.target.value);
+                          setSelectedCaseId('');
+                          setSelectedAccount('');
+                          setSelectedAccountDate('');
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         <option value="">{t('selectClient')}</option>
                         {clients.map((c) => (
@@ -375,7 +499,10 @@ export function Calculator() {
                       </label>
                       <select
                         value={selectedCaseId}
-                        onChange={(e) => setSelectedCaseId(e.target.value)}
+                        onChange={(e) => {
+                          setSelectedCaseId(e.target.value);
+                          setSelectedAccountDate('');
+                        }}
                         disabled={!selectedClientId}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
                         <option value="">{t('selectCase')}</option>
@@ -387,7 +514,130 @@ export function Calculator() {
                       </select>
                     </div>
 
-                    <div className="flex items-end">
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('account') ?? 'Счёт'}
+                      </label>
+
+                      <input
+                        ref={accountInputRef}
+                        value={selectedAccount}
+                        onChange={(e) => {
+                          setSelectedAccount(e.target.value);
+                          setAccountOpen(true);
+                        }}
+                        onFocus={() => setAccountOpen(true)}
+                        onMouseDown={suppressBrowserAutocomplete}
+                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                        placeholder={t('enterAccount') ?? 'Введите счёт'}
+                        maxLength={120}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+
+                      {accountOpen &&
+                        (accountOpts.length > 0 ||
+                          (selectedAccount ?? '').toString().trim() !== '') && (
+                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
+                            {accountLoading && (
+                              <div className="px-3 py-2 text-sm text-gray-500">
+                                {t('loading') ?? 'Загрузка…'}
+                              </div>
+                            )}
+
+                            {(() => {
+                              const sel = (selectedAccount ?? '').toString();
+                              const selTrim = sel.trim();
+                              const selLower = selTrim.toLowerCase();
+                              return selTrim !== '' &&
+                                !accountOpts.some((x) => x.account.toLowerCase() === selLower) ? (
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => setAccountOpen(false)}>
+                                  {(t('create') ?? 'Создать') + ` «${selTrim}»`}
+                                </button>
+                              ) : null;
+                            })()}
+
+                            {accountOpts.map((opt) => {
+                              const key = `${opt.account}__${opt.accountDate ?? ''}`;
+                              const human =
+                                opt.account +
+                                (opt.accountDate
+                                  ? ` (${new Date(opt.accountDate).toLocaleDateString()})`
+                                  : '');
+
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={async () => {
+                                    setSelectedAccount(opt.account);
+                                    setAccountOpen(false);
+
+                                    if (opt.accountDate) {
+                                      setSelectedAccountDate(toDateInputValue(opt.accountDate));
+                                      return;
+                                    }
+
+                                    try {
+                                      const cid = selectedClientId
+                                        ? parseInt(selectedClientId, 10)
+                                        : undefined;
+                                      const caseId = selectedCaseId
+                                        ? parseInt(selectedCaseId, 10)
+                                        : undefined;
+
+                                      const resp = await apiService.getAccounts({
+                                        clientId: cid,
+                                        caseId,
+                                        q: opt.account,
+                                        take: 50,
+                                        withDate: true as const,
+                                        dedupe: false,
+                                      } as Parameters<typeof apiService.getAccounts>[0]);
+
+                                      const arr = Array.isArray(resp)
+                                        ? (resp as AccountApiItem[])
+                                        : [];
+                                      const found = arr.find((x) =>
+                                        isAccountWithDate(x, opt.account),
+                                      );
+                                      if (found) {
+                                        setSelectedAccountDate(toDateInputValue(found.accountDate));
+                                      }
+                                    } catch {
+                                      /*  */
+                                    }
+                                  }}>
+                                  {human}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('accountDate') ?? 'Дата счёта'}
+                      </label>
+                      <input
+                        type="date"
+                        value={selectedAccountDate}
+                        onChange={(e) => setSelectedAccountDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+
+                    <div className="md:col-span-4 flex items-end">
                       <button
                         onClick={handleSavePayments}
                         disabled={!selectedClientId || savingPayments}
