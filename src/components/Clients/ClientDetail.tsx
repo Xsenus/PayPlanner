@@ -11,6 +11,9 @@ import {
   Plus,
   Edit,
   Trash2,
+  Wallet,
+  Banknote,
+  LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useClientStats } from '../../hooks/useClients';
@@ -57,6 +60,8 @@ type ClientStatsShape = {
   overduePaymentsCount?: number;
   pendingAmount?: number;
   overdueAmount?: number;
+  overallAmount?: number;
+  remainingDebt?: number;
   paidPayments?: number;
   totalPayments?: number;
   lastPaymentDate?: string | null;
@@ -119,6 +124,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setPayModalOpen(false);
     setEditingPayment(null);
   };
+
+  const overallAmount =
+    (view?.totalIncome ?? 0) + (view?.pendingAmount ?? 0) + (view?.overdueAmount ?? 0);
+
+  const remainingDebt = (view?.pendingAmount ?? 0) + (view?.overdueAmount ?? 0);
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('ru-RU', {
@@ -188,6 +198,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       overduePaymentsCount: totals.overdue,
       pendingAmount: totals.pendingAmount,
       overdueAmount: totals.overdueAmount,
+      overallAmount: totals.income + totals.pendingAmount + totals.overdueAmount,
+      remainingDebt: totals.pendingAmount + totals.overdueAmount,
       paidPayments: undefined,
       totalPayments: totals.total,
     };
@@ -354,6 +366,46 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     );
   }
 
+  function StatCard({
+    icon: Icon,
+    title,
+    value,
+    color,
+    bg,
+  }: {
+    icon: LucideIcon;
+    title: string;
+    value: string;
+    color: string;
+    bg: string;
+  }) {
+    return (
+      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between lg:flex-col lg:items-center lg:text-center h-full">
+          <div className="flex items-center gap-3 min-w-0 lg:flex-col lg:gap-2 lg:w-full lg:items-center">
+            <span className={`p-2.5 md:p-3 rounded-lg ${bg} lg:mb-1`}>
+              <Icon className={`w-5 h-5 md:w-6 md:h-6 ${color}`} />
+            </span>
+            <span className="text-sm font-medium text-gray-600 truncate lg:overflow-visible lg:whitespace-normal lg:w-full">
+              {title}
+            </span>
+          </div>
+          <span
+            className={[
+              'ml-3 text-lg sm:text-xl font-bold',
+              'lg:ml-0 lg:mt-3 lg:text-2xl',
+              color,
+            ].join(' ')}>
+            {value}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const netColor = view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600';
+  const netBg = view.netAmount >= 0 ? 'bg-emerald-50' : 'bg-red-50';
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto p-6">
@@ -371,95 +423,62 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </div>
           </div>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8">
+          <StatCard
+            icon={TrendingUp}
+            title="Доходы"
+            value={formatCurrency(view.totalIncome)}
+            color="text-emerald-600"
+            bg="bg-emerald-50"
+          />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between md:justify-start md:gap-3">
-              <div className="p-2.5 md:p-3 rounded-lg bg-emerald-50">
-                <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-emerald-600" />
-              </div>
-              <p className="text-sm font-medium text-gray-600">Доходы</p>
-              <p className="md:hidden text-lg font-bold text-emerald-600">
-                {formatCurrency(view.totalIncome)}
-              </p>
-            </div>
-            <p className="hidden md:block mt-3 text-2xl font-bold text-emerald-600">
-              {formatCurrency(view.totalIncome)}
-            </p>
-          </div>
+          <StatCard
+            icon={TrendingDown}
+            title="Расходы"
+            value={formatCurrency(view.totalExpenses)}
+            color="text-red-600"
+            bg="bg-red-50"
+          />
 
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between md:justify-start md:gap-3">
-              <div className="p-2.5 md:p-3 rounded-lg bg-red-50">
-                <TrendingDown className="w-5 h-5 md:w-6 md:h-6 text-red-600" />
-              </div>
-              <p className="text-sm font-medium text-gray-600">Расходы</p>
-              <p className="md:hidden text-lg font-bold text-red-600">
-                {formatCurrency(view.totalExpenses)}
-              </p>
-            </div>
-            <p className="hidden md:block mt-3 text-2xl font-bold text-red-600">
-              {formatCurrency(view.totalExpenses)}
-            </p>
-          </div>
+          <StatCard
+            icon={Check}
+            title="Итог"
+            value={formatCurrency(view.netAmount)}
+            color={netColor}
+            bg={netBg}
+          />
 
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between md:justify-start md:gap-3">
-              <div
-                className={`p-2.5 md:p-3 rounded-lg ${
-                  view.netAmount >= 0 ? 'bg-emerald-50' : 'bg-red-50'
-                }`}>
-                <Check
-                  className={`w-5 h-5 md:w-6 md:h-6 ${
-                    view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600'
-                  }`}
-                />
-              </div>
-              <p className="text-sm font-medium text-gray-600">Итог</p>
-              <p
-                className={`md:hidden text-lg font-bold ${
-                  view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600'
-                }`}>
-                {formatCurrency(view.netAmount)}
-              </p>
-            </div>
-            <p
-              className={`hidden md:block mt-3 text-2xl font-bold ${
-                view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600'
-              }`}>
-              {formatCurrency(view.netAmount)}
-            </p>
-          </div>
+          <StatCard
+            icon={Clock}
+            title="Ожидается"
+            value={formatCurrency(view.pendingAmount ?? 0)}
+            color="text-amber-600"
+            bg="bg-amber-50"
+          />
 
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between md:justify-start md:gap-3">
-              <div className="p-2.5 md:p-3 rounded-lg bg-amber-50">
-                <Clock className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
-              </div>
-              <p className="text-sm font-medium text-gray-600">Ожидается</p>
-              <p className="md:hidden text-lg font-bold text-amber-600">
-                {formatCurrency(view.pendingAmount ?? 0)}
-              </p>
-            </div>
-            <p className="hidden md:block mt-3 text-2xl font-bold text-amber-600">
-              {formatCurrency(view.pendingAmount ?? 0)}
-            </p>
-          </div>
+          <StatCard
+            icon={AlertTriangle}
+            title="Просрочено"
+            value={formatCurrency(view.overdueAmount ?? 0)}
+            color="text-purple-700"
+            bg="bg-purple-50"
+          />
 
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between md:justify-start md:gap-3">
-              <div className="p-2.5 md:p-3 rounded-lg bg-purple-50">
-                <AlertTriangle className="w-5 h-5 md:w-6 md:h-6 text-purple-700" />
-              </div>
-              <p className="text-sm font-medium text-gray-600">Просрочено</p>
-              <p className="md:hidden text-lg font-bold text-purple-700">
-                {formatCurrency(view.overdueAmount ?? 0)}
-              </p>
-            </div>
-            <p className="hidden md:block mt-3 text-2xl font-bold text-purple-700">
-              {formatCurrency(view.overdueAmount ?? 0)}
-            </p>
-          </div>
+          <StatCard
+            icon={Wallet}
+            title="Общая сумма"
+            value={formatCurrency(view.overallAmount ?? overallAmount)}
+            color="text-sky-700"
+            bg="bg-sky-50"
+          />
+
+          <StatCard
+            icon={Banknote}
+            title="Остаток долга"
+            value={formatCurrency(view.remainingDebt ?? remainingDebt)}
+            color="text-indigo-700"
+            bg="bg-indigo-50"
+          />
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
