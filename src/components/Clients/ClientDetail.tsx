@@ -13,7 +13,6 @@ import {
   Trash2,
   Wallet,
   Banknote,
-  LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useClientStats } from '../../hooks/useClients';
@@ -23,6 +22,8 @@ import { PaymentModal } from '../Calendar/PaymentModal';
 import type { Payment } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
+import { StatCardItem, StatsCards } from '../Statistics/StatCardItem';
+import { formatCurrencySmart } from '../../utils/formatters';
 
 interface ClientDetailProps {
   clientId: number;
@@ -366,45 +367,65 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     );
   }
 
-  function StatCard({
-    icon: Icon,
-    title,
-    value,
-    color,
-    bg,
-  }: {
-    icon: LucideIcon;
-    title: string;
-    value: string;
-    color: string;
-    bg: string;
-  }) {
-    return (
-      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between lg:flex-col lg:items-center lg:text-center h-full">
-          <div className="flex items-center gap-3 min-w-0 lg:flex-col lg:gap-2 lg:w-full lg:items-center">
-            <span className={`p-2.5 md:p-3 rounded-lg ${bg} lg:mb-1`}>
-              <Icon className={`w-5 h-5 md:w-6 md:h-6 ${color}`} />
-            </span>
-            <span className="text-sm font-medium text-gray-600 truncate lg:overflow-visible lg:whitespace-normal lg:w-full">
-              {title}
-            </span>
-          </div>
-          <span
-            className={[
-              'ml-3 text-lg sm:text-xl font-bold',
-              'lg:ml-0 lg:mt-3 lg:text-2xl',
-              color,
-            ].join(' ')}>
-            {value}
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const f = (n: number) => formatCurrencySmart(n);
 
-  const netColor = view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600';
-  const netBg = view.netAmount >= 0 ? 'bg-emerald-50' : 'bg-red-50';
+  const items: StatCardItem[] = [
+    {
+      title: 'Доходы',
+      ...f(view.totalIncome),
+      icon: TrendingUp,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+    },
+    {
+      title: 'Расходы',
+      ...f(view.totalExpenses),
+      icon: TrendingDown,
+      color: 'text-red-600',
+      bg: 'bg-red-50',
+    },
+    {
+      title: 'Итог',
+      ...f(view.netAmount),
+      icon: Check,
+      color: view.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600',
+      bg: view.netAmount >= 0 ? 'bg-emerald-50' : 'bg-red-50',
+    },
+    {
+      title: 'Ожидается',
+      ...f(view.pendingAmount ?? 0),
+      icon: Clock,
+      color: 'text-amber-600',
+      bg: 'bg-amber-50',
+    },
+    {
+      title: 'Просрочено',
+      ...f(view.overdueAmount ?? 0),
+      icon: AlertTriangle,
+      color: 'text-purple-700',
+      bg: 'bg-purple-50',
+    },
+    {
+      title: 'Общая сумма',
+      ...f(view.overallAmount ?? overallAmount),
+      icon: Wallet,
+      color: 'text-sky-700',
+      bg: 'bg-sky-50',
+    },
+    {
+      title: 'Остаток долга',
+      ...f(view.remainingDebt ?? remainingDebt),
+      icon: Banknote,
+      color: 'text-indigo-700',
+      bg: 'bg-indigo-50',
+    },
+  ].map(
+    ({ short, full, ...rest }): StatCardItem => ({
+      ...rest,
+      value: short,
+      titleAttr: full,
+    }),
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -423,63 +444,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8">
-          <StatCard
-            icon={TrendingUp}
-            title="Доходы"
-            value={formatCurrency(view.totalIncome)}
-            color="text-emerald-600"
-            bg="bg-emerald-50"
-          />
 
-          <StatCard
-            icon={TrendingDown}
-            title="Расходы"
-            value={formatCurrency(view.totalExpenses)}
-            color="text-red-600"
-            bg="bg-red-50"
-          />
-
-          <StatCard
-            icon={Check}
-            title="Итог"
-            value={formatCurrency(view.netAmount)}
-            color={netColor}
-            bg={netBg}
-          />
-
-          <StatCard
-            icon={Clock}
-            title="Ожидается"
-            value={formatCurrency(view.pendingAmount ?? 0)}
-            color="text-amber-600"
-            bg="bg-amber-50"
-          />
-
-          <StatCard
-            icon={AlertTriangle}
-            title="Просрочено"
-            value={formatCurrency(view.overdueAmount ?? 0)}
-            color="text-purple-700"
-            bg="bg-purple-50"
-          />
-
-          <StatCard
-            icon={Wallet}
-            title="Общая сумма"
-            value={formatCurrency(view.overallAmount ?? overallAmount)}
-            color="text-sky-700"
-            bg="bg-sky-50"
-          />
-
-          <StatCard
-            icon={Banknote}
-            title="Остаток долга"
-            value={formatCurrency(view.remainingDebt ?? remainingDebt)}
-            color="text-indigo-700"
-            bg="bg-indigo-50"
-          />
-        </div>
+        <StatsCards items={items} lgCols={7} />
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
           <div className="p-6 flex flex-wrap items-center gap-3">
