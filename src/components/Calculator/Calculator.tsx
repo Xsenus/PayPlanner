@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Calculator as CalcIcon, Save, Loader2, Info, AlertTriangle } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useClients } from '../../hooks/useClients';
@@ -160,41 +160,6 @@ export function Calculator() {
     };
   }, [selectedAccount, selectedClientId, selectedCaseId]);
 
-  const mockResult: InstallmentResponse = {
-    overpay: 11686,
-    toPay: 111686,
-    items: [
-      {
-        date: '2025-09-16',
-        principal: 1161.42,
-        interest: 366.67,
-        payment: 1528.09,
-        balance: 88500,
-      },
-      {
-        date: '2025-10-16',
-        principal: 1166.75,
-        interest: 361.34,
-        payment: 1528.09,
-        balance: 87333.25,
-      },
-      {
-        date: '2025-11-16',
-        principal: 1172.09,
-        interest: 356.0,
-        payment: 1528.09,
-        balance: 86161.16,
-      },
-      {
-        date: '2025-12-16',
-        principal: 1177.47,
-        interest: 350.62,
-        payment: 1528.09,
-        balance: 84983.69,
-      },
-    ],
-  };
-
   const handleNumber = (v: string) => (v === '' ? '' : Number.isNaN(Number(v)) ? 0 : parseFloat(v));
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -213,7 +178,6 @@ export function Calculator() {
       const resp = await apiService.calculateInstallment(formData);
       setEditableResults(JSON.parse(JSON.stringify(resp)) as InstallmentResponse);
     } catch {
-      setEditableResults(JSON.parse(JSON.stringify(mockResult)) as InstallmentResponse);
       setError(t('apiUnavailable'));
     } finally {
       setLoading(false);
@@ -279,14 +243,6 @@ export function Calculator() {
     }
   };
 
-  const monthlyPayment = useMemo(
-    () =>
-      editableResults?.items?.[0]?.payment
-        ? formatCurrency(editableResults.items[0].payment)
-        : '₽0',
-    [editableResults, formatCurrency],
-  );
-
   const formIsValid =
     formData.total > 0 &&
     formData.months >= 1 &&
@@ -297,12 +253,14 @@ export function Calculator() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 text-center md:text-left">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center gap-3 justify-center md:justify-start">
             <CalcIcon size={32} className="text-blue-600" />
             {t('installmentCalculator')}
           </h1>
-          <p className="text-gray-600 mt-1">{t('calculateLoanPayments')}</p>
+          <p className="text-gray-600 mt-2 text-center md:text-left">
+            {t('calculateLoanPayments')}
+          </p>
         </div>
       </header>
 
@@ -395,7 +353,7 @@ export function Calculator() {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   {t('startDate')}
                 </label>
@@ -405,11 +363,36 @@ export function Calculator() {
                   value={toDateInputValue(formData.startDate as unknown as string)}
                   onChange={handleChange}
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center"
                 />
                 <p id="calc-help" className="mt-2 text-xs text-gray-500 flex items-center gap-1">
                   <Info size={14} /> {t('calcHint') ?? 'Параметры можно изменить в любой момент.'}
                 </p>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="block text-sm mb-2 opacity-0 select-none">{t('startDate')}</label>
+                <button
+                  type="submit"
+                  disabled={!formIsValid || loading}
+                  aria-disabled={!formIsValid || loading}
+                  aria-busy={loading || undefined}
+                  className="
+                      w-full md:w-auto md:min-w-[220px] h-[42px]
+                      px-4 rounded-lg font-medium whitespace-nowrap
+                      bg-blue-600 text-white shadow-sm
+                      hover:bg-blue-700
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                      flex items-center justify-center gap-2
+                    ">
+                  {loading ? (
+                    <Loader2 className="animate-spin shrink-0" size={18} />
+                  ) : (
+                    <CalcIcon className="shrink-0" size={18} />
+                  )}
+                  <span>{loading ? t('calculating') : t('calculate')}</span>
+                </button>
               </div>
             </div>
 
@@ -418,17 +401,6 @@ export function Calculator() {
                 {error}
               </div>
             )}
-
-            <div className="sticky bottom-3 md:static">
-              <button
-                type="submit"
-                disabled={!formIsValid || loading}
-                className="w-full md:w-auto md:min-w-[220px] bg-blue-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
-                aria-disabled={!formIsValid || loading}>
-                {loading ? <Loader2 className="animate-spin" size={18} /> : <CalcIcon size={18} />}
-                {loading ? t('calculating') : t('calculate')}
-              </button>
-            </div>
           </form>
         </section>
 
@@ -450,206 +422,185 @@ export function Calculator() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                  <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                    <p className="text-sm text-gray-600 mb-1">{t('totalPayable')}</p>
-                    <p className="text-xl font-bold text-blue-700">
-                      {formatCurrency(editableResults.toPay)}
-                    </p>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('client')}
+                    </label>
+                    <select
+                      value={selectedClientId}
+                      onChange={(e) => {
+                        setSelectedClientId(e.target.value);
+                        setSelectedCaseId('');
+                        setSelectedAccount('');
+                        setSelectedAccountDate('');
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      <option value="">{t('selectClient')}</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.company ? `— ${c.company}` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="p-4 bg-red-50 rounded-xl border border-red-100">
-                    <p className="text-sm text-gray-600 mb-1">{t('totalInterest')}</p>
-                    <p className="text-xl font-bold text-red-700">
-                      {formatCurrency(editableResults.overpay)}
-                    </p>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('case')}
+                    </label>
+                    <select
+                      value={selectedCaseId}
+                      onChange={(e) => {
+                        setSelectedCaseId(e.target.value);
+                        setSelectedAccountDate('');
+                      }}
+                      disabled={!selectedClientId}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
+                      <option value="">{t('selectCase')}</option>
+                      {cases.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title} — {new Date(c.createdAt).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
-                    <p className="text-sm text-gray-600 mb-1">{t('monthlyPayment')}</p>
-                    <p className="text-xl font-bold text-emerald-700">{monthlyPayment}</p>
-                  </div>
-                </div>
 
-                <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('client')}
-                      </label>
-                      <select
-                        value={selectedClientId}
-                        onChange={(e) => {
-                          setSelectedClientId(e.target.value);
-                          setSelectedCaseId('');
-                          setSelectedAccount('');
-                          setSelectedAccountDate('');
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <option value="">{t('selectClient')}</option>
-                        {clients.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} {c.company ? `— ${c.company}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  <div className="relative md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('account') ?? 'Счёт'}
+                    </label>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('case')}
-                      </label>
-                      <select
-                        value={selectedCaseId}
-                        onChange={(e) => {
-                          setSelectedCaseId(e.target.value);
-                          setSelectedAccountDate('');
-                        }}
-                        disabled={!selectedClientId}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
-                        <option value="">{t('selectCase')}</option>
-                        {cases.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.title} — {new Date(c.createdAt).toLocaleDateString()}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <input
+                      ref={accountInputRef}
+                      value={selectedAccount}
+                      onChange={(e) => {
+                        setSelectedAccount(e.target.value);
+                        setAccountOpen(true);
+                      }}
+                      onFocus={() => setAccountOpen(true)}
+                      onMouseDown={suppressBrowserAutocomplete}
+                      onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                      placeholder={t('enterAccount') ?? 'Введите счёт'}
+                      maxLength={120}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
 
-                    <div className="relative">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('account') ?? 'Счёт'}
-                      </label>
+                    {accountOpen &&
+                      (accountOpts.length > 0 ||
+                        (selectedAccount ?? '').toString().trim() !== '') && (
+                        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
+                          {accountLoading && (
+                            <div className="px-3 py-2 text-sm text-gray-500">
+                              {t('loading') ?? 'Загрузка…'}
+                            </div>
+                          )}
 
-                      <input
-                        ref={accountInputRef}
-                        value={selectedAccount}
-                        onChange={(e) => {
-                          setSelectedAccount(e.target.value);
-                          setAccountOpen(true);
-                        }}
-                        onFocus={() => setAccountOpen(true)}
-                        onMouseDown={suppressBrowserAutocomplete}
-                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
-                        placeholder={t('enterAccount') ?? 'Введите счёт'}
-                        maxLength={120}
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
+                          {(() => {
+                            const sel = (selectedAccount ?? '').toString();
+                            const selTrim = sel.trim();
+                            const selLower = selTrim.toLowerCase();
+                            return selTrim !== '' &&
+                              !accountOpts.some((x) => x.account.toLowerCase() === selLower) ? (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setAccountOpen(false)}>
+                                {(t('create') ?? 'Создать') + ` «${selTrim}»`}
+                              </button>
+                            ) : null;
+                          })()}
 
-                      {accountOpen &&
-                        (accountOpts.length > 0 ||
-                          (selectedAccount ?? '').toString().trim() !== '') && (
-                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
-                            {accountLoading && (
-                              <div className="px-3 py-2 text-sm text-gray-500">
-                                {t('loading') ?? 'Загрузка…'}
-                              </div>
-                            )}
+                          {accountOpts.map((opt) => {
+                            const key = `${opt.account}__${opt.accountDate ?? ''}`;
+                            const human =
+                              opt.account +
+                              (opt.accountDate
+                                ? ` (${new Date(opt.accountDate).toLocaleDateString()})`
+                                : '');
 
-                            {(() => {
-                              const sel = (selectedAccount ?? '').toString();
-                              const selTrim = sel.trim();
-                              const selLower = selTrim.toLowerCase();
-                              return selTrim !== '' &&
-                                !accountOpts.some((x) => x.account.toLowerCase() === selLower) ? (
-                                <button
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => setAccountOpen(false)}>
-                                  {(t('create') ?? 'Создать') + ` «${selTrim}»`}
-                                </button>
-                              ) : null;
-                            })()}
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={async () => {
+                                  setSelectedAccount(opt.account);
+                                  setAccountOpen(false);
 
-                            {accountOpts.map((opt) => {
-                              const key = `${opt.account}__${opt.accountDate ?? ''}`;
-                              const human =
-                                opt.account +
-                                (opt.accountDate
-                                  ? ` (${new Date(opt.accountDate).toLocaleDateString()})`
-                                  : '');
+                                  if (opt.accountDate) {
+                                    setSelectedAccountDate(toDateInputValue(opt.accountDate));
+                                    return;
+                                  }
 
-                              return (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={async () => {
-                                    setSelectedAccount(opt.account);
-                                    setAccountOpen(false);
+                                  try {
+                                    const cid = selectedClientId
+                                      ? parseInt(selectedClientId, 10)
+                                      : undefined;
+                                    const caseId = selectedCaseId
+                                      ? parseInt(selectedCaseId, 10)
+                                      : undefined;
 
-                                    if (opt.accountDate) {
-                                      setSelectedAccountDate(toDateInputValue(opt.accountDate));
-                                      return;
+                                    const resp = await apiService.getAccounts({
+                                      clientId: cid,
+                                      caseId,
+                                      q: opt.account,
+                                      take: 50,
+                                      withDate: true as const,
+                                      dedupe: false,
+                                    } as Parameters<typeof apiService.getAccounts>[0]);
+
+                                    const arr = Array.isArray(resp)
+                                      ? (resp as AccountApiItem[])
+                                      : [];
+                                    const found = arr.find((x) =>
+                                      isAccountWithDate(x, opt.account),
+                                    );
+                                    if (found) {
+                                      setSelectedAccountDate(toDateInputValue(found.accountDate));
                                     }
+                                  } catch {
+                                    /*  */
+                                  }
+                                }}>
+                                {human}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                  </div>
 
-                                    try {
-                                      const cid = selectedClientId
-                                        ? parseInt(selectedClientId, 10)
-                                        : undefined;
-                                      const caseId = selectedCaseId
-                                        ? parseInt(selectedCaseId, 10)
-                                        : undefined;
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('accountDate') ?? 'Дата счёта'}
+                    </label>
+                    <input
+                      type="date"
+                      value={selectedAccountDate}
+                      onChange={(e) => setSelectedAccountDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center"
+                    />
+                  </div>
 
-                                      const resp = await apiService.getAccounts({
-                                        clientId: cid,
-                                        caseId,
-                                        q: opt.account,
-                                        take: 50,
-                                        withDate: true as const,
-                                        dedupe: false,
-                                      } as Parameters<typeof apiService.getAccounts>[0]);
-
-                                      const arr = Array.isArray(resp)
-                                        ? (resp as AccountApiItem[])
-                                        : [];
-                                      const found = arr.find((x) =>
-                                        isAccountWithDate(x, opt.account),
-                                      );
-                                      if (found) {
-                                        setSelectedAccountDate(toDateInputValue(found.accountDate));
-                                      }
-                                    } catch {
-                                      /*  */
-                                    }
-                                  }}>
-                                  {human}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('accountDate') ?? 'Дата счёта'}
-                      </label>
-                      <input
-                        type="date"
-                        value={selectedAccountDate}
-                        onChange={(e) => setSelectedAccountDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-
-                    <div className="md:col-span-4 flex items-end">
-                      <button
-                        onClick={handleSavePayments}
-                        disabled={!selectedClientId || savingPayments}
-                        className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50">
-                        {savingPayments ? (
-                          <Loader2 className="animate-spin" size={16} />
-                        ) : (
-                          <Save size={16} />
-                        )}
-                        {savingPayments ? t('saving') : t('saveToCalendar')}
-                      </button>
-                    </div>
+                  <div className="md:col-span-4 flex items-end">
+                    <button
+                      onClick={handleSavePayments}
+                      disabled={!selectedClientId || savingPayments}
+                      className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50">
+                      {savingPayments ? (
+                        <Loader2 className="animate-spin" size={16} />
+                      ) : (
+                        <Save size={16} />
+                      )}
+                      {savingPayments ? t('saving') : t('saveToCalendar')}
+                    </button>
                   </div>
                 </div>
 
@@ -660,38 +611,50 @@ export function Calculator() {
 
                   <div className="overflow-x-auto border border-gray-200 rounded-xl">
                     <table className="min-w-[760px] w-full text-sm">
+                      <colgroup>
+                        <col style={{ width: 56 }} />
+                        <col style={{ width: 160 }} />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
+
                       <thead className="bg-gray-50 sticky top-0 z-10">
                         <tr>
-                          <th className="px-3 py-2 text-left text-gray-600 font-medium">#</th>
-                          <th className="px-3 py-2 text-left text-gray-600 font-medium">
+                          <th className="px-2 py-2 text-center text-gray-600 font-medium">#</th>
+                          <th className="px-2 py-2 text-center text-gray-600 font-medium">
                             {t('date')}
                           </th>
-                          <th className="px-3 py-2 text-right text-gray-600 font-medium">
+                          <th className="px-3 py-2 text-center text-gray-600 font-medium">
                             {t('payment')}
                           </th>
-                          <th className="px-3 py-2 text-right text-gray-600 font-medium">
+                          <th className="px-3 py-2 text-center text-gray-600 font-medium">
                             {t('principal')}
                           </th>
-                          <th className="px-3 py-2 text-right text-gray-600 font-medium">
+                          <th className="px-3 py-2 text-center text-gray-600 font-medium">
                             {t('interest')}
                           </th>
-                          <th className="px-3 py-2 text-right text-gray-600 font-medium">
+                          <th className="px-3 py-2 text-center text-gray-600 font-medium">
                             {t('balance')}
                           </th>
                         </tr>
                       </thead>
+
                       <tbody className="divide-y divide-gray-100">
                         {editableResults.items.map((item, index) => (
                           <tr key={index} className={index % 2 ? 'bg-white' : 'bg-gray-50'}>
-                            <td className="px-3 py-2 text-gray-900">{index + 1}</td>
-                            <td className="px-3 py-2">
+                            <td className="px-2 py-2 text-center text-gray-900">{index + 1}</td>
+
+                            <td className="px-2 py-2 text-center">
                               <input
                                 type="date"
                                 value={toDateInputValue(item.date as unknown as string)}
                                 onChange={(e) => handleResultChange(index, 'date', e.target.value)}
-                                className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center"
                               />
                             </td>
+
                             <td className="px-3 py-2 text-right">
                               <input
                                 type="number"
@@ -700,7 +663,7 @@ export function Calculator() {
                                 onChange={(e) =>
                                   handleResultChange(index, 'payment', e.target.value)
                                 }
-                                className="w-28 text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 step="0.01"
                               />
                             </td>
@@ -712,7 +675,7 @@ export function Calculator() {
                                 onChange={(e) =>
                                   handleResultChange(index, 'principal', e.target.value)
                                 }
-                                className="w-28 text-xs border border-gray-200 rounded px-2 py-1 text-right text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                                className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                 step="0.01"
                               />
                             </td>
@@ -724,7 +687,7 @@ export function Calculator() {
                                 onChange={(e) =>
                                   handleResultChange(index, 'interest', e.target.value)
                                 }
-                                className="w-28 text-xs border border-gray-200 rounded px-2 py-1 text-right text-red-600 focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                                className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right text-red-600 focus:ring-2 focus:ring-red-500 focus:border-red-500"
                                 step="0.01"
                               />
                             </td>
@@ -736,16 +699,17 @@ export function Calculator() {
                                 onChange={(e) =>
                                   handleResultChange(index, 'balance', e.target.value)
                                 }
-                                className="w-28 text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 step="0.01"
                               />
                             </td>
                           </tr>
                         ))}
                       </tbody>
+
                       <tfoot>
                         <tr className="bg-gray-100 border-t border-gray-200">
-                          <td className="px-3 py-2 text-gray-600" colSpan={2}>
+                          <td className="px-2 py-2 text-gray-600 text-center" colSpan={2}>
                             {t('totals')}
                           </td>
                           <td className="px-3 py-2 text-right font-semibold">

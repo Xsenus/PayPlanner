@@ -133,7 +133,7 @@ export const ru = {
 
   // Calculator
   installmentCalculator: 'Калькулятор рассрочки',
-  calculateLoanPayments: 'Расчёт платежей по кредиту и генерация графика платежей',
+  calculateLoanPayments: 'Расчёт платежей и генерация графика',
   loanParameters: 'Параметры кредита',
   totalAmount: 'Общая сумма (₽)',
   downPayment: 'Первоначальный взнос (₽)',
