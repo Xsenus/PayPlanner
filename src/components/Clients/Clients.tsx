@@ -349,44 +349,44 @@ export function Clients() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <Users size={32} className="text-blue-600" />
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{t('clients')}</h1>
+      <div className="max-w-7xl mx-auto p-4 sm:p-6">
+        <div className="mb-6 sm:mb-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-2">
+              <div className="flex items-center gap-3">
+                <Users size={32} className="text-blue-600" />
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{t('clients')}</h1>
+              </div>
               <p className="text-gray-600">{t('manageClients')}</p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={16} />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t('search') || 'Поиск по имени, телефону, компании или email'}
-                className="pl-9 pr-8 py-2 w-64 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {query && (
-                <button
-                  type="button"
-                  aria-label={t('clear') || 'Очистить'}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100"
-                  onClick={() => setQuery('')}>
-                  <X size={14} />
-                </button>
-              )}
+            <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2 sm:items-center">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={16} />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('search') || 'Поиск по имени, телефону, компании или email'}
+                  className="pl-9 pr-8 py-2 w-full rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    aria-label={t('clear') || 'Очистить'}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100"
+                    onClick={() => setQuery('')}>
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleAddClient}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                <Plus size={20} />
+                {t('addClient')}
+              </button>
             </div>
-
-            <button
-              type="button"
-              onClick={handleAddClient}
-              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
-              <Plus size={20} />
-              {t('addClient')}
-            </button>
           </div>
         </div>
 
@@ -422,7 +422,7 @@ export function Clients() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 items-stretch min-h-0">
             {sortedClients.map((client) => {
               const cases = (client.cases ?? []) as ClientCase[];
               const totalCases = cases.length;
@@ -433,7 +433,6 @@ export function Clients() {
                 return acc;
               }, {});
 
-              // Сортировка: Open → OnHold → Closed, затем по дате (новые сверху)
               const sortedByStatusThenDate = [...cases].sort((a, b) => {
                 const ra = statusOrder(a.status);
                 const rb = statusOrder(b.status);
@@ -443,8 +442,6 @@ export function Clients() {
 
               const isExpanded = expandedCards.has(client.id);
 
-              // В свернутом виде показываем только НЕ закрытые.
-              // Если все дела закрытые — покажем первые по общему списку.
               const nonClosed = sortedByStatusThenDate.filter((k) => statusOrder(k.status) !== 2);
               const visibleCases = isExpanded
                 ? sortedByStatusThenDate
@@ -457,32 +454,30 @@ export function Clients() {
               return (
                 <div
                   key={client.id}
-                  className={`rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow
+                  className={`h-full flex flex-col overflow-hidden rounded-xl p-5 sm:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow
                   ${client.isActive ? 'bg-white' : 'bg-gray-100 opacity-70'}`}>
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
                         <Users size={24} className="text-blue-600" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-gray-900 block max-w-full truncate">
                           {highlight(client.name ?? '', query)}
                         </h3>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-500 block max-w-full truncate">
                           {highlight(client.company ?? '', query)}
                         </p>
                       </div>
                     </div>
-                    <div className="flex gap-1">
-                      {/* Новая кнопка "Добавить дело" */}
+                    <div className="flex gap-1 self-end sm:self-auto shrink-0">
                       <button
                         type="button"
                         onClick={() => openAddCase(client.id)}
                         className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                         title="Добавить дело">
-                        <PlusCircle size={16} />
+                        <PlusCircle size={16} />{' '}
                       </button>
-
                       <button
                         type="button"
                         onClick={() => handleEditClient(client)}
@@ -499,9 +494,7 @@ export function Clients() {
                       </button>
                     </div>
                   </div>
-
-                  {/* Контакты */}
-                  <div className="space-y-2 mb-5">
+                  <div className="flex-1 min-h-0 flex flex-col">
                     {client.email && (
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Mail size={14} />
@@ -511,7 +504,9 @@ export function Clients() {
                     {client.phone && (
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Phone size={14} />
-                        <span>{highlightPhone(client.phone ?? '', query)}</span>
+                        <span className="truncate">
+                          {highlightPhone(client.phone ?? '', query)}
+                        </span>
                       </div>
                     )}
                     {client.address && (
@@ -521,8 +516,6 @@ export function Clients() {
                       </div>
                     )}
                   </div>
-
-                  {/* Дела клиента */}
                   <div className="mt-2">
                     <div className="flex items-center gap-2 mb-2">
                       <FolderKanban size={18} className="text-slate-600" />
@@ -531,9 +524,8 @@ export function Clients() {
                         {t('total') || 'Всего'}: {totalCases}
                       </span>
                     </div>
-
                     {totalCases > 0 ? (
-                      <div className="flex flex-wrap gap-2 mb-3">
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3">
                         {Object.entries(counts)
                           .sort((a, b) => b[1] - a[1])
                           .slice(0, 4)
@@ -542,7 +534,7 @@ export function Clients() {
                             return (
                               <span
                                 key={status}
-                                className={`text-xs px-2.5 py-1 rounded-full ${statusClasses(
+                                className={`text-[11px] sm:text-xs px-2 py-1 rounded-full ${statusClasses(
                                   status,
                                 )}`}
                                 title={label}>
@@ -556,8 +548,6 @@ export function Clients() {
                         {t('noCases') || 'Дел пока нет'}
                       </div>
                     )}
-
-                    {/* Список дел */}
                     {visibleCases.length > 0 && (
                       <ul className="space-y-2">
                         {visibleCases.map((c) => (
@@ -577,9 +567,9 @@ export function Clients() {
                                 {t('created') || 'Создано'}: {formatDate(c.createdAt)}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 shrink-0">
                               <span
-                                className={`shrink-0 text-[11px] px-2 py-1 rounded-full ${statusClasses(
+                                className={`text-[11px] px-2 py-1 rounded-full ${statusClasses(
                                   c.status,
                                 )}`}>
                                 {caseStatusLabel(c.status)}
@@ -596,8 +586,6 @@ export function Clients() {
                         ))}
                       </ul>
                     )}
-
-                    {/* Кнопки показать ещё / свернуть */}
                     {hiddenCount > 0 && !isExpanded && (
                       <button
                         type="button"
@@ -615,12 +603,9 @@ export function Clients() {
                       </button>
                     )}
                   </div>
-
-                  {/* Примечания */}
                   {client.notes && (
                     <p className="mt-4 text-sm text-gray-500 line-clamp-2">{client.notes}</p>
                   )}
-
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <button
                       type="button"
