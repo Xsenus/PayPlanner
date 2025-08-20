@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   Users,
   Plus,
@@ -9,6 +9,8 @@ import {
   Edit,
   FolderKanban,
   PlusCircle,
+  Search,
+  X,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -68,6 +70,106 @@ function formatDate(d?: string) {
   }
 }
 
+function matchesClient(c: Client, q: string): boolean {
+  const ql = q.trim().toLowerCase();
+  if (!ql) return true;
+
+  const qDigits = q.replace(/\D/g, '');
+  const name = (c.name ?? '').toLowerCase();
+  const company = (c.company ?? '').toLowerCase();
+  const email = (c.email ?? '').toLowerCase();
+  const phone = (c.phone ?? '').toLowerCase();
+  const phoneDigits = (c.phone ?? '').replace(/\D/g, '');
+
+  return (
+    name.includes(ql) ||
+    company.includes(ql) ||
+    email.includes(ql) ||
+    phone.includes(ql) ||
+    (!!qDigits && phoneDigits.includes(qDigits))
+  );
+}
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlight(text: string, q: string): ReactNode {
+  const query = q.trim();
+  if (!query) return text;
+  const re = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+  const parts = text.split(re);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="bg-yellow-200 rounded px-0.5">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function highlightPhone(phone: string, q: string): ReactNode {
+  const qDigits = q.replace(/\D/g, '');
+  if (!qDigits) return highlight(phone, q);
+
+  const digitPositions: number[] = [];
+  const digitsOnlyChars: string[] = [];
+  for (let i = 0; i < phone.length; i++) {
+    const ch = phone[i];
+    if (/\d/.test(ch)) {
+      digitPositions.push(i);
+      digitsOnlyChars.push(ch);
+    }
+  }
+  const digitsOnly = digitsOnlyChars.join('');
+  const pos = digitsOnly.indexOf(qDigits);
+  if (pos === -1) return highlight(phone, q);
+
+  const toHi = new Set(digitPositions.slice(pos, pos + qDigits.length));
+  const out: ReactNode[] = [];
+  let buf = '';
+  let inMark = false;
+  let key = 0;
+
+  for (let i = 0; i < phone.length; i++) {
+    const should = toHi.has(i);
+    if (should) {
+      if (!inMark) {
+        if (buf) out.push(buf);
+        buf = phone[i];
+        inMark = true;
+      } else {
+        buf += phone[i];
+      }
+    } else {
+      if (inMark) {
+        out.push(
+          <mark key={`m${key++}`} className="bg-yellow-200 rounded px-0.5">
+            {buf}
+          </mark>,
+        );
+        buf = '';
+        inMark = false;
+      }
+      buf += phone[i];
+    }
+  }
+  if (buf) {
+    if (inMark) {
+      out.push(
+        <mark key={`m${key++}`} className="bg-yellow-200 rounded px-0.5">
+          {buf}
+        </mark>,
+      );
+    } else {
+      out.push(buf);
+    }
+  }
+  return out;
+}
+
 export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
@@ -84,6 +186,17 @@ export function Clients() {
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('edit');
 
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
+
+  const [query, setQuery] = useState('');
+  const filteredClients = useMemo(() => {
+    if (!query.trim()) return clients;
+    return clients.filter((c) => matchesClient(c, query));
+  }, [clients, query]);
+
+  const sortedClients = useMemo(
+    () => [...filteredClients].sort((a, b) => Number(b.isActive) - Number(a.isActive)),
+    [filteredClients],
+  );
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -232,7 +345,7 @@ export function Clients() {
     setEditingCase(null);
   };
 
-  const sortedClients = [...clients].sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  const hasAnyClients = clients.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -245,16 +358,39 @@ export function Clients() {
               <p className="text-gray-600">{t('manageClients')}</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleAddClient}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
-            <Plus size={20} />
-            {t('addClient')}
-          </button>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={16} />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('search') || 'Поиск по имени, телефону, компании или email'}
+                className="pl-9 pr-8 py-2 w-64 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {query && (
+                <button
+                  type="button"
+                  aria-label={t('clear') || 'Очистить'}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100"
+                  onClick={() => setQuery('')}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddClient}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+              <Plus size={20} />
+              {t('addClient')}
+            </button>
+          </div>
         </div>
 
-        {sortedClients.length === 0 ? (
+        {!hasAnyClients ? (
           <div className="text-center py-12">
             <Users size={48} className="mx-auto mb-4 text-gray-300" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">{t('noClientsYet')}</h3>
@@ -265,6 +401,25 @@ export function Clients() {
               className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
               {t('addClient')}
             </button>
+          </div>
+        ) : sortedClients.length === 0 ? (
+          <div className="text-center py-12">
+            <Users size={48} className="mx-auto mb-4 text-gray-300" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              {t('nothingFound') || 'Ничего не найдено'}
+            </h3>
+            <p className="text-gray-500 mb-4">
+              {t('tryAnotherQuery') || 'Попробуйте изменить поисковый запрос.'}
+            </p>
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+                <X size={16} />
+                {t('clear') || 'Очистить поиск'}
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -310,8 +465,12 @@ export function Clients() {
                         <Users size={24} className="text-blue-600" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">{client.name}</h3>
-                        <p className="text-sm text-gray-500">{client.company}</p>
+                        <h3 className="font-semibold text-gray-900">
+                          {highlight(client.name ?? '', query)}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {highlight(client.company ?? '', query)}
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-1">
@@ -346,13 +505,13 @@ export function Clients() {
                     {client.email && (
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Mail size={14} />
-                        <span className="truncate">{client.email}</span>
+                        <span className="truncate">{highlight(client.email ?? '', query)}</span>
                       </div>
                     )}
                     {client.phone && (
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Phone size={14} />
-                        <span>{client.phone}</span>
+                        <span>{highlightPhone(client.phone ?? '', query)}</span>
                       </div>
                     )}
                     {client.address && (

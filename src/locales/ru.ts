@@ -27,6 +27,8 @@ export const ru = {
   clear: 'Очистить',
   account: 'Счёт',
   accountDate: 'Дата счёта',
+  nothingFound: 'Ничего не найдено',
+  tryAnotherQuery: 'Попробуйте другой запрос',
   // Navigation
   calendar: 'Календарь',
   reports: 'Отчёты',
