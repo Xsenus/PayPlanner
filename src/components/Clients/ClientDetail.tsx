@@ -13,17 +13,19 @@ import {
   Trash2,
   Wallet,
   Banknote,
+  PlusCircle,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useClientStats } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
 import { apiService } from '../../services/api';
 import { PaymentModal } from '../Calendar/PaymentModal';
-import type { Payment } from '../../types';
+import type { Payment, ClientCase } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { StatCardItem, StatsCards } from '../Statistics/StatCardItem';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { CaseModal } from './CaseModal';
 
 interface ClientDetailProps {
   clientId: number;
@@ -84,7 +86,13 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     clientId,
     selectedCaseId === 'all' ? undefined : Number(selectedCaseId),
   );
-  const { cases } = useClientCases(clientId);
+
+  const { cases: serverCases } = useClientCases(clientId);
+  const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
+  useEffect(() => {
+    setCasesLocal(serverCases);
+  }, [serverCases]);
+  const cases = useMemo(() => casesLocal ?? serverCases, [casesLocal, serverCases]);
 
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
@@ -94,6 +102,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [localStats, setLocalStats] = useState<ClientStatsShape | null>(null);
+
+  const [caseModalOpen, setCaseModalOpen] = useState(false);
+  const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
+  const [caseMode, setCaseMode] = useState<'create' | 'edit'>('create');
 
   useEffect(() => {
     if (!stats) return;
@@ -124,6 +136,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const closePayModal = () => {
     setPayModalOpen(false);
     setEditingPayment(null);
+  };
+
+  const openAddCase = () => {
+    setEditingCase(null);
+    setCaseMode('create');
+    setCaseModalOpen(true);
   };
 
   const overallAmount =
@@ -218,7 +236,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
     const visible = list
       .filter(matchesFilter)
-      .sort((a, b) => +new Date(a.date) - +new Date(b.date)); // по возрастанию
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date));
 
     const withList = { ...base, recentPayments: visible, lastPaymentDate: maxDate(visible) };
     return recomputeAggregates(withList, visible);
@@ -345,6 +363,21 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     }
   };
 
+  const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
+    const base: Omit<ClientCase, 'id' | 'createdAt' | 'payments'> = {
+      clientId,
+      title: (patch.title ?? '').trim(),
+      description: (patch.description ?? '').trim(),
+      status: (patch.status ?? 'Open') as ClientCase['status'],
+    };
+
+    const created = await apiService.createCase(base);
+    setCasesLocal((prev) => [created, ...(prev ?? [])]);
+    setSelectedCaseId(created.id);
+    setCaseModalOpen(false);
+    setEditingCase(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -430,18 +463,30 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto p-6">
-        <div className="flex items-center gap-4 mb-8">
-          <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-            <ArrowLeft size={20} />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Users size={24} className="text-blue-600" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{view.clientName}</h1>
-              <p className="text-gray-600">Данные клиента и история платежей</p>
-            </div>
+        <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
+          <div className="flex items-center gap-2 w-full">
+            <button
+              onClick={onBack}
+              className="order-1 p-1 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+              title="Назад"
+              aria-label="Назад">
+              <ArrowLeft size={24} />
+            </button>
+            <h1
+              className="order-2 sm:order-3 flex-1 min-w-0 text-2xl font-bold text-gray-900"
+              title={view.clientName}>
+              {view.clientName}
+            </h1>
+            <button
+              type="button"
+              onClick={openAddCase}
+              title="Добавить дело"
+              aria-label="Добавить дело"
+              className="order-3 sm:order-2 ml-auto sm:ml-2 w-12 h-12 inline-flex items-center justify-center
+               rounded-lg border border-dashed border-emerald-300 text-emerald-700 bg-emerald-50
+               hover:bg-emerald-100 hover:border-emerald-400 transition-colors shrink-0">
+              <PlusCircle size={24} />
+            </button>
           </div>
         </div>
 
@@ -449,13 +494,47 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
           <div className="p-6 flex flex-wrap items-center gap-3">
+            <MonthRangePicker
+              value={{ from: monthFrom || undefined, to: monthTo || undefined }}
+              onChange={(r) => {
+                setMonthFrom(r.from ?? '');
+                setMonthTo(r.to ?? '');
+              }}
+              yearsBack={8}
+              yearsForward={1}
+            />
+
+            <div className="relative w-full sm:w-56">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | NormalizedStatus)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                <option value="all">Все статусы</option>
+                <option value="pending">Ожидается</option>
+                <option value="completed">Выполнено</option>
+                <option value="overdue">Просрочено</option>
+              </select>
+            </div>
+
+            <div className="w-full sm:w-auto sm:ml-auto order-last sm:order-none">
+              <button
+                onClick={openAddPayment}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2
+               bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700">
+                <Plus size={16} /> Добавить платёж
+              </button>
+            </div>
+          </div>
+
+          <div className="px-6 pb-6 pt-0">
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => setSelectedCaseId('all')}
                 className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
                   selectedCaseId === 'all'
-                    ? 'bg-slate-800 text-white border-slate-800'
+                    ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                 }`}>
                 Все дела
@@ -463,6 +542,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
               {cases.map((k) => {
                 const active = selectedCaseId === k.id;
+                const inactiveClasses = caseStatusClasses(k.status);
                 return (
                   <button
                     key={k.id}
@@ -470,48 +550,18 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                     onClick={() => setSelectedCaseId(k.id)}
                     title={caseStatusLabel(k.status)}
                     className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                      active ? 'ring-2 ring-offset-1 ring-black/5' : 'hover:opacity-90'
-                    } ${caseStatusClasses(k.status)}`}>
+                      active
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                        : `${inactiveClasses} hover:opacity-90`
+                    }`}>
                     {k.title}
                   </button>
                 );
               })}
             </div>
-
-            <div className="ml-auto flex items-center gap-3 flex-wrap">
-              <MonthRangePicker
-                value={{ from: monthFrom || undefined, to: monthTo || undefined }}
-                onChange={(r) => {
-                  setMonthFrom(r.from ?? '');
-                  setMonthTo(r.to ?? '');
-                }}
-                yearsBack={8}
-                yearsForward={1}
-              />
-
-              <div className="relative w-full sm:w-56">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as 'all' | NormalizedStatus)}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                  <option value="all">Все статусы</option>
-                  <option value="pending">Ожидается</option>
-                  <option value="completed">Выполнено</option>
-                  <option value="overdue">Просрочено</option>
-                </select>
-              </div>
-
-              <button
-                onClick={openAddPayment}
-                className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700">
-                <Plus size={16} /> Добавить платёж
-              </button>
-            </div>
           </div>
         </div>
 
-        {/* Список платежей */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-6 border-b border-gray-100">
             <div className="flex items-center justify-between">
@@ -540,71 +590,78 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                     <div
                       key={payment.id}
                       className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="mt-0.5">
                           {payment.type === 'Income' ? (
                             <TrendingUp size={20} className="text-emerald-600" />
                           ) : (
                             <TrendingDown size={20} className="text-red-600" />
                           )}
-                          <div>
-                            <p className="font-medium text-gray-900">
-                              {formatCurrency(payment.amount)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-900">
+                            {formatCurrency(payment.amount)}
+                          </p>
+                          {payment.description && (
+                            <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
+                              {payment.description}
                             </p>
-                            {payment.description && (
-                              <p className="text-sm text-gray-500">{payment.description}</p>
-                            )}
-                          </div>
+                          )}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <div className="text-right mr-2">
-                          <p className="text-sm font-medium text-gray-900">
+                      <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
+                        <div className="flex items-center justify-end gap-2">
+                          <p className="text-sm font-medium text-gray-900 leading-none">
                             {toRuDate(payment.date)}
                           </p>
-                          <div className="flex items-center gap-2 justify-end">
-                            {(() => {
-                              const s = normalizeStatus(payment.status);
-                              if (s === 'overdue') {
-                                return (
-                                  <>
-                                    <AlertTriangle size={14} className="text-purple-700" />
-                                    <span className="text-xs text-purple-700">Просрочено</span>
-                                  </>
-                                );
-                              }
-                              if (s === 'completed') {
-                                return (
-                                  <>
-                                    <CheckCircle size={14} className="text-emerald-600" />
-                                    <span className="text-xs text-emerald-600">Выполнено</span>
-                                  </>
-                                );
-                              }
-                              // pending
+                          <button
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
+                            onClick={() => openEditPayment(payment)}
+                            title="Редактировать"
+                            aria-label="Редактировать">
+                            <Edit size={16} />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          {(() => {
+                            const s = normalizeStatus(payment.status);
+                            if (s === 'overdue') {
                               return (
                                 <>
-                                  <Clock size={14} className="text-amber-600" />
-                                  <span className="text-xs text-amber-600">Ожидается</span>
+                                  <AlertTriangle size={14} className="text-purple-700" />
+                                  <span className="text-xs text-purple-700 leading-none">
+                                    Просрочено
+                                  </span>
                                 </>
                               );
-                            })()}
-                          </div>
+                            }
+                            if (s === 'completed') {
+                              return (
+                                <>
+                                  <CheckCircle size={14} className="text-emerald-600" />
+                                  <span className="text-xs text-emerald-600 leading-none">
+                                    Выполнено
+                                  </span>
+                                </>
+                              );
+                            }
+                            return (
+                              <>
+                                <Clock size={14} className="text-amber-600" />
+                                <span className="text-xs text-amber-600 leading-none">
+                                  Ожидается
+                                </span>
+                              </>
+                            );
+                          })()}
+                          <button
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
+                            onClick={() => removePayment(payment.id)}
+                            title="Удалить"
+                            aria-label="Удалить">
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-
-                        <button
-                          className="p-2 rounded-lg hover:bg-blue-50 text-blue-600"
-                          onClick={() => openEditPayment(payment)}
-                          title="Редактировать">
-                          <Edit size={16} />
-                        </button>
-                        <button
-                          className="p-2 rounded-lg hover:bg-red-50 text-red-600"
-                          onClick={() => removePayment(payment.id)}
-                          title="Удалить">
-                          <Trash2 size={16} />
-                        </button>
                       </div>
                     </div>
                   ))}
@@ -625,6 +682,27 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           defaultClientId={clientId}
           defaultClientCaseId={selectedCaseId === 'all' ? undefined : Number(selectedCaseId)}
         />
+
+        {caseModalOpen && (
+          <CaseModal
+            isOpen={caseModalOpen}
+            onClose={() => setCaseModalOpen(false)}
+            caseData={
+              caseMode === 'edit' && editingCase
+                ? editingCase
+                : ({
+                    id: 0,
+                    clientId,
+                    title: '',
+                    description: '',
+                    status: 'Open',
+                    createdAt: new Date().toISOString(),
+                  } as ClientCase)
+            }
+            onSave={saveCase}
+            onDelete={undefined}
+          />
+        )}
 
         {error && (
           <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
