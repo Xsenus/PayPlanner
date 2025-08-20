@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { Calendar, X } from 'lucide-react';
 
-type YM = string; // 'YYYY-MM'
+type YM = string;
 export type MonthRange = { from?: YM; to?: YM };
 
 const ruMonths = [
@@ -77,7 +77,7 @@ export function MonthRangePicker({
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     const onClick = (e: MouseEvent) => {
       const isMobile = window.matchMedia('(max-width: 767px)').matches;
-      if (isMobile) return; // на мобилке у нас overlay закрывает
+      if (isMobile) return;
       if (!popRef.current) return;
       if (popRef.current.contains(e.target as Node)) return;
       if (btnRef.current?.contains(e.target as Node)) return;
@@ -135,7 +135,7 @@ export function MonthRangePicker({
   }
 
   const presets = [
-    { name: 'Этот месяц', calc: () => ({ from: now, to: now }) },
+    { name: 'Текущий месяц', calc: () => ({ from: now, to: now }) },
     {
       name: 'Прошлый месяц',
       calc: () => {
@@ -143,10 +143,13 @@ export function MonthRangePicker({
         return { from: prev, to: prev };
       },
     },
-    { name: '3 мес', calc: () => ({ from: ymAdd(now, -2), to: now }) },
-    { name: '6 мес', calc: () => ({ from: ymAdd(now, -5), to: now }) },
-    { name: '12 мес', calc: () => ({ from: ymAdd(now, -11), to: now }) },
-    { name: 'ГОД', calc: () => ({ from: `${now.slice(0, 4)}-01`, to: `${now.slice(0, 4)}-12` }) },
+    { name: '3 месяца', calc: () => ({ from: ymAdd(now, -2), to: now }) },
+    { name: '6 месяцев', calc: () => ({ from: ymAdd(now, -5), to: now }) },
+    { name: '12 месяцев', calc: () => ({ from: ymAdd(now, -11), to: now }) },
+    {
+      name: 'Текущий год',
+      calc: () => ({ from: `${now.slice(0, 4)}-01`, to: `${now.slice(0, 4)}-12` }),
+    },
   ];
 
   const MonthCell = ({ y, idx }: { y: number; idx: number }) => {
@@ -383,7 +386,6 @@ export function MonthRangePicker({
           </div>
         </div>
 
-        {/* пресеты */}
         <div className="w-40 border-l pl-4">
           <div className="mb-2 text-xs font-medium text-slate-500">Быстрый выбор</div>
           <div className="space-y-2">
@@ -426,15 +428,15 @@ export function MonthRangePicker({
   );
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative ${className} w-full md:w-auto min-w-0`}>
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
+        className="w-full md:w-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
         title="Выбрать период по месяцам">
-        <Calendar className="h-4 w-4" />
-        <span className="truncate text-slate-700 max-w-[60vw] md:max-w-[420px]">
+        <Calendar className="h-4 w-4 shrink-0" />
+        <span className="flex-1 truncate text-slate-700 md:flex-none md:max-w-[420px]">
           {labelOfRangeCompact(value)}
         </span>
       </button>
