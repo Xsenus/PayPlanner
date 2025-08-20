@@ -237,24 +237,77 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCaseId, monthFrom, monthTo, statusFilter]);
 
+  type PaymentBody = Omit<Payment, 'id' | 'createdAt'>;
+  const toBodyFromPayment = (p: Payment): PaymentBody => ({
+    date: p.date,
+    amount: p.amount,
+    type: p.type,
+    status: p.status,
+    description: p.description,
+    isPaid: p.isPaid,
+    paidDate: p.paidDate,
+    notes: p.notes ?? null,
+    clientId: p.clientId ?? null,
+    clientCaseId: p.clientCaseId ?? null,
+    dealTypeId: p.dealTypeId ?? null,
+    incomeTypeId: p.incomeTypeId ?? null,
+    paymentSourceId: p.paymentSourceId ?? null,
+    paymentStatusId: p.paymentStatusId ?? null,
+    account: p.account ?? null,
+    accountDate: p.accountDate ?? null,
+  });
+
+  const normFk = (v: unknown): number | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return null;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   const submitPayment = async (payload: PaymentUpsert) => {
     const isEdit = 'id' in payload && typeof payload.id === 'number';
-    const autoClientCaseId =
-      !isEdit && selectedCaseId !== 'all' ? Number(selectedCaseId) : undefined;
-
-    const body: Omit<Payment, 'id' | 'createdAt'> = {
-      ...(payload as Omit<Payment, 'id' | 'createdAt'>),
-      clientId,
-      clientCaseId: (payload as Partial<Payment>).clientCaseId ?? autoClientCaseId,
-    };
+    const incoming = payload as Partial<PaymentBody>;
 
     const oldPayment = isEdit
       ? (view.recentPayments ?? []).find((p) => p.id === (payload as { id: number }).id)
       : undefined;
 
+    const base: PaymentBody = oldPayment ? toBodyFromPayment(oldPayment) : ({} as PaymentBody);
+
+    const resolvedClientId =
+      incoming.clientId !== undefined
+        ? normFk(incoming.clientId)
+        : !isEdit
+        ? clientId
+        : base.clientId;
+    const resolvedClientCaseId =
+      incoming.clientCaseId !== undefined
+        ? normFk(incoming.clientCaseId)
+        : !isEdit && selectedCaseId !== 'all'
+        ? Number(selectedCaseId)
+        : base.clientCaseId;
+
+    const body: PaymentBody = {
+      ...base,
+      ...incoming,
+      clientId: (resolvedClientId ?? null) as number | null,
+      clientCaseId: (resolvedClientCaseId ?? null) as number | null,
+    };
+
     const saved = isEdit
       ? await apiService.updatePayment((payload as { id: number }).id, body)
       : await apiService.createPayment(body);
+
+    if (isEdit && saved.clientId !== clientId) {
+      if (oldPayment) {
+        setLocalStats((prev) => {
+          const current = prev ?? (stats as unknown as ClientStatsShape);
+          return optimisticDelete(current, oldPayment);
+        });
+      }
+      closePayModal();
+      return;
+    }
 
     setLocalStats((prev) => {
       const current = prev ?? (stats as unknown as ClientStatsShape);
@@ -335,7 +388,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </p>
           </div>
 
-          <div className="bg-white rounded-xl p-4 md:p-6 shadowсм border border-gray-100">
+          <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between md:justify-start md:gap-3">
               <div className="p-2.5 md:p-3 rounded-lg bg-red-50">
                 <TrendingDown className="w-5 h-5 md:w-6 md:h-6 text-red-600" />

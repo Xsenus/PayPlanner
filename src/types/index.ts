@@ -69,20 +69,20 @@ export interface Payment {
   paidDate?: string;
   notes: string;
   createdAt: string;
-  clientId?: number;
-  clientCaseId?: number;
-  dealTypeId?: number;
-  incomeTypeId?: number;
-  paymentSourceId?: number;
-  paymentStatusId?: number;
-  client?: Client;
-  clientCase?: ClientCase;
-  dealType?: DealType;
-  incomeType?: IncomeType;
-  paymentSource?: PaymentSource;
+  clientId?: number | null;
+  clientCaseId?: number | null;
+  dealTypeId?: number | null;
+  incomeTypeId?: number | null;
+  paymentSourceId?: number | null;
+  paymentStatusId?: number | null;
+  client?: Client | null;
+  clientCase?: ClientCase | null;
+  dealType?: DealType | null;
+  incomeType?: IncomeType | null;
+  paymentSource?: PaymentSource | null;
   paymentStatusEntity?: PaymentStatusEntity;
-  account?: string;
-  accountDate?: string;
+  account?: string | null;
+  accountDate?: string | null;
 }
 
 export type AccountSuggestion = {
