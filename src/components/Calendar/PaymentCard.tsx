@@ -5,7 +5,7 @@ import type React from 'react';
 interface PaymentCardProps {
   payment: Payment;
   onClick?: () => void;
-  onClientClick?: (clientId: number, clientCaseId?: number) => void; // 👈 новый проп
+  onClientClick?: (clientId: number, clientCaseId?: number) => void;
   neutral?: boolean;
   className?: string;
 }
@@ -48,8 +48,11 @@ export function PaymentCard({
           <button
             type="button"
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.stopPropagation(); // чтобы не сработал onClick карточки
-              onClientClick?.(payment.clientId ?? -1, payment.clientCaseId);
+              e.stopPropagation();
+              onClientClick?.(
+                payment.clientId ?? -1,
+                payment.clientCaseId ? payment.clientCaseId : undefined,
+              );
             }}
             className="text-blue-600 hover:underline">
             {payment.client.name}
