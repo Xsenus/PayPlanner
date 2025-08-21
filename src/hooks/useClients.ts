@@ -2,32 +2,29 @@ import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
 import type { Client, ClientStats, ClientCase } from '../types';
 
+function isClient(x: unknown): x is Client {
+  if (typeof x !== 'object' || x === null) return false;
+  const o = x as Record<string, unknown>;
+  return typeof o.id === 'number' && typeof o.createdAt === 'string';
+}
+
 export function useClients() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const hydrateCases = async (list: Client[]) => {
-    const withCases = await Promise.all(
-      list.map(async (c) => {
-        try {
-          const cases = await apiService.getCasesV1({ clientId: c.id });
-          return { ...c, cases: cases as ClientCase[] };
-        } catch {
-          return { ...c, cases: [] as ClientCase[] };
-        }
-      }),
-    );
-    return withCases;
-  };
-
   const fetchClients = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+
       const base = await apiService.getClients();
-      const enriched = await hydrateCases(base);
-      setClients(enriched);
+      const normalized: Client[] = (base as Client[]).map((c) => ({
+        ...c,
+        cases: (c.cases ?? []) as ClientCase[],
+      }));
+
+      setClients(normalized);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch clients');
     } finally {
@@ -36,23 +33,40 @@ export function useClients() {
   }, []);
 
   useEffect(() => {
-    fetchClients();
+    void fetchClients();
   }, [fetchClients]);
 
   const createClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
     try {
-      await apiService.createClient(client);
-      await fetchClients();
+      const created = await apiService.createClient(client);
+      if (isClient(created)) {
+        setClients((prev) => [
+          { ...created, cases: (created.cases ?? []) as ClientCase[] },
+          ...prev,
+        ]);
+      } else {
+        await fetchClients();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create client');
       throw err;
     }
   };
 
-  const updateClient = async (id: number, client: Omit<Client, 'id' | 'createdAt'>) => {
+  const updateClient = async (id: number, patch: Omit<Client, 'id' | 'createdAt'>) => {
     try {
-      await apiService.updateClient(id, client);
-      await fetchClients();
+      const updated = await apiService.updateClient(id, patch);
+      if (isClient(updated)) {
+        setClients((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? { ...updated, cases: (updated.cases ?? c.cases ?? []) as ClientCase[] }
+              : c,
+          ),
+        );
+      } else {
+        await fetchClients();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update client');
       throw err;
@@ -61,10 +75,11 @@ export function useClients() {
 
   const deleteClient = async (id: number) => {
     try {
+      setClients((prev) => prev.filter((c) => c.id !== id));
       await apiService.deleteClient(id);
-      await fetchClients();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete client');
+      await fetchClients();
       throw err;
     }
   };
@@ -99,7 +114,7 @@ export function useClientStats(clientId: number, caseId?: number) {
       }
     };
 
-    if (clientId) fetchStats();
+    if (clientId) void fetchStats();
   }, [clientId, caseId]);
 
   return {
