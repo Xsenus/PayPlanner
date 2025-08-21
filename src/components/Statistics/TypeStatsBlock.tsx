@@ -170,6 +170,11 @@ export function TypeStatsBlock({
       icon: headIcon,
       color: headColor,
       bg: headBg,
+      hint: (
+        <div className="text-xs leading-5">
+          Сумма платежей где статус равен 'Выполнено' в выбранном диапазоне дат
+        </div>
+      ),
     },
     {
       title: 'Ожидается',
@@ -178,6 +183,11 @@ export function TypeStatsBlock({
       icon: Clock,
       color: 'text-amber-600',
       bg: 'bg-amber-50',
+      hint: (
+        <div className="text-xs leading-5">
+          Сумма платежей где статус равен 'Ожидается' в выбранном диапазоне дат
+        </div>
+      ),
     },
     {
       title: 'Просрочено',
@@ -186,6 +196,11 @@ export function TypeStatsBlock({
       icon: AlertTriangle,
       color: 'text-purple-600',
       bg: 'bg-purple-50',
+      hint: (
+        <div className="text-xs leading-5">
+          Сумма платежей где статус равен 'Просрочено' в выбранном диапазоне дат
+        </div>
+      ),
     },
     {
       title: 'Общая сумма',
@@ -194,6 +209,7 @@ export function TypeStatsBlock({
       icon: Wallet,
       color: 'text-cyan-700',
       bg: 'bg-cyan-50',
+      hint: <div className="text-xs leading-5">Оплачено + Ожидается + Просрочено</div>,
     },
     {
       title: 'Остаток долга',
@@ -202,6 +218,7 @@ export function TypeStatsBlock({
       icon: Banknote,
       color: 'text-sky-700',
       bg: 'bg-sky-50',
+      hint: <div className="text-xs leading-5">Ожидается + Просрочено</div>,
     },
   ];
 
