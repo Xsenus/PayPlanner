@@ -1,13 +1,5 @@
 import { useMemo } from 'react';
-import {
-  TrendingUp,
-  TrendingDown,
-  CheckCircle,
-  Clock,
-  AlertTriangle,
-  Wallet,
-  Banknote,
-} from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, AlertTriangle, Wallet, Banknote } from 'lucide-react';
 
 import { StatsCards, type StatCardItem } from './StatCardItem';
 import { useSummaryStats } from '../../hooks/useSummaryStats';
@@ -146,7 +138,6 @@ export function TypeStatsBlock({
   const apiStatus: SummaryStatus | undefined =
     statusFilter && statusFilter !== 'All' ? statusFilter : undefined;
 
-  // 1) Серверная сводка (без обнуления данных во время загрузки)
   const { data, loading } = useSummaryStats({
     clientId,
     caseId,
@@ -161,7 +152,6 @@ export function TypeStatsBlock({
 
   const mappedServer = useMemo(() => mapServerStats(data, kind), [data, kind]);
 
-  // 2) Фоллбек из платежей (если сервер вернул нули/нет данных)
   const { payments, loading: paymentsLoading } = usePayments(from ?? '', to ?? '', {
     pollInterval: 0,
   });
@@ -186,7 +176,6 @@ export function TypeStatsBlock({
 
   const m = useFallback ? mappedFallback : mappedServer;
 
-  // Скелетон только при первом рендере
   const hasDataAlready = !!data || (!!payments && payments.length > 0);
   const showLoading = (loading || (useFallback && paymentsLoading)) && !hasDataAlready;
 
@@ -196,7 +185,6 @@ export function TypeStatsBlock({
   const headColor = kind === 'Income' ? 'text-emerald-600' : 'text-rose-600';
   const headBg = kind === 'Income' ? 'bg-emerald-50' : 'bg-rose-50';
 
-  // ⬇️ меняем .short → .full, чтобы показывать копейки
   const items: StatCardItem[] = [
     {
       title,
@@ -205,14 +193,6 @@ export function TypeStatsBlock({
       icon: headIcon,
       color: headColor,
       bg: headBg,
-    },
-    {
-      title: 'Итог',
-      value: fmt(m.sumByType).full,
-      titleAttr: fmt(m.sumByType).full,
-      icon: CheckCircle,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
     },
     {
       title: 'Ожидается',
@@ -250,9 +230,8 @@ export function TypeStatsBlock({
 
   return (
     <div className={`flex flex-col gap-3 ${className}`}>
-      {/* фиксируем минимальную высоту, чтобы сетка не «скакала» */}
       <div className="min-h-[120px]">
-        <StatsCards items={items} loading={showLoading} lgCols={6} />
+        <StatsCards items={items} loading={showLoading} lgCols={items.length} />
       </div>
     </div>
   );
