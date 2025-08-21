@@ -27,6 +27,15 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
   });
 
   useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
     if (client) {
       setFormData({
         name: client.name,

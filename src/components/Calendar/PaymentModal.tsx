@@ -37,6 +37,7 @@ export function PaymentModal({
   type,
 }: PaymentModalProps) {
   const accountInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   function suppressBrowserAutocomplete() {
     const el = accountInputRef.current;
@@ -197,6 +198,18 @@ export function PaymentModal({
       prevOpenRef.current = true;
     }
   }, [isOpen, defaultClientId, defaultClientCaseId, type]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
+        formRef.current?.requestSubmit();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
 
   const clientIdRef = useRef(formData.clientId);
   useEffect(() => {
@@ -385,7 +398,7 @@ export function PaymentModal({
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 {t('type') ?? 'Тип'}
