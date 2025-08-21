@@ -12,9 +12,10 @@ import {
   Trash2,
   PlusCircle,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { apiService } from '../../services/api';
+import { usePayments } from '../../hooks/usePayments';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type { Payment, ClientCase } from '../../types';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
@@ -75,6 +76,9 @@ function toStatsStatusFilter(
   }
 }
 
+const MIN_DATE = '1900-01-01';
+const MAX_DATE = '2100-12-31';
+
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const [clientName, setClientName] = useState<string>('...');
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
@@ -113,43 +117,49 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     };
   }, [clientId]);
 
-  const fromDateStr =
-    monthFrom && !monthTo
-      ? ymStart(monthFrom)
-      : monthFrom && monthTo
-      ? ymStart(monthFrom)
-      : undefined;
-
-  const toDateStr =
-    monthTo && !monthFrom ? ymEnd(monthTo) : monthFrom && monthTo ? ymEnd(monthTo) : undefined;
-
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
 
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [loadingPayments, setLoadingPayments] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchPayments = useCallback(async () => {
-    setLoadingPayments(true);
-    setError(null);
-    try {
-      const data = await apiService.getPayments({
-        from: fromDateStr,
-        to: toDateStr,
-        clientId,
-        caseId: caseIdForQuery,
-      });
-      setPayments(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load payments');
-    } finally {
-      setLoadingPayments(false);
+  const { fromDateStr, toDateStr } = useMemo(() => {
+    if (monthFrom && monthTo) {
+      return { fromDateStr: ymStart(monthFrom), toDateStr: ymEnd(monthTo) };
     }
-  }, [clientId, caseIdForQuery, fromDateStr, toDateStr]);
+    if (monthFrom && !monthTo) {
+      const f = ymStart(monthFrom);
+      return { fromDateStr: f, toDateStr: ymEnd(monthFrom) };
+    }
+    if (!monthFrom && monthTo) {
+      const t = ymEnd(monthTo);
+      return { fromDateStr: ymStart(monthTo), toDateStr: t };
+    }
+    return { fromDateStr: MIN_DATE, toDateStr: MAX_DATE };
+  }, [monthFrom, monthTo]);
 
+  const pollInterval = payModalOpen ? 0 : 5000;
+  const {
+    payments,
+    loading: loadingPayments,
+    error,
+    refresh: refreshPayments,
+    createPayment,
+    updatePayment,
+    deletePayment,
+  } = usePayments(fromDateStr, toDateStr, { pollInterval, clientId, caseId: caseIdForQuery });
+
+  function makeStatsSignature(arr: Payment[]): string {
+    if (!arr || arr.length === 0) return 'empty';
+    return arr
+      .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}`)
+      .sort()
+      .join('|');
+  }
+  const prevStatsSigRef = useRef<string>('init');
   useEffect(() => {
-    void fetchPayments();
-  }, [fetchPayments]);
+    const sig = makeStatsSignature(payments);
+    if (prevStatsSigRef.current !== sig) {
+      prevStatsSigRef.current = sig;
+      bumpStats();
+    }
+  }, [payments]);
 
   const lastPaymentDate = useMemo(() => {
     if (!payments.length) return null;
@@ -190,21 +200,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   const submitPayment = async (payload: PaymentUpsert) => {
     if ('id' in payload) {
-      await apiService.updatePayment(payload.id, toBody(payload as PaymentBody));
+      await updatePayment({ ...toBody(payload as PaymentBody), id: payload.id });
     } else {
-      await apiService.createPayment(toBody(payload as PaymentBody));
+      await createPayment(toBody(payload as PaymentBody));
     }
     closePayModal();
-    await fetchPayments();
-    bumpStats(); // мягко обновим сводку
+    await refreshPayments();
+    bumpStats();
   };
 
-  // Удаление с подтверждением (используется и из списка, и из модалки)
   const removePayment = async (id: number) => {
     if (!window.confirm('Удалить платёж?')) return;
-    await apiService.deletePayment(id);
-    await fetchPayments();
-    bumpStats(); // мягко обновим сводку
+    await deletePayment(id);
+    await refreshPayments();
+    bumpStats();
   };
 
   const openAddCase = () => {
@@ -263,6 +272,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           to={toDateStr}
           statusFilter={toStatsStatusFilter(statusFilter)}
           reloadToken={statsReloadToken}
+          rawPayments={payments}
           className="mb-6"
         />
 
