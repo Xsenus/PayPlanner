@@ -242,7 +242,7 @@ app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId
 
 // -------------------- CLIENTS --------------------
 app.MapGet("/api/clients", async (PaymentContext context, CancellationToken ct) =>
-    await context.Clients.AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+    await context.Clients        .Include(c => c.Cases).AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
 
 app.MapGet("/api/clients/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
 {
