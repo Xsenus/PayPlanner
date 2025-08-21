@@ -470,9 +470,8 @@ export class ApiService {
 
   /**
    * Сводная статистика по доходам/расходам с серверными расчётами.
-   * Любые параметры опциональны: можно передать clientId/caseId и period ИЛИ from/to и т.д.
-   * При отсутствии from/to сервер применит period (по умолчанию this-month).
    * Поддерживает фильтры: status и q (поиск).
+   * Параметр r — cache-buster (передаём reloadToken).
    */
   async getSummaryStats(params?: {
     clientId?: number;
@@ -483,6 +482,7 @@ export class ApiService {
     type?: 'Income' | 'Expense';
     status?: SummaryStatus;
     q?: string;
+    r?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);

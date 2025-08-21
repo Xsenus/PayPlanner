@@ -245,6 +245,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           statusFilter={statusFilter}
           search={deferredSearch}
           reloadToken={statsReloadKey}
+          rawPayments={payments}
         />
 
         <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6 mt-4">

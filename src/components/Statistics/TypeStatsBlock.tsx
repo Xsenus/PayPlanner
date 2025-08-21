@@ -1,13 +1,11 @@
 import { useMemo } from 'react';
 import { TrendingUp, TrendingDown, Clock, AlertTriangle, Wallet, Banknote } from 'lucide-react';
-
 import { StatsCards, type StatCardItem } from './StatCardItem';
 import { useSummaryStats } from '../../hooks/useSummaryStats';
-import { usePayments } from '../../hooks/usePayments';
 import type { PeriodKey, Payment, SummaryStatus } from '../../types';
 import { formatCurrencySmart } from '../../utils/formatters';
 
-type StatusFilter = 'All' | SummaryStatus;
+type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
 
 type Props = {
   kind: 'Income' | 'Expense';
@@ -19,6 +17,7 @@ type Props = {
   statusFilter?: StatusFilter;
   search?: string;
   reloadToken?: number;
+  rawPayments?: Payment[];
   className?: string;
 };
 
@@ -28,7 +27,6 @@ function mapServerStats(raw: unknown, kind: 'Income' | 'Expense') {
     kind === 'Income'
       ? ['income', 'incomes', 'in', 'incomeStats']
       : ['expense', 'expenses', 'outcome', 'outgo', 'expenseStats'];
-
   let bucket: Record<string, unknown> = {};
   for (const k of sectKeys) {
     const v = s[k];
@@ -37,28 +35,17 @@ function mapServerStats(raw: unknown, kind: 'Income' | 'Expense') {
       break;
     }
   }
-
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
   const completed = num(bucket['completedAmount']) ?? 0;
-
   const pending = num(bucket['pendingAmount']) || num(bucket['expected']) || 0;
-
   const overdue = num(bucket['overdueAmount']) || num(bucket['overdue']) || 0;
-
   const overall = num(bucket['totalAmount']) || num(s['overall']) || 0;
 
   let debtLeft = num(bucket['debtLeft']) || num(bucket['remaining']) || 0;
-
   if (!debtLeft) debtLeft = pending + overdue;
 
-  return {
-    sumByType: completed,
-    expected: pending,
-    overdue,
-    overall,
-    debtLeft,
-  };
+  return { sumByType: completed, expected: pending, overdue, overall, debtLeft };
 }
 
 function matchesSearch(p: Payment, q: string): boolean {
@@ -76,6 +63,7 @@ function matchesSearch(p: Payment, q: string): boolean {
   ];
   return fields.some((v) => (v ?? '').toLowerCase().includes(s));
 }
+
 function aggregateFromPayments(
   payments: Payment[],
   kind: 'Income' | 'Expense',
@@ -94,7 +82,6 @@ function aggregateFromPayments(
   let completed = 0;
   let pending = 0;
   let overdue = 0;
-
   for (const p of filtered) {
     const amt = typeof p.amount === 'number' ? p.amount : 0;
     switch (p.status) {
@@ -113,14 +100,7 @@ function aggregateFromPayments(
 
   const overall = completed + pending + overdue;
   const debtLeft = pending + overdue;
-
-  return {
-    sumByType: completed,
-    expected: pending,
-    overdue,
-    overall,
-    debtLeft,
-  };
+  return { sumByType: completed, expected: pending, overdue, overall, debtLeft };
 }
 
 export function TypeStatsBlock({
@@ -133,10 +113,11 @@ export function TypeStatsBlock({
   statusFilter,
   search,
   reloadToken,
+  rawPayments,
   className = '',
 }: Props) {
   const apiStatus: SummaryStatus | undefined =
-    statusFilter && statusFilter !== 'All' ? statusFilter : undefined;
+    statusFilter && statusFilter !== 'All' ? (statusFilter as SummaryStatus) : undefined;
 
   const { data, loading } = useSummaryStats({
     clientId,
@@ -149,21 +130,17 @@ export function TypeStatsBlock({
     q: search && search.trim() ? search.trim() : undefined,
     reloadToken,
   });
-
   const mappedServer = useMemo(() => mapServerStats(data, kind), [data, kind]);
 
-  const { payments, loading: paymentsLoading } = usePayments(from ?? '', to ?? '', {
-    pollInterval: 0,
-  });
   const mappedFallback = useMemo(
     () =>
-      aggregateFromPayments(payments ?? [], kind, {
+      aggregateFromPayments(rawPayments ?? [], kind, {
         clientId,
         caseId,
         statusFilter,
         search,
       }),
-    [payments, kind, clientId, caseId, statusFilter, search],
+    [rawPayments, kind, clientId, caseId, statusFilter, search],
   );
 
   const useFallback =
@@ -176,8 +153,8 @@ export function TypeStatsBlock({
 
   const m = useFallback ? mappedFallback : mappedServer;
 
-  const hasDataAlready = !!data || (!!payments && payments.length > 0);
-  const showLoading = (loading || (useFallback && paymentsLoading)) && !hasDataAlready;
+  const hasDataAlready = !!data || !!(rawPayments && rawPayments.length > 0);
+  const showLoading = loading && !hasDataAlready;
 
   const fmt = (n: number) => formatCurrencySmart(n);
   const title = kind === 'Income' ? 'Доходы' : 'Расходы';

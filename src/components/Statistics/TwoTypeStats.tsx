@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PeriodKey } from '../../types';
+import type { PeriodKey, Payment } from '../../types';
 import { TypeStatsBlock } from './TypeStatsBlock';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 
@@ -14,6 +14,7 @@ type Props = {
   statusFilter?: StatusFilter;
   search?: string;
   reloadToken?: number;
+  rawPayments?: Payment[];
   className?: string;
 };
 
@@ -53,6 +54,7 @@ export function TwoTypeStats({
   statusFilter,
   search,
   reloadToken,
+  rawPayments,
   className = '',
 }: Props) {
   const [tab, setTab] = useState<'Income' | 'Expense'>('Income');
@@ -106,6 +108,7 @@ export function TwoTypeStats({
               statusFilter={statusFilter}
               search={search}
               reloadToken={reloadToken}
+              rawPayments={rawPayments}
             />
           </StatsGroup>
         ) : (
@@ -120,6 +123,7 @@ export function TwoTypeStats({
               statusFilter={statusFilter}
               search={search}
               reloadToken={reloadToken}
+              rawPayments={rawPayments}
             />
           </StatsGroup>
         )}
@@ -137,6 +141,7 @@ export function TwoTypeStats({
             statusFilter={statusFilter}
             search={search}
             reloadToken={reloadToken}
+            rawPayments={rawPayments}
           />
         </StatsGroup>
         <StatsGroup title="Расходы" Icon={TrendingDown} tone="expense">
@@ -150,6 +155,7 @@ export function TwoTypeStats({
             statusFilter={statusFilter}
             search={search}
             reloadToken={reloadToken}
+            rawPayments={rawPayments}
           />
         </StatsGroup>
       </div>

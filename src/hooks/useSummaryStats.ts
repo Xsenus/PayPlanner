@@ -32,6 +32,7 @@ export function useSummaryStats(params: {
         type,
         status,
         q,
+        r: typeof reloadToken === 'number' ? reloadToken : undefined, // ← cache-buster
       });
       setData(res);
     } catch (e: unknown) {
@@ -39,7 +40,7 @@ export function useSummaryStats(params: {
     } finally {
       setLoading(false);
     }
-  }, [clientId, caseId, from, to, period, type, status, q]);
+  }, [clientId, caseId, from, to, period, type, status, q, reloadToken]);
 
   useEffect(() => {
     void fetch();
