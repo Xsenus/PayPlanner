@@ -6,6 +6,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
 import type { Payment, PaymentStatus, ClientCase } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
+import { buildOptionsWithSelected } from '../../utils/formOptions';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
@@ -261,9 +262,17 @@ export function PaymentModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
+    if (pickedCat && pickedCat.paymentType !== formData.type) {
+      alert(
+        t('invalidCategoryForDirection') ?? 'Тип категории не соответствует направлению платежа',
+      );
+      return;
+    }
+
     if (loading) return;
 
-    const amountNum = parseFloat(formData.amount);
+    const amountNum = parseFloat(formData.amount.replace(',', '.'));
     if (!Number.isFinite(amountNum) || amountNum < 0) {
       console.error('Invalid amount value:', formData.amount);
       return;
@@ -341,7 +350,7 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         type: value as PaymentKind,
-        incomeTypeId: value === 'Income' ? prev.incomeTypeId : '',
+        incomeTypeId: '',
       }));
       return;
     }
@@ -354,6 +363,10 @@ export function PaymentModal({
 
   const canDelete = !!payment && !!onDelete;
   if (!isOpen) return null;
+
+  const selDealTypeId = formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined;
+  const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
+  const selSourceId = formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -581,37 +594,73 @@ export function PaymentModal({
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                 <option value="">{t('selectDealType')}</option>
-                {dealTypes
-                  .filter((dealType) => dealType.isActive)
-                  .map((dealType) => (
-                    <option key={dealType.id} value={dealType.id}>
-                      {dealType.name}
-                    </option>
-                  ))}
-              </select>
+                {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d.name}
+                    {!d.isActive ? ' (не активно)' : ''}
+                  </option>
+                ))}
+              </select>{' '}
+              {(() => {
+                const picked = dealTypes.find((d) => d.id === selDealTypeId);
+                if (picked && !picked.isActive) {
+                  return (
+                    <div className="mt-1 text-xs text-amber-600">
+                      Внимание: выбранный тип сделки деактивирован. Вы можете сохранить платёж как
+                      есть или выбрать актуальный тип.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
-            {formData.type === 'Income' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('incomeType')}
-                </label>
-                <select
-                  name="incomeTypeId"
-                  value={formData.incomeTypeId}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                  <option value="">{t('selectIncomeType')}</option>
-                  {incomeTypes
-                    .filter((incomeType) => incomeType.isActive)
-                    .map((incomeType) => (
-                      <option key={incomeType.id} value={incomeType.id}>
-                        {incomeType.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {formData.type === 'Income'
+                  ? t('incomeType') ?? 'Тип дохода'
+                  : t('expenseType') ?? 'Тип расхода'}
+              </label>
+              <select
+                name="incomeTypeId"
+                value={formData.incomeTypeId}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="">
+                  {formData.type === 'Income'
+                    ? t('selectIncomeType') ?? 'Выберите тип дохода'
+                    : t('selectExpenseType') ?? 'Выберите тип расхода'}
+                </option>
+                {buildOptionsWithSelected(
+                  incomeTypes,
+                  selIncomeTypeId,
+                  (it) => it.isActive && it.paymentType === formData.type,
+                ).map((it) => (
+                  <option key={it.id} value={String(it.id)}>
+                    {it.name}
+                    {!it.isActive ? ' (не активно)' : ''}
+                    {it.paymentType !== formData.type ? ' (другое направление)' : ''}
+                  </option>
+                ))}
+              </select>
+              {(() => {
+                const picked = incomeTypes.find((it) => it.id === selIncomeTypeId);
+                if (!picked) return null;
+                if (!picked.isActive || picked.paymentType !== formData.type) {
+                  return (
+                    <div className="mt-1 text-xs text-amber-600">
+                      Внимание: выбранная категория
+                      {!picked.isActive ? ' деактивирована' : ''}
+                      {picked.paymentType !== formData.type
+                        ? ' и относится к другому направлению'
+                        : ''}
+                      . Вы можете сохранить платёж как есть или выбрать актуальную категорию.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -623,14 +672,27 @@ export function PaymentModal({
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                 <option value="">{t('selectPaymentSource')}</option>
-                {paymentSources
-                  .filter((source) => source.isActive)
-                  .map((source) => (
-                    <option key={source.id} value={source.id}>
-                      {source.name}
+                {buildOptionsWithSelected(paymentSources, selSourceId, (s) => s.isActive).map(
+                  (s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.name}
+                      {!s.isActive ? ' (не активно)' : ''}
                     </option>
-                  ))}
+                  ),
+                )}
               </select>
+              {(() => {
+                const picked = paymentSources.find((s) => s.id === selSourceId);
+                if (picked && !picked.isActive) {
+                  return (
+                    <div className="mt-1 text-xs text-amber-600">
+                      Внимание: выбранный источник деактивирован. Вы можете сохранить платёж как
+                      есть или выбрать актуальный источник.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             <div>

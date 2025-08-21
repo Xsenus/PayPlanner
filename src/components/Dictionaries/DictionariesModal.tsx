@@ -5,9 +5,8 @@ import type { DealType, IncomeType, PaymentSource } from '../../types';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const aActive = a.item.isActive;
-    const bActive = b.item.isActive;
-    return aActive === bActive ? 0 : aActive ? -1 : 1;
+    if (a.item.isActive !== b.item.isActive) return a.item.isActive ? -1 : 1;
+    return a.item.name.localeCompare(b.item.name, 'ru', { sensitivity: 'base' });
   });
 }
 
@@ -101,7 +100,7 @@ function Tabs<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="grid grid-cols-3 rounded-xl bg-gray-100 p-1">
+    <div className="grid grid-cols-2 sm:grid-cols-4 rounded-xl bg-gray-100 p-1">
       {tabs.map((t) => (
         <button
           key={t.value}
@@ -142,7 +141,7 @@ function Modal(props: {
   );
 }
 
-type VisibleKind = Exclude<DictKind, 'payment-statuses'>;
+type VisibleKind = 'deal-types' | 'income-income' | 'income-expense' | 'payment-sources';
 type ApiVisibleItem = DealType | IncomeType | PaymentSource;
 
 type FullDictItem = {
@@ -165,7 +164,8 @@ const makeKey = (): RowKey => `${Date.now()}-${Math.random().toString(36).slice(
 
 const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'deal-types', label: 'Тип сделки' },
-  { value: 'income-types', label: 'Тип дохода' },
+  { value: 'income-income', label: 'Тип дохода' },
+  { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
 ];
 
@@ -173,8 +173,10 @@ function defaultColor(kind: VisibleKind): string {
   switch (kind) {
     case 'deal-types':
       return '#3B82F6';
-    case 'income-types':
+    case 'income-income':
       return '#10B981';
+    case 'income-expense':
+      return '#EF4444';
     case 'payment-sources':
       return '#8B5CF6';
   }
@@ -202,7 +204,8 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
   const [activeTab, setActiveTab] = useState<VisibleKind>('deal-types');
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
     'deal-types': [],
-    'income-types': [],
+    'income-income': [],
+    'income-expense': [],
     'payment-sources': [],
   });
   const [busy, setBusy] = useState(false);
@@ -215,7 +218,14 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     setBusy(true);
     setError(null);
     try {
-      const list = await apiService.getDict(kind);
+      let list: ApiVisibleItem[] = [];
+      if (kind === 'income-income') {
+        list = await apiService.getIncomeTypes('Income');
+      } else if (kind === 'income-expense') {
+        list = await apiService.getIncomeTypes('Expense');
+      } else {
+        list = await apiService.getDict(dictKindFor(kind));
+      }
       const normalized = (list as ApiVisibleItem[]).map((x) => normalize(kind, x));
       setData((prev) => ({
         ...prev,
@@ -274,6 +284,17 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     });
   };
 
+  function isIncomeKind(k: VisibleKind) {
+    return k === 'income-income' || k === 'income-expense';
+  }
+  function paymentTypeByKind(k: VisibleKind): 'Income' | 'Expense' {
+    return k === 'income-expense' ? 'Expense' : 'Income';
+  }
+  function dictKindFor(k: VisibleKind): DictKind {
+    if (k === 'income-income' || k === 'income-expense') return 'income-types';
+    return k;
+  }
+
   async function saveNew(
     kind: VisibleKind,
     idx: number,
@@ -286,12 +307,20 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     setBusy(true);
     setError(null);
     try {
-      const created = await apiService.createDict(kind, {
-        name: item.name,
-        isActive: item.isActive,
-        description: item.description,
-        colorHex: item.colorHex,
-      });
+      const created = isIncomeKind(kind)
+        ? await apiService.createIncomeType({
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+            paymentType: paymentTypeByKind(kind),
+          })
+        : await apiService.createDict(dictKindFor(kind), {
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+          });
       const normalized = normalize(kind, created as ApiVisibleItem);
       setData((prev) => {
         const copy = [...prev[kind]];
@@ -314,12 +343,20 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     setBusy(true);
     setError(null);
     try {
-      const updated = await apiService.updateDict(kind, item.id, {
-        name: item.name,
-        isActive: item.isActive,
-        description: item.description,
-        colorHex: item.colorHex,
-      });
+      const updated = isIncomeKind(kind)
+        ? await apiService.updateIncomeType(item.id, {
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+            paymentType: paymentTypeByKind(kind),
+          })
+        : await apiService.updateDict(dictKindFor(kind), item.id, {
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+          });
       const normalized = normalize(kind, updated as ApiVisibleItem);
       setData((prev) => {
         const copy = [...prev[kind]];
@@ -339,7 +376,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     setBusy(true);
     setError(null);
     try {
-      await apiService.deleteDict(confirmDelete.kind, confirmDelete.id);
+      await apiService.deleteDict(dictKindFor(confirmDelete.kind), confirmDelete.id);
       setData((prev) => ({
         ...prev,
         [confirmDelete.kind]: prev[confirmDelete.kind].filter(

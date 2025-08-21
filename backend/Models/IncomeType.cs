@@ -39,5 +39,10 @@ namespace PayPlanner.Api.Models
         /// Платежи, относящиеся к данному типу дохода.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
+
+        /// <summary>
+        /// Тип платежа.
+        /// </summary>
+        public PaymentType PaymentType { get; set; }
     }
 }

@@ -16,41 +16,36 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [dealTypesData, incomeTypesData, paymentSourcesData, paymentStatusesData] =
-        await Promise.all([
-          apiService.getDealTypes(),
-          apiService.getIncomeTypes(),
-          apiService.getPaymentSources(),
-          apiService.getPaymentStatuses(),
-        ]);
-      setDealTypes(dealTypesData);
-      setIncomeTypes(incomeTypesData);
-      setPaymentSources(paymentSourcesData);
-      setPaymentStatuses(paymentStatusesData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch dictionaries');
-      setDealTypes([]);
-      setIncomeTypes([]);
-      setPaymentSources([]);
-      setPaymentStatuses([]);
+      const [deal, incIncome, incExpense, sources, statuses] = await Promise.all([
+        apiService.getDict('deal-types'),
+        apiService.getIncomeTypes('Income'),
+        apiService.getIncomeTypes('Expense'),
+        apiService.getDict('payment-sources'),
+        apiService.getDict('payment-statuses'),
+      ]);
+
+      setDealTypes(deal ?? []);
+
+      const merged = [...(incIncome ?? []), ...(incExpense ?? [])];
+      const byId = new Map<number, IncomeType>();
+      for (const it of merged) byId.set(it.id, it);
+      setIncomeTypes(Array.from(byId.values()));
+
+      setPaymentSources(sources ?? []);
+      setPaymentStatuses(statuses ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
-      await refresh();
-    })();
-    return () => {
-      alive = false;
-    };
+    void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    const handler = () => refresh();
+    const handler = () => void refresh();
     window.addEventListener(DICTS_CHANGED, handler);
     return () => window.removeEventListener(DICTS_CHANGED, handler);
   }, [refresh]);

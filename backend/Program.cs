@@ -84,9 +84,11 @@ app.UseStaticFiles();
 // DB init
 using (var scope = app.Services.CreateScope())
 {
-    var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-    await context.Database.MigrateAsync();
-    await SeedDataService.SeedAsync(context);
+    var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+    await ctx.Database.MigrateAsync();
+    var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>(); 
+    var seedClients = cfg.GetValue<bool>("Seed:ClientsAndPayments");
+    await SeedDataService.SeedAsync(ctx, seedClients);
 }
 
 // Health
@@ -94,12 +96,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 
 // -------------------- PAYMENTS --------------------
 
-app.MapGet("/api/payments", async (
-    PaymentContext context,
-    DateTime? from,
-    DateTime? to,
-    int? clientId,
-    int? caseId,
+app.MapGet("/api/payments", async (PaymentContext context, DateTime? from, DateTime? to, int? clientId, int? caseId,
     CancellationToken ct) =>
 {
     var query = context.Payments
@@ -127,6 +124,15 @@ app.MapGet("/api/payments/{id}", async (PaymentContext context, int id, Cancella
 
 app.MapPost("/api/payments", async (PaymentContext context, Payment payment) =>
 {
+    if (payment.IncomeTypeId.HasValue)
+    {
+        var it = await context.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == payment.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != payment.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
+
     payment.Account = string.IsNullOrWhiteSpace(payment.Account) ? null : payment.Account.Trim();
     context.Payments.Add(payment);
     await context.SaveChangesAsync();
@@ -137,6 +143,15 @@ app.MapPut("/api/payments/{id}", async (PaymentContext context, int id, Payment 
 {
     var existing = await context.Payments.FindAsync(id);
     if (existing is null) return Results.NotFound();
+
+    if (payment.IncomeTypeId.HasValue)
+    {
+        var it = await context.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == payment.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != payment.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
 
     existing.Date = payment.Date;
     existing.Amount = payment.Amount;
@@ -388,8 +403,19 @@ app.MapDelete("/api/cases/{id}", async (PaymentContext context, int id) =>
 app.MapGet("/api/dictionaries/deal-types", async (PaymentContext context, CancellationToken ct) =>
     await context.DealTypes/*.Where(d => d.IsActive)*/.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct));
 
-app.MapGet("/api/dictionaries/income-types", async (PaymentContext context, CancellationToken ct) =>
-    await context.IncomeTypes/*.Where(i => i.IsActive)*/.AsNoTracking().OrderBy(i => i.Name).ToListAsync(ct));
+app.MapGet("/api/dictionaries/income-types", async (PaymentContext context, PaymentType? paymentType, bool? isActive,
+    CancellationToken ct) =>
+{
+    var q = context.IncomeTypes.AsNoTracking().AsQueryable();
+
+    if (isActive.HasValue)
+        q = q.Where(i => i.IsActive == isActive.Value);
+
+    if (paymentType.HasValue)
+        q = q.Where(i => i.PaymentType == paymentType.Value);
+
+    return await q.OrderBy(i => i.Name).ToListAsync(ct);
+});
 
 app.MapGet("/api/dictionaries/payment-sources", async (PaymentContext context, CancellationToken ct) =>
     await context.PaymentSources/*.Where(p => p.IsActive)*/.AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct));
@@ -480,6 +506,15 @@ paymentsV1.MapGet("/{id:int}", async (PaymentContext db, int id, CancellationTok
 
 paymentsV1.MapPost("", async (PaymentContext db, Payment model) =>
 {
+    if (model.IncomeTypeId.HasValue)
+    {
+        var it = await db.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != model.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
+
     model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
     db.Payments.Add(model);
     await db.SaveChangesAsync();
@@ -490,6 +525,15 @@ paymentsV1.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
 {
     var e = await db.Payments.FindAsync(id);
     if (e is null) return Results.NotFound();
+
+    if (model.IncomeTypeId.HasValue)
+    {
+        var it = await db.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != model.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
 
     e.Date = model.Date;
     e.Amount = model.Amount;
@@ -702,6 +746,15 @@ paymentsV2.MapGet("/{id:int}", async (PaymentContext db, int id, CancellationTok
 
 paymentsV2.MapPost("", async (PaymentContext db, Payment model) =>
 {
+    if (model.IncomeTypeId.HasValue)
+    {
+        var it = await db.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != model.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
+
     model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
     db.Payments.Add(model);
     await db.SaveChangesAsync();
@@ -712,6 +765,15 @@ paymentsV2.MapPut("/{id:int}", async (PaymentContext db, int id, Payment model) 
 {
     var e = await db.Payments.FindAsync(id);
     if (e is null) return Results.NotFound();
+
+    if (model.IncomeTypeId.HasValue)
+    {
+        var it = await db.IncomeTypes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
+        if (it is null) return Results.BadRequest("Unknown IncomeTypeId");
+        if (it.PaymentType != model.Type)
+            return Results.BadRequest("IncomeType.PaymentType mismatches payment.Type");
+    }
 
     e.Date = model.Date;
     e.Amount = model.Amount;
@@ -1010,7 +1072,8 @@ dictsGroup
         e.Name = m.Name;
         e.Description = m.Description;
         e.ColorHex = m.ColorHex;
-        e.IsActive = m.IsActive;
+        e.IsActive = m.IsActive; 
+        e.PaymentType = m.PaymentType;
         return e;
     })
     .MapToggleActive<IncomeType>();

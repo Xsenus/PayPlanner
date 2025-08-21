@@ -31,6 +31,7 @@ export interface DealType {
   createdAt: string;
 }
 
+export type PaymentKind = 'Income' | 'Expense';
 export interface IncomeType {
   id: number;
   name: string;
@@ -38,6 +39,7 @@ export interface IncomeType {
   colorHex: string;
   isActive: boolean;
   createdAt: string;
+  paymentType: PaymentKind;
 }
 
 export interface PaymentSource {

@@ -19,6 +19,8 @@ export const ru = {
   noCases: 'Нет дел',
   income: 'Доход',
   expense: 'Расход',
+  expenseType: 'Тип расхода',
+  selectExpenseType: 'Выберите тип расхода',
   type: 'Тип',
   dictionaries: 'Справочники',
   confirmSaveAllPayments: 'Сохранить все платежи?',
@@ -123,7 +125,7 @@ export const ru = {
   clientHasNotMadePayments: 'Этот клиент ещё не совершал платежей',
   paid: 'Оплачено',
   total: 'Всего',
-
+  invalidCategoryForDirection: 'Выбранная категория не соответствует направлению платежа',
   // Reports
   financialInsights: 'Финансовая аналитика и статистика',
   distributionByStatus: 'Распределение по статусам',

@@ -141,11 +141,14 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
+            entity.Property(e => e.PaymentType).HasConversion<int>().IsRequired().HasDefaultValue(PaymentType.Income);
 
             // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_IncomeTypes_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_IncomeTypes_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_IncomeTypes_IsActive_Name");
+            entity.HasIndex(e => new { e.IsActive, e.PaymentType }).HasDatabaseName("IX_IncomeTypes_IsActive_PaymentType");
+            entity.HasIndex(e => new { e.IsActive, e.PaymentType, e.Name }).HasDatabaseName("IX_IncomeTypes_IsActive_PaymentType_Name");
         });
 
         // ------------------ PaymentSource ------------------

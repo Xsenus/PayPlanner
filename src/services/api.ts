@@ -284,9 +284,19 @@ export class ApiService {
   async getDealTypes() {
     return this.getDict('deal-types');
   }
-  async getIncomeTypes() {
-    return this.getDict('income-types');
+  async getIncomeTypes(): Promise<IncomeType[]>;
+  async getIncomeTypes(
+    paymentType?: 'Income' | 'Expense',
+    isActive?: boolean,
+  ): Promise<IncomeType[]>;
+  async getIncomeTypes(
+    paymentType?: 'Income' | 'Expense',
+    isActive?: boolean,
+  ): Promise<IncomeType[]> {
+    const q = buildQuery({ paymentType, isActive });
+    return this.request<IncomeType[]>(`${pathForKind('income-types')}${q}`);
   }
+
   async getPaymentSources() {
     return this.getDict('payment-sources');
   }
@@ -326,6 +336,24 @@ export class ApiService {
   // ===== Installments =====
   async calculateInstallment(request: InstallmentRequest) {
     return this.request('/installments/calc', { method: 'POST', body: JSON.stringify(request) });
+  }
+
+  // Специализированные CRUD для IncomeType (с полем paymentType)
+  async createIncomeType(data: Omit<IncomeType, 'id' | 'createdAt'>): Promise<IncomeType> {
+    return this.request<IncomeType>(pathForKind('income-types'), {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateIncomeType(
+    id: number,
+    data: Omit<IncomeType, 'id' | 'createdAt'>,
+  ): Promise<IncomeType> {
+    return this.request<IncomeType>(`${pathForKind('income-types')}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   }
 
   // ===== Dictionaries (универсальный CRUD) =====
