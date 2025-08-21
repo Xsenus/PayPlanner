@@ -14,6 +14,7 @@ type AccountOption = { account: string; accountDate?: string | null };
 interface PaymentModalProps {
   defaultClientId?: number;
   defaultClientCaseId?: number;
+  casesPrefetch?: ClientCase[];
   type?: PaymentKind;
   isOpen: boolean;
   onClose: () => void;
@@ -34,6 +35,7 @@ export function PaymentModal({
   onDelete,
   defaultClientId,
   defaultClientCaseId,
+  casesPrefetch,
   type,
 }: PaymentModalProps) {
   const accountInputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +54,7 @@ export function PaymentModal({
 
   const [loading, setLoading] = useState(false);
   const [cases, setCases] = useState<ClientCase[]>([]);
+  const [fallbackCase, setFallbackCase] = useState<ClientCase | null>(null);
 
   const [formData, setFormData] = useState({
     date: todayYMD(),
@@ -164,8 +167,8 @@ export function PaymentModal({
           isPaid: p.isPaid,
           paidDate: toDateInputValue(p.paidDate) || '',
           notes: p.notes || '',
-          clientId: p.clientId?.toString() || '',
-          clientCaseId: p.clientCaseId?.toString() || '',
+          clientId: (p.clientId ?? defaultClientId)?.toString() || '',
+          clientCaseId: (p.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
           incomeTypeId: p.incomeTypeId?.toString() || '',
           paymentSourceId: p.paymentSourceId?.toString() || '',
@@ -222,40 +225,88 @@ export function PaymentModal({
   }, [formData.clientCaseId]);
 
   useEffect(() => {
+    if (!isOpen) return;
+
     let cancelled = false;
 
-    const currentClientId = clientIdRef.current;
-    const initialCaseId = caseIdRef.current;
+    const currentClientId = formData.clientId || (defaultClientId ? String(defaultClientId) : '');
+    const initialCaseId =
+      formData.clientCaseId || (defaultClientCaseId ? String(defaultClientCaseId) : '');
+    const cidNum = Number(currentClientId);
+
+    const filterPrefetchForClient = (all?: ClientCase[]) =>
+      (all ?? []).filter((c) => String(c.clientId) === String(currentClientId));
 
     const load = async () => {
-      const cid = Number(currentClientId);
-      if (!cid) {
+      if (!cidNum) {
         if (!cancelled) {
           setCases([]);
-          setFormData((s) => ({ ...s, clientCaseId: '' }));
+          setFallbackCase(null);
         }
         return;
       }
 
-      const list = await apiService.getCases(cid);
-      if (cancelled) return;
+      let list: ClientCase[] = filterPrefetchForClient(casesPrefetch);
 
-      setCases(list || []);
-
-      if (initialCaseId && !(list || []).some((c) => String(c.id) === initialCaseId)) {
-        setFormData((s) => {
-          if (s.clientId !== currentClientId) return s;
-          if (s.clientCaseId !== initialCaseId) return s;
-          return { ...s, clientCaseId: '' };
-        });
+      if (!list.length) {
+        try {
+          list = await apiService.getCases(cidNum);
+        } catch {
+          list = [];
+        }
+        if (cancelled) return;
       }
+
+      if (initialCaseId) {
+        const present = list.some((c) => String(c.id) === String(initialCaseId));
+        if (!present) {
+          try {
+            const one = await apiService.getCase(Number(initialCaseId));
+            if (cancelled) return;
+
+            if (one && String(one.clientId) === String(currentClientId)) {
+              list = [...list, one];
+              setFallbackCase(one);
+            } else {
+              setFallbackCase(null);
+              setFormData((s) => {
+                if (s.clientId !== currentClientId) return s;
+                if (s.clientCaseId !== initialCaseId) return s;
+                return { ...s, clientCaseId: '' };
+              });
+            }
+          } catch {
+            if (!cancelled) {
+              setFallbackCase(null);
+              setFormData((s) => {
+                if (s.clientId !== currentClientId) return s;
+                if (s.clientCaseId !== initialCaseId) return s;
+                return { ...s, clientCaseId: '' };
+              });
+            }
+          }
+        } else {
+          setFallbackCase(null);
+        }
+      } else {
+        setFallbackCase(null);
+      }
+
+      if (!cancelled) setCases(list);
     };
 
-    load();
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [formData.clientId]);
+  }, [
+    isOpen,
+    formData.clientId,
+    casesPrefetch,
+    formData.clientCaseId,
+    defaultClientId,
+    defaultClientCaseId,
+  ]);
 
   const markPaid = () =>
     setFormData((s) => ({
@@ -461,13 +512,24 @@ export function PaymentModal({
                 {t('case') ?? 'Дело'}
               </label>
               <select
-                key={formData.clientId || 'no-client'}
+                key={(formData.clientId || 'no-client') + ':' + cases.length}
                 name="clientCaseId"
                 value={formData.clientCaseId}
                 onChange={handleChange}
                 disabled={!formData.clientId}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                 <option value="">{t('selectCase') ?? 'Без дела'}</option>
+
+                {formData.clientCaseId &&
+                  !cases.some((c) => String(c.id) === String(formData.clientCaseId)) &&
+                  (fallbackCase ? (
+                    <option value={fallbackCase.id}>{fallbackCase.title}</option>
+                  ) : (
+                    <option value={formData.clientCaseId}>
+                      {t('case') ?? 'Дело'} #{formData.clientCaseId}
+                    </option>
+                  ))}
+
                 {cases.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title}

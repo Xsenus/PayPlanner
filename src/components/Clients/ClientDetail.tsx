@@ -466,12 +466,13 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
           onDelete={async (id: number) => {
-            await removePayment(id); // подтверждение внутри
+            await removePayment(id);
             closePayModal();
           }}
           type={editingPayment?.type ?? 'Income'}
           defaultClientId={clientId}
           defaultClientCaseId={selectedCaseId === 'all' ? undefined : Number(selectedCaseId)}
+          casesPrefetch={cases}
         />
 
         {caseModalOpen && (
