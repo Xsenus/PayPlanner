@@ -18,6 +18,13 @@ type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
 };
 
+function makeStatsSignature(payments: Payment[]): string {
+  if (!payments || payments.length === 0) return 'empty';
+  return payments
+    .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}`)
+    .sort()
+    .join('|');
+}
 function ymStart(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
   return formatLocalYMD(new Date(y, (m ?? 1) - 1, 1));
@@ -80,8 +87,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   } = usePayments(fromDateStr, toDateStr, { pollInterval });
 
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
-  const prevIdsRef = useRef<Set<number>>(new Set());
 
+  const prevStatsSigRef = useRef<string>('init');
+  useEffect(() => {
+    const sig = makeStatsSignature(payments);
+    if (prevStatsSigRef.current !== sig) {
+      prevStatsSigRef.current = sig;
+      bumpStats();
+    }
+  }, [payments]);
+
+  const prevIdsRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     if (isModalOpen) return;
     const currentIds = new Set(payments.map((p) => p.id));
