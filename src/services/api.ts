@@ -472,14 +472,17 @@ export class ApiService {
    * Сводная статистика по доходам/расходам с серверными расчётами.
    * Любые параметры опциональны: можно передать clientId/caseId и period ИЛИ from/to и т.д.
    * При отсутствии from/to сервер применит period (по умолчанию this-month).
+   * Поддерживает фильтры: status и q (поиск).
    */
   async getSummaryStats(params?: {
     clientId?: number;
     caseId?: number;
-    from?: string; // 'YYYY-MM-DD'
-    to?: string; // 'YYYY-MM-DD'
+    from?: string;
+    to?: string;
     period?: PeriodKey;
     type?: 'Income' | 'Expense';
+    status?: SummaryStatus;
+    q?: string;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
@@ -488,7 +491,14 @@ export class ApiService {
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
-    opts?: { from?: string; to?: string; period?: PeriodKey; type?: 'Income' | 'Expense' },
+    opts?: {
+      from?: string;
+      to?: string;
+      period?: PeriodKey;
+      type?: 'Income' | 'Expense';
+      status?: SummaryStatus;
+      q?: string;
+    },
   ) {
     const q = buildQuery({ clientId, ...opts });
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
@@ -497,7 +507,14 @@ export class ApiService {
   /** Упрощённый вызов: сводка по делу. */
   async getCaseSummaryStats(
     caseId: number,
-    opts?: { from?: string; to?: string; period?: PeriodKey; type?: 'Income' | 'Expense' },
+    opts?: {
+      from?: string;
+      to?: string;
+      period?: PeriodKey;
+      type?: 'Income' | 'Expense';
+      status?: SummaryStatus;
+      q?: string;
+    },
   ) {
     const q = buildQuery({ caseId, ...opts });
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
@@ -521,5 +538,6 @@ import type {
   AccountSuggestion,
   SummaryStats,
   PeriodKey,
+  SummaryStatus,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';

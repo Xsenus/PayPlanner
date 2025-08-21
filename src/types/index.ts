@@ -143,6 +143,8 @@ export interface InstallmentItem {
   balance: number;
 }
 
+export type SummaryStatus = 'Pending' | 'Completed' | 'Overdue';
+
 export type PeriodKey =
   | 'today'
   | 'yesterday'

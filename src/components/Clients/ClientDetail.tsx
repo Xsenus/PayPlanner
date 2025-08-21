@@ -4,15 +4,12 @@ import {
   TrendingUp,
   TrendingDown,
   Calendar as CalendarIcon,
-  Check,
   CheckCircle,
   Clock,
   AlertTriangle,
   Plus,
   Edit,
   Trash2,
-  Wallet,
-  Banknote,
   PlusCircle,
 } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback } from 'react';
@@ -22,11 +19,9 @@ import { PaymentModal } from '../Calendar/PaymentModal';
 import type { Payment, ClientCase } from '../../types';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
-import { StatCardItem, StatsCards } from '../Statistics/StatCardItem';
-import { formatCurrencySmart } from '../../utils/formatters';
 import { CaseModal } from './CaseModal';
-import { useSummaryStats } from '../../hooks/useSummaryStats';
-import { toMonthlyStats } from '../../utils/statsAdapters';
+import { TwoTypeStats } from '../Statistics/TwoTypeStats';
+import { formatCurrencySmart } from '../../utils/formatters';
 
 interface ClientDetailProps {
   clientId: number;
@@ -65,6 +60,21 @@ function caseStatusLabel(s?: string) {
   return s ?? '';
 }
 
+function toStatsStatusFilter(
+  s: 'all' | NormalizedStatus,
+): 'All' | 'Pending' | 'Completed' | 'Overdue' {
+  switch (s) {
+    case 'completed':
+      return 'Completed';
+    case 'overdue':
+      return 'Overdue';
+    case 'pending':
+      return 'Pending';
+    default:
+      return 'All';
+  }
+}
+
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const [clientName, setClientName] = useState<string>('...');
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
@@ -84,6 +94,9 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('create');
+
+  const [statsReloadToken, setStatsReloadToken] = useState(0);
+  const bumpStats = () => setStatsReloadToken((x) => x + 1);
 
   useEffect(() => {
     let alive = true;
@@ -111,18 +124,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     monthTo && !monthFrom ? ymEnd(monthTo) : monthFrom && monthTo ? ymEnd(monthTo) : undefined;
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
-
-  const {
-    data: summary,
-    loading: summaryLoading,
-    refresh: refreshSummary,
-  } = useSummaryStats({
-    clientId,
-    caseId: caseIdForQuery,
-    from: fromDateStr,
-    to: toDateStr,
-  });
-  const stats = useMemo(() => (summary ? toMonthlyStats(summary) : null), [summary]);
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingPayments, setLoadingPayments] = useState<boolean>(true);
@@ -194,12 +195,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       await apiService.createPayment(toBody(payload as PaymentBody));
     }
     closePayModal();
-    await Promise.all([fetchPayments(), refreshSummary()]);
+    await fetchPayments();
+    bumpStats(); // мягко обновим сводку
   };
 
+  // Удаление с подтверждением (используется и из списка, и из модалки)
   const removePayment = async (id: number) => {
+    if (!window.confirm('Удалить платёж?')) return;
     await apiService.deletePayment(id);
-    await Promise.all([fetchPayments(), refreshSummary()]);
+    await fetchPayments();
+    bumpStats(); // мягко обновим сводку
   };
 
   const openAddCase = () => {
@@ -220,61 +225,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setCaseModalOpen(false);
     setEditingCase(null);
   };
-
-  const f = (n: number) => formatCurrencySmart(n);
-  const income = stats?.income ?? 0;
-  const expense = stats?.expense ?? 0;
-  const netCompleted = stats?.completedAmount ?? 0;
-  const pendingAmount = stats?.pendingAmount ?? 0;
-  const overdueAmount = stats?.overdueAmount ?? 0;
-  const overallAmount = income + pendingAmount + overdueAmount;
-  const remainingDebt = pendingAmount + overdueAmount;
-
-  const items: StatCardItem[] = [
-    {
-      title: 'Доходы',
-      ...f(income),
-      icon: TrendingUp,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
-    },
-    { title: 'Расходы', ...f(expense), icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
-    {
-      title: 'Итог',
-      ...f(netCompleted),
-      icon: Check,
-      color: netCompleted >= 0 ? 'text-emerald-600' : 'text-red-600',
-      bg: netCompleted >= 0 ? 'bg-emerald-50' : 'bg-red-50',
-    },
-    {
-      title: 'Ожидается',
-      ...f(pendingAmount),
-      icon: Clock,
-      color: 'text-amber-600',
-      bg: 'bg-amber-50',
-    },
-    {
-      title: 'Просрочено',
-      ...f(overdueAmount),
-      icon: AlertTriangle,
-      color: 'text-purple-700',
-      bg: 'bg-purple-50',
-    },
-    {
-      title: 'Общая сумма',
-      ...f(overallAmount),
-      icon: Wallet,
-      color: 'text-sky-700',
-      bg: 'bg-sky-50',
-    },
-    {
-      title: 'Остаток долга',
-      ...f(remainingDebt),
-      icon: Banknote,
-      color: 'text-indigo-700',
-      bg: 'bg-indigo-50',
-    },
-  ].map(({ short, full, ...rest }): StatCardItem => ({ ...rest, value: short, titleAttr: full }));
 
   const notFound = !loadingPayments && clientName === '...' && payments.length === 0;
 
@@ -306,7 +256,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        <StatsCards items={items} lgCols={7} loading={summaryLoading} />
+        <TwoTypeStats
+          clientId={clientId}
+          caseId={caseIdForQuery}
+          from={fromDateStr}
+          to={toDateStr}
+          statusFilter={toStatsStatusFilter(statusFilter)}
+          reloadToken={statsReloadToken}
+          className="mb-6"
+        />
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
           <div className="p-6 flex flex-wrap items-center gap-3">
@@ -420,13 +378,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                         )}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-medium text-gray-900">
-                          {new Intl.NumberFormat('ru-RU', {
-                            style: 'currency',
-                            currency: 'RUB',
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 0,
-                          }).format(payment.amount)}
+                        <p
+                          className="font-medium text-gray-900"
+                          title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
+                          {formatCurrencySmart(payment.amount).full}
                         </p>
                         {payment.description && (
                           <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
@@ -495,12 +450,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
         </div>
 
         <PaymentModal
+          key={payModalOpen ? (editingPayment ? `edit-${editingPayment.id}` : 'new') : 'closed'}
           isOpen={payModalOpen}
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
           onDelete={async (id: number) => {
-            await removePayment(id);
+            await removePayment(id); // подтверждение внутри
+            closePayModal();
           }}
           type={editingPayment?.type ?? 'Income'}
           defaultClientId={clientId}

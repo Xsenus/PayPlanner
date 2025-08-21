@@ -978,11 +978,10 @@ clientsV2.MapDelete("/{id:int}", async (PaymentContext context, int id) =>
 // Пример: /api/v2/stats/months?startYear=2025&startMonth=1&endYear=2025&endMonth=6
 var statsV2 = apiV2.MapGroup("/stats");
 
-statsV2.MapGet("/summary", async (
-    StatsSummaryService svc, int? clientId, int? caseId, DateTime? from, DateTime? to, string? period, PaymentType? type,
-    CancellationToken ct) =>
+statsV2.MapGet("/summary", async (StatsSummaryService svc, int? clientId, int? caseId, DateTime? from, DateTime? to,
+    string? period, PaymentType? type, PaymentStatus? status, string? q, CancellationToken ct) =>
 {
-    var res = await svc.GetAsync(clientId, caseId, from, to, period, type, ct);
+    var res = await svc.GetAsync(clientId, caseId, from, to, period, type, status, q, ct);
     return Results.Ok(res);
 });
 

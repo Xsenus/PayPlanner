@@ -1,15 +1,13 @@
 import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
-import { SummaryCards } from './SummaryCards';
 import { PaymentModal } from './PaymentModal';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { Payment } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
-import { toMonthlyStats } from '../../utils/statsAdapters';
-import { useSummaryStats } from '../../hooks/useSummaryStats';
+import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
@@ -40,6 +38,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [range, setRange] = useState<MonthRange>({});
 
+  const [statsReloadKey, setStatsReloadKey] = useState(0);
+  const bumpStats = () => setStatsReloadKey((x) => x + 1);
+
   const { t, formatMonth } = useTranslation();
 
   const year = currentDate.getFullYear();
@@ -60,13 +61,6 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       : range.from && range.to
       ? ymEnd(range.to)
       : formatLocalYMD(endOfMonth);
-
-  // server summary
-  const { data: summary, refresh: refreshSummary } = useSummaryStats({
-    from: fromDateStr,
-    to: toDateStr,
-  });
-  const statsForCards = useMemo(() => (summary ? toMonthlyStats(summary) : null), [summary]);
 
   const formatRange = () => {
     if (range.from && range.to) return `${range.from} — ${range.to}`;
@@ -128,12 +122,16 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const handleCloseModal = async () => {
     setIsModalOpen(false);
     setEditingPayment(null);
-    await Promise.all([refreshPayments(), refreshSummary()]);
+    await refreshPayments();
+    bumpStats();
   };
 
   const handleSubmit = async (payload: SubmitDTO) => {
     if ('id' in payload) await updatePayment(payload);
     else await createPayment(payload);
+
+    await refreshPayments();
+    bumpStats();
   };
 
   const filteredPayments = useMemo(() => {
@@ -241,9 +239,15 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           </div>
         </div>
 
-        <SummaryCards stats={statsForCards} />
+        <TwoTypeStats
+          from={fromDateStr}
+          to={toDateStr}
+          statusFilter={statusFilter}
+          search={deferredSearch}
+          reloadToken={statsReloadKey}
+        />
 
-        <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6 mt-4">
           <button
             type="button"
             onClick={() => handleAddPayment('Income')}
@@ -274,8 +278,12 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onSubmit={handleSubmit}
           payment={editingPayment}
           onDelete={async (id) => {
+            if (!window.confirm('Удалить платёж?')) return;
             await deletePayment(id);
-            await refreshSummary();
+            await refreshPayments();
+            setIsModalOpen(false);
+            setEditingPayment(null);
+            setTimeout(() => bumpStats(), 0);
           }}
         />
       </div>
