@@ -142,3 +142,43 @@ export interface InstallmentItem {
   payment: number;
   balance: number;
 }
+
+export type PeriodKey =
+  | 'today'
+  | 'yesterday'
+  | 'last-7d'
+  | 'last-30d'
+  | 'this-week'
+  | 'last-week'
+  | 'this-month'
+  | 'last-month'
+  | 'previous-month'
+  | 'this-quarter'
+  | 'last-quarter'
+  | 'qtd'
+  | 'this-year'
+  | 'ytd';
+
+export type SummaryBucket = {
+  totalAmount: number;
+  totalCount: number;
+  completedAmount: number;
+  completedCount: number;
+  pendingAmount: number;
+  pendingCount: number;
+  overdueAmount: number;
+  overdueCount: number;
+  remainingAmount: number;
+};
+
+export type SummaryStats = {
+  from: string;
+  to: string;
+  clientId?: number;
+  caseId?: number;
+  income: SummaryBucket;
+  expense: SummaryBucket;
+  netCompleted: number;
+  netTotal: number;
+  netRemaining: number;
+};

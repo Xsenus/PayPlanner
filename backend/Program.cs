@@ -39,7 +39,8 @@ builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(norma
 // Services
 builder.Services.AddScoped<InstallmentService>(); 
 builder.Services.AddHostedService<PaymentStatusUpdater>(); 
-builder.Services.AddHostedService<DatabaseBackupService>();
+builder.Services.AddHostedService<DatabaseBackupService>(); 
+builder.Services.AddScoped<StatsSummaryService>();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -977,12 +978,15 @@ clientsV2.MapDelete("/{id:int}", async (PaymentContext context, int id) =>
 // Пример: /api/v2/stats/months?startYear=2025&startMonth=1&endYear=2025&endMonth=6
 var statsV2 = apiV2.MapGroup("/stats");
 
-statsV2.MapGet("/months", async (
-    PaymentContext context,
-    int startYear,
-    int startMonth,
-    int endYear,
-    int endMonth,
+statsV2.MapGet("/summary", async (
+    StatsSummaryService svc, int? clientId, int? caseId, DateTime? from, DateTime? to, string? period, PaymentType? type,
+    CancellationToken ct) =>
+{
+    var res = await svc.GetAsync(clientId, caseId, from, to, period, type, ct);
+    return Results.Ok(res);
+});
+
+statsV2.MapGet("/months", async (PaymentContext context, int startYear, int startMonth, int endYear, int endMonth,
     CancellationToken ct) =>
 {
     if (startMonth is < 1 or > 12 || endMonth is < 1 or > 12)

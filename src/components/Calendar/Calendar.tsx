@@ -4,11 +4,12 @@ import { CalendarGrid } from './CalendarGrid';
 import { SummaryCards } from './SummaryCards';
 import { PaymentModal } from './PaymentModal';
 import { usePayments } from '../../hooks/usePayments';
-import { useMonthlyStats } from '../../hooks/useMonthlyStats';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
-import type { MonthlyStats, Payment } from '../../types';
+import type { Payment } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
+import { toMonthlyStats } from '../../utils/statsAdapters';
+import { useSummaryStats } from '../../hooks/useSummaryStats';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
@@ -18,61 +19,6 @@ type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
 type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
 };
-
-function computeMonthlyStatsFrom(payments: Payment[]): MonthlyStats {
-  const completed = payments.filter((p) => p.isPaid).length;
-  const pending = payments.filter((p) => !p.isPaid && p.status === 'Pending').length;
-  const overdue = payments.filter((p) => !p.isPaid && p.status === 'Overdue').length;
-  const total = payments.length;
-
-  const income = payments
-    .filter((p) => p.type === 'Income' && p.isPaid)
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  const expense = payments
-    .filter((p) => p.type === 'Expense' && p.isPaid)
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  const profit = income - expense;
-  const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
-
-  const { completedAmount, pendingAmount, overdueAmount } = computeAmounts(payments);
-
-  return {
-    income,
-    expense,
-    profit,
-    completionRate,
-    counts: { completed, pending, overdue, total },
-    completedAmount,
-    pendingAmount,
-    overdueAmount,
-  };
-}
-
-function computeAmounts(payments: Payment[]) {
-  const income = payments
-    .filter((p) => p.type === 'Income' && p.isPaid)
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  const expense = payments
-    .filter((p) => p.type === 'Expense' && p.isPaid)
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  const pendingAmount = payments
-    .filter((p) => !p.isPaid && p.status === 'Pending')
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  const overdueAmount = payments
-    .filter((p) => !p.isPaid && p.status === 'Overdue')
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-
-  return {
-    completedAmount: income - expense,
-    pendingAmount,
-    overdueAmount,
-  };
-}
 
 function ymStart(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
@@ -92,14 +38,12 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
-
   const [range, setRange] = useState<MonthRange>({});
 
   const { t, formatMonth } = useTranslation();
 
   const year = currentDate.getFullYear();
-  const m0 = currentDate.getMonth(); // 0..11 — для расчёта дат
-  const m1 = m0 + 1; // 1..12 — для API статистики
+  const m0 = currentDate.getMonth();
   const startOfMonth = new Date(year, m0, 1);
   const endOfMonth = new Date(year, m0 + 1, 0);
 
@@ -109,12 +53,20 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       : range.from && range.to
       ? ymStart(range.from)
       : formatLocalYMD(startOfMonth);
+
   const toDateStr =
     range.to && !range.from
       ? ymEnd(range.to)
       : range.from && range.to
       ? ymEnd(range.to)
       : formatLocalYMD(endOfMonth);
+
+  // server summary
+  const { data: summary, refresh: refreshSummary } = useSummaryStats({
+    from: fromDateStr,
+    to: toDateStr,
+  });
+  const statsForCards = useMemo(() => (summary ? toMonthlyStats(summary) : null), [summary]);
 
   const formatRange = () => {
     if (range.from && range.to) return `${range.from} — ${range.to}`;
@@ -133,18 +85,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     refresh: refreshPayments,
   } = usePayments(fromDateStr, toDateStr, { pollInterval });
 
-  const { stats, refresh: refreshStats } = useMonthlyStats(year, m1, { pollInterval });
-
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   const prevIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     if (isModalOpen) return;
-
     const currentIds = new Set(payments.map((p) => p.id));
     const prevIds = prevIdsRef.current;
     const added = new Set<number>();
-
     currentIds.forEach((id) => {
       if (!prevIds.has(id)) added.add(id);
     });
@@ -180,7 +128,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const handleCloseModal = async () => {
     setIsModalOpen(false);
     setEditingPayment(null);
-    await Promise.all([refreshPayments(), refreshStats()]);
+    await Promise.all([refreshPayments(), refreshSummary()]);
   };
 
   const handleSubmit = async (payload: SubmitDTO) => {
@@ -207,17 +155,6 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       return statusOk && match;
     });
   }, [payments, deferredSearch, statusFilter]);
-
-  const hasFilters =
-    deferredSearch.trim().length > 0 || statusFilter !== 'All' || !!range.from || !!range.to;
-
-  const effectiveStats = useMemo<MonthlyStats | null>(() => {
-    if (!stats && !payments.length) return null;
-    const base = hasFilters ? computeMonthlyStatsFrom(filteredPayments) : (stats as MonthlyStats);
-    const source = hasFilters ? filteredPayments : payments;
-    const amounts = computeAmounts(source);
-    return { ...base, ...amounts };
-  }, [hasFilters, filteredPayments, stats, payments]);
 
   const clearRange = () => setRange({});
 
@@ -304,23 +241,21 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           </div>
         </div>
 
-        <SummaryCards stats={effectiveStats} />
+        <SummaryCards stats={statsForCards} />
 
         <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6">
           <button
             type="button"
             onClick={() => handleAddPayment('Income')}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm">
-            <Plus className="h-4 w-4" />
-            {t('addIncome')}
+            <Plus className="h-4 w-4" /> {t('addIncome')}
           </button>
 
           <button
             type="button"
             onClick={() => handleAddPayment('Expense')}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm">
-            <Plus className="h-4 w-4" />
-            {t('addExpense')}
+            <Plus className="h-4 w-4" /> {t('addExpense')}
           </button>
         </div>
 
@@ -340,6 +275,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           payment={editingPayment}
           onDelete={async (id) => {
             await deletePayment(id);
+            await refreshSummary();
           }}
         />
       </div>

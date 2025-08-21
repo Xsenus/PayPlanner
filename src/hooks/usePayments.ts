@@ -8,6 +8,7 @@ type UpdatePaymentDTO = { id: number } & Omit<Payment, 'id' | 'createdAt'>;
 interface Options {
   pollInterval?: number;
   clientId?: number;
+  caseId?: number;
 }
 
 export function usePayments(from?: string, to?: string, opts?: Options) {
@@ -21,7 +22,14 @@ export function usePayments(from?: string, to?: string, opts?: Options) {
       try {
         if (!silent) setLoading(true);
         setError(null);
-        const data = await apiService.getPayments(from, to, opts?.clientId);
+
+        const data = await apiService.getPayments({
+          from,
+          to,
+          clientId: opts?.clientId,
+          caseId: opts?.caseId,
+        });
+
         setPayments(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch payments');
@@ -29,7 +37,7 @@ export function usePayments(from?: string, to?: string, opts?: Options) {
         if (!silent) setLoading(false);
       }
     },
-    [from, to, opts?.clientId],
+    [from, to, opts?.clientId, opts?.caseId],
   );
 
   useEffect(() => {
