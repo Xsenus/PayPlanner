@@ -161,7 +161,7 @@ export function PaymentModal({
       if (p) {
         setFormData({
           date: toDateInputValue(p.date) || todayYMD(),
-          amount: p.amount.toString(),
+          amount: Number.isFinite(p.amount) ? p.amount.toFixed(2) : '',
           status: p.status,
           description: p.description,
           isPaid: p.isPaid,
@@ -213,6 +213,17 @@ export function PaymentModal({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData((s) => {
+      if (!s.amount?.trim()) return s;
+      const n = Number(String(s.amount).replace(',', '.'));
+      if (!Number.isFinite(n)) return s;
+      const fixed = n.toFixed(2);
+      return s.amount === fixed ? s : { ...s, amount: fixed };
+    });
+  }, [isOpen]);
 
   const clientIdRef = useRef(formData.clientId);
   useEffect(() => {
@@ -323,6 +334,66 @@ export function PaymentModal({
       status: 'Pending',
       paidDate: '',
     }));
+
+  const amountRef = useRef<HTMLInputElement>(null);
+  const handleAmountInput = (raw: string, el?: HTMLInputElement) => {
+    let v = raw.replace(/[^\d.,]/g, '');
+    const caret = el?.selectionStart ?? v.length;
+    if (!v) {
+      setFormData((s) => ({ ...s, amount: '' }));
+      return;
+    }
+
+    const firstSepIdx = v.search(/[.,]/);
+    if (firstSepIdx === -1) {
+      const intPart = v.replace(/^0+(?=\d)/, '') || '0';
+      const newVal = `${intPart}.00`;
+      const nextCaret = Math.min(caret, intPart.length);
+
+      setFormData((s) => ({ ...s, amount: newVal }));
+      requestAnimationFrame(() => {
+        const node = amountRef.current;
+        if (node) node.setSelectionRange(nextCaret, nextCaret);
+      });
+      return;
+    }
+
+    const sep = v[firstSepIdx];
+    v = v.slice(0, firstSepIdx + 1) + v.slice(firstSepIdx + 1).replace(/[.,]/g, '');
+    const [intRaw, fracRaw = ''] = v.split(sep);
+
+    const intPart = (intRaw || '0').replace(/^0+(?=\d)/, '') || '0';
+    const fracPart = fracRaw.slice(0, 2);
+    const newVal = fracPart ? `${intPart}${sep}${fracPart}` : `${intPart}${sep}`;
+
+    let nextCaret: number;
+    if (caret <= firstSepIdx) {
+      nextCaret = Math.min(caret, intPart.length);
+    } else {
+      const offsetInFrac = Math.max(0, caret - (firstSepIdx + 1));
+      nextCaret = intPart.length + 1 + Math.min(offsetInFrac, fracPart.length);
+    }
+
+    setFormData((s) => ({ ...s, amount: newVal }));
+    requestAnimationFrame(() => {
+      const node = amountRef.current;
+      if (node) node.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  const formatAmountOnBlur = () => {
+    const raw = formData.amount.trim();
+    if (!raw) return;
+
+    const cleaned = raw.replace(',', '.').replace(/[^\d.]/g, '');
+    const num = Number(cleaned);
+    if (!Number.isFinite(num)) {
+      setFormData((s) => ({ ...s, amount: '' }));
+      return;
+    }
+    const fixed = num.toFixed(2);
+    setFormData((s) => ({ ...s, amount: fixed }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -479,14 +550,16 @@ export function PaymentModal({
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
               <input
-                type="number"
+                ref={amountRef}
+                type="text"
                 name="amount"
                 value={formData.amount}
-                onChange={handleChange}
-                required
-                min="0"
-                step="0.01"
+                onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
+                onBlur={formatAmountOnBlur}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
                 inputMode="decimal"
+                pattern="^\d+([.,]\d{0,2})?$"
+                placeholder="0.00"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
