@@ -14,6 +14,8 @@ builder.Services.AddDbContext<PaymentContext>(options =>
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserProfileService>();
 builder.Services.AddScoped<ActivityLogService>();
+builder.Services.AddScoped<FeatureFlagService>();
+builder.Services.AddScoped<DataMigrationService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "your-super-secret-key-min-32-chars-long-12345";
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "PayPlanner";
