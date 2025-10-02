@@ -27,7 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const checkApi = async () => {
-      if (isDevelopment) {
+      if (isDevelopment && supabase) {
         const apiAvailable = await authApiService.checkApiAvailable();
         setUseSupabase(!apiAvailable);
       } else {
@@ -71,6 +71,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const fetchSupabaseUserData = useCallback(async (userId: string) => {
+    if (!supabase) {
+      return { profile: null, roles: [] };
+    }
+
     try {
       const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
@@ -129,7 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!apiChecked) return;
 
-    if (useSupabase) {
+    if (useSupabase && supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         updateSupabaseAuthUser(session?.user || null, session);
       });
@@ -177,7 +181,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [updateSupabaseAuthUser, useSupabase, apiChecked]);
 
   const signIn = async (credentials: LoginCredentials): Promise<void> => {
-    if (useSupabase) {
+    if (useSupabase && supabase) {
       const { error } = await supabase.auth.signInWithPassword({
         email: credentials.email,
         password: credentials.password,
@@ -196,7 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signUp = async (data: RegisterData): Promise<void> => {
-    if (useSupabase) {
+    if (useSupabase && supabase) {
       const { error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
@@ -221,7 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async (): Promise<void> => {
-    if (useSupabase) {
+    if (useSupabase && supabase) {
       const { error } = await supabase.auth.signOut();
 
       if (error) {

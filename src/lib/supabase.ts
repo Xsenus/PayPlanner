@@ -12,25 +12,25 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Validate that required environment variables are present
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
-
 /**
  * Singleton Supabase client instance
  * Configured with auto-refresh for authentication tokens
  * and persistent sessions in local storage
+ *
+ * Note: If Supabase credentials are not available, this will be null
+ * and the application will use C# API authentication instead
  */
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    // Store session in local storage for persistence across page reloads
-    storage: window.localStorage,
-    // Automatically refresh tokens before they expire
-    autoRefreshToken: true,
-    // Persist session across browser tabs
-    persistSession: true,
-    // Detect session changes across tabs
-    detectSessionInUrl: true,
-  },
-});
+export const supabase = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        // Store session in local storage for persistence across page reloads
+        storage: window.localStorage,
+        // Automatically refresh tokens before they expire
+        autoRefreshToken: true,
+        // Persist session across browser tabs
+        persistSession: true,
+        // Detect session changes across tabs
+        detectSessionInUrl: true,
+      },
+    })
+  : null;

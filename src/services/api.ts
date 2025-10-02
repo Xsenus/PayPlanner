@@ -74,10 +74,14 @@ export class ApiService {
    */
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    
+
     // Get the current session to include auth token
-    const { data: { session } } = await supabase.auth.getSession();
-    
+    let session = null;
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      session = data.session;
+    }
+
     const response = await fetch(url, {
       headers: {
         ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
