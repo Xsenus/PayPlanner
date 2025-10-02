@@ -181,6 +181,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [updateSupabaseAuthUser, useSupabase, apiChecked]);
 
   const signIn = async (credentials: LoginCredentials): Promise<void> => {
+    // Demo mode bypass
+    if (credentials.email === 'demo@demo.com' && credentials.password === 'demo') {
+      const demoUser: CSharpAuthUser = {
+        id: 'demo-user-123',
+        email: 'demo@demo.com',
+        fullName: 'Demo User',
+        roles: ['admin', 'user'],
+        createdAt: new Date().toISOString(),
+      };
+      setAuthUser(mapCSharpToAuthUser(demoUser));
+      return;
+    }
+
     if (useSupabase && supabase) {
       const { error } = await supabase.auth.signInWithPassword({
         email: credentials.email,

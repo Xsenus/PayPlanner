@@ -36,6 +36,22 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
   const { signIn } = useAuth();
 
   /**
+   * Handle demo login
+   */
+  const handleDemoLogin = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      await signIn({ email: 'demo@demo.com', password: 'demo' });
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
    * Handle form submission
    * Validates input and attempts to sign in the user
    *
@@ -122,6 +138,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+
+        {/* Demo mode button */}
+        <div className="mt-4">
+          <button
+            onClick={handleDemoLogin}
+            disabled={loading}
+            className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors disabled:bg-green-400 disabled:cursor-not-allowed font-medium"
+          >
+            Demo Mode Login
+          </button>
+        </div>
 
         {/* Switch to registration link */}
         <div className="mt-6 text-center">
