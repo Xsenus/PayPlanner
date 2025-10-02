@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Calendar, BarChart, Calculator, Users, Settings } from 'lucide-react';
+import { Calendar, BarChart, Calculator, Users, Settings, Shield } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useAuth } from '../../contexts/AuthContext';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 interface NavigationProps {
@@ -10,6 +11,7 @@ interface NavigationProps {
 
 export function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
+  const { hasRole } = useAuth();
   const [dictOpen, setDictOpen] = useState(false);
 
   const tabs = [
@@ -34,6 +36,15 @@ export function Navigation({ activeTab, onTabChange }: NavigationProps) {
       onClick: () => setDictOpen(true),
     },
   ];
+
+  if (hasRole('admin')) {
+    tabs.push({
+      id: 'users',
+      label: 'Users',
+      icon: Shield,
+      onClick: () => onTabChange('users'),
+    });
+  }
 
   return (
     <div className="sticky top-0 z-40 bg-white border-b border-gray-200/80">

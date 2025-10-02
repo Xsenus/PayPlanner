@@ -12,11 +12,12 @@ import { Reports } from './components/Reports/Reports';
 import { Calculator } from './components/Calculator/Calculator';
 import { Clients } from './components/Clients/Clients';
 import { ClientDetail } from './components/Clients/ClientDetail';
+import { UserManagement } from './components/UserManagement/UserManagement';
 import { ProtectedRoute } from './components/Auth/ProtectedRoute';
 import { UserMenu } from './components/Auth/UserMenu';
 
 // Define available tab types
-type Tab = 'calendar' | 'reports' | 'calculator' | 'clients' | 'clientDetail';
+type Tab = 'calendar' | 'reports' | 'calculator' | 'clients' | 'clientDetail' | 'users';
 
 /**
  * App Component
@@ -76,6 +77,8 @@ function App() {
             />
           )
         );
+      case 'users':
+        return <UserManagement />;
       default:
         return <Calendar onOpenClient={handleOpenClient} />;
     }
