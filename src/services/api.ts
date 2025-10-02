@@ -1,3 +1,13 @@
+/**
+ * API Service
+ *
+ * Centralized service for making HTTP requests to the backend API.
+ * Handles request formatting, authentication headers, and error handling.
+ * All API calls are authenticated with the user's session token from Supabase.
+ */
+
+import { supabase } from '../lib/supabase';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
 export type DictKind = 'deal-types' | 'income-types' | 'payment-sources' | 'payment-statuses';
@@ -10,6 +20,12 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? PaymentSource
   : PaymentStatusEntity;
 
+/**
+ * Get API path for dictionary kind
+ *
+ * @param kind - Dictionary kind identifier
+ * @returns API path for the dictionary endpoint
+ */
 function pathForKind(kind: DictKind): string {
   return `/dictionaries/${kind}`;
 }
@@ -23,6 +39,13 @@ export interface PagedResult<T> {
 
 type SortDir = 'asc' | 'desc';
 
+/**
+ * Build query string from parameters object
+ * Filters out undefined, null, and empty string values
+ *
+ * @param params - Object with query parameters
+ * @returns Query string with leading '?' or empty string
+ */
 function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -33,12 +56,33 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return s ? `?${s}` : '';
 }
 
+/**
+ * ApiService Class
+ *
+ * Provides methods for interacting with the backend API.
+ * Automatically includes authentication headers from Supabase session.
+ */
 export class ApiService {
+  /**
+   * Make an authenticated HTTP request
+   * Automatically adds Authorization header with user's session token
+   *
+   * @param endpoint - API endpoint path
+   * @param options - Fetch options (method, body, headers, etc.)
+   * @returns Promise resolving to the response data
+   * @throws Error if request fails or returns non-OK status
+   */
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
+    
+    // Get the current session to include auth token
+    const { data: { session } } = await supabase.auth.getSession();
+    
     const response = await fetch(url, {
       headers: {
         ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+        // Include Authorization header if user is authenticated
+        ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
         ...options?.headers,
       },
       ...options,
@@ -64,9 +108,12 @@ export class ApiService {
     return (await response.json()) as T;
   }
 
-  // ===== Payments (back-compat + расширенные варианты) =====
+  // ===== Payments (back-compat + extended variants) =====
 
-  // Перегрузки — чтобы не ломать старые вызовы
+  /**
+   * Get payments with optional filters
+   * Supports multiple overload signatures for backwards compatibility
+   */
   async getPayments(): Promise<Payment[]>;
   async getPayments(from?: string, to?: string, clientId?: number): Promise<Payment[]>;
   async getPayments(params?: {
@@ -89,20 +136,29 @@ export class ApiService {
         caseId: a?.caseId,
       });
     } else {
-      // старый сигнатурный стиль: (from?, to?, clientId?)
+      // Old signature style: (from?, to?, clientId?)
       q = buildQuery({ from: a, to: b, clientId: c });
     }
     return this.request<Payment[]>(`/payments${q}`);
   }
 
+  /**
+   * Get a single payment by ID
+   */
   async getPayment(id: number) {
     return this.request<Payment>(`/payments/${id}`);
   }
 
+  /**
+   * Create a new payment
+   */
   async createPayment(payment: Omit<Payment, 'id' | 'createdAt'>) {
     return this.request<Payment>('/payments', { method: 'POST', body: JSON.stringify(payment) });
   }
 
+  /**
+   * Update an existing payment
+   */
   async updatePayment(id: number, payment: Omit<Payment, 'id' | 'createdAt'>) {
     return this.request<Payment>(`/payments/${id}`, {
       method: 'PUT',
@@ -110,11 +166,16 @@ export class ApiService {
     });
   }
 
+  /**
+   * Delete a payment
+   */
   async deletePayment(id: number) {
     return this.request<void>(`/payments/${id}`, { method: 'DELETE' });
   }
 
-  // V1: фильтры/сорт без пагинации
+  /**
+   * V1: Get payments with filters and sorting, no pagination
+   */
   async getPaymentsV1(params?: {
     from?: string;
     to?: string;
@@ -128,7 +189,9 @@ export class ApiService {
     return this.request<Payment[]>(`/v1/payments${q}`);
   }
 
-  // V2: пагинация
+  /**
+   * V2: Get payments with pagination support
+   */
   async getPaymentsV2(params?: {
     from?: string;
     to?: string;
@@ -149,14 +212,24 @@ export class ApiService {
   }
 
   // ===== Clients =====
+
+  /**
+   * Get all clients
+   */
   async getClients() {
     return this.request<Client[]>('/clients');
   }
 
+  /**
+   * Get a single client by ID
+   */
   async getClient(id: number) {
     return this.request<Client>(`/clients/${id}`);
   }
 
+  /**
+   * Get client statistics with optional case filter
+   */
   async getClientStats(id: number): Promise<ClientStats>;
   async getClientStats(id: number, params?: { caseId?: number }): Promise<ClientStats>;
   async getClientStats(id: number, params?: { caseId?: number }) {
@@ -164,19 +237,30 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
+  /**
+   * Create a new client
+   */
   async createClient(client: Omit<Client, 'id' | 'createdAt'>) {
     return this.request<Client>('/clients', { method: 'POST', body: JSON.stringify(client) });
   }
 
+  /**
+   * Update an existing client
+   */
   async updateClient(id: number, client: Omit<Client, 'id' | 'createdAt'>) {
     return this.request<Client>(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(client) });
   }
 
+  /**
+   * Delete a client
+   */
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
   }
 
-  // Доп: V1/V2 клиенты (на будущее, не ломает текущее)
+  /**
+   * V1: Get clients with filters and sorting
+   */
   async getClientsV1(params?: {
     search?: string;
     isActive?: boolean;
@@ -187,6 +271,9 @@ export class ApiService {
     return this.request<Client[]>(`/v1/clients${q}`);
   }
 
+  /**
+   * V2: Get clients with pagination
+   */
   async getClientsV2(params?: {
     search?: string;
     isActive?: boolean;
@@ -203,9 +290,12 @@ export class ApiService {
     return this.request<PagedResult<Client>>(`/v2/clients${q}`);
   }
 
-  // ===== Cases (совмещение старого и нового вызова) =====
+  // ===== Cases (combining old and new call patterns) =====
 
-  // Перегрузки совместимости
+  /**
+   * Get cases with optional client filter
+   * Supports multiple overload signatures for backwards compatibility
+   */
   async getCases(): Promise<ClientCase[]>;
   async getCases(clientId?: number): Promise<ClientCase[]>;
   async getCases(params?: { clientId?: number }): Promise<ClientCase[]>;
@@ -219,26 +309,40 @@ export class ApiService {
     return this.request<ClientCase[]>(`/cases${q}`);
   }
 
+  /**
+   * Get a single case by ID
+   */
   async getCase(id: number) {
     return this.request<ClientCase>(`/cases/${id}`);
   }
 
+  /**
+   * Create a new case
+   */
   async createCase(model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>('/cases', { method: 'POST', body: JSON.stringify(model) });
   }
 
+  /**
+   * Update an existing case
+   */
   async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }
 
+  /**
+   * Delete a case
+   */
   async deleteCase(id: number) {
     return this.request<void>(`/cases/${id}`, { method: 'DELETE' });
   }
 
-  // V1/V2 для дел (опционально)
+  /**
+   * V1: Get cases with filters and sorting
+   */
   async getCasesV1(params?: {
     clientId?: number;
-    status?: string; // если у тебя есть строгий тип, замени тут string на него
+    status?: string;
     search?: string;
     sortBy?: 'createdAt' | 'title' | 'status';
     sortDir?: SortDir;
@@ -247,6 +351,9 @@ export class ApiService {
     return this.request<ClientCase[]>(`/v1/cases${q}`);
   }
 
+  /**
+   * V2: Get cases with pagination
+   */
   async getCasesV2(params?: {
     clientId?: number;
     status?: string;
@@ -265,25 +372,17 @@ export class ApiService {
   }
 
   // ===== Dictionaries =====
-  // async getDealTypes() {
-  //   return this.request<DealType[]>('/dictionaries/deal-types');
-  // }
 
-  // async getIncomeTypes() {
-  //   return this.request<IncomeType[]>('/dictionaries/income-types');
-  // }
-
-  // async getPaymentSources() {
-  //   return this.request<PaymentSource[]>('/dictionaries/payment-sources');
-  // }
-
-  // async getPaymentStatuses() {
-  //   return this.request<PaymentStatusEntity[]>('/dictionaries/payment-statuses');
-  // }
-
+  /**
+   * Get deal types dictionary
+   */
   async getDealTypes() {
     return this.getDict('deal-types');
   }
+
+  /**
+   * Get income types dictionary with optional filters
+   */
   async getIncomeTypes(): Promise<IncomeType[]>;
   async getIncomeTypes(
     paymentType?: 'Income' | 'Expense',
@@ -297,19 +396,32 @@ export class ApiService {
     return this.request<IncomeType[]>(`${pathForKind('income-types')}${q}`);
   }
 
+  /**
+   * Get payment sources dictionary
+   */
   async getPaymentSources() {
     return this.getDict('payment-sources');
   }
+
+  /**
+   * Get payment statuses dictionary
+   */
   async getPaymentStatuses() {
     return this.getDict('payment-statuses');
   }
 
   // ===== Statistics =====
+
+  /**
+   * Get monthly statistics for a specific month
+   */
   async getMonthlyStats(year: number, month: number) {
     return this.request<MonthlyStats>(`/stats/month?year=${year}&month=${month}`);
   }
 
-  // Расширенная статистика по диапазону месяцев (если на бэке включено /v2/stats/months)
+  /**
+   * Get statistics for a range of months
+   */
   async getMonthlyStatsRange(params: {
     startYear: number;
     startMonth: number;
@@ -334,11 +446,17 @@ export class ApiService {
   }
 
   // ===== Installments =====
+
+  /**
+   * Calculate installment payment schedule
+   */
   async calculateInstallment(request: InstallmentRequest) {
     return this.request('/installments/calc', { method: 'POST', body: JSON.stringify(request) });
   }
 
-  // Специализированные CRUD для IncomeType (с полем paymentType)
+  /**
+   * Create a new income type (specialized CRUD with paymentType field)
+   */
   async createIncomeType(data: Omit<IncomeType, 'id' | 'createdAt'>): Promise<IncomeType> {
     return this.request<IncomeType>(pathForKind('income-types'), {
       method: 'POST',
@@ -346,6 +464,9 @@ export class ApiService {
     });
   }
 
+  /**
+   * Update an income type
+   */
   async updateIncomeType(
     id: number,
     data: Omit<IncomeType, 'id' | 'createdAt'>,
@@ -356,14 +477,21 @@ export class ApiService {
     });
   }
 
-  // ===== Dictionaries (универсальный CRUD) =====
+  // ===== Dictionaries (universal CRUD) =====
+
+  /**
+   * Get dictionary items by kind
+   */
   async getDict<K extends DictKind>(kind: K): Promise<DictItemByKind<K>[]> {
     return this.request<DictItemByKind<K>[]>(pathForKind(kind));
   }
 
+  /**
+   * Create a dictionary item
+   */
   async createDict<K extends DictKind>(
     kind: K,
-    data: Omit<BaseDictItem, 'id'>, // можно передавать и description/colorHex
+    data: Omit<BaseDictItem, 'id'>,
   ): Promise<DictItemByKind<K>> {
     return this.request<DictItemByKind<K>>(pathForKind(kind), {
       method: 'POST',
@@ -371,6 +499,9 @@ export class ApiService {
     });
   }
 
+  /**
+   * Update a dictionary item
+   */
   async updateDict<K extends DictKind>(
     kind: K,
     id: number,
@@ -382,11 +513,19 @@ export class ApiService {
     });
   }
 
+  /**
+   * Delete a dictionary item
+   */
   async deleteDict(kind: DictKind, id: number): Promise<void> {
     await this.request<void>(`${pathForKind(kind)}/${id}`, { method: 'DELETE' });
   }
 
-  // ===== Accounts (подсказки для поля "Счёт") =====
+  // ===== Accounts (suggestions for account field) =====
+
+  /**
+   * Get account suggestions with various filter options
+   * Supports returning either simple string array or objects with dates
+   */
   async getAccounts(params?: {
     clientId?: number;
     caseId?: number;
@@ -428,6 +567,9 @@ export class ApiService {
     return this.request<string[]>(`/accounts${q}`);
   }
 
+  /**
+   * Get account suggestions (convenience method)
+   */
   async getAccountSuggestions(
     q?: string,
     opts?: {
@@ -469,9 +611,9 @@ export class ApiService {
   }
 
   /**
-   * Сводная статистика по доходам/расходам с серверными расчётами.
-   * Поддерживает фильтры: status и q (поиск).
-   * Параметр r — cache-buster (передаём reloadToken).
+   * Get summary statistics with server-side calculations
+   * Supports filters: status and q (search)
+   * Parameter r is a cache-buster (pass reloadToken)
    */
   async getSummaryStats(params?: {
     clientId?: number;
@@ -488,7 +630,9 @@ export class ApiService {
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
   }
 
-  /** Упрощённый вызов: сводка по клиенту. */
+  /**
+   * Simplified call: get summary for a client
+   */
   async getClientSummaryStats(
     clientId: number,
     opts?: {
@@ -504,7 +648,9 @@ export class ApiService {
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
   }
 
-  /** Упрощённый вызов: сводка по делу. */
+  /**
+   * Simplified call: get summary for a case
+   */
   async getCaseSummaryStats(
     caseId: number,
     opts?: {
@@ -521,9 +667,10 @@ export class ApiService {
   }
 }
 
+// Export singleton instance
 export const apiService = new ApiService();
 
-// ---- types import ----
+// ---- Type imports ----
 import type {
   Payment,
   Client,
