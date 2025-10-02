@@ -12,6 +12,8 @@ builder.Services.AddDbContext<PaymentContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default")));
 
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<UserProfileService>();
+builder.Services.AddScoped<ActivityLogService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "your-super-secret-key-min-32-chars-long-12345";
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "PayPlanner";
@@ -123,6 +125,97 @@ app.MapGet("/api/roles", async (AuthService authService) =>
     return Results.Ok(roles);
 })
 .RequireAuthorization();
+
+// User activation/deactivation endpoints
+app.MapPost("/api/users/{id}/activate", async (string id, AuthService authService) =>
+{
+    var success = await authService.ActivateUserAsync(id);
+    return success ? Results.Ok() : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/users/{id}/deactivate", async (string id, AuthService authService) =>
+{
+    var success = await authService.DeactivateUserAsync(id);
+    return success ? Results.Ok() : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapDelete("/api/users/{id}", async (string id, AuthService authService) =>
+{
+    var success = await authService.DeleteUserAsync(id);
+    return success ? Results.Ok() : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+// User profile endpoints
+app.MapGet("/api/profiles/{userId}", async (string userId, UserProfileService profileService) =>
+{
+    var profile = await profileService.GetProfileByUserIdAsync(userId);
+    return profile != null ? Results.Ok(profile) : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/profiles/{userId}", async (string userId, CreateUserProfileRequest request, UserProfileService profileService) =>
+{
+    var profile = await profileService.CreateOrUpdateProfileAsync(userId, request);
+    return Results.Ok(profile);
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapDelete("/api/profiles/{userId}", async (string userId, UserProfileService profileService) =>
+{
+    var success = await profileService.DeleteProfileAsync(userId);
+    return success ? Results.Ok() : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+// Activity log endpoints
+app.MapGet("/api/activity-logs", async (
+    [AsParameters] ActivityLogFilterRequest filter,
+    ActivityLogService logService) =>
+{
+    var (logs, total) = await logService.GetLogsAsync(filter);
+    return Results.Ok(new { logs, total, page = filter.Page, pageSize = filter.PageSize });
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapGet("/api/activity-logs/user/{userId}", async (string userId, ActivityLogService logService) =>
+{
+    var logs = await logService.GetUserLogsAsync(userId);
+    return Results.Ok(logs);
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/activity-logs/clear", async (
+    string? userId,
+    DateTime? beforeDate,
+    ActivityLogService logService) =>
+{
+    await logService.ClearLogsAsync(userId, beforeDate);
+    return Results.Ok();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapGet("/api/activity-logs/status", (ActivityLogService logService) =>
+{
+    return Results.Ok(new { enabled = logService.IsLoggingEnabled() });
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/activity-logs/enable", (ActivityLogService logService) =>
+{
+    logService.EnableLogging();
+    return Results.Ok();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/activity-logs/disable", (ActivityLogService logService) =>
+{
+    logService.DisableLogging();
+    return Results.Ok();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.Run();
 

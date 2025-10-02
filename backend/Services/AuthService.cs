@@ -31,7 +31,7 @@ public class AuthService
             return null;
         }
 
-        if (!user.IsActive)
+        if (!user.IsActive || !user.IsActivated)
         {
             return null;
         }
@@ -208,6 +208,57 @@ public class AuthService
         return await _context.Set<Role>()
             .OrderBy(r => r.Name)
             .ToListAsync();
+    }
+
+    public async Task<bool> ActivateUserAsync(string userId)
+    {
+        var user = await _context.Set<User>()
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+        {
+            return false;
+        }
+
+        user.IsActivated = true;
+        user.IsActive = true;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> DeactivateUserAsync(string userId)
+    {
+        var user = await _context.Set<User>()
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+        {
+            return false;
+        }
+
+        user.IsActive = false;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> DeleteUserAsync(string userId)
+    {
+        var user = await _context.Set<User>()
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+        {
+            return false;
+        }
+
+        _context.Set<User>().Remove(user);
+        await _context.SaveChangesAsync();
+
+        return true;
     }
 
     private string GenerateJwtToken(User user)

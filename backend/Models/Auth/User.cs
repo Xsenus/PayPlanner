@@ -24,7 +24,10 @@ public class User
     public string FullName { get; set; } = string.Empty;
 
     [Column("is_active")]
-    public bool IsActive { get; set; } = true;
+    public bool IsActive { get; set; } = false; // Default to inactive, must be activated by admin
+
+    [Column("is_activated")]
+    public bool IsActivated { get; set; } = false; // Administrator activation flag
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -33,4 +36,5 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public virtual ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
+    public virtual UserProfile? Profile { get; set; }
 }
