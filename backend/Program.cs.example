@@ -1,0 +1,129 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Services;
+using PayPlanner.Api.Models;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<PaymentContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<AuthService>();
+
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "your-secret-key-must-be-at-least-32-characters-long!";
+var key = Encoding.UTF8.GetBytes(jwtSecret);
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(key)
+    };
+});
+
+builder.Services.AddAuthorization();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Authentication endpoints
+app.MapPost("/api/auth/login", async (LoginRequest request, AuthService authService) =>
+{
+    var result = await authService.LoginAsync(request.Email, request.Password);
+    return result != null ? Results.Ok(result) : Results.Unauthorized();
+});
+
+app.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
+{
+    var userIdClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+    if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+        return Results.Unauthorized();
+
+    var user = await authService.GetUserByIdAsync(userId);
+    return user != null ? Results.Ok(user) : Results.NotFound();
+})
+.RequireAuthorization();
+
+// User management endpoints (admin only)
+app.MapGet("/api/users", async (AuthService authService) =>
+{
+    var users = await authService.GetAllUsersAsync();
+    return Results.Ok(users);
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapGet("/api/users/{id}", async (int id, AuthService authService) =>
+{
+    var user = await authService.GetUserByIdAsync(id);
+    return user != null ? Results.Ok(user) : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/users", async (CreateUserRequest request, AuthService authService) =>
+{
+    var user = await authService.CreateUserAsync(request);
+    return user != null ? Results.Created($"/api/users/{user.Id}", user) : Results.BadRequest("User already exists");
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPut("/api/users/{id}", async (int id, UpdateUserRequest request, AuthService authService) =>
+{
+    var user = await authService.UpdateUserAsync(id, request);
+    return user != null ? Results.Ok(user) : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapDelete("/api/users/{id}", async (int id, AuthService authService) =>
+{
+    var deleted = await authService.DeleteUserAsync(id);
+    return deleted ? Results.NoContent() : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+// Roles endpoint
+app.MapGet("/api/roles", async (AuthService authService) =>
+{
+    var roles = await authService.GetAllRolesAsync();
+    return Results.Ok(roles);
+})
+.RequireAuthorization();
+
+// ... Add your existing endpoints here (payments, clients, etc.)
+
+app.Run();

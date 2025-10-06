@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase, UserProfile, UserRole } from '../../services/supabase';
+import { authService, User, Role } from '../../services/authService';
 import { X } from 'lucide-react';
 
 interface UserModalProps {
-  user: UserProfile | null;
+  user: User | null;
   onClose: () => void;
 }
 
@@ -11,9 +11,9 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [roleId, setRoleId] = useState('');
+  const [roleId, setRoleId] = useState(0);
   const [isActive, setIsActive] = useState(true);
-  const [roles, setRoles] = useState<UserRole[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -21,22 +21,17 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
     fetchRoles();
     if (user) {
       setEmail(user.email);
-      setFullName(user.full_name);
-      setRoleId(user.role_id);
-      setIsActive(user.is_active);
+      setFullName(user.fullName);
+      setRoleId(user.role.id);
+      setIsActive(user.isActive);
     }
   }, [user]);
 
   const fetchRoles = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('*')
-        .order('name');
-
-      if (error) throw error;
-      setRoles(data || []);
-      if (data && data.length > 0 && !user) {
+      const data = await authService.getRoles();
+      setRoles(data);
+      if (data.length > 0 && !user) {
         setRoleId(data.find(r => r.name === 'user')?.id || data[0].id);
       }
     } catch (err) {
@@ -51,43 +46,19 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
 
     try {
       if (user) {
-        const { error: updateError } = await supabase
-          .from('user_profiles')
-          .update({
-            full_name: fullName,
-            role_id: roleId,
-            is_active: isActive,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-
-        if (updateError) throw updateError;
+        await authService.updateUser(user.id, {
+          fullName,
+          roleId,
+          isActive,
+        });
       } else {
-        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        await authService.createUser({
           email,
           password,
-          options: {
-            data: {
-              full_name: fullName,
-            },
-          },
+          fullName,
+          roleId,
+          isActive,
         });
-
-        if (signUpError) throw signUpError;
-
-        if (authData.user) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          const { error: profileError } = await supabase
-            .from('user_profiles')
-            .update({
-              role_id: roleId,
-              is_active: isActive,
-            })
-            .eq('id', authData.user.id);
-
-          if (profileError) throw profileError;
-        }
       }
 
       onClose();
@@ -170,7 +141,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
             </label>
             <select
               value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
+              onChange={(e) => setRoleId(Number(e.target.value))}
               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               required
             >

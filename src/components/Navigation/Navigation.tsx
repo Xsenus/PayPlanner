@@ -11,7 +11,7 @@ interface NavigationProps {
 
 export function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
-  const { signOut, profile, isAdmin } = useAuth();
+  const { signOut, user, isAdmin } = useAuth();
   const [dictOpen, setDictOpen] = useState(false);
 
   const handleSignOut = async () => {
@@ -89,9 +89,9 @@ export function Navigation({ activeTab, onTabChange }: NavigationProps) {
 
           <div className="flex items-center gap-4 py-4">
             <div className="text-sm text-gray-600">
-              <span className="font-medium">{profile?.full_name}</span>
+              <span className="font-medium">{user?.fullName}</span>
               <span className="ml-2 text-xs px-2 py-1 bg-gray-100 rounded">
-                {profile?.role?.name}
+                {user?.role?.name}
               </span>
             </div>
             <button
