@@ -8,14 +8,18 @@ import { Clients } from './components/Clients/Clients';
 import { ClientDetail } from './components/Clients/ClientDetail';
 import { Users } from './components/Users/Users';
 import { Login } from './components/Auth/Login';
+import { Register } from './components/Auth/Register';
+import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 
 type Tab = 'calendar' | 'reports' | 'calculator' | 'clients' | 'clientDetail' | 'users';
+type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
+  const [authView, setAuthView] = useState<AuthView>('login');
 
   const handleOpenClient = (clientId: number, caseId?: number) => {
     setSelectedClientId(clientId);
@@ -35,7 +39,25 @@ function AppContent() {
   }
 
   if (!user) {
-    return <Login />;
+    if (authView === 'register') {
+      return (
+        <Register
+          onSuccess={() => setAuthView('awaiting')}
+          onBackToLogin={() => setAuthView('login')}
+        />
+      );
+    }
+
+    if (authView === 'awaiting') {
+      return <AwaitingApproval onBackToLogin={() => setAuthView('login')} />;
+    }
+
+    return (
+      <Login
+        onShowRegister={() => setAuthView('register')}
+        onPendingApproval={() => setAuthView('awaiting')}
+      />
+    );
   }
 
   const renderContent = () => {

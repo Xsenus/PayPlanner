@@ -13,6 +13,8 @@ public class UserDto
     public string FullName { get; set; } = string.Empty;
     public RoleDto Role { get; set; } = null!;
     public bool IsActive { get; set; }
+    public bool IsApproved { get; set; }
+    public DateTime? ApprovedAt { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

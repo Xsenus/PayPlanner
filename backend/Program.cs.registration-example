@@ -1,0 +1,75 @@
+// Add to your existing Program.cs
+
+// Register the email service
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// Update AuthService registration to include IEmailService
+builder.Services.AddScoped<AuthService>();
+
+// Add registration endpoint (add after existing auth endpoints)
+app.MapPost("/api/auth/register", async (RegisterRequest request, AuthService authService) =>
+{
+    try
+    {
+        var user = await authService.RegisterAsync(request);
+        return user != null ? Results.Ok(new { message = "Registration successful. Awaiting admin approval." })
+                            : Results.BadRequest("User already exists");
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(ex.Message);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// Update login endpoint to handle pending approval
+app.MapPost("/api/auth/login", async (LoginRequest request, AuthService authService) =>
+{
+    try
+    {
+        var result = await authService.LoginAsync(request.Email, request.Password);
+        return result != null ? Results.Ok(result) : Results.Unauthorized();
+    }
+    catch (InvalidOperationException ex) when (ex.Message == "PendingApproval")
+    {
+        return Results.Problem(
+            detail: "Your account is awaiting admin approval",
+            statusCode: 403,
+            title: "PendingApproval"
+        );
+    }
+});
+
+// Admin approval endpoints
+app.MapGet("/api/admin/users", async (HttpContext context, AuthService authService, [FromQuery] string? status) =>
+{
+    var users = await authService.GetAllUsersAsync(status);
+    return Results.Ok(users);
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/admin/users/{id}/approve", async (int id, HttpContext context, AuthService authService) =>
+{
+    var userIdClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+    if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var approvedBy))
+        return Results.Unauthorized();
+
+    var approved = await authService.ApproveUserAsync(id, approvedBy);
+    return approved ? Results.Ok(new { message = "User approved successfully" })
+                    : Results.BadRequest("User not found or already approved");
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/admin/users/{id}/reject", async (int id, [FromBody] RejectUserRequest? request, AuthService authService) =>
+{
+    var rejected = await authService.RejectUserAsync(id, request?.Reason);
+    return rejected ? Results.Ok(new { message = "User rejected successfully" })
+                    : Results.NotFound();
+})
+.RequireAuthorization(policy => policy.RequireRole("admin"));
+
+// Add to your models
+public record RejectUserRequest(string? Reason);

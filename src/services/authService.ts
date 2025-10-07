@@ -12,6 +12,8 @@ export interface User {
   fullName: string;
   role: Role;
   isActive: boolean;
+  isApproved: boolean;
+  approvedAt?: string | null;
   createdAt: string;
 }
 
@@ -106,8 +108,26 @@ class AuthApiService {
     return this.token;
   }
 
-  async getUsers(): Promise<User[]> {
-    return this.request<User[]>('/users');
+  async getUsers(status?: 'pending' | 'approved'): Promise<User[]> {
+    const query = status ? `?status=${status}` : '';
+    return this.request<User[]>(`/users${query}`);
+  }
+
+  async getPendingUsers(): Promise<User[]> {
+    return this.getUsers('pending');
+  }
+
+  async approveUser(id: number): Promise<void> {
+    return this.request<void>(`/admin/users/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async rejectUser(id: number, reason?: string): Promise<void> {
+    return this.request<void>(`/admin/users/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
   }
 
   async getUser(id: number): Promise<User> {

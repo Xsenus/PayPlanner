@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { authService, User } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserPlus, Pencil, Trash2, Shield, CheckCircle, XCircle } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, CheckCircle, XCircle, UserCheck, UserX, Clock } from 'lucide-react';
 import { UserModal } from './UserModal';
+
+type FilterTab = 'all' | 'pending' | 'approved';
 
 export const Users = () => {
   const { isAdmin } = useAuth();
@@ -11,20 +13,45 @@ export const Users = () => {
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [filterTab, setFilterTab] = useState<FilterTab>('all');
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [filterTab]);
 
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const data = await authService.getUsers();
+      const status = filterTab === 'all' ? undefined : filterTab;
+      const data = await authService.getUsers(status);
       setUsers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApprove = async (userId: number) => {
+    if (!confirm('Are you sure you want to approve this user?')) return;
+
+    try {
+      await authService.approveUser(userId);
+      await fetchUsers();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve user');
+    }
+  };
+
+  const handleReject = async (userId: number) => {
+    const reason = prompt('Optionally provide a reason for rejection:');
+    if (reason === null) return;
+
+    try {
+      await authService.rejectUser(userId, reason || undefined);
+      await fetchUsers();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to reject user');
     }
   };
 
@@ -82,6 +109,8 @@ export const Users = () => {
     );
   }
 
+  const pendingCount = users.filter(u => !u.isApproved).length;
+
   return (
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
@@ -96,6 +125,45 @@ export const Users = () => {
           >
             <UserPlus className="w-5 h-5" />
             Add User
+          </button>
+        </div>
+
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setFilterTab('all')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              filterTab === 'all'
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            All Users
+          </button>
+          <button
+            onClick={() => setFilterTab('pending')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+              filterTab === 'pending'
+                ? 'bg-amber-600 text-white'
+                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Pending Approval
+            {filterTab !== 'pending' && pendingCount > 0 && (
+              <span className="bg-amber-600 text-white text-xs px-2 py-0.5 rounded-full">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setFilterTab('approved')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              filterTab === 'approved'
+                ? 'bg-green-600 text-white'
+                : 'bg-green-50 text-green-700 hover:bg-green-100'
+            }`}
+          >
+            Approved Users
           </button>
         </div>
 
@@ -156,20 +224,43 @@ export const Users = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleEdit(user)}
-                          className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Edit user"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(user.id)}
-                          className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {!user.isApproved ? (
+                          <>
+                            <button
+                              onClick={() => handleApprove(user.id)}
+                              className="flex items-center gap-1 px-3 py-1.5 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                              title="Approve user"
+                            >
+                              <UserCheck className="w-4 h-4" />
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleReject(user.id)}
+                              className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                              title="Reject user"
+                            >
+                              <UserX className="w-4 h-4" />
+                              Reject
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleEdit(user)}
+                              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="Edit user"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(user.id)}
+                              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete user"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -8,8 +8,12 @@ public class User
     public string FullName { get; set; } = string.Empty;
     public int RoleId { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool IsApproved { get; set; } = false;
+    public DateTime? ApprovedAt { get; set; }
+    public int? ApprovedByUserId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public Role? Role { get; set; }
+    public User? ApprovedBy { get; set; }
 }

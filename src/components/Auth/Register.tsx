@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
-import { LogIn, Eye, EyeOff, UserPlus } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
-interface LoginProps {
-  onShowRegister?: () => void;
-  onPendingApproval?: () => void;
+interface RegisterProps {
+  onSuccess: () => void;
+  onBackToLogin: () => void;
 }
 
-export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
-  const { signIn } = useAuth();
+export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,18 +18,37 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await signIn(email, password);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to sign in';
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password, fullName }),
+      });
 
-      if (errorMessage.includes('PendingApproval') || errorMessage.includes('awaiting')) {
-        onPendingApproval?.();
-      } else {
-        setError(errorMessage);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Registration failed');
       }
+
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -39,17 +58,25 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl p-8">
+          <button
+            onClick={onBackToLogin}
+            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="text-sm">Back to login</span>
+          </button>
+
           <div className="flex items-center justify-center mb-8">
             <div className="bg-slate-900 rounded-full p-4">
-              <LogIn className="w-8 h-8 text-white" />
+              <UserPlus className="w-8 h-8 text-white" />
             </div>
           </div>
 
           <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">
-            Welcome Back
+            Create Account
           </h1>
           <p className="text-center text-slate-600 mb-8">
-            Sign in to your account to continue
+            Register for access to PayPlanner
           </p>
 
           {error && (
@@ -59,6 +86,21 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label htmlFor="fullName" className="block text-sm font-medium text-slate-700 mb-2">
+                Full Name
+              </label>
+              <input
+                id="fullName"
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                placeholder="John Doe"
+                required
+              />
+            </div>
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
                 Email Address
@@ -86,9 +128,10 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all pr-12"
-                  placeholder="Enter your password"
+                  placeholder="At least 6 characters"
                   required
-                  autoComplete="current-password"
+                  minLength={6}
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -100,26 +143,37 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
               </div>
             </div>
 
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-2">
+                Confirm Password
+              </label>
+              <input
+                id="confirmPassword"
+                type={showPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                placeholder="Confirm your password"
+                required
+                minLength={6}
+                autoComplete="new-password"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
               className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Creating account...' : 'Create Account'}
             </button>
           </form>
 
-          {onShowRegister && (
-            <div className="mt-6 text-center">
-              <button
-                onClick={onShowRegister}
-                className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>Don't have an account? <span className="font-medium">Register</span></span>
-              </button>
-            </div>
-          )}
+          <div className="mt-6 text-center text-sm text-slate-600">
+            <p>
+              Your account will be reviewed by an administrator before you can log in.
+            </p>
+          </div>
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
