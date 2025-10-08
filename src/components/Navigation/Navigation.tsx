@@ -6,6 +6,7 @@ import {
   Users,
   Settings,
   UserCog,
+  Shield,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -124,6 +125,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               label: 'Пользователи',
               icon: UserCog,
               onClick: () => onTabChange('users'),
+            },
+            {
+              id: 'roles' as const,
+              label: 'Роли',
+              icon: Shield,
+              onClick: () => onTabChange('roles'),
             },
           ]
         : []),

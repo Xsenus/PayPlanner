@@ -224,8 +224,19 @@ class AuthApiService {
 
   // ==== roles (admin) ====
   public async getRoles() {
-    // путь соответствует контроллеру UsersController.GetRoles -> /api/users/roles
-    return this.request<Role[]>('/users/roles');
+    return this.request<Role[]>('/roles');
+  }
+
+  public async createRole(data: { name: string; description: string }) {
+    return this.request<Role>('/roles', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  public async updateRole(id: number, data: { name: string; description: string }) {
+    return this.request<Role>(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  public async deleteRole(id: number) {
+    return this.request<void>(`/roles/${id}`, { method: 'DELETE' });
   }
 }
 

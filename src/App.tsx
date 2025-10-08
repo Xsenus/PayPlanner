@@ -7,6 +7,7 @@ import { Calculator } from './components/Calculator/Calculator';
 import { Clients } from './components/Clients/Clients';
 import { ClientDetail } from './components/Clients/ClientDetail';
 import { Users } from './components/Users/Users';
+import { Roles } from './components/Roles/Roles';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -130,6 +131,19 @@ function AppContent() {
             </div>
           </div>
         );
+      case 'roles':
+        return isAdmin ? (
+          <Roles />
+        ) : (
+          <div className="p-8">
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
+                <p className="text-red-700">Нужны права администратора.</p>
+              </div>
+            </div>
+          </div>
+        );
       default:
         return <Calendar onOpenClient={handleOpenClient} />;
     }
@@ -140,7 +154,7 @@ function AppContent() {
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab: Tab) => {
-          if (tab === 'users' && !isAdmin) return;
+          if ((tab === 'users' || tab === 'roles') && !isAdmin) return;
           setActiveTab(tab);
         }}
       />
