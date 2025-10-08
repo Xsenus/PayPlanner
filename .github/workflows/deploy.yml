@@ -1,0 +1,115 @@
+name: Deploy PayPlanner
+
+on:
+    push:
+        branches: ["main"]
+    workflow_dispatch: {}
+
+permissions:
+    contents: read
+
+concurrency:
+    group: payplanner-deploy
+    cancel-in-progress: true
+
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-latest
+
+        env:
+            BE_CSPROJ: backend/PayPlanner.Api.csproj
+            OUT_DIR: out
+            TAR_NAME: payplanner_${{ github.sha }}.tar.gz
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            # ---------- Build backend (.NET 9) ----------
+            - name: Setup .NET 9
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "9.0.x"
+
+            - name: Restore backend
+              run: dotnet restore "${{ env.BE_CSPROJ }}"
+
+            - name: Publish backend
+              run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
+
+            # ---------- Build frontend (Node 20 / Vite) ----------
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+
+            - name: Install FE deps
+              run: npm ci
+
+            - name: Build FE
+              run: npm run build
+
+            - name: Prepare FE artifacts
+              run: |
+                  mkdir -p "${{ env.OUT_DIR }}/fe"
+                  cp -r dist/* "${{ env.OUT_DIR }}/fe/"
+
+            # ---------- Pack artifacts ----------
+            - name: Create tarball
+              run: |
+                  tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
+
+            # ---------- Upload to VPS ----------
+            - name: Upload package to VPS
+              uses: appleboy/scp-action@v0.1.7
+              with:
+                  host: ${{ secrets.VPS_HOST }}
+                  username: ${{ secrets.VPS_USER }}
+                  key: ${{ secrets.VPS_SSH_KEY }}
+                  port: ${{ secrets.VPS_PORT || 22 }}
+                  source: "${{ env.TAR_NAME }}"
+                  target: "/tmp"
+
+            # ---------- Deploy on VPS ----------
+            - name: Deploy on VPS
+              uses: appleboy/ssh-action@v1.2.0
+              with:
+                  host: ${{ secrets.VPS_HOST }}
+                  username: ${{ secrets.VPS_USER }}
+                  key: ${{ secrets.VPS_SSH_KEY }}
+                  port: ${{ secrets.VPS_PORT || 22 }}
+                  script: |
+                      set -euo pipefail
+
+                      TAR="/tmp/${{ env.TAR_NAME }}"
+                      STAGE="/tmp/payplanner-${{ github.sha }}"
+                      BE_DIR="/var/www/payplanner-be"
+                      FE_DIR="/var/www/payplanner-fe"
+
+                      echo "[1/6] Prepare staging"
+                      mkdir -p "$STAGE"
+                      tar -xzf "$TAR" -C "$STAGE"
+
+                      echo "[2/6] Ensure target dirs"
+                      sudo mkdir -p "$BE_DIR" "$FE_DIR"
+
+                      echo "[3/6] Rsync backend -> $BE_DIR"
+                      sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
+
+                      echo "[4/6] Rsync frontend -> $FE_DIR"
+                      sudo rsync -a --delete "$STAGE/fe/" "$FE_DIR/"
+
+                      echo "[5/6] Permissions"
+                      sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
+
+                      echo "[6/6] Restart service"
+                      sudo systemctl daemon-reload || true
+                      sudo systemctl restart payplanner.service
+
+                      # Проверка статуса
+                      sleep 2
+                      sudo systemctl is-active --quiet payplanner.service && echo "Service active" || (sudo journalctl -u payplanner.service --no-pager -n 100; exit 1)
+
+                      # Уборка
+                      rm -rf "$STAGE" "$TAR"
