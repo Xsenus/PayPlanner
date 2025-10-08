@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
-using System;
 
 namespace PayPlanner.Api.Services
 {
@@ -18,19 +17,33 @@ namespace PayPlanner.Api.Services
         /// <param name="context">DbContext</param>
         /// <param name="seedClientsAndPayments">
         /// Если true — добавить клиентов, дела и платежи (даже если таблица не пустая).
-        /// Обычно используем true только вручную (для демо/добавки примеров).
         /// Если false — клиенты/дела/платежи сидятся только когда Clients пуст.
         /// </param>
         public static async Task SeedAsync(PaymentContext context, bool seedClientsAndPayments = false)
         {
             await SeedDictionariesAsync(context);          // словари
-            await SeedRolesAsync(context);                  // роли (admin, user)
-            await SeedAdminUserAsync(context);              // администратор
+            await SeedRolesAsync(context);                 // роли (admin, user)
+            await SeedAdminUserAsync(context);             // администратор
 
-            var shouldSeedClients = seedClientsAndPayments || !await context.Clients.AnyAsync();
+            // Возможность отключить клиентские сиды на проде:
+            var skipClientsByEnv =
+                string.Equals(Environment.GetEnvironmentVariable("PAYPLANNER_SKIP_CLIENT_SEED"), "1",
+                    StringComparison.OrdinalIgnoreCase);
+
+            var shouldSeedClients =
+                !skipClientsByEnv && (seedClientsAndPayments || !await context.Clients.AnyAsync());
+
             if (shouldSeedClients)
             {
-                await SeedClientsCasesPaymentsAsync(context);
+                try
+                {
+                    await SeedClientsCasesPaymentsAsync(context);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[SEED][Clients] skipped due to error: {ex.GetType().Name}: {ex.Message}");
+                    // Не валим процесс — просто пропустим клиентскую часть
+                }
             }
         }
 
@@ -123,22 +136,16 @@ namespace PayPlanner.Api.Services
 
         /// <summary>
         /// Создаёт пользователя-администратора, если его ещё нет.
-        /// Email/пароль можно задать через переменные окружения:
-        ///  - PAYPLANNER_ADMIN_EMAIL (по умолчанию admin@payplanner.local)
-        ///  - PAYPLANNER_ADMIN_PASSWORD (по умолчанию ChangeMeAdmin#12345)
-        ///  - PAYPLANNER_ADMIN_FULLNAME (по умолчанию System Administrator)
         /// </summary>
         private static async Task SeedAdminUserAsync(PaymentContext context)
         {
             var adminEmail = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_EMAIL") ?? "admin@payplanner.local";
-            var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "123456789";
-            var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "Administrator";
+            var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "ChangeMeAdmin#12345";
+            var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "System Administrator";
 
-            // уже есть админ с таким email?
             var exists = await context.Users.AsNoTracking().AnyAsync(u => u.Email == adminEmail);
             if (exists) return;
 
-            // получаем id роли admin (после SeedRolesAsync она должна существовать)
             var adminRoleId = await context.Roles
                 .Where(r => r.Name == "admin")
                 .Select(r => r.Id)
@@ -151,7 +158,6 @@ namespace PayPlanner.Api.Services
                 adminRoleId = await context.Roles.Where(r => r.Name == "admin").Select(r => r.Id).FirstAsync();
             }
 
-            // настраиваем PasswordHasher под те же параметры, что и в Program.cs
             var hasher = new PasswordHasher<User>(
                 Options.Create(new PasswordHasherOptions
                 {
@@ -185,18 +191,20 @@ namespace PayPlanner.Api.Services
 
         private static async Task SeedClientsCasesPaymentsAsync(PaymentContext context)
         {
+            // Читаем справочники и строим безопасные карты (без падения на дублях)
             var dealTypes = await context.DealTypes.AsNoTracking().ToListAsync();
-            var dealTypeByName = dealTypes.ToDictionary(d => d.Name, d => d.Id, StringComparer.OrdinalIgnoreCase);
+            var dealTypeByName = BuildNameMap(dealTypes, d => d.Name, d => d.Id);
 
             var incomeTypes = await context.IncomeTypes.AsNoTracking().ToListAsync();
-            var incomeTypeByName = incomeTypes.ToDictionary(d => d.Name, d => d.Id, StringComparer.OrdinalIgnoreCase);
+            var incomeTypeByName = BuildNameMap(incomeTypes, i => i.Name, i => i.Id);
 
             var sources = await context.PaymentSources.AsNoTracking().ToListAsync();
-            var sourceByName = sources.ToDictionary(s => s.Name, s => s.Id, StringComparer.OrdinalIgnoreCase);
+            var sourceByName = BuildNameMap(sources, s => s.Name, s => s.Id);
 
             var statuses = await context.PaymentStatuses.AsNoTracking().ToListAsync();
-            var statusByName = statuses.ToDictionary(s => s.Name, s => s.Id, StringComparer.OrdinalIgnoreCase);
+            var statusByName = BuildNameMap(statuses, s => s.Name, s => s.Id);
 
+            // Идемпотентные клиенты
             var clients = new[]
             {
                 new Client { Name = "Иван Иванов",      Email = "ivan@example.com",  Phone = "+7-900-010-01-01", Company = "ТехКорп",                Address = "ул. Ленина, д. 10, Москва" },
@@ -212,8 +220,10 @@ namespace PayPlanner.Api.Services
             foreach (var c in clients)
             {
                 var found = existingClients.FirstOrDefault(ec =>
-                    (!string.IsNullOrWhiteSpace(c.Email) && string.Equals(ec.Email, c.Email, StringComparison.OrdinalIgnoreCase)) ||
-                    (string.Equals(ec.Name, c.Name, StringComparison.OrdinalIgnoreCase) && string.Equals(ec.Phone, c.Phone, StringComparison.OrdinalIgnoreCase))
+                    (!string.IsNullOrWhiteSpace(c.Email) &&
+                        string.Equals(ec.Email, c.Email, StringComparison.OrdinalIgnoreCase)) ||
+                    (string.Equals(ec.Name, c.Name, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(ec.Phone, c.Phone, StringComparison.OrdinalIgnoreCase))
                 );
 
                 if (found is null)
@@ -240,16 +250,22 @@ namespace PayPlanner.Api.Services
 
             foreach (var (clientEmail, title, desc, status) in casesToEnsure)
             {
-                var clientId = existingClients.First(c => string.Equals(c.Email, clientEmail, StringComparison.OrdinalIgnoreCase)).Id;
+                var cli = existingClients.FirstOrDefault(c =>
+                    string.Equals(c.Email, clientEmail, StringComparison.OrdinalIgnoreCase));
+                if (cli is null)
+                {
+                    Console.Error.WriteLine($"[SEED][Cases] client '{clientEmail}' not found, skip case '{title}'");
+                    continue;
+                }
 
                 var exists = await context.ClientCases.AsNoTracking()
-                    .AnyAsync(cc => cc.ClientId == clientId && cc.Title == title);
+                    .AnyAsync(cc => cc.ClientId == cli.Id && cc.Title == title);
 
                 if (!exists)
                 {
                     var cc = new ClientCase
                     {
-                        ClientId = clientId,
+                        ClientId = cli.Id,
                         Title = title,
                         Description = desc ?? string.Empty,
                         Status = status
@@ -386,12 +402,24 @@ namespace PayPlanner.Api.Services
 
             foreach (var p in paymentsToEnsure)
             {
-                var clientId = existingClients.First(c => string.Equals(c.Email, p.Email, StringComparison.OrdinalIgnoreCase)).Id;
-                var caseId = allCases.First(c => c.ClientId == clientId && c.Title == p.CaseTitle).Id;
+                var cli = existingClients.FirstOrDefault(c =>
+                    string.Equals(c.Email, p.Email, StringComparison.OrdinalIgnoreCase));
+                if (cli is null)
+                {
+                    Console.Error.WriteLine($"[SEED][Payments] client '{p.Email}' not found, skip payment '{p.Description}'");
+                    continue;
+                }
+
+                var caseEnt = allCases.FirstOrDefault(c => c.ClientId == cli.Id && c.Title == p.CaseTitle);
+                if (caseEnt is null)
+                {
+                    Console.Error.WriteLine($"[SEED][Payments] case '{p.CaseTitle}' for '{p.Email}' not found, skip");
+                    continue;
+                }
 
                 var exists = await context.Payments.AsNoTracking().AnyAsync(x =>
-                    x.ClientId == clientId &&
-                    x.ClientCaseId == caseId &&
+                    x.ClientId == cli.Id &&
+                    x.ClientCaseId == caseEnt.Id &&
                     x.Date == p.Date &&
                     x.Amount == p.Amount &&
                     x.Type == p.Type &&
@@ -402,8 +430,8 @@ namespace PayPlanner.Api.Services
 
                 var payment = new Payment
                 {
-                    ClientId = clientId,
-                    ClientCaseId = caseId,
+                    ClientId = cli.Id,
+                    ClientCaseId = caseEnt.Id,
                     Date = p.Date,
                     Amount = p.Amount,
                     Type = p.Type,
@@ -411,10 +439,10 @@ namespace PayPlanner.Api.Services
                     Description = p.Description,
                     IsPaid = p.IsPaid,
                     PaidDate = p.PaidDate,
-                    DealTypeId = dealTypeByName[p.DealType],
-                    IncomeTypeId = incomeTypeByName[p.IncomeType],
-                    PaymentSourceId = sourceByName[p.Source],
-                    PaymentStatusId = statusByName[p.StatusName]
+                    DealTypeId = GetIdOrThrow(dealTypeByName, p.DealType, "DealType"),
+                    IncomeTypeId = GetIdOrThrow(incomeTypeByName, p.IncomeType, "IncomeType"),
+                    PaymentSourceId = GetIdOrThrow(sourceByName, p.Source, "PaymentSource"),
+                    PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus")
                 };
 
                 toAdd.Add(payment);
@@ -482,6 +510,30 @@ namespace PayPlanner.Api.Services
                 ctx.PaymentStatuses.Add(new PaymentStatusEntity { Name = name, ColorHex = color, Description = desc ?? string.Empty, IsActive = true });
                 await ctx.SaveChangesAsync();
             }
+        }
+
+        // --- нормализация и безопасные карты имён ---
+
+        private static string Norm(string? s) =>
+            (s ?? string.Empty).Trim().ToUpperInvariant();
+
+        private static Dictionary<string, int> BuildNameMap<T>(
+            IEnumerable<T> src,
+            Func<T, string?> nameSelector,
+            Func<T, int> idSelector)
+        {
+            return src
+                .Where(x => !string.IsNullOrWhiteSpace(nameSelector(x)))
+                .GroupBy(x => Norm(nameSelector(x)))
+                .ToDictionary(g => g.Key, g => idSelector(g.First()));
+        }
+
+        private static int GetIdOrThrow(Dictionary<string, int> map, string key, string entityName)
+        {
+            if (map.TryGetValue(Norm(key), out var id))
+                return id;
+
+            throw new InvalidOperationException($"[SEED] {entityName} '{key}' not found (check dictionaries seeding/data).");
         }
     }
 }
