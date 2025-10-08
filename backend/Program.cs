@@ -97,10 +97,20 @@ builder.Services.AddAuthorization(opts =>
     opts.AddPolicy("Admin", p => p.RequireRole("admin"));
 });
 
-// ================= Urls override =================
-var urls = builder.Configuration["Urls"];
-if (!string.IsNullOrWhiteSpace(urls))
-    builder.WebHost.UseUrls(urls);
+// ================= Hosting URLs (ENV > config > default) =================
+// 1) ENV - самый высокий приоритет
+var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+
+// 2) config ("urls"/"Urls") - берЄм, если ENV не задан
+var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
+
+// 3) дефолт Ч внутренний порт дл€ проксировани€ через Nginx
+var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
+    ? urlsEnv
+    : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5000");
+
+// явно задаЄм адреса, чтобы переопределить возможные значени€ из appsettings
+builder.WebHost.UseUrls(effectiveUrls);
 
 var app = builder.Build();
 
