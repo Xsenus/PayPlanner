@@ -131,8 +131,8 @@ namespace PayPlanner.Api.Services
         private static async Task SeedAdminUserAsync(PaymentContext context)
         {
             var adminEmail = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_EMAIL") ?? "admin@payplanner.local";
-            var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "123456";
-            var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "System Administrator";
+            var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "123456789";
+            var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "Administrator";
 
             // уже есть админ с таким email?
             var exists = await context.Users.AsNoTracking().AnyAsync(u => u.Email == adminEmail);
@@ -146,7 +146,6 @@ namespace PayPlanner.Api.Services
 
             if (adminRoleId == 0)
             {
-                // подстраховка Ч досоздаЄм роль
                 context.Roles.Add(new Role { Name = "admin", Description = "јдминистратор системы" });
                 await context.SaveChangesAsync();
                 adminRoleId = await context.Roles.Where(r => r.Name == "admin").Select(r => r.Id).FirstAsync();
