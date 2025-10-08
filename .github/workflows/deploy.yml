@@ -1,129 +1,151 @@
 name: Deploy PayPlanner
 
 on:
-    push:
-        branches: ["main"]
-    workflow_dispatch: {}
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
 
 permissions:
-    contents: read
+  contents: read
 
 concurrency:
-    group: payplanner-deploy
-    cancel-in-progress: true
+  group: payplanner-deploy
+  cancel-in-progress: true
 
 jobs:
-    build-and-deploy:
-        runs-on: ubuntu-latest
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
+    env:
+      BE_CSPROJ: backend/PayPlanner.Api.csproj
+      OUT_DIR: out
+      TAR_NAME: payplanner_${{ github.sha }}.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- Build backend (.NET 9) ----------
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore backend
+        run: dotnet restore "${{ env.BE_CSPROJ }}"
+
+      - name: Publish backend
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
+
+      # ---------- Build frontend (Node 20 / Vite, фронт в корне) ----------
+      # Кеш npm только если есть lock-файл
+      - name: Setup Node (with cache)
+        if: ${{ hashFiles('package-lock.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      # Фолбэк без кеша
+      - name: Setup Node (no cache)
+        if: ${{ hashFiles('package-lock.json') == '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Установка зависимостей
+      - name: Install FE deps (ci)
+        if: ${{ hashFiles('package-lock.json') != '' }}
+        run: npm ci
+
+      - name: Install FE deps (install fallback)
+        if: ${{ hashFiles('package-lock.json') == '' }}
+        run: npm install
+
+      - name: Build FE
         env:
-            BE_CSPROJ: backend/PayPlanner.Api.csproj
-            OUT_DIR: out
-            TAR_NAME: payplanner_${{ github.sha }}.tar.gz
+          VITE_API_URL: /api
+        run: npm run build
 
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
+      - name: Prepare FE artifacts
+        run: |
+          mkdir -p "${{ env.OUT_DIR }}/fe"
+          cp -r dist/* "${{ env.OUT_DIR }}/fe/"
 
-            # ---------- Build backend (.NET 9) ----------
-            - name: Setup .NET 9
-              uses: actions/setup-dotnet@v4
-              with:
-                  dotnet-version: "9.0.x"
+      # ---------- Pack artifacts ----------
+      - name: Create tarball
+        run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
 
-            - name: Restore backend
-              run: dotnet restore "${{ env.BE_CSPROJ }}"
+      # ---------- Upload to VPS ----------
+      - name: Upload package to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "${{ env.TAR_NAME }}"
+          target: "/tmp"
 
-            - name: Publish backend
-              run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
+      # ---------- Deploy on VPS ----------
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
 
-            # ---------- Build frontend (Node 20 / Vite, фронт в корне) ----------
-            # Кеш npm только если есть lock-файл
-            - name: Setup Node (with cache)
-              if: ${{ hashFiles('package-lock.json') != '' }}
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: package-lock.json
+            TAR="/tmp/${{ env.TAR_NAME }}"
+            STAGE="/tmp/payplanner-${{ github.sha }}"
+            BE_DIR="/var/www/payplanner-be"
+            FE_DIR="/var/www/payplanner-fe"
 
-            # Фолбэк без кеша
-            - name: Setup Node (no cache)
-              if: ${{ hashFiles('package-lock.json') == '' }}
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
+            echo "[1/7] Prepare staging"
+            rm -rf "$STAGE"
+            mkdir -p "$STAGE"
+            tar -xzf "$TAR" -C "$STAGE"
 
-            # Установка зависимостей
-            - name: Install FE deps (ci)
-              if: ${{ hashFiles('package-lock.json') != '' }}
-              run: npm ci
+            echo "[2/7] Ensure target dirs"
+            sudo mkdir -p "$BE_DIR" "$FE_DIR" "$BE_DIR/backups"
+            # Права на каталоги (проекты под www-data)
+            sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
 
-            - name: Install FE deps (install fallback)
-              if: ${{ hashFiles('package-lock.json') == '' }}
-              run: npm install
+            echo "[3/7] Rsync backend -> $BE_DIR (keep DB & backups)"
+            # НЕ трогаем БД и бэкапы
+            sudo rsync -a --delete \
+              --exclude "payplanner.db*" \
+              --exclude "backups/" \
+              "$STAGE/be/" "$BE_DIR/"
 
-            - name: Build FE
-              env:
-                  VITE_API_URL: /api
-              run: npm run build
+            echo "[4/7] Rsync frontend -> $FE_DIR"
+            sudo rsync -a --delete "$STAGE/fe/" "$FE_DIR/"
 
-            - name: Prepare FE artifacts
-              run: |
-                  mkdir -p "${{ env.OUT_DIR }}/fe"
-                  cp -r dist/* "${{ env.OUT_DIR }}/fe/"
+            echo "[5/7] Permissions"
+            sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
 
-            # ---------- Pack artifacts ----------
-            - name: Create tarball
-              run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
+            echo "[6/7] Restart service"
+            sudo systemctl daemon-reload || true
+            sudo systemctl restart payplanner.service
 
-            # ---------- Upload to VPS ----------
-            - name: Upload package to VPS
-              uses: appleboy/scp-action@v0.1.7
-              with:
-                  host: ${{ secrets.VPS_HOST }}
-                  username: ${{ secrets.VPS_USER }}
-                  key: ${{ secrets.VPS_SSH_KEY }}
-                  port: ${{ secrets.VPS_PORT || 22 }}
-                  source: "${{ env.TAR_NAME }}"
-                  target: "/tmp"
+            echo "[7/7] Health check"
+            # ждём чуть-чуть и проверяем сервис и /api/health
+            sleep 2
+            if ! sudo systemctl is-active --quiet payplanner.service; then
+              echo "Service is not active:"
+              sudo journalctl -u payplanner.service --no-pager -n 200
+              exit 1
+            fi
 
-            # ---------- Deploy on VPS ----------
-            - name: Deploy on VPS
-              uses: appleboy/ssh-action@v1.2.0
-              with:
-                  host: ${{ secrets.VPS_HOST }}
-                  username: ${{ secrets.VPS_USER }}
-                  key: ${{ secrets.VPS_SSH_KEY }}
-                  port: ${{ secrets.VPS_PORT || 22 }}
-                  script: |
-                      set -euo pipefail
-                      TAR="/tmp/${{ env.TAR_NAME }}"
-                      STAGE="/tmp/payplanner-${{ github.sha }}"
-                      BE_DIR="/var/www/payplanner-be"
-                      FE_DIR="/var/www/payplanner-fe"
+            # локально к Kestrel (ожидаем 200)
+            if ! curl -fsS http://127.0.0.1:5000/api/health >/dev/null; then
+              echo "Health check to Kestrel failed"
+              sudo journalctl -u payplanner.service --no-pager -n 200
+              exit 1
+            fi
 
-                      echo "[1/6] Prepare staging"
-                      mkdir -p "$STAGE"
-                      tar -xzf "$TAR" -C "$STAGE"
-
-                      echo "[2/6] Ensure target dirs"
-                      sudo mkdir -p "$BE_DIR" "$FE_DIR"
-
-                      echo "[3/6] Rsync backend -> $BE_DIR"
-                      sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
-
-                      echo "[4/6] Rsync frontend -> $FE_DIR"
-                      sudo rsync -a --delete "$STAGE/fe/" "$FE_DIR/"
-
-                      echo "[5/6] Permissions"
-                      sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
-
-                      echo "[6/6] Restart service"
-                      sudo systemctl daemon-reload || true
-                      sudo systemctl restart payplanner.service
-
-                      sleep 2
-                      sudo systemctl is-active --quiet payplanner.service && echo "Service active" || (sudo journalctl -u payplanner.service --no-pager -n 100; exit 1)
-
-                      rm -rf "$STAGE" "$TAR"
+            # уборка
+            rm -rf "$STAGE" "$TAR"
