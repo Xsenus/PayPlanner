@@ -1,13 +1,13 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.AspNetCore.Identity;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace PayPlanner.Api.Services;
 
@@ -18,18 +18,17 @@ public class AuthService
     private readonly IEmailService _emailService;
     private readonly IPasswordHasher<User> _passwordHasher;
 
-    public AuthService(
-        PaymentContext context,
-        IConfiguration configuration,
-        IEmailService emailService,
-        IPasswordHasher<User> passwordHasher
-    )
+    public AuthService(PaymentContext context, IConfiguration configuration, IEmailService emailService,
+        IPasswordHasher<User> passwordHasher)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _passwordHasher = passwordHasher;
     }
+
+    private static string NormalizeEmail(string email)
+        => (email ?? string.Empty).Trim().ToLowerInvariant();
 
     private string GenerateJwtToken(User user)
     {
@@ -58,33 +57,37 @@ public class AuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static UserDto MapToDto(User user)
+    private static UserDto MapToDto(User user) => new()
     {
-        return new UserDto
+        Id = user.Id,
+        Email = user.Email,
+        FullName = user.FullName,
+        IsActive = user.IsActive,
+        IsApproved = user.IsApproved,
+        ApprovedAt = user.ApprovedAt,
+        CreatedAt = user.CreatedAt,
+        Role = new RoleDto
         {
-            Id = user.Id,
-            Email = user.Email,
-            FullName = user.FullName,
-            IsActive = user.IsActive,
-            IsApproved = user.IsApproved,
-            ApprovedAt = user.ApprovedAt,
-            CreatedAt = user.CreatedAt,
-            Role = new RoleDto
-            {
-                Id = user.Role?.Id ?? 0,
-                Name = user.Role?.Name ?? "user",
-                Description = user.Role?.Description ?? ""
-            }
-        };
-    }
+            Id = user.Role?.Id ?? 0,
+            Name = user.Role?.Name ?? "user",
+            Description = user.Role?.Description ?? string.Empty
+        }
+    };
 
     public async Task<bool> ApproveUserAsync(int userId, int approvedByUserId)
     {
+        var approverExists = await _context.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Id == approvedByUserId);
+
+        if (!approverExists)
+            return false;
+
         var user = await _context.Users
             .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
-        if (user == null || user.IsApproved)
+        if (user is null || user.IsApproved)
             return false;
 
         user.IsApproved = true;
@@ -98,14 +101,32 @@ public class AuthService
         return true;
     }
 
+    public async Task<bool> RejectUserAsync(int userId, string? reason = null)
+    {
+        var user = await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+            return false;
+
+        await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     public async Task<UserDto?> CreateUserAsync(CreateUserRequest request)
     {
-        if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+        var email = NormalizeEmail(request.Email);
+        if (await _context.Users.AnyAsync(u => u.Email == email))
             return null;
 
         var user = new User
         {
-            Email = request.Email,
+            Email = email,
             FullName = request.FullName,
             RoleId = request.RoleId,
             IsActive = request.IsActive,
@@ -120,10 +141,25 @@ public class AuthService
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        user = await _context.Users
-            .Include(u => u.Role)
-            .FirstAsync(u => u.Id == user.Id);
+        user = await _context.Users.Include(u => u.Role).FirstAsync(u => u.Id == user.Id);
+        return MapToDto(user);
+    }
 
+    public async Task<UserDto?> UpdateUserAsync(int id, UpdateUserRequest request)
+    {
+        var user = await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Id == id);
+
+        if (user == null)
+            return null;
+
+        user.FullName = request.FullName;
+        user.RoleId = request.RoleId;
+        user.IsActive = request.IsActive;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
         return MapToDto(user);
     }
 
@@ -138,12 +174,26 @@ public class AuthService
         return true;
     }
 
+    public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
+    {
+        var q = _context.Users.Include(u => u.Role).AsQueryable();
+
+        if (status == "pending") q = q.Where(u => !u.IsApproved);
+        else if (status == "approved") q = q.Where(u => u.IsApproved);
+
+        var users = await q.OrderByDescending(u => u.CreatedAt).ToListAsync();
+        return users.Select(MapToDto).ToList();
+    }
+
+    public async Task<UserDto?> GetUserByIdAsync(int id)
+    {
+        var user = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == id);
+        return user == null ? null : MapToDto(user);
+    }
+
     public async Task<List<RoleDto>> GetAllRolesAsync()
     {
-        var roles = await _context.Roles
-            .OrderBy(r => r.Name)
-            .ToListAsync();
-
+        var roles = await _context.Roles.OrderBy(r => r.Name).ToListAsync();
         return roles.Select(r => new RoleDto
         {
             Id = r.Id,
@@ -152,40 +202,23 @@ public class AuthService
         }).ToList();
     }
 
-    public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
-    {
-        var query = _context.Users.Include(u => u.Role).AsQueryable();
-
-        if (status == "pending")
-            query = query.Where(u => !u.IsApproved);
-        else if (status == "approved")
-            query = query.Where(u => u.IsApproved);
-
-        var users = await query
-            .OrderByDescending(u => u.CreatedAt)
-            .ToListAsync();
-
-        return users.Select(MapToDto).ToList();
-    }
-
-    public async Task<UserDto?> GetUserByIdAsync(int id)
-    {
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .FirstOrDefaultAsync(u => u.Id == id);
-
-        return user == null ? null : MapToDto(user);
-    }
-
     public async Task<LoginResponse?> LoginAsync(string email, string password)
     {
+        var emailNorm = NormalizeEmail(email);
+
         var user = await _context.Users
             .Include(u => u.Role)
-            .FirstOrDefaultAsync(u => u.Email == email);
+            .FirstOrDefaultAsync(u => u.Email == emailNorm);
 
-        if (user == null || !user.IsActive)
+        // Ќе раскрываем, существует ли пользователь Ч 401
+        if (user == null)
             return null;
 
+        // ѕользователь выключен Ч код дл€ фронта
+        if (!user.IsActive)
+            throw new InvalidOperationException("UserInactive");
+
+        // Ќе одобрен Ч код дл€ фронта
         if (!user.IsApproved)
             throw new InvalidOperationException("PendingApproval");
 
@@ -211,7 +244,9 @@ public class AuthService
 
     public async Task<UserDto?> RegisterAsync(RegisterRequest request)
     {
-        if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+        var email = NormalizeEmail(request.Email);
+
+        if (await _context.Users.AnyAsync(u => u.Email == email))
             return null;
 
         var registrationEnabled = _configuration.GetValue<bool>("Features:RegistrationEnabled", true);
@@ -228,7 +263,7 @@ public class AuthService
 
         var user = new User
         {
-            Email = request.Email,
+            Email = email,
             FullName = request.FullName,
             RoleId = defaultRoleId,
             IsActive = true,
@@ -237,15 +272,12 @@ public class AuthService
             UpdatedAt = DateTime.UtcNow
         };
 
-        // PBKDF2 хеш Ч хэшируем на экземпл€ре пользовател€
         user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        user = await _context.Users
-            .Include(u => u.Role)
-            .FirstAsync(u => u.Id == user.Id);
+        user = await _context.Users.Include(u => u.Role).FirstAsync(u => u.Id == user.Id);
 
         await _emailService.SendRegistrationPendingEmailAsync(user.Email, user.FullName);
 
@@ -259,44 +291,11 @@ public class AuthService
                 .ToListAsync();
 
             foreach (var adminEmail in adminEmails)
-                await _emailService.SendAdminNewRegistrationNotificationAsync(adminEmail, user.FullName, user.Email);
+            {
+                await _emailService.SendAdminNewRegistrationNotificationAsync(
+                    adminEmail, user.FullName, user.Email);
+            }
         }
-
-        return MapToDto(user);
-    }
-
-    public async Task<bool> RejectUserAsync(int userId, string? reason = null)
-    {
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .FirstOrDefaultAsync(u => u.Id == userId);
-
-        if (user == null)
-            return false;
-
-        await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
-
-        _context.Users.Remove(user);
-        await _context.SaveChangesAsync();
-
-        return true;
-    }
-
-    public async Task<UserDto?> UpdateUserAsync(int id, UpdateUserRequest request)
-    {
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .FirstOrDefaultAsync(u => u.Id == id);
-
-        if (user == null)
-            return null;
-
-        user.FullName = request.FullName;
-        user.RoleId = request.RoleId;
-        user.IsActive = request.IsActive;
-        user.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
 
         return MapToDto(user);
     }

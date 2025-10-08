@@ -16,6 +16,7 @@ type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
   const { user, loading } = useAuth();
+
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
@@ -27,12 +28,23 @@ function AppContent() {
     setActiveTab('clientDetail');
   };
 
+  const hardSignOut = () => {
+    try {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('pp.jwt');
+      sessionStorage.removeItem('auth_token');
+    } catch {
+      /* */
+    }
+    location.reload();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-slate-200 border-t-slate-900"></div>
-          <p className="mt-4 text-slate-600">Loading...</p>
+          <p className="mt-4 text-slate-600">Загрузка…</p>
         </div>
       </div>
     );
@@ -60,6 +72,30 @@ function AppContent() {
     );
   }
 
+  if (!user.isApproved) {
+    return <AwaitingApproval onBackToLogin={hardSignOut} />;
+  }
+
+  if (!user.isActive) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">Доступ ограничён</h1>
+          <p className="text-slate-600 mb-6">
+            Ваш аккаунт отключён. Обратитесь к администратору системы.
+          </p>
+          <button
+            onClick={hardSignOut}
+            className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-all">
+            Выйти
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isAdmin = (user?.role?.name ?? '').toLowerCase() === 'admin';
+
   const renderContent = () => {
     switch (activeTab) {
       case 'calendar':
@@ -84,7 +120,18 @@ function AppContent() {
           )
         );
       case 'users':
-        return <Users />;
+        return isAdmin ? (
+          <Users />
+        ) : (
+          <div className="p-8">
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
+                <p className="text-red-700">Нужны права администратора.</p>
+              </div>
+            </div>
+          </div>
+        );
       default:
         return <Calendar onOpenClient={handleOpenClient} />;
     }
@@ -92,7 +139,13 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as Tab)} />
+      <Navigation
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (tab === 'users' && !isAdmin) return;
+          setActiveTab(tab as Tab);
+        }}
+      />
       {renderContent()}
     </div>
   );

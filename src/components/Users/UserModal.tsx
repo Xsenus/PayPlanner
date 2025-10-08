@@ -32,10 +32,10 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
       const data = await authService.getRoles();
       setRoles(data);
       if (data.length > 0 && !user) {
-        setRoleId(data.find(r => r.name === 'user')?.id || data[0].id);
+        setRoleId(data.find((r) => r.name === 'user')?.id || data[0].id);
       }
     } catch (err) {
-      console.error('Error fetching roles:', err);
+      console.error('Ошибка загрузки ролей:', err);
     }
   };
 
@@ -46,24 +46,13 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
 
     try {
       if (user) {
-        await authService.updateUser(user.id, {
-          fullName,
-          roleId,
-          isActive,
-        });
+        await authService.updateUser(user.id, { fullName, roleId, isActive });
       } else {
-        await authService.createUser({
-          email,
-          password,
-          fullName,
-          roleId,
-          isActive,
-        });
+        await authService.createUser({ email, password, fullName, roleId, isActive });
       }
-
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Произошла ошибка');
     } finally {
       setLoading(false);
     }
@@ -74,12 +63,9 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
         <div className="flex items-center justify-between p-6 border-b border-slate-200">
           <h2 className="text-xl font-bold text-slate-900">
-            {user ? 'Edit User' : 'Add New User'}
+            {user ? 'Редактировать пользователя' : 'Новый пользователь'}
           </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -92,9 +78,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Full Name
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Полное имя</label>
             <input
               type="text"
               value={fullName}
@@ -105,9 +89,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Email
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
             <input
               type="email"
               value={email}
@@ -120,9 +102,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
 
           {!user && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Password
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Пароль</label>
               <input
                 type="password"
                 value={password}
@@ -131,23 +111,20 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
                 required
                 minLength={6}
               />
-              <p className="text-xs text-slate-500 mt-1">Minimum 6 characters</p>
+              <p className="text-xs text-slate-500 mt-1">Минимум 6 символов</p>
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Role
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Роль</label>
             <select
               value={roleId}
               onChange={(e) => setRoleId(Number(e.target.value))}
               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
-              required
-            >
+              required>
               {roles.map((role) => (
                 <option key={role.id} value={role.id}>
-                  {role.name.charAt(0).toUpperCase() + role.name.slice(1)} - {role.description}
+                  {role.name.charAt(0).toUpperCase() + role.name.slice(1)} — {role.description}
                 </option>
               ))}
             </select>
@@ -162,7 +139,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
               className="w-4 h-4 text-slate-900 border-slate-300 rounded focus:ring-slate-900"
             />
             <label htmlFor="isActive" className="text-sm font-medium text-slate-700">
-              Active User
+              Активный пользователь
             </label>
           </div>
 
@@ -170,16 +147,14 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              Cancel
+              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
+              Отмена
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Saving...' : user ? 'Update' : 'Create'}
+              className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50">
+              {loading ? 'Сохраняем…' : user ? 'Обновить' : 'Создать'}
             </button>
           </div>
         </form>

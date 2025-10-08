@@ -1,7 +1,17 @@
 import { useState, useEffect } from 'react';
 import { authService, User } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserPlus, Pencil, Trash2, Shield, CheckCircle, XCircle, UserCheck, UserX, Clock } from 'lucide-react';
+import {
+  UserPlus,
+  Pencil,
+  Trash2,
+  Shield,
+  CheckCircle,
+  XCircle,
+  UserCheck,
+  UserX,
+  Clock,
+} from 'lucide-react';
 import { UserModal } from './UserModal';
 
 type FilterTab = 'all' | 'pending' | 'approved';
@@ -26,43 +36,40 @@ export const Users = () => {
       const data = await authService.getUsers(status);
       setUsers(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users');
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить пользователей');
     } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (userId: number) => {
-    if (!confirm('Are you sure you want to approve this user?')) return;
-
+    if (!confirm('Подтвердить одобрение пользователя?')) return;
     try {
       await authService.approveUser(userId);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to approve user');
+      alert(err instanceof Error ? err.message : 'Не удалось одобрить пользователя');
     }
   };
 
   const handleReject = async (userId: number) => {
-    const reason = prompt('Optionally provide a reason for rejection:');
+    const reason = prompt('Укажите причину отклонения (необязательно):');
     if (reason === null) return;
-
     try {
       await authService.rejectUser(userId, reason || undefined);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to reject user');
+      alert(err instanceof Error ? err.message : 'Не удалось отклонить пользователя');
     }
   };
 
   const handleDelete = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
-
+    if (!confirm('Удалить пользователя?')) return;
     try {
       await authService.deleteUser(userId);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete user');
+      alert(err instanceof Error ? err.message : 'Не удалось удалить пользователя');
     }
   };
 
@@ -88,8 +95,10 @@ export const Users = () => {
         <div className="max-w-4xl mx-auto">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
             <Shield className="w-12 h-12 text-red-600 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-red-900 mb-2">Access Denied</h2>
-            <p className="text-red-700">You need admin privileges to access user management.</p>
+            <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
+            <p className="text-red-700">
+              Нужны права администратора для доступа к управлению пользователями.
+            </p>
           </div>
         </div>
       </div>
@@ -102,29 +111,28 @@ export const Users = () => {
         <div className="max-w-6xl mx-auto">
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-slate-900"></div>
-            <p className="mt-4 text-slate-600">Loading users...</p>
+            <p className="mt-4 text-slate-600">Загрузка пользователей…</p>
           </div>
         </div>
       </div>
     );
   }
 
-  const pendingCount = users.filter(u => !u.isApproved).length;
+  const pendingCount = users.filter((u) => !u.isApproved).length;
 
   return (
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">User Management</h1>
-            <p className="text-slate-600 mt-2">Manage users and their roles</p>
+            <h1 className="text-3xl font-bold text-slate-900">Управление пользователями</h1>
+            <p className="text-slate-600 mt-2">Управляйте пользователями и их ролями</p>
           </div>
           <button
             onClick={handleAdd}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
-          >
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
             <UserPlus className="w-5 h-5" />
-            Add User
+            Добавить пользователя
           </button>
         </div>
 
@@ -135,9 +143,8 @@ export const Users = () => {
               filterTab === 'all'
                 ? 'bg-slate-900 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            All Users
+            }`}>
+            Все
           </button>
           <button
             onClick={() => setFilterTab('pending')}
@@ -145,10 +152,9 @@ export const Users = () => {
               filterTab === 'pending'
                 ? 'bg-amber-600 text-white'
                 : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-            }`}
-          >
+            }`}>
             <Clock className="w-4 h-4" />
-            Pending Approval
+            Ожидают одобрения
             {filterTab !== 'pending' && pendingCount > 0 && (
               <span className="bg-amber-600 text-white text-xs px-2 py-0.5 rounded-full">
                 {pendingCount}
@@ -161,9 +167,8 @@ export const Users = () => {
               filterTab === 'approved'
                 ? 'bg-green-600 text-white'
                 : 'bg-green-50 text-green-700 hover:bg-green-100'
-            }`}
-          >
-            Approved Users
+            }`}>
+            Одобренные
           </button>
         </div>
 
@@ -178,12 +183,22 @@ export const Users = () => {
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">User</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Email</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Role</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Status</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Created</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">Actions</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                    Пользователь
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                    Email
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Роль</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                    Статус
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                    Создан
+                  </th>
+                  <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
+                    Действия
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -201,8 +216,7 @@ export const Users = () => {
                             : user.role.name === 'manager'
                             ? 'bg-blue-100 text-blue-700'
                             : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
+                        }`}>
                         {user.role.name}
                       </span>
                     </td>
@@ -210,12 +224,12 @@ export const Users = () => {
                       {user.isActive ? (
                         <span className="inline-flex items-center gap-1 text-green-700">
                           <CheckCircle className="w-4 h-4" />
-                          <span className="text-sm">Active</span>
+                          <span className="text-sm">Активен</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-red-700">
                           <XCircle className="w-4 h-4" />
-                          <span className="text-sm">Inactive</span>
+                          <span className="text-sm">Неактивен</span>
                         </span>
                       )}
                     </td>
@@ -229,18 +243,16 @@ export const Users = () => {
                             <button
                               onClick={() => handleApprove(user.id)}
                               className="flex items-center gap-1 px-3 py-1.5 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
-                              title="Approve user"
-                            >
+                              title="Одобрить пользователя">
                               <UserCheck className="w-4 h-4" />
-                              Approve
+                              Одобрить
                             </button>
                             <button
                               onClick={() => handleReject(user.id)}
                               className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                              title="Reject user"
-                            >
+                              title="Отклонить пользователя">
                               <UserX className="w-4 h-4" />
-                              Reject
+                              Отклонить
                             </button>
                           </>
                         ) : (
@@ -248,15 +260,13 @@ export const Users = () => {
                             <button
                               onClick={() => handleEdit(user)}
                               className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                              title="Edit user"
-                            >
+                              title="Редактировать пользователя">
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDelete(user.id)}
                               className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete user"
-                            >
+                              title="Удалить пользователя">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </>
@@ -272,15 +282,13 @@ export const Users = () => {
           {users.length === 0 && (
             <div className="text-center py-12 text-slate-500">
               <UserPlus className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No users found</p>
+              <p>Пользователи не найдены</p>
             </div>
           )}
         </div>
       </div>
 
-      {showModal && (
-        <UserModal user={selectedUser} onClose={handleModalClose} />
-      )}
+      {showModal && <UserModal user={selectedUser} onClose={handleModalClose} />}
     </div>
   );
 };

@@ -1,5 +1,14 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
+function getAuthToken(): string | null {
+  return (
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('pp.jwt') ||
+    sessionStorage.getItem('auth_token') ||
+    null
+  );
+}
+
 export type DictKind = 'deal-types' | 'income-types' | 'payment-sources' | 'payment-statuses';
 
 export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
@@ -36,12 +45,16 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 export class ApiService {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
+    const token = getAuthToken();
+    const headers: Record<string, string> = {
+      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const response = await fetch(url, {
-      headers: {
-        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
-        ...options?.headers,
-      },
       ...options,
+      headers,
     });
 
     if (!response.ok) {

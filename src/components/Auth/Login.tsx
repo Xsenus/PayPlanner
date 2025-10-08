@@ -1,10 +1,15 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { LogIn, Eye, EyeOff, UserPlus } from 'lucide-react';
+import type { ApiError } from '../../services/authService';
 
 interface LoginProps {
   onShowRegister?: () => void;
   onPendingApproval?: () => void;
+}
+
+function hasCode(e: unknown): e is ApiError {
+  return e instanceof Error && 'code' in e;
 }
 
 export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
@@ -22,13 +27,52 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
 
     try {
       await signIn(email, password);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to sign in';
+    } catch (err: unknown) {
+      if (hasCode(err)) {
+        if (err.code === 'PendingApproval') {
+          onPendingApproval?.();
+          setLoading(false);
+          return;
+        }
+        if (err.code === 'UserInactive') {
+          setError('Ваш аккаунт отключён. Обратитесь к администратору.');
+          setLoading(false);
+          return;
+        }
+      }
 
-      if (errorMessage.includes('PendingApproval') || errorMessage.includes('awaiting')) {
-        onPendingApproval?.();
+      if (err instanceof Error) {
+        const msg = err.message?.trim();
+
+        // fallback: if backend error accidentally passed as JSON string
+        if (msg && msg.startsWith('{')) {
+          try {
+            const p = JSON.parse(msg) as Record<string, unknown>;
+            const code =
+              (typeof p.code === 'string' ? p.code.trim() : undefined) ||
+              (typeof p.title === 'string' ? p.title.trim() : undefined);
+            const detail = typeof p.detail === 'string' ? p.detail.trim() : undefined;
+            if (code === 'PendingApproval') {
+              onPendingApproval?.();
+              setLoading(false);
+              return;
+            }
+            if (code === 'UserInactive') {
+              setError('Ваш аккаунт отключён. Обратитесь к администратору.');
+              setLoading(false);
+              return;
+            }
+            setError(detail || code || 'Не удалось войти. Проверьте email и пароль.');
+            setLoading(false);
+            return;
+          } catch {
+            // ignore and show plain message below
+          }
+        }
+
+        setError(msg || 'Не удалось войти. Проверьте email и пароль.');
       } else {
-        setError(errorMessage);
+        setError('Не удалось войти. Проверьте email и пароль.');
       }
     } finally {
       setLoading(false);
@@ -45,12 +89,8 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
             </div>
           </div>
 
-          <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">
-            Welcome Back
-          </h1>
-          <p className="text-center text-slate-600 mb-8">
-            Sign in to your account to continue
-          </p>
+          <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">Добро пожаловать</h1>
+          <p className="text-center text-slate-600 mb-8">Войдите в аккаунт, чтобы продолжить</p>
 
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
@@ -61,7 +101,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
-                Email Address
+                Email
               </label>
               <input
                 id="email"
@@ -77,7 +117,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
-                Password
+                Пароль
               </label>
               <div className="relative">
                 <input
@@ -86,15 +126,14 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all pr-12"
-                  placeholder="Enter your password"
+                  placeholder="Введите пароль"
                   required
                   autoComplete="current-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                >
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
@@ -103,9 +142,8 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Signing in...' : 'Sign In'}
+              className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              {loading ? 'Входим…' : 'Войти'}
             </button>
           </form>
 
@@ -113,17 +151,18 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
             <div className="mt-6 text-center">
               <button
                 onClick={onShowRegister}
-                className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
-              >
+                className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors">
                 <UserPlus className="w-4 h-4" />
-                <span>Don't have an account? <span className="font-medium">Register</span></span>
+                <span>
+                  Нет аккаунта? <span className="font-medium">Зарегистрироваться</span>
+                </span>
               </button>
             </div>
           )}
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
-          <p>PayPlanner - Payment Management System</p>
+          <p>PayPlanner — система управления платежами</p>
         </div>
       </div>
     </div>

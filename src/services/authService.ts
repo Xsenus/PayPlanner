@@ -1,9 +1,47 @@
+// src/services/authService.ts
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
+// ==== storage helpers (bkwd-compat) ====
+const KEY_MAIN = 'pp_token';
+const KEY_FALLBACKS = ['auth_token', 'pp.jwt'];
+
+function readToken(): string | null {
+  return (
+    localStorage.getItem(KEY_MAIN) ||
+    KEY_FALLBACKS.map((k) => localStorage.getItem(k)).find(Boolean) ||
+    sessionStorage.getItem('auth_token') ||
+    null
+  );
+}
+
+function writeToken(token: string) {
+  try {
+    localStorage.setItem(KEY_MAIN, token);
+    // совместимость с прежними ключами
+    localStorage.setItem('auth_token', token);
+    localStorage.setItem('pp.jwt', token);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearToken() {
+  try {
+    localStorage.removeItem(KEY_MAIN);
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('pp.jwt');
+    sessionStorage.removeItem('auth_token');
+  } catch {
+    /* ignore */
+  }
+}
+
+// ==== types ====
 export interface Role {
   id: number;
   name: string;
-  description: string;
+  description?: string | null;
 }
 
 export interface User {
@@ -13,16 +51,11 @@ export interface User {
   role: Role;
   isActive: boolean;
   isApproved: boolean;
+  createdAt: string; // ISO
   approvedAt?: string | null;
-  createdAt: string;
 }
 
-export interface LoginResponse {
-  token: string;
-  user: User;
-}
-
-export interface CreateUserRequest {
+export interface CreateUserDto {
   email: string;
   password: string;
   fullName: string;
@@ -30,132 +63,169 @@ export interface CreateUserRequest {
   isActive: boolean;
 }
 
-export interface UpdateUserRequest {
-  fullName: string;
-  roleId: number;
-  isActive: boolean;
+export interface UpdateUserDto {
+  fullName?: string;
+  roleId?: number;
+  isActive?: boolean;
 }
 
+export type ApiErrorCode = 'PendingApproval' | 'UserInactive' | 'InvalidCredentials' | string;
+export interface ApiError extends Error {
+  code?: ApiErrorCode;
+}
+
+function makeError(message: string, code?: ApiErrorCode): ApiError {
+  const e = new Error(message) as ApiError;
+  e.code = code;
+  return e;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+type LoginResponse = { token: string; user?: User };
+
 class AuthApiService {
-  private token: string | null = null;
-
-  constructor() {
-    this.token = localStorage.getItem('auth_token');
-  }
-
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    return headers;
+  private authHeaders(): Record<string, string> {
+    const t = readToken();
+    return t ? { Authorization: `Bearer ${t}` } : {};
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...this.getHeaders(),
-        ...options?.headers,
-      },
-    });
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(
-        `HTTP ${response.status} ${response.statusText}${text ? `: ${text}` : ''}`,
-      );
+    const headers: Record<string, string> = {
+      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...this.authHeaders(),
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+
+    const res = await fetch(url, { ...options, headers });
+
+    if (res.ok) {
+      if (res.status === 204) return undefined as T;
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        return (await res.text()) as unknown as T;
+      }
+      return (await res.json()) as T;
     }
 
-    if (response.status === 204) {
-      return undefined as T;
+    // Ошибки — пробуем распарсить тело
+    const raw = await res.text().catch(() => '');
+    let body: unknown = null;
+    try {
+      body = raw ? JSON.parse(raw) : null;
+    } catch {
+      /* ignore */
     }
 
-    return (await response.json()) as T;
+    if (isRecord(body)) {
+      const title = typeof body.title === 'string' ? body.title.trim() : undefined;
+      const detail = typeof body.detail === 'string' ? body.detail.trim() : undefined;
+      const message = typeof body.message === 'string' ? body.message.trim() : undefined;
+      const code: ApiErrorCode | undefined =
+        (typeof body.code === 'string' ? body.code.trim() : undefined) || title;
+
+      if (code === 'PendingApproval')
+        throw makeError('Ваш аккаунт ожидает одобрения администратором.', code);
+      if (code === 'UserInactive')
+        throw makeError('Ваш аккаунт отключён. Обратитесь к администратору.', code);
+      if (code === 'InvalidCredentials' || res.status === 401)
+        throw makeError('Неверный email или пароль.', 'InvalidCredentials');
+
+      if (detail) throw makeError(detail, code);
+      if (message) throw makeError(message, code);
+      if (code) throw makeError(code);
+    }
+
+    if (res.status === 401) throw makeError('Неверный email или пароль.', 'InvalidCredentials');
+    throw makeError(raw || `Ошибка ${res.status} ${res.statusText}`);
   }
 
-  async login(email: string, password: string): Promise<LoginResponse> {
-    const response = await this.request<LoginResponse>('/auth/login', {
+  // ==== auth ====
+  public isAuthenticated(): boolean {
+    return !!readToken();
+  }
+
+  public logout(): void {
+    clearToken();
+  }
+
+  public async getCurrentUser(): Promise<User> {
+    return this.request<User>('/auth/me');
+  }
+
+  /** login: сохраняем токен и сразу пытаемся получить профиль */
+  public async login(email: string, password: string): Promise<LoginResponse> {
+    const resp = await this.request<LoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
 
-    this.token = response.token;
-    localStorage.setItem('auth_token', response.token);
+    if (resp?.token) {
+      writeToken(resp.token);
+    }
 
-    return response;
+    // Если сервер не вернул user в login — дотягиваем /auth/me
+    if (!resp.user) {
+      const me = await this.getCurrentUser();
+      return { token: resp.token, user: me };
+    }
+
+    return resp;
   }
 
-  async getCurrentUser(): Promise<User> {
-    return this.request<User>('/auth/me');
+  /** alias, если где-то уже использовано */
+  public me() {
+    return this.getCurrentUser();
   }
 
-  logout() {
-    this.token = null;
-    localStorage.removeItem('auth_token');
-  }
-
-  isAuthenticated(): boolean {
-    return !!this.token;
-  }
-
-  getToken(): string | null {
-    return this.token;
-  }
-
-  async getUsers(status?: 'pending' | 'approved'): Promise<User[]> {
-    const query = status ? `?status=${status}` : '';
-    return this.request<User[]>(`/users${query}`);
-  }
-
-  async getPendingUsers(): Promise<User[]> {
-    return this.getUsers('pending');
-  }
-
-  async approveUser(id: number): Promise<void> {
-    return this.request<void>(`/admin/users/${id}/approve`, {
+  public async register(data: { fullName: string; email: string; password: string }) {
+    return this.request<unknown>('/auth/register', {
       method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 
-  async rejectUser(id: number, reason?: string): Promise<void> {
-    return this.request<void>(`/admin/users/${id}/reject`, {
-      method: 'POST',
-      body: JSON.stringify({ reason }),
-    });
+  // ==== users (admin) ====
+  public async getUsers(status?: string) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<User[]>(`/users${q}`);
   }
 
-  async getUser(id: number): Promise<User> {
+  public async getUser(id: number) {
     return this.request<User>(`/users/${id}`);
   }
 
-  async createUser(data: CreateUserRequest): Promise<User> {
-    return this.request<User>('/users', {
+  public async createUser(data: CreateUserDto) {
+    return this.request<User>('/users', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  public async updateUser(id: number, data: UpdateUserDto) {
+    return this.request<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  public async deleteUser(id: number) {
+    return this.request<void>(`/users/${id}`, { method: 'DELETE' });
+  }
+
+  public async approveUser(id: number) {
+    return this.request<{ approved: boolean }>(`/users/${id}/approve`, { method: 'POST' });
+  }
+
+  public async rejectUser(id: number, reason?: string) {
+    return this.request<{ rejected: boolean }>(`/users/${id}/reject`, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(reason ? { reason } : {}),
     });
   }
 
-  async updateUser(id: number, data: UpdateUserRequest): Promise<User> {
-    return this.request<User>(`/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteUser(id: number): Promise<void> {
-    return this.request<void>(`/users/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getRoles(): Promise<Role[]> {
-    return this.request<Role[]>('/roles');
+  // ==== roles (admin) ====
+  public async getRoles() {
+    // путь соответствует контроллеру UsersController.GetRoles -> /api/users/roles
+    return this.request<Role[]>('/users/roles');
   }
 }
 

@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { authService, User } from '../services/authService';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { authService, type User } from '../services/authService';
 
 interface AuthContextType {
   user: User | null;
@@ -13,11 +13,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 };
 
@@ -31,11 +30,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
         return;
       }
-
-      const userData = await authService.getCurrentUser();
-      setUser(userData);
+      const me = await authService.getCurrentUser();
+      setUser(me);
     } catch (error) {
-      console.error('Error fetching user:', error);
+      console.error('Ошибка загрузки профиля:', error);
       authService.logout();
       setUser(null);
     }
@@ -50,8 +48,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const response = await authService.login(email, password);
-    setUser(response.user);
+    const resp = await authService.login(email, password);
+    if (resp.user) {
+      setUser(resp.user);
+    } else {
+      const me = await authService.getCurrentUser();
+      setUser(me);
+    }
   };
 
   const signOut = async () => {
@@ -59,15 +62,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
-  const isAdmin = () => {
-    return user?.role?.name === 'admin';
-  };
+  const isAdmin = () => user?.role?.name === 'admin';
+  const isManager = () => user?.role?.name === 'manager' || user?.role?.name === 'admin';
 
-  const isManager = () => {
-    return user?.role?.name === 'manager' || user?.role?.name === 'admin';
-  };
-
-  const value = {
+  const value: AuthContextType = {
     user,
     loading,
     signIn,
