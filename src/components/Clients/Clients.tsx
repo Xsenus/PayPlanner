@@ -11,6 +11,8 @@ import {
   PlusCircle,
   Search,
   X,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -188,6 +190,13 @@ export function Clients() {
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
 
   const [query, setQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    try {
+      return (localStorage.getItem('pp.clients_view') as 'cards' | 'table') || 'cards';
+    } catch {
+      return 'cards';
+    }
+  });
   const filteredClients = useMemo(() => {
     if (!query.trim()) return clients;
     return clients.filter((c) => matchesClient(c, query));
@@ -347,9 +356,18 @@ export function Clients() {
 
   const hasAnyClients = clients.length > 0;
 
+  const handleViewModeChange = (mode: 'cards' | 'table') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('pp.clients_view', mode);
+    } catch {
+      /** */
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-4 sm:p-6">
+      <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
         <div className="mb-6 sm:mb-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-2">
@@ -378,6 +396,30 @@ export function Clients() {
                     <X size={14} />
                   </button>
                 )}
+              </div>
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => handleViewModeChange('cards')}
+                  className={`p-2 rounded transition-colors ${
+                    viewMode === 'cards'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  title="Карточки">
+                  <LayoutGrid size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleViewModeChange('table')}
+                  className={`p-2 rounded transition-colors ${
+                    viewMode === 'table'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  title="Таблица">
+                  <List size={18} />
+                </button>
               </div>
               <button
                 type="button"
@@ -420,6 +462,129 @@ export function Clients() {
                 {t('clear') || 'Очистить поиск'}
               </button>
             )}
+          </div>
+        ) : viewMode === 'table' ? (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Клиент
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Контакты
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Дела
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Действия
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {sortedClients.map((client) => {
+                    const cases = (client.cases ?? []) as ClientCase[];
+                    const totalCases = cases.length;
+                    const counts = cases.reduce<Record<string, number>>((acc, c) => {
+                      const key = (c.status ?? 'unknown').toLowerCase();
+                      acc[key] = (acc[key] ?? 0) + 1;
+                      return acc;
+                    }, {});
+
+                    return (
+                      <tr
+                        key={client.id}
+                        className={`hover:bg-gray-50 transition-colors ${
+                          client.isActive ? '' : 'bg-gray-50 opacity-70'
+                        }`}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                              <Users size={20} className="text-blue-600" />
+                            </div>
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                {highlight(client.name ?? '', query)}
+                              </div>
+                              {client.company && (
+                                <div className="text-sm text-gray-500">
+                                  {highlight(client.company ?? '', query)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm space-y-1">
+                            {client.email && (
+                              <div className="flex items-center gap-2 text-gray-600">
+                                <Mail size={14} />
+                                <span>{highlight(client.email ?? '', query)}</span>
+                              </div>
+                            )}
+                            {client.phone && (
+                              <div className="flex items-center gap-2 text-gray-600">
+                                <Phone size={14} />
+                                <span>{highlightPhone(client.phone ?? '', query)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {Object.entries(counts)
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 3)
+                              .map(([status, count]) => {
+                                const label = caseStatusLabel(status);
+                                return (
+                                  <span
+                                    key={status}
+                                    className={`text-xs px-2 py-1 rounded-full ${statusClasses(
+                                      status,
+                                    )}`}>
+                                    {label} · {count}
+                                  </span>
+                                );
+                              })}
+                            {totalCases === 0 && (
+                              <span className="text-xs text-gray-500">Дел нет</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openAddCase(client.id)}
+                              className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                              title="Добавить дело">
+                              <PlusCircle size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEditClient(client)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title={t('edit')}>
+                              <Edit size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedClientId(client.id)}
+                              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                              title={t('viewDetails')}>
+                              <Eye size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 items-stretch min-h-0">

@@ -498,7 +498,7 @@ export const Dictionaries = () => {
   if (!isAdmin()) {
     return (
       <div className="p-8">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-[calc(100vw-2rem)] mx-auto">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
             <ShieldAlert className="w-12 h-12 text-red-600 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
@@ -513,7 +513,7 @@ export const Dictionaries = () => {
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[calc(100vw-2rem)] mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900">Справочники</h1>
           <p className="text-slate-600 mt-2">Управляйте справочниками системы</p>

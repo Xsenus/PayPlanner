@@ -183,7 +183,7 @@ export function Reports() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="max-w-[calc(100vw-2rem)] mx-auto p-6">
         {/* Заголовки по центру на мобиле + выбор периода */}
         <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="text-center md:text-left">

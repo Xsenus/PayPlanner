@@ -239,7 +239,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="max-w-[calc(100vw-2rem)] mx-auto p-6">
         <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
           <div className="flex items-center gap-2 w-full">
             <button

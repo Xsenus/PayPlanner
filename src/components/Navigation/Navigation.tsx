@@ -8,8 +8,8 @@ import {
   UserCog,
   Shield,
   LogOut,
-  ChevronLeft,
-  ChevronRight,
+  Menu,
+  X,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -28,6 +28,7 @@ const STYLE_ID = 'pp-sidebar-style';
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
   const { signOut, user, isAdmin } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -45,7 +46,6 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       styleEl.textContent = `
         body.pp-with-sidebar {
           padding-left: var(--pp-sidebar-w, ${WIDTH_OPEN});
-          padding-right: max(clamp(12px, 2vw, 24px), env(safe-area-inset-right));
         }
         @media (max-width: 1024px) {
           body.pp-with-sidebar { padding-left: 0 !important; }
@@ -83,25 +83,37 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         id: 'calendar' as const,
         label: t('calendar') ?? 'Календарь',
         icon: Calendar,
-        onClick: () => onTabChange('calendar'),
+        onClick: () => {
+          onTabChange('calendar');
+          setMobileOpen(false);
+        },
       },
       {
         id: 'reports' as const,
         label: t('reports') ?? 'Отчёты',
         icon: BarChart,
-        onClick: () => onTabChange('reports'),
+        onClick: () => {
+          onTabChange('reports');
+          setMobileOpen(false);
+        },
       },
       {
         id: 'calculator' as const,
         label: t('calculator') ?? 'Калькулятор',
         icon: Calculator,
-        onClick: () => onTabChange('calculator'),
+        onClick: () => {
+          onTabChange('calculator');
+          setMobileOpen(false);
+        },
       },
       {
         id: 'clients' as const,
         label: t('clients') ?? 'Клиенты',
         icon: Users,
-        onClick: () => onTabChange('clients'),
+        onClick: () => {
+          onTabChange('clients');
+          setMobileOpen(false);
+        },
       },
       ...(isAdmin()
         ? [
@@ -109,19 +121,28 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               id: 'dictionaries' as const,
               label: t('dictionaries') ?? 'Справочники',
               icon: Settings,
-              onClick: () => onTabChange('dictionaries'),
+              onClick: () => {
+                onTabChange('dictionaries');
+                setMobileOpen(false);
+              },
             },
             {
               id: 'users' as const,
               label: 'Пользователи',
               icon: UserCog,
-              onClick: () => onTabChange('users'),
+              onClick: () => {
+                onTabChange('users');
+                setMobileOpen(false);
+              },
             },
             {
               id: 'roles' as const,
               label: 'Роли',
               icon: Shield,
-              onClick: () => onTabChange('roles'),
+              onClick: () => {
+                onTabChange('roles');
+                setMobileOpen(false);
+              },
             },
           ]
         : []),
@@ -133,45 +154,71 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
   return (
     <>
+      {/* Mobile menu button */}
+      <button
+        onClick={() => setMobileOpen(!mobileOpen)}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-slate-900 text-white shadow-lg"
+        aria-label="Toggle menu">
+        {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       <aside
         className={[
           'fixed left-0 top-0 z-40 h-screen',
           'flex flex-col transition-all duration-300 ease-in-out',
           'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900',
-          'border-r border-slate-700/50 backdrop-blur-sm',
+          'border-r border-slate-700/50',
           sidebarWidthClass,
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
         aria-label={t('navigation') ?? 'Навигация'}>
         <div
           className={[
             'h-16 flex items-center border-b border-slate-700/50',
-            'bg-slate-900/50 backdrop-blur-sm',
+            'bg-slate-900/50',
             collapsed ? 'justify-center px-2' : 'px-5',
           ].join(' ')}>
           {!collapsed ? (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-                <span className="text-white font-bold text-sm">PP</span>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
+                <span className="text-white font-bold">PP</span>
               </div>
-              <div className="text-lg font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent">
+              <div className="text-xl font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent">
                 PayPlanner
               </div>
             </div>
           ) : (
             <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold text-base">PP</span>
+              <span className="text-white font-bold">PP</span>
             </div>
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="absolute -right-3 top-20 rounded-full shadow-lg bg-gradient-to-r from-blue-600 to-blue-700 text-white p-1.5 hover:from-blue-700 hover:to-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 transition-all hover:scale-110"
-          title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
-          aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </button>
+        {/* Desktop toggle button - внутри сайдбара */}
+        <div className="hidden lg:block">
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className={[
+              'w-full py-2 flex items-center justify-center',
+              'text-slate-400 hover:text-white hover:bg-slate-800/50',
+              'border-b border-slate-700/30 transition-all',
+            ].join(' ')}
+            title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
+            <div className="text-xs flex items-center gap-2">
+              {collapsed ? '→' : '← Свернуть'}
+            </div>
+          </button>
+        </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-2">
           <ul className="space-y-1.5">
@@ -198,7 +245,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       ].join(' ')}
                     />
                     {!collapsed && <span className="truncate font-medium text-sm">{tab.label}</span>}
-                    {isActive && (
+                    {isActive && !collapsed && (
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                     )}
                   </button>
@@ -208,50 +255,49 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           </ul>
         </nav>
 
-        <div className="border-t border-slate-700/50 p-3 bg-slate-900/50 backdrop-blur-sm">
-          <div
-            className={
-              collapsed
-                ? 'flex items-center justify-center mb-3'
-                : 'flex flex-col items-center gap-3 mb-3'
-            }>
-            <div
-              className={[
-                'rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center font-semibold text-white shadow-lg',
-                collapsed ? 'h-9 w-9 text-xs' : 'h-10 w-10 text-sm',
-              ].join(' ')}>
-              {(user?.fullName ?? 'U')
-                .split(' ')
-                .map((p) => p.trim()[0])
-                .filter(Boolean)
-                .slice(0, 2)
-                .join('')
-                .toUpperCase()}
-            </div>
-            {!collapsed && (
-              <>
-                <div className="text-sm font-medium text-center truncate max-w-[12rem] text-white">
+        <div className="border-t border-slate-700/50 p-4 bg-slate-900/50">
+          {!collapsed ? (
+            <div className="mb-4 flex items-center gap-3 px-2">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center font-semibold text-white shadow-lg shrink-0">
+                {(user?.fullName ?? 'U')
+                  .split(' ')
+                  .map((p) => p.trim()[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-white truncate">
                   {user?.fullName}
                 </div>
-                <div className="text-xs text-slate-400 text-center">
-                  <span className="px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700/50">
-                    {user?.role?.name}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
+                <div className="text-xs text-slate-400 truncate">{user?.role?.name}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-4 flex justify-center">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center font-semibold text-white shadow-lg text-xs">
+                {(user?.fullName ?? 'U')
+                  .split(' ')
+                  .map((p) => p.trim()[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase()}
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleSignOut}
             className={[
               'w-full flex items-center rounded-lg text-sm transition-all duration-200 group',
               'text-slate-300 hover:bg-red-500/10 hover:text-red-400 border border-slate-700/50 hover:border-red-500/30',
-              collapsed ? 'justify-center p-2.5' : 'justify-center px-3 py-2.5',
+              collapsed ? 'justify-center p-2.5' : 'justify-center gap-2 px-3 py-2.5',
             ].join(' ')}
             title="Выйти">
             <LogOut className="h-4 w-4 group-hover:scale-110 transition-transform" />
-            {!collapsed && <span className="ml-2 font-medium">Выйти</span>}
+            {!collapsed && <span className="font-medium">Выйти</span>}
           </button>
         </div>
       </aside>
