@@ -199,12 +199,40 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Email).HasMaxLength(200).IsRequired();
+
+            entity.Property(e => e.Email)
+                  .HasMaxLength(200)
+                  .IsRequired()
+                  .UseCollation("NOCASE");
+
             entity.Property(e => e.PasswordHash).IsRequired();
             entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
+
+            // --- дополнительные поля профиля ---
+            entity.Property(e => e.FirstName).HasMaxLength(100);
+            entity.Property(e => e.LastName).HasMaxLength(100);
+            entity.Property(e => e.MiddleName).HasMaxLength(100);
+
+            entity.Property(e => e.PhotoUrl).HasMaxLength(500);
+            entity.Property(e => e.PhoneNumber).HasMaxLength(50);
+
+            entity.Property(e => e.WhatsApp).HasMaxLength(100);
+            entity.Property(e => e.Telegram).HasMaxLength(100);
+            entity.Property(e => e.Instagram).HasMaxLength(100);
+            entity.Property(e => e.Messenger).HasMaxLength(100);
+            entity.Property(e => e.Viber).HasMaxLength(100);
+
+            // --- даты как date ---
+            entity.Property(e => e.DateOfBirth).HasColumnType("date");
+            entity.Property(e => e.EmploymentStartDate).HasColumnType("date");
+            entity.Property(e => e.EmploymentEndDate).HasColumnType("date");
+
+            // --- флаги/дефолты ---
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.IsApproved).HasDefaultValue(false);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+            // --- связи ---
             entity.HasOne(e => e.Role)
                   .WithMany(r => r.Users)
                   .HasForeignKey(e => e.RoleId)
@@ -215,19 +243,27 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ApprovedByUserId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- Индексы ----
+            // --- индексы ---
             entity.HasIndex(e => e.Email)
                   .IsUnique()
-                  .HasDatabaseName("idx_users_email");
+                  .HasDatabaseName("IX_Users_Email");
 
-            entity.HasIndex(e => e.RoleId)
-                  .HasDatabaseName("idx_users_role");
+            entity.HasIndex(e => e.RoleId).HasDatabaseName("idx_users_role");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("idx_users_active");
+            entity.HasIndex(e => e.IsApproved).HasDatabaseName("idx_users_approval");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_users_created");
+            entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("idx_users_updated");
+            entity.HasIndex(e => e.ApprovedAt).HasDatabaseName("idx_users_approvedAt");
+            entity.HasIndex(e => e.IsEmployee).HasDatabaseName("idx_users_isemployee");
+            entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
+                  .HasDatabaseName("idx_users_employment_range");
 
-            entity.HasIndex(e => e.IsActive)
-                  .HasDatabaseName("idx_users_active");
-
-            entity.HasIndex(e => e.IsApproved)
-                  .HasDatabaseName("idx_users_approval");
+            // --- проверки целостности ---
+            entity.ToTable(tb =>
+            {
+                tb.HasCheckConstraint("CK_Users_Employment_Range",
+                    "(EmploymentStartDate IS NULL OR EmploymentEndDate IS NULL OR EmploymentStartDate <= EmploymentEndDate)");
+            });
         });
     }
 

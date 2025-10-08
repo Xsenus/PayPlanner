@@ -77,78 +77,32 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
   };
 
-  const tabs = useMemo(
-    () => [
-      {
-        id: 'calendar' as const,
-        label: t('calendar') ?? 'Календарь',
-        icon: Calendar,
-        onClick: () => {
-          onTabChange('calendar');
-          setMobileOpen(false);
-        },
-      },
-      {
-        id: 'reports' as const,
-        label: t('reports') ?? 'Отчёты',
-        icon: BarChart,
-        onClick: () => {
-          onTabChange('reports');
-          setMobileOpen(false);
-        },
-      },
-      {
-        id: 'calculator' as const,
-        label: t('calculator') ?? 'Калькулятор',
-        icon: Calculator,
-        onClick: () => {
-          onTabChange('calculator');
-          setMobileOpen(false);
-        },
-      },
-      {
-        id: 'clients' as const,
-        label: t('clients') ?? 'Клиенты',
-        icon: Users,
-        onClick: () => {
-          onTabChange('clients');
-          setMobileOpen(false);
-        },
-      },
-      ...(isAdmin()
-        ? [
-            {
-              id: 'dictionaries' as const,
-              label: t('dictionaries') ?? 'Справочники',
-              icon: Settings,
-              onClick: () => {
-                onTabChange('dictionaries');
-                setMobileOpen(false);
-              },
-            },
-            {
-              id: 'users' as const,
-              label: 'Пользователи',
-              icon: UserCog,
-              onClick: () => {
-                onTabChange('users');
-                setMobileOpen(false);
-              },
-            },
-            {
-              id: 'roles' as const,
-              label: 'Роли',
-              icon: Shield,
-              onClick: () => {
-                onTabChange('roles');
-                setMobileOpen(false);
-              },
-            },
-          ]
-        : []),
-    ],
-    [onTabChange, isAdmin, t],
+  // Базовые вкладки доступны всем
+  const baseTabs = useMemo(
+    () =>
+      [
+        { id: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar },
+        { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart },
+        { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator },
+        { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users },
+        { id: 'dictionaries' as Tab, label: t('dictionaries') ?? 'Справочники', icon: Settings },
+      ] as const,
+    [t],
   );
+
+  // Админские вкладки добавляем отдельно
+  const adminTabs = useMemo(
+    () =>
+      isAdmin()
+        ? ([
+            { id: 'users' as Tab, label: 'Пользователи', icon: UserCog },
+            { id: 'roles' as Tab, label: 'Роли', icon: Shield },
+          ] as const)
+        : ([] as const),
+    [isAdmin],
+  );
+
+  const tabs = useMemo(() => [...baseTabs, ...adminTabs], [baseTabs, adminTabs]);
 
   const sidebarWidthClass = collapsed ? 'w-20' : 'w-[17rem]';
 
@@ -202,7 +156,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           )}
         </div>
 
-        {/* Desktop toggle button - внутри сайдбара */}
+        {/* Desktop toggle button */}
         <div className="hidden lg:block">
           <button
             type="button"
@@ -214,9 +168,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             ].join(' ')}
             title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
             aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
-            <div className="text-xs flex items-center gap-2">
-              {collapsed ? '→' : '← Свернуть'}
-            </div>
+            <div className="text-xs flex items-center gap-2">{collapsed ? '→' : '← Свернуть'}</div>
           </button>
         </div>
 
@@ -224,11 +176,14 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           <ul className="space-y-1.5">
             {tabs.map((tab) => {
               const Icon = tab.icon;
-              const isActive = activeTab === (tab.id as Tab);
+              const isActive = activeTab === tab.id;
               return (
                 <li key={tab.id}>
                   <button
-                    onClick={tab.onClick}
+                    onClick={() => {
+                      onTabChange(tab.id);
+                      setMobileOpen(false);
+                    }}
                     aria-current={isActive ? 'page' : undefined}
                     title={tab.label}
                     className={[
@@ -244,7 +199,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                         collapsed ? 'h-6 w-6' : 'h-5 w-5',
                       ].join(' ')}
                     />
-                    {!collapsed && <span className="truncate font-medium text-sm">{tab.label}</span>}
+                    {!collapsed && (
+                      <span className="truncate font-medium text-sm">{tab.label}</span>
+                    )}
                     {isActive && !collapsed && (
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                     )}
@@ -268,9 +225,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                   .toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white truncate">
-                  {user?.fullName}
-                </div>
+                <div className="text-sm font-semibold text-white truncate">{user?.fullName}</div>
                 <div className="text-xs text-slate-400 truncate">{user?.role?.name}</div>
               </div>
             </div>

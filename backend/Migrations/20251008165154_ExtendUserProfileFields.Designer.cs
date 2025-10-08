@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayPlanner.Api.Data;
 
@@ -10,9 +11,11 @@ using PayPlanner.Api.Data;
 namespace PayPlanner.Api.Migrations
 {
     [DbContext(typeof(PaymentContext))]
-    partial class PaymentContextModelSnapshot : ModelSnapshot
+    [Migration("20251008165154_ExtendUserProfileFields")]
+    partial class ExtendUserProfileFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.9");
@@ -575,6 +578,8 @@ namespace PayPlanner.Api.Migrations
 
                     b.ToTable("Users", t =>
                         {
+                            t.HasCheckConstraint("CK_Users_DOB_NotFuture", "(DateOfBirth IS NULL OR DateOfBirth <= date('now'))");
+
                             t.HasCheckConstraint("CK_Users_Employment_Range", "(EmploymentStartDate IS NULL OR EmploymentEndDate IS NULL OR EmploymentStartDate <= EmploymentEndDate)");
                         });
                 });

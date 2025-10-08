@@ -62,8 +62,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
-  const isAdmin = () => user?.role?.name === 'admin';
-  const isManager = () => user?.role?.name === 'manager' || user?.role?.name === 'admin';
+  const isAdmin = () => (user?.role?.name ?? '').toLowerCase() === 'admin';
+  const isManager = () => {
+    const r = (user?.role?.name ?? '').toLowerCase();
+    return r === 'manager' || r === 'admin';
+  };
 
   const value: AuthContextType = {
     user,

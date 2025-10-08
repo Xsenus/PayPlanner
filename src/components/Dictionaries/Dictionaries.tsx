@@ -59,18 +59,25 @@ function defaultColor(kind: VisibleKind): string {
 const isValidHexColor = (v: string) => /^#[0-9A-Fa-f]{6}$/.test(v);
 
 function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
+  const description = 'description' in x && typeof x.description === 'string' ? x.description : '';
+  const colorHex =
+    'colorHex' in x && typeof x.colorHex === 'string' ? x.colorHex : defaultColor(kind);
+  const isActive = 'isActive' in x && typeof x.isActive === 'boolean' ? x.isActive : true;
+  const createdAt = 'createdAt' in x ? (x as { createdAt?: string }).createdAt : undefined;
+
   return {
     id: x.id,
     name: x.name,
-    description: x.description ?? '',
-    colorHex: x.colorHex ?? defaultColor(kind),
-    isActive: !!x.isActive,
-    createdAt: x.createdAt,
+    description,
+    colorHex,
+    isActive,
+    createdAt,
   };
 }
 
 export const Dictionaries = () => {
   const { isAdmin } = useAuth();
+  const canEdit = isAdmin(); // админ может создавать/редактировать/удалять
   const [activeTab, setActiveTab] = useState<VisibleKind>('deal-types');
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
     'deal-types': [],
@@ -117,6 +124,7 @@ export const Dictionaries = () => {
   }, [loadKind]);
 
   const addNew = (kind: VisibleKind) => {
+    if (!canEdit) return; // только админам
     setData((prev) => ({
       ...prev,
       [kind]: [
@@ -169,6 +177,7 @@ export const Dictionaries = () => {
     idx: number,
     item: Omit<FullDictItem, 'id' | 'createdAt'>,
   ) {
+    if (!canEdit) return;
     if (!item.name.trim()) return setError('Название не должно быть пустым');
     if (item.colorHex && !isValidHexColor(item.colorHex))
       return setError('Цвет должен быть в формате #RRGGBB');
@@ -205,6 +214,7 @@ export const Dictionaries = () => {
   }
 
   async function saveEdit(kind: VisibleKind, idx: number, item: FullDictItem) {
+    if (!canEdit) return;
     if (!item.name.trim()) return setError('Название не должно быть пустым');
     if (item.colorHex && !isValidHexColor(item.colorHex))
       return setError('Цвет должен быть в формате #RRGGBB');
@@ -242,6 +252,7 @@ export const Dictionaries = () => {
 
   async function doDelete() {
     if (!confirmDelete) return;
+    if (!canEdit) return;
     setBusy(true);
     setError(null);
     try {
@@ -459,7 +470,10 @@ export const Dictionaries = () => {
               className={`inline-block h-3 w-3 rounded-full ${item.isActive ? '' : 'opacity-40'}`}
               style={{ backgroundColor: item.colorHex || defaultColor(kind) }}
             />
-            <div className={`text-sm font-medium ${item.isActive ? 'text-slate-900' : 'text-slate-400'}`}>
+            <div
+              className={`text-sm font-medium ${
+                item.isActive ? 'text-slate-900' : 'text-slate-400'
+              }`}>
               {item.name}
             </div>
             {!item.isActive && (
@@ -469,7 +483,8 @@ export const Dictionaries = () => {
             )}
           </div>
           {item.description.trim() && (
-            <div className={`mt-1.5 text-xs ${item.isActive ? 'text-slate-600' : 'text-slate-400'}`}>
+            <div
+              className={`mt-1.5 text-xs ${item.isActive ? 'text-slate-600' : 'text-slate-400'}`}>
               {item.description}
             </div>
           )}
@@ -480,32 +495,20 @@ export const Dictionaries = () => {
           )}
         </div>
         <div className="col-span-4 lg:col-span-3 flex justify-end gap-2">
-          <button
-            onClick={onEdit}
-            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition">
-            <Pencil className="h-4 w-4" />
-          </button>
-          <button
-            onClick={onDelete}
-            className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAdmin()) {
-    return (
-      <div className="p-8">
-        <div className="max-w-[calc(100vw-2rem)] mx-auto">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <ShieldAlert className="w-12 h-12 text-red-600 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
-            <p className="text-red-700">
-              Нужны права администратора для доступа к управлению справочниками.
-            </p>
-          </div>
+          {canEdit && (
+            <>
+              <button
+                onClick={onEdit}
+                className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition">
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button
+                onClick={onDelete}
+                className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -516,7 +519,16 @@ export const Dictionaries = () => {
       <div className="max-w-[calc(100vw-2rem)] mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900">Справочники</h1>
-          <p className="text-slate-600 mt-2">Управляйте справочниками системы</p>
+          <p className="text-slate-600 mt-2">
+            {canEdit ? 'Управляйте справочниками системы' : 'Просмотр справочников системы'}
+          </p>
+
+          {!canEdit && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+              <ShieldAlert className="w-4 h-4 text-slate-500" />
+              Редактирование доступно только администраторам.
+            </div>
+          )}
         </div>
 
         <div className="mb-6">
@@ -545,12 +557,15 @@ export const Dictionaries = () => {
         <div className={busy ? 'pointer-events-none opacity-70' : ''}>
           <div className="mb-4 flex items-center justify-between">
             <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
-            <button
-              onClick={() => addNew(activeTab)}
-              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">
-              <Plus className="h-4 w-4" />
-              Добавить
-            </button>
+
+            {canEdit && (
+              <button
+                onClick={() => addNew(activeTab)}
+                className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">
+                <Plus className="h-4 w-4" />
+                Добавить
+              </button>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -562,20 +577,37 @@ export const Dictionaries = () => {
                     key={key}
                     item={row.item}
                     kind={activeTab}
-                    onEdit={() => setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))}
-                    onDelete={() => setConfirmDelete({ kind: activeTab, id: row.item.id })}
+                    onEdit={() =>
+                      canEdit && setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))
+                    }
+                    onDelete={() =>
+                      canEdit && setConfirmDelete({ kind: activeTab, id: row.item.id })
+                    }
                   />
                 );
               }
               if (row.mode === 'edit') {
-                return <EditRow key={key} idx={idx} kind={activeTab} item={row.item} />;
+                return canEdit ? (
+                  <EditRow key={key} idx={idx} kind={activeTab} item={row.item} />
+                ) : (
+                  <ViewRow
+                    key={key}
+                    item={row.item}
+                    kind={activeTab}
+                    onEdit={() => {}}
+                    onDelete={() => {}}
+                  />
+                );
               }
-              return <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />;
+              // 'new'
+              return canEdit ? (
+                <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />
+              ) : null;
             })}
           </div>
         </div>
 
-        {confirmDelete && (
+        {canEdit && confirmDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
               <div className="p-6">

@@ -131,18 +131,7 @@ function AppContent() {
           </div>
         );
       case 'clients':
-        return isAdmin ? (
-          <Clients />
-        ) : (
-          <div className="p-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
-                <p className="text-red-700">Нужны права администратора.</p>
-              </div>
-            </div>
-          </div>
-        );
+        return <Clients />;
       case 'roles':
         return isAdmin ? (
           <Roles />
@@ -157,18 +146,7 @@ function AppContent() {
           </div>
         );
       case 'dictionaries':
-        return isAdmin ? (
-          <Dictionaries />
-        ) : (
-          <div className="p-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
-                <p className="text-red-700">Нужны права администратора.</p>
-              </div>
-            </div>
-          </div>
-        );
+        return <Dictionaries />;
       default:
         return <Calendar onOpenClient={handleOpenClient} />;
     }
@@ -179,7 +157,7 @@ function AppContent() {
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab: Tab) => {
-          if ((tab === 'users' || tab === 'roles' || tab === 'dictionaries' || tab === 'clients') && !isAdmin) return;
+          if ((tab === 'users' || tab === 'roles') && !isAdmin) return;
           setActiveTab(tab);
         }}
       />
