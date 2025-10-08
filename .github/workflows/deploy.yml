@@ -37,8 +37,7 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
-      # ---------- Build frontend (Node 20 / Vite, фронт в корне) ----------
-      # Кеш npm только если есть lock-файл
+      # ---------- Build frontend (Node 20 / Vite) ----------
       - name: Setup Node (with cache)
         if: ${{ hashFiles('package-lock.json') != '' }}
         uses: actions/setup-node@v4
@@ -47,14 +46,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
-      # Фолбэк без кеша
       - name: Setup Node (no cache)
         if: ${{ hashFiles('package-lock.json') == '' }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # Установка зависимостей
       - name: Install FE deps (ci)
         if: ${{ hashFiles('package-lock.json') != '' }}
         run: npm ci
@@ -98,6 +95,7 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -euo pipefail
+            set -x
 
             TAR="/tmp/${{ env.TAR_NAME }}"
             STAGE="/tmp/payplanner-${{ github.sha }}"
@@ -111,11 +109,9 @@ jobs:
 
             echo "[2/7] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_DIR" "$BE_DIR/backups"
-            # Права на каталоги (проекты под www-data)
             sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
 
             echo "[3/7] Rsync backend -> $BE_DIR (keep DB & backups)"
-            # НЕ трогаем БД и бэкапы
             sudo rsync -a --delete \
               --exclude "payplanner.db*" \
               --exclude "backups/" \
@@ -131,19 +127,21 @@ jobs:
             sudo systemctl daemon-reload || true
             sudo systemctl restart payplanner.service
 
-            echo "[7/7] Health check"
-            # ждём чуть-чуть и проверяем сервис и /api/health
-            sleep 2
-            if ! sudo systemctl is-active --quiet payplanner.service; then
-              echo "Service is not active:"
-              sudo journalctl -u payplanner.service --no-pager -n 200
-              exit 1
-            fi
-
-            # локально к Kestrel (ожидаем 200)
-            if ! curl -fsS http://127.0.0.1:5000/api/health >/dev/null; then
-              echo "Health check to Kestrel failed"
-              sudo journalctl -u payplanner.service --no-pager -n 200
+            echo "[7/7] Wait for health"
+            # ждём, пока сервис реально начнёт слушать и /api/health отдаст 200
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:5000/api/health >/dev/null; then
+                ok=1
+                echo "Health OK on attempt $i"
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "Health check to Kestrel failed after retries"
+              sudo systemctl status payplanner.service --no-pager || true
+              sudo journalctl -u payplanner.service --no-pager -n 200 || true
               exit 1
             fi
 
