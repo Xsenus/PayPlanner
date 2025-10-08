@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { Navigation } from './components/Navigation/Navigation';
+import Navigation from './components/Navigation/Navigation';
 import { Calendar } from './components/Calendar/Calendar';
 import { Reports } from './components/Reports/Reports';
 import { Calculator } from './components/Calculator/Calculator';
@@ -10,8 +10,8 @@ import { Users } from './components/Users/Users';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
+import type { Tab } from './types/tabs';
 
-type Tab = 'calendar' | 'reports' | 'calculator' | 'clients' | 'clientDetail' | 'users';
 type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
@@ -34,7 +34,7 @@ function AppContent() {
       localStorage.removeItem('pp.jwt');
       sessionStorage.removeItem('auth_token');
     } catch {
-      /* */
+      /** */
     }
     location.reload();
   };
@@ -59,11 +59,9 @@ function AppContent() {
         />
       );
     }
-
     if (authView === 'awaiting') {
       return <AwaitingApproval onBackToLogin={() => setAuthView('login')} />;
     }
-
     return (
       <Login
         onShowRegister={() => setAuthView('register')}
@@ -141,9 +139,9 @@ function AppContent() {
     <div className="min-h-screen bg-gray-50">
       <Navigation
         activeTab={activeTab}
-        onTabChange={(tab) => {
+        onTabChange={(tab: Tab) => {
           if (tab === 'users' && !isAdmin) return;
-          setActiveTab(tab as Tab);
+          setActiveTab(tab);
         }}
       />
       {renderContent()}
