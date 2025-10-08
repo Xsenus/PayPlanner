@@ -48,10 +48,24 @@ export interface User {
   id: number;
   email: string;
   fullName: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  middleName?: string | null;
+  dateOfBirth?: string | null;
+  photoUrl?: string | null;
+  phoneNumber?: string | null;
+  whatsApp?: string | null;
+  telegram?: string | null;
+  instagram?: string | null;
+  messenger?: string | null;
+  viber?: string | null;
+  isEmployee: boolean;
+  employmentStartDate?: string | null;
+  employmentEndDate?: string | null;
   role: Role;
   isActive: boolean;
   isApproved: boolean;
-  createdAt: string; // ISO
+  createdAt: string;
   approvedAt?: string | null;
 }
 
@@ -65,6 +79,20 @@ export interface CreateUserDto {
 
 export interface UpdateUserDto {
   fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  dateOfBirth?: string;
+  photoUrl?: string;
+  phoneNumber?: string;
+  whatsApp?: string;
+  telegram?: string;
+  instagram?: string;
+  messenger?: string;
+  viber?: string;
+  isEmployee?: boolean;
+  employmentStartDate?: string;
+  employmentEndDate?: string;
   roleId?: number;
   isActive?: boolean;
 }

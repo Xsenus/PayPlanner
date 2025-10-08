@@ -533,26 +533,38 @@ export function Clients() {
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-1.5">
-                            {Object.entries(counts)
-                              .sort((a, b) => b[1] - a[1])
-                              .slice(0, 3)
-                              .map(([status, count]) => {
-                                const label = caseStatusLabel(status);
-                                return (
-                                  <span
-                                    key={status}
-                                    className={`text-xs px-2 py-1 rounded-full ${statusClasses(
-                                      status,
-                                    )}`}>
-                                    {label} · {count}
-                                  </span>
-                                );
-                              })}
-                            {totalCases === 0 && (
-                              <span className="text-xs text-gray-500">Дел нет</span>
-                            )}
-                          </div>
+                          {totalCases > 0 ? (
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(counts)
+                                  .sort((a, b) => b[1] - a[1])
+                                  .slice(0, 3)
+                                  .map(([status, count]) => {
+                                    const label = caseStatusLabel(status);
+                                    return (
+                                      <span
+                                        key={status}
+                                        className={`text-xs px-2 py-1 rounded-full ${statusClasses(
+                                          status,
+                                        )}`}>
+                                        {label} · {count}
+                                      </span>
+                                    );
+                                  })}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedClientId(client.id);
+                                  setInitialCaseId('all');
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-700 hover:underline">
+                                Посмотреть все дела →
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">Дел нет</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-1">

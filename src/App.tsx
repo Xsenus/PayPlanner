@@ -104,8 +104,6 @@ function AppContent() {
         return <Reports />;
       case 'calculator':
         return <Calculator />;
-      case 'clients':
-        return <Clients />;
       case 'clientDetail':
         return (
           selectedClientId && (
@@ -122,6 +120,19 @@ function AppContent() {
       case 'users':
         return isAdmin ? (
           <Users />
+        ) : (
+          <div className="p-8">
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
+                <p className="text-red-700">Нужны права администратора.</p>
+              </div>
+            </div>
+          </div>
+        );
+      case 'clients':
+        return isAdmin ? (
+          <Clients />
         ) : (
           <div className="p-8">
             <div className="max-w-4xl mx-auto">
@@ -168,7 +179,7 @@ function AppContent() {
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab: Tab) => {
-          if ((tab === 'users' || tab === 'roles' || tab === 'dictionaries') && !isAdmin) return;
+          if ((tab === 'users' || tab === 'roles' || tab === 'dictionaries' || tab === 'clients') && !isAdmin) return;
           setActiveTab(tab);
         }}
       />
