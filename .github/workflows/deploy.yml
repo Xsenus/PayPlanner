@@ -38,15 +38,30 @@ jobs:
               run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
             # ---------- Build frontend (Node 20 / Vite, фронт в корне) ----------
-            - name: Setup Node
+            # Кеш только если lock-файл есть
+            - name: Setup Node (with cache)
+              if: ${{ hashFiles('package-lock.json') != '' }}
               uses: actions/setup-node@v4
               with:
                   node-version: "20"
                   cache: "npm"
                   cache-dependency-path: package-lock.json
 
-            - name: Install FE deps
+            # Фолбэк без кеша
+            - name: Setup Node (no cache)
+              if: ${{ hashFiles('package-lock.json') == '' }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            # Установка зависимостей: ci если есть lock, иначе install
+            - name: Install FE deps (ci)
+              if: ${{ hashFiles('package-lock.json') != '' }}
               run: npm ci
+
+            - name: Install FE deps (install fallback)
+              if: ${{ hashFiles('package-lock.json') == '' }}
+              run: npm install
 
             - name: Build FE
               run: npm run build
@@ -81,7 +96,6 @@ jobs:
                   port: ${{ secrets.VPS_PORT || 22 }}
                   script: |
                       set -euo pipefail
-
                       TAR="/tmp/${{ env.TAR_NAME }}"
                       STAGE="/tmp/payplanner-${{ github.sha }}"
                       BE_DIR="/var/www/payplanner-be"
