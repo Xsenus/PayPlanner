@@ -38,7 +38,7 @@ jobs:
               run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
             # ---------- Build frontend (Node 20 / Vite, фронт в корне) ----------
-            # Кеш только если lock-файл есть
+            # Кеш npm только если есть lock-файл
             - name: Setup Node (with cache)
               if: ${{ hashFiles('package-lock.json') != '' }}
               uses: actions/setup-node@v4
@@ -54,7 +54,7 @@ jobs:
               with:
                   node-version: "20"
 
-            # Установка зависимостей: ci если есть lock, иначе install
+            # Установка зависимостей
             - name: Install FE deps (ci)
               if: ${{ hashFiles('package-lock.json') != '' }}
               run: npm ci
@@ -64,6 +64,8 @@ jobs:
               run: npm install
 
             - name: Build FE
+              env:
+                  VITE_API_URL: /api
               run: npm run build
 
             - name: Prepare FE artifacts
