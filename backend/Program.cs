@@ -1,15 +1,21 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// JSON
+// ================= JSON =================
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -17,59 +23,92 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-// Swagger
+// ================= Swagger =================
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// ================= DbContext (SQLite) =================
 static string NormalizeSqliteConnection(string raw)
 {
     var b = new SqliteConnectionStringBuilder(raw);
     if (!Path.IsPathRooted(b.DataSource))
-    {
         b.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, b.DataSource));
-    }
     return b.ToString();
 }
 
-// DbContext (SQLite)
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
 builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(normalizedCs));
 
-// Services
-builder.Services.AddScoped<InstallmentService>(); 
-builder.Services.AddHostedService<PaymentStatusUpdater>(); 
-builder.Services.AddHostedService<DatabaseBackupService>(); 
+// ================= Services & Backgrounds =================
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.Configure<PasswordHasherOptions>(opt =>
+{
+    opt.CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV3;
+    opt.IterationCount = 210_000;
+});
+
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<InstallmentService>();
+builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<DatabaseBackupService>();
 builder.Services.AddScoped<StatsSummaryService>();
 
-// CORS
+// ================= CORS =================
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
     });
 });
 
-// Response compression (в т.ч. JSON)
+// ================= Response compression =================
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/json" });
 });
 
-// URLs override
+// ================= JWT Auth =================
+var jwtSection = builder.Configuration.GetSection("Jwt");
+var jwtSecret = jwtSection.GetValue<string>("Secret") ?? "your-secret-key-min-32-characters-long!";
+var jwtIssuer = jwtSection.GetValue<string>("Issuer") ?? "PayPlanner";
+var jwtAudience = jwtSection.GetValue<string>("Audience") ?? "PayPlanner";
+
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(o =>
+    {
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = signingKey,
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2)
+        };
+    });
+
+builder.Services.AddAuthorization(opts =>
+{
+    opts.AddPolicy("Admin", p => p.RequireRole("admin"));
+});
+
+// ================= Urls override =================
 var urls = builder.Configuration["Urls"];
 if (!string.IsNullOrWhiteSpace(urls))
-{
     builder.WebHost.UseUrls(urls);
-}
 
 var app = builder.Build();
 
-// Swagger UI
+// ================= Middleware =================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -78,26 +117,121 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 app.UseResponseCompression();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// DB init
+// ================= DB init & seed =================
 using (var scope = app.Services.CreateScope())
 {
     var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
     await ctx.Database.MigrateAsync();
-    var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>(); 
+
+    var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     var seedClients = cfg.GetValue<bool>("Seed:ClientsAndPayments");
     await SeedDataService.SeedAsync(ctx, seedClients);
 }
 
-// Health
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+// ================= Health =================
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
-// -------------------- PAYMENTS --------------------
+// ======================================================================
+// ============================ AUTH ====================================
+// ======================================================================
+var auth = app.MapGroup("/api/auth");
 
-app.MapGet("/api/payments", async (PaymentContext context, DateTime? from, DateTime? to, int? clientId, int? caseId,
+// Helper: id текущего пользовател€ из токена
+static int? GetUserId(ClaimsPrincipal user)
+    => int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+
+// ѕубличные
+auth.MapPost("/login", async (AuthService svc, LoginRequest req) =>
+{
+    var res = await svc.LoginAsync(req.Email, req.Password);
+    return res is null ? Results.Unauthorized() : Results.Ok(res);
+}).AllowAnonymous();
+
+auth.MapPost("/register", async (AuthService svc, RegisterRequest req) =>
+{
+    var dto = await svc.RegisterAsync(req);
+    return dto is null
+        ? Results.Conflict(new { message = "User with this email already exists" })
+        : Results.Created($"/api/auth/users/{dto.Id}", dto);
+}).AllowAnonymous();
+
+// ѕрофиль
+auth.MapGet("/me", async (AuthService svc, ClaimsPrincipal principal) =>
+{
+    var id = GetUserId(principal);
+    if (id is null) return Results.Unauthorized();
+
+    var user = await svc.GetUserByIdAsync(id.Value);
+    return user is null ? Results.NotFound() : Results.Ok(user);
+}).RequireAuthorization();
+
+// ADMIN
+var admin = auth.MapGroup("/admin").RequireAuthorization("Admin");
+
+admin.MapGet("/users", async (AuthService svc, string? status) =>
+{
+    var users = await svc.GetAllUsersAsync(status);
+    return Results.Ok(users);
+});
+
+admin.MapGet("/users/{id:int}", async (AuthService svc, int id) =>
+{
+    var user = await svc.GetUserByIdAsync(id);
+    return user is null ? Results.NotFound() : Results.Ok(user);
+});
+
+admin.MapPost("/users", async (AuthService svc, CreateUserRequest req) =>
+{
+    var dto = await svc.CreateUserAsync(req);
+    return dto is null
+        ? Results.Conflict(new { message = "User with this email already exists" })
+        : Results.Created($"/api/auth/users/{dto.Id}", dto);
+});
+
+admin.MapPut("/users/{id:int}", async (AuthService svc, int id, UpdateUserRequest req) =>
+{
+    var dto = await svc.UpdateUserAsync(id, req);
+    return dto is null ? Results.NotFound() : Results.Ok(dto);
+});
+
+admin.MapDelete("/users/{id:int}", async (AuthService svc, int id) =>
+{
+    var ok = await svc.DeleteUserAsync(id);
+    return ok ? Results.NoContent() : Results.NotFound();
+});
+
+admin.MapPost("/users/{id:int}/approve", async (AuthService svc, ClaimsPrincipal principal, int id) =>
+{
+    var approverId = GetUserId(principal) ?? 0;
+    var ok = await svc.ApproveUserAsync(id, approverId);
+    return ok ? Results.Ok(new { approved = true }) : Results.NotFound();
+});
+
+admin.MapPost("/users/{id:int}/reject", async (AuthService svc, int id, string? reason) =>
+{
+    var ok = await svc.RejectUserAsync(id, reason);
+    return ok ? Results.Ok(new { rejected = true }) : Results.NotFound();
+});
+
+admin.MapGet("/roles", async (AuthService svc) =>
+{
+    var roles = await svc.GetAllRolesAsync();
+    return Results.Ok(roles);
+});
+
+// ======================================================================
+// ========================= PAYMENTS (CRUD) =============================
+// ======================================================================
+// ¬се эндпоинты ниже требуют авторизации (ограничение на CRUD навешано)
+var paymentsGroup = app.MapGroup("/api/payments").RequireAuthorization();
+
+paymentsGroup.MapGet("", async (PaymentContext context, DateTime? from, DateTime? to, int? clientId, int? caseId,
     CancellationToken ct) =>
 {
     var query = context.Payments
@@ -112,7 +246,7 @@ app.MapGet("/api/payments", async (PaymentContext context, DateTime? from, DateT
     return await query.AsNoTracking().OrderBy(p => p.Date).ToListAsync(ct);
 });
 
-app.MapGet("/api/payments/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
+paymentsGroup.MapGet("/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
 {
     var payment = await context.Payments
         .AsQueryable()
@@ -123,7 +257,7 @@ app.MapGet("/api/payments/{id}", async (PaymentContext context, int id, Cancella
     return payment is not null ? Results.Ok(payment) : Results.NotFound();
 });
 
-app.MapPost("/api/payments", async (PaymentContext context, Payment payment) =>
+paymentsGroup.MapPost("", async (PaymentContext context, Payment payment) =>
 {
     if (payment.IncomeTypeId.HasValue)
     {
@@ -140,7 +274,7 @@ app.MapPost("/api/payments", async (PaymentContext context, Payment payment) =>
     return Results.Created($"/api/payments/{payment.Id}", payment);
 });
 
-app.MapPut("/api/payments/{id}", async (PaymentContext context, int id, Payment payment) =>
+paymentsGroup.MapPut("/{id}", async (PaymentContext context, int id, Payment payment) =>
 {
     var existing = await context.Payments.FindAsync(id);
     if (existing is null) return Results.NotFound();
@@ -175,7 +309,7 @@ app.MapPut("/api/payments/{id}", async (PaymentContext context, int id, Payment 
     return Results.Ok(existing);
 });
 
-app.MapDelete("/api/payments/{id}", async (PaymentContext context, int id) =>
+paymentsGroup.MapDelete("/{id}", async (PaymentContext context, int id) =>
 {
     var payment = await context.Payments.FindAsync(id);
     if (payment is null) return Results.NotFound();
@@ -185,18 +319,17 @@ app.MapDelete("/api/payments/{id}", async (PaymentContext context, int id) =>
     return Results.NoContent();
 });
 
-// -------------------- ACCOUNTS --------------------
-app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId, string? q, bool withDate = false,
+// ===================== ACCOUNTS (подбор счетов) =======================
+var accountsGroup = app.MapGroup("/api/accounts").RequireAuthorization();
+
+accountsGroup.MapGet("", async (PaymentContext db, int? clientId, int? caseId, string? q, bool withDate = false,
     bool dedupe = false, int take = 50, CancellationToken ct = default) =>
 {
     var query = db.Payments.AsNoTracking()
         .Where(p => p.Account != null && p.Account != "");
 
-    if (clientId.HasValue)
-        query = query.Where(p => p.ClientId == clientId.Value);
-
-    if (caseId.HasValue)
-        query = query.Where(p => p.ClientCaseId == caseId.Value);
+    if (clientId.HasValue) query = query.Where(p => p.ClientId == clientId.Value);
+    if (caseId.HasValue) query = query.Where(p => p.ClientCaseId == caseId.Value);
 
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -211,7 +344,6 @@ app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId
             .Select(g => new { Account = g.Key, Count = g.Count() })
             .OrderByDescending(x => x.Count)
             .ThenBy(x => x.Account)
-            //.Take(Math.Clamp(take, 1, 200))
             .Select(x => x.Account)
             .ToListAsync(ct);
 
@@ -222,7 +354,7 @@ app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId
         .Select(p => new
         {
             Account = p.Account!,
-            AccountDate = p.AccountDate, 
+            AccountDate = p.AccountDate,
             SortDate = p.AccountDate ?? p.Date
         });
 
@@ -232,7 +364,6 @@ app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId
     var result = await pairsQuery
         .OrderByDescending(x => x.SortDate)
         .ThenBy(x => x.Account)
-        //.Take(Math.Clamp(take, 1, 500))
         .Select(x => new { account = x.Account, accountDate = x.AccountDate })
         .OrderByDescending(o => o.accountDate)
         .ToListAsync(ct);
@@ -240,11 +371,15 @@ app.MapGet("/api/accounts", async (PaymentContext db, int? clientId, int? caseId
     return Results.Ok(result);
 });
 
-// -------------------- CLIENTS --------------------
-app.MapGet("/api/clients", async (PaymentContext context, CancellationToken ct) =>
-    await context.Clients        .Include(c => c.Cases).AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+// ======================================================================
+// =========================== CLIENTS ==================================
+// ======================================================================
+var clientsGroup = app.MapGroup("/api/clients").RequireAuthorization();
 
-app.MapGet("/api/clients/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
+clientsGroup.MapGet("", async (PaymentContext context, CancellationToken ct) =>
+    await context.Clients.Include(c => c.Cases).AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+
+clientsGroup.MapGet("/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
 {
     var client = await context.Clients
         .Include(c => c.Cases)
@@ -253,7 +388,7 @@ app.MapGet("/api/clients/{id}", async (PaymentContext context, int id, Cancellat
     return client is not null ? Results.Ok(client) : Results.NotFound();
 });
 
-app.MapGet("/api/clients/{id}/stats", async (PaymentContext context, int id, int? caseId, CancellationToken ct) =>
+clientsGroup.MapGet("/{id}/stats", async (PaymentContext context, int id, int? caseId, CancellationToken ct) =>
 {
     var client = await context.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
     if (client is null) return Results.NotFound();
@@ -278,27 +413,27 @@ app.MapGet("/api/clients/{id}/stats", async (PaymentContext context, int id, int
     {
         ClientId = client.Id,
         ClientName = client.Name,
-        TotalIncome = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.Amount),
-        TotalExpenses = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.Amount),
+        TotalIncome = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount),
+        TotalExpenses = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount),
         TotalPayments = payments.Count,
         PaidPayments = payments.Count(p => p.IsPaid),
         PendingPayments = payments.Count(p => !p.IsPaid),
         LastPaymentDate = payments.FirstOrDefault()?.Date,
-        RecentPayments = payments/*.Take(10)*/.ToList()
+        RecentPayments = payments.ToList()
     };
 
     stats.NetAmount = stats.TotalIncome - stats.TotalExpenses;
     return Results.Ok(stats);
 });
 
-app.MapPost("/api/clients", async (PaymentContext context, Client client) =>
+clientsGroup.MapPost("", async (PaymentContext context, Client client) =>
 {
     context.Clients.Add(client);
     await context.SaveChangesAsync();
     return Results.Created($"/api/clients/{client.Id}", client);
 });
 
-app.MapPut("/api/clients/{id}", async (PaymentContext context, int id, Client client) =>
+clientsGroup.MapPut("/{id}", async (PaymentContext context, int id, Client client) =>
 {
     var existing = await context.Clients.FindAsync(id);
     if (existing is null) return Results.NotFound();
@@ -315,19 +450,13 @@ app.MapPut("/api/clients/{id}", async (PaymentContext context, int id, Client cl
     return Results.Ok(existing);
 });
 
-app.MapDelete("/api/clients/{id}", async (PaymentContext context, int id) =>
+clientsGroup.MapDelete("/{id}", async (PaymentContext context, int id) =>
 {
     var client = await context.Clients.FindAsync(id);
     if (client is null) return Results.NotFound();
 
-    // —охран€ем историю: обнул€ем ссылки у платежей, дела удал€тс€ каскадом
     var payments = await context.Payments.Where(p => p.ClientId == id).ToListAsync();
-    foreach (var p in payments)
-    {
-        p.ClientId = null;
-        p.ClientCaseId = null;
-    }
-
+    foreach (var p in payments) { p.ClientId = null; p.ClientCaseId = null; }
     await context.SaveChangesAsync();
 
     context.Clients.Remove(client);
@@ -335,9 +464,12 @@ app.MapDelete("/api/clients/{id}", async (PaymentContext context, int id) =>
     return Results.NoContent();
 });
 
-// -------------------- CLIENT CASES --------------------
+// ======================================================================
+// ========================= CLIENT CASES ================================
+// ======================================================================
+var casesGroup = app.MapGroup("/api/cases").RequireAuthorization();
 
-app.MapGet("/api/cases", async (PaymentContext context, int? clientId, CancellationToken ct) =>
+casesGroup.MapGet("", async (PaymentContext context, int? clientId, CancellationToken ct) =>
 {
     var q = context.ClientCases
         .Include(c => c.Client)
@@ -351,7 +483,7 @@ app.MapGet("/api/cases", async (PaymentContext context, int? clientId, Cancellat
         .ToListAsync(ct);
 });
 
-app.MapGet("/api/cases/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
+casesGroup.MapGet("/{id}", async (PaymentContext context, int id, CancellationToken ct) =>
 {
     var entity = await context.ClientCases
         .Include(c => c.Client)
@@ -362,14 +494,14 @@ app.MapGet("/api/cases/{id}", async (PaymentContext context, int id, Cancellatio
     return entity is not null ? Results.Ok(entity) : Results.NotFound();
 });
 
-app.MapPost("/api/cases", async (PaymentContext context, ClientCase model) =>
+casesGroup.MapPost("", async (PaymentContext context, ClientCase model) =>
 {
     context.ClientCases.Add(model);
     await context.SaveChangesAsync();
     return Results.Created($"/api/cases/{model.Id}", model);
 });
 
-app.MapPut("/api/cases/{id}", async (PaymentContext context, int id, ClientCase model) =>
+casesGroup.MapPut("/{id}", async (PaymentContext context, int id, ClientCase model) =>
 {
     var existing = await context.ClientCases.FindAsync(id);
     if (existing is null) return Results.NotFound();
@@ -383,12 +515,11 @@ app.MapPut("/api/cases/{id}", async (PaymentContext context, int id, ClientCase 
     return Results.Ok(existing);
 });
 
-app.MapDelete("/api/cases/{id}", async (PaymentContext context, int id) =>
+casesGroup.MapDelete("/{id}", async (PaymentContext context, int id) =>
 {
     var existing = await context.ClientCases.FindAsync(id);
     if (existing is null) return Results.NotFound();
 
-    // ѕри удалении дела Ч отцепл€ем платежи (ClientCaseId = null)
     var payments = await context.Payments.Where(p => p.ClientCaseId == id).ToListAsync();
     foreach (var p in payments) p.ClientCaseId = null;
 
@@ -399,34 +530,85 @@ app.MapDelete("/api/cases/{id}", async (PaymentContext context, int id) =>
     return Results.NoContent();
 });
 
-// -------------------- DICTIONARIES --------------------
+// ======================================================================
+// =========================== DICTIONARIES ==============================
+// ======================================================================
+// „тение словарей Ч авторизованные пользователи
+var dictRead = app.MapGroup("/api/dictionaries").RequireAuthorization();
 
-app.MapGet("/api/dictionaries/deal-types", async (PaymentContext context, CancellationToken ct) =>
-    await context.DealTypes/*.Where(d => d.IsActive)*/.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct));
+dictRead.MapGet("/deal-types", async (PaymentContext context, CancellationToken ct) =>
+    await context.DealTypes.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct));
 
-app.MapGet("/api/dictionaries/income-types", async (PaymentContext context, PaymentType? paymentType, bool? isActive,
-    CancellationToken ct) =>
+dictRead.MapGet("/income-types", async (PaymentContext context, PaymentType? paymentType, bool? isActive, CancellationToken ct) =>
 {
     var q = context.IncomeTypes.AsNoTracking().AsQueryable();
 
-    if (isActive.HasValue)
-        q = q.Where(i => i.IsActive == isActive.Value);
-
-    if (paymentType.HasValue)
-        q = q.Where(i => i.PaymentType == paymentType.Value);
+    if (isActive.HasValue) q = q.Where(i => i.IsActive == isActive.Value);
+    if (paymentType.HasValue) q = q.Where(i => i.PaymentType == paymentType.Value);
 
     return await q.OrderBy(i => i.Name).ToListAsync(ct);
 });
 
-app.MapGet("/api/dictionaries/payment-sources", async (PaymentContext context, CancellationToken ct) =>
-    await context.PaymentSources/*.Where(p => p.IsActive)*/.AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct));
+dictRead.MapGet("/payment-sources", async (PaymentContext context, CancellationToken ct) =>
+    await context.PaymentSources.AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct));
 
-app.MapGet("/api/dictionaries/payment-statuses", async (PaymentContext context, CancellationToken ct) =>
-    await context.PaymentStatuses/*.Where(s => s.IsActive)*/.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct));
+dictRead.MapGet("/payment-statuses", async (PaymentContext context, CancellationToken ct) =>
+    await context.PaymentStatuses.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct));
 
-// -------------------- STATS --------------------
+// јдминские операции со словар€ми Ч только admin
+var dictAdmin = app.MapGroup("/api/dictionaries").RequireAuthorization("Admin");
 
-app.MapGet("/api/stats/month", async (PaymentContext context, int year, int month, CancellationToken ct) =>
+dictAdmin
+    .MapDictionaryCrud<DealType>("/deal-types", (e, m) =>
+    {
+        e.Name = m.Name;
+        e.Description = m.Description;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        return e;
+    })
+    .MapToggleActive<DealType>();
+
+dictAdmin
+    .MapDictionaryCrud<IncomeType>("/income-types", (e, m) =>
+    {
+        e.Name = m.Name;
+        e.Description = m.Description;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        e.PaymentType = m.PaymentType;
+        return e;
+    })
+    .MapToggleActive<IncomeType>();
+
+dictAdmin
+    .MapDictionaryCrud<PaymentSource>("/payment-sources", (e, m) =>
+    {
+        e.Name = m.Name;
+        e.Description = m.Description;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        return e;
+    })
+    .MapToggleActive<PaymentSource>();
+
+dictAdmin
+    .MapDictionaryCrud<PaymentStatusEntity>("/payment-statuses", (e, m) =>
+    {
+        e.Name = m.Name;
+        e.Description = m.Description;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        return e;
+    })
+    .MapToggleActive<PaymentStatusEntity>();
+
+// ======================================================================
+// ============================= STATS ==================================
+// ======================================================================
+var stats = app.MapGroup("/api/stats").RequireAuthorization();
+
+stats.MapGet("/month", async (PaymentContext context, int year, int month, CancellationToken ct) =>
 {
     var startDate = new DateTime(year, month, 1);
     var endDate = startDate.AddMonths(1).AddDays(-1);
@@ -438,12 +620,11 @@ app.MapGet("/api/stats/month", async (PaymentContext context, int year, int mont
 
     var income = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount);
     var expense = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount);
-    //var profit = income - expense;
+    var profit = income - expense;
 
     var completed = payments.Count(p => p.IsPaid);
     var pending = payments.Count(p => !p.IsPaid && p.Status == PaymentStatus.Pending);
     var overdue = payments.Count(p => !p.IsPaid && p.Status == PaymentStatus.Overdue);
-    var profit = payments.Count(p => p.Status == PaymentStatus.Completed);
     var total = payments.Count;
 
     var completionRate = total > 0 ? (double)completed / total * 100 : 0;
@@ -464,16 +645,20 @@ app.MapGet("/api/stats/month", async (PaymentContext context, int year, int mont
     };
 });
 
-// -------------------- INSTALLMENTS --------------------
+// ======================================================================
+// =========================== INSTALLMENTS ==============================
+// ======================================================================
+app.MapPost("/api/installments/calc",
+    (InstallmentService service, InstallmentRequest request) => service.CalculateInstallment(request)
+).RequireAuthorization();
 
-app.MapPost("/api/installments/calc", (InstallmentService service, InstallmentRequest request) =>
-    service.CalculateInstallment(request));
-
-// ==================== V1: те же CRUD, но фильтры без пагинации ====================
-var apiV1 = app.MapGroup("/api/v1");
+// ======================================================================
+// ============================== V1 ====================================
+// ======================================================================
+var apiV1 = app.MapGroup("/api/v1").RequireAuthorization();
 
 // ---- payments (V1) ----
-var paymentsV1 = apiV1.MapGroup("/payments");
+var paymentsV1 = apiV1.MapGroup("/payments").RequireAuthorization();
 
 paymentsV1.MapGet("", async (
     PaymentContext db,
@@ -567,14 +752,14 @@ paymentsV1.MapDelete("/{id:int}", async (PaymentContext db, int id) =>
 });
 
 // ---- clients (V1) ----
-var clientsV1 = apiV1.MapGroup("/clients");
+var clientsV1 = apiV1.MapGroup("/clients").RequireAuthorization();
 
 clientsV1.MapGet("", async (
     PaymentContext db,
-    string? search,          // Name/Email/Phone/Company/Address
-    bool? isActive,          // фильтр активности
-    string? sortBy,          // name|createdAt (по умолчанию name)
-    string? sortDir,         // asc|desc (по умолчанию asc)
+    string? search,
+    bool? isActive,
+    string? sortBy,
+    string? sortDir,
     CancellationToken ct
 ) =>
 {
@@ -634,15 +819,15 @@ clientsV1.MapDelete("/{id:int}", async (PaymentContext db, int id) =>
 });
 
 // ---- cases (V1) ----
-var casesV1 = apiV1.MapGroup("/cases");
+var casesV1 = apiV1.MapGroup("/cases").RequireAuthorization();
 
 casesV1.MapGet("", async (
     PaymentContext db,
     int? clientId,
     ClientCaseStatus? status,
-    string? search,          // Title/Description
-    string? sortBy,          // createdAt|title|status (по умолчанию createdAt)
-    string? sortDir,         // asc|desc (по умолчанию asc)
+    string? search,
+    string? sortBy,
+    string? sortDir,
     CancellationToken ct
 ) =>
 {
@@ -699,11 +884,13 @@ casesV1.MapDelete("/{id:int}", async (PaymentContext db, int id) =>
     return Results.NoContent();
 });
 
-// ==================== V2: PAGED payments/cases/clients ====================
-var apiV2 = app.MapGroup("/api/v2");
+// ======================================================================
+// ============================== V2 (Paged) ============================
+// ======================================================================
+var apiV2 = app.MapGroup("/api/v2").RequireAuthorization();
 
 // ---- payments (V2) ----
-var paymentsV2 = apiV2.MapGroup("/payments");
+var paymentsV2 = apiV2.MapGroup("/payments").RequireAuthorization();
 
 paymentsV2.MapGet("", async (
     PaymentContext db,
@@ -711,9 +898,9 @@ paymentsV2.MapGet("", async (
     DateTime? to,
     int? clientId,
     int? caseId,
-    string? search,          // Description/Notes
-    string? sortBy,          // date|amount|createdAt (по умолчанию date)
-    string? sortDir,         // asc|desc (по умолчанию asc)
+    string? search,
+    string? sortBy,
+    string? sortDir,
     int page = 1,
     int pageSize = 50,
     CancellationToken ct = default) =>
@@ -807,15 +994,15 @@ paymentsV2.MapDelete("/{id:int}", async (PaymentContext db, int id) =>
 });
 
 // ---- cases (V2) ----
-var casesV2 = apiV2.MapGroup("/cases");
+var casesV2 = apiV2.MapGroup("/cases").RequireAuthorization();
 
 casesV2.MapGet("", async (
     PaymentContext db,
     int? clientId,
-    ClientCaseStatus? status, // фильтр по статусу
-    string? search,           // Title/Description
-    string? sortBy,           // createdAt|title|status (по умолчанию createdAt)
-    string? sortDir,          // asc|desc (по умолчанию asc)
+    ClientCaseStatus? status,
+    string? search,
+    string? sortBy,
+    string? sortDir,
     int page = 1,
     int pageSize = 50,
     CancellationToken ct = default) =>
@@ -883,14 +1070,14 @@ casesV2.MapDelete("/{id:int}", async (PaymentContext db, int id) =>
 });
 
 // ---- clients (V2) ----
-var clientsV2 = apiV2.MapGroup("/clients");
+var clientsV2 = apiV2.MapGroup("/clients").RequireAuthorization();
 
 clientsV2.MapGet("", async (
     PaymentContext context,
-    string? search,          // ищем по Name/Email/Phone/Company/Address
-    bool? isActive,          // фильтр активности
-    string? sortBy,          // name|createdAt (по умолчанию name)
-    string? sortDir,         // asc|desc (по умолчанию asc)
+    string? search,
+    bool? isActive,
+    string? sortBy,
+    string? sortDir,
     int page = 1,
     int pageSize = 50,
     CancellationToken ct = default) =>
@@ -918,7 +1105,7 @@ clientsV2.MapGet("", async (
     q = (sortBy?.ToLowerInvariant()) switch
     {
         "createdat" => (desc ? q.OrderByDescending(c => c.CreatedAt) : q.OrderBy(c => c.CreatedAt)),
-        _ => (desc ? q.OrderByDescending(c => c.Name) : q.OrderBy(c => c.Name)), // name по умолчанию
+        _ => (desc ? q.OrderByDescending(c => c.Name) : q.OrderBy(c => c.Name)),
     };
 
     var total = await q.CountAsync(ct);
@@ -974,138 +1161,7 @@ clientsV2.MapDelete("/{id:int}", async (PaymentContext context, int id) =>
     return Results.NoContent();
 });
 
-// ==================== V2: STATS Ч сводка по нескольким мес€цам ====================
-// ѕример: /api/v2/stats/months?startYear=2025&startMonth=1&endYear=2025&endMonth=6
-var statsV2 = apiV2.MapGroup("/stats");
-
-statsV2.MapGet("/summary", async (StatsSummaryService svc, int? clientId, int? caseId, DateTime? from, DateTime? to,
-    string? period, PaymentType? type, PaymentStatus? status, string? q, CancellationToken ct) =>
-{
-    var res = await svc.GetAsync(clientId, caseId, from, to, period, type, status, q, ct);
-    return Results.Ok(res);
-});
-
-statsV2.MapGet("/months", async (PaymentContext context, int startYear, int startMonth, int endYear, int endMonth,
-    CancellationToken ct) =>
-{
-    if (startMonth is < 1 or > 12 || endMonth is < 1 or > 12)
-        return Results.BadRequest("ћес€ц должен быть 1..12.");
-
-    var start = new DateTime(startYear, startMonth, 1);
-    var end = new DateTime(endYear, endMonth, 1).AddMonths(1).AddDays(-1);
-
-    if (end < start) return Results.BadRequest("ƒиапазон мес€цев указан некорректно.");
-
-    var rows = await context.Payments
-        .Where(p => p.Date >= start && p.Date <= end)
-        .Select(p => new
-        {
-            Year = p.Date.Year,
-            Month = p.Date.Month,
-            p.Type,
-            p.IsPaid,
-            p.Status,
-            p.Amount
-        })
-        .AsNoTracking()
-        .ToListAsync(ct);
-
-    var grouped = rows
-        .GroupBy(x => new { x.Year, x.Month })
-        .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
-        .Select(g =>
-        {
-            var total = g.Count();
-            var completed = g.Count(x => x.IsPaid);
-            var pending = g.Count(x => !x.IsPaid && x.Status == PaymentStatus.Pending);
-            var overdue = g.Count(x => !x.IsPaid && x.Status == PaymentStatus.Overdue);
-
-            var income = g.Where(x => x.Type == PaymentType.Income && x.IsPaid).Sum(x => x.Amount);
-            var expense = g.Where(x => x.Type == PaymentType.Expense && x.IsPaid).Sum(x => x.Amount);
-            var profit = income - expense;
-            var rate = total > 0 ? Math.Round((double)completed / total * 100, 1) : 0;
-
-            return new
-            {
-                year = g.Key.Year,
-                month = g.Key.Month,
-                period = $"{g.Key.Year:D4}-{g.Key.Month:D2}",
-                income,
-                expense,
-                profit,
-                completionRate = rate,
-                counts = new
-                {
-                    completed,
-                    pending,
-                    overdue,
-                    total
-                }
-            };
-        })
-        .ToList();
-
-    return Results.Ok(new
-    {
-        start = new { year = start.Year, month = start.Month },
-        end = new { year = end.Year, month = end.Month },
-        items = grouped
-    });
-});
-
-// ==================== DICTIONARIES ADMIN: CRUD + toggle-active ====================
-var dictsGroup = app.MapGroup("/api/dictionaries");
-
-// DealType
-dictsGroup
-    .MapDictionaryCrud<DealType>("/deal-types", (e, m) =>
-    {
-        e.Name = m.Name;
-        e.Description = m.Description;
-        e.ColorHex = m.ColorHex;
-        e.IsActive = m.IsActive;
-        return e;
-    })
-    .MapToggleActive<DealType>();
-
-// IncomeType
-dictsGroup
-    .MapDictionaryCrud<IncomeType>("/income-types", (e, m) =>
-    {
-        e.Name = m.Name;
-        e.Description = m.Description;
-        e.ColorHex = m.ColorHex;
-        e.IsActive = m.IsActive; 
-        e.PaymentType = m.PaymentType;
-        return e;
-    })
-    .MapToggleActive<IncomeType>();
-
-// PaymentSource
-dictsGroup
-    .MapDictionaryCrud<PaymentSource>("/payment-sources", (e, m) =>
-    {
-        e.Name = m.Name;
-        e.Description = m.Description;
-        e.ColorHex = m.ColorHex;
-        e.IsActive = m.IsActive;
-        return e;
-    })
-    .MapToggleActive<PaymentSource>();
-
-// PaymentStatusEntity
-dictsGroup
-    .MapDictionaryCrud<PaymentStatusEntity>("/payment-statuses", (e, m) =>
-    {
-        e.Name = m.Name;
-        e.Description = m.Description;
-        e.ColorHex = m.ColorHex;
-        e.IsActive = m.IsActive;
-        return e;
-    })
-    .MapToggleActive<PaymentStatusEntity>();
-
-// SPA fallback
+// ======================================================================
 app.MapFallbackToFile("index.html");
 
 app.Run();

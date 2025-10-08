@@ -4,7 +4,7 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Data;
 
 /// <summary>
-/// Контекст базы данных для модуля управления платежами и клиентами.
+/// Контекст базы данных для модуля управления платежами, клиентами и пользователями.
 /// Содержит DbSet для всех основных сущностей и конфигурацию индексов.
 /// </summary>
 public class PaymentContext : DbContext
@@ -28,7 +28,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
-            entity.Property(p => p.Account).HasMaxLength(120); 
+            entity.Property(p => p.Account).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
 
             // Связь с клиентом
@@ -181,6 +181,54 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentStatuses_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentStatuses_IsActive_Name");
         });
+
+        // ================== Roles ==================
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
+
+            // ---- Индексы ----
+            entity.HasIndex(e => e.Name)
+                  .IsUnique()
+                  .HasDatabaseName("IX_Roles_Name");
+        });
+
+        // ================== Users ==================
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Email).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.PasswordHash).IsRequired();
+            entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.IsApproved).HasDefaultValue(false);
+
+            entity.HasOne(e => e.Role)
+                  .WithMany(r => r.Users)
+                  .HasForeignKey(e => e.RoleId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ApprovedBy)
+                  .WithMany()
+                  .HasForeignKey(e => e.ApprovedByUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            // ---- Индексы ----
+            entity.HasIndex(e => e.Email)
+                  .IsUnique()
+                  .HasDatabaseName("idx_users_email");
+
+            entity.HasIndex(e => e.RoleId)
+                  .HasDatabaseName("idx_users_role");
+
+            entity.HasIndex(e => e.IsActive)
+                  .HasDatabaseName("idx_users_active");
+
+            entity.HasIndex(e => e.IsApproved)
+                  .HasDatabaseName("idx_users_approval");
+        });
     }
 
     /// <summary>
@@ -217,4 +265,14 @@ public class PaymentContext : DbContext
     /// Статусы платежей.
     /// </summary>
     public DbSet<PaymentStatusEntity> PaymentStatuses { get; set; }
+
+    /// <summary>
+    /// Роли пользователей.
+    /// </summary>
+    public DbSet<Role> Roles { get; set; }
+
+    /// <summary>
+    /// Пользователи.
+    /// </summary>
+    public DbSet<User> Users { get; set; }
 }

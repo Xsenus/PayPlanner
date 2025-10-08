@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace PayPlanner.Api.Models
+namespace PayPlanner.Api.Models.Requests
 {
     /// <summary>
     /// <para>¬ходные параметры дл€ расчЄта рассрочки (аннуитет).</para>

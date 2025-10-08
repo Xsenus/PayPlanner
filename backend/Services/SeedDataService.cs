@@ -1,11 +1,14 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using System;
 
 namespace PayPlanner.Api.Services
 {
     /// <summary>
-    /// Первичное наполнение БД тестовыми данными: клиенты, дела, словари и привязанные платежи.
+    /// Первичное наполнение БД тестовыми данными: роли, админ, клиенты, дела, словари и платежи.
     /// </summary>
     public static class SeedDataService
     {
@@ -20,7 +23,10 @@ namespace PayPlanner.Api.Services
         /// </param>
         public static async Task SeedAsync(PaymentContext context, bool seedClientsAndPayments = false)
         {
-            await SeedDictionariesAsync(context);
+            await SeedDictionariesAsync(context);          // словари
+            await SeedRolesAsync(context);                  // роли (admin, user)
+            await SeedAdminUserAsync(context);              // администратор
+
             var shouldSeedClients = seedClientsAndPayments || !await context.Clients.AnyAsync();
             if (shouldSeedClients)
             {
@@ -28,6 +34,9 @@ namespace PayPlanner.Api.Services
             }
         }
 
+        /// <summary>
+        /// Словари (deal types, income types, sources, statuses).
+        /// </summary>
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
             if (!await context.DealTypes.AnyAsync())
@@ -43,59 +52,26 @@ namespace PayPlanner.Api.Services
                 context.DealTypes.AddRange(dealTypes);
                 await context.SaveChangesAsync();
             }
-            else
-            {
-                //await EnsureDealTypeAsync(context, "Консалтинг", "#3B82F6", "Профессиональные консультационные услуги");
-                //await EnsureDealTypeAsync(context, "Продажа товара", "#10B981", "Прямая продажа продукции");
-                //await EnsureDealTypeAsync(context, "Подписка", "#8B5CF6", "Регулярные подписные услуги");
-                //await EnsureDealTypeAsync(context, "Проект", "#F59E0B", "Работа по проекту с фиксированным объёмом");
-                //await EnsureDealTypeAsync(context, "Обслуживание", "#EF4444", "Долгосрочные контракты на обслуживание");
-            }
 
             if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Income).AnyAsync())
             {
                 var incomeTypes = new[]
                 {
                     new IncomeType { Name = "Доход от услуг",  Description = "Доход от оказания услуг",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
-                    //new IncomeType { Name = "Продажа товаров",  Description = "Доход от продажи товаров",     ColorHex = "#059669", PaymentType = PaymentType.Income },
-                    //new IncomeType { Name = "Лицензирование",   Description = "Доход от лицензий и роялти",   ColorHex = "#047857", PaymentType = PaymentType.Income },
-                    //new IncomeType { Name = "Проценты",         Description = "Доход от процентов/инвестиций",ColorHex = "#065F46", PaymentType = PaymentType.Income },
                     new IncomeType { Name = "Прочие доходы",    Description = "Прочие доходы",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
                 };
                 context.IncomeTypes.AddRange(incomeTypes);
                 await context.SaveChangesAsync();
             }
-            else
-            {
-                //await EnsureIncomeTypeAsync(context, "Доход от услуг", "#10B981", PaymentType.Income, "Доход от оказания услуг");
-                //await EnsureIncomeTypeAsync(context, "Продажа товаров", "#059669", PaymentType.Income, "Доход от продажи товаров");
-                //await EnsureIncomeTypeAsync(context, "Лицензирование", "#047857", PaymentType.Income, "Доход от лицензий и роялти");
-                //await EnsureIncomeTypeAsync(context, "Проценты", "#065F46", PaymentType.Income, "Доход от процентов/инвестиций");
-                //await EnsureIncomeTypeAsync(context, "Прочие доходы", "#064E3B", PaymentType.Income, "Прочие доходы");
-            }
 
             if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Expense).AnyAsync())
             {
-                var incomeTypes = new[]
+                var expenseTypes = new[]
                 {
-                    //new IncomeType { Name = "Госпошлина",       Description = "Государственные пошлины",      ColorHex = "#EF4444", PaymentType = PaymentType.Expense },
-                    //new IncomeType { Name = "Нотариус",         Description = "Нотариальные расходы",         ColorHex = "#F43F5E", PaymentType = PaymentType.Expense },
-                    //new IncomeType { Name = "Софт/подписки",    Description = "Подписки на ПО и сервисы",     ColorHex = "#DC2626", PaymentType = PaymentType.Expense },
-                    //new IncomeType { Name = "Инфраструктура",   Description = "Серверы/хостинг/CDN",          ColorHex = "#B91C1C", PaymentType = PaymentType.Expense },
-                    //new IncomeType { Name = "Маркетинг",        Description = "Реклама и продвижение",        ColorHex = "#7F1D1D", PaymentType = PaymentType.Expense },
-                    new IncomeType { Name = "Прочие расходы",   Description = "Иные расходы",                 ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
+                    new IncomeType { Name = "Прочие расходы", Description = "Иные расходы", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
                 };
-                context.IncomeTypes.AddRange(incomeTypes);
+                context.IncomeTypes.AddRange(expenseTypes);
                 await context.SaveChangesAsync();
-            }
-            else
-            {
-                //await EnsureIncomeTypeAsync(context, "Госпошлина", "#EF4444", PaymentType.Expense, "Государственные пошлины");
-                //await EnsureIncomeTypeAsync(context, "Нотариус", "#F43F5E", PaymentType.Expense, "Нотариальные расходы");
-                //await EnsureIncomeTypeAsync(context, "Софт/подписки", "#DC2626", PaymentType.Expense, "Подписки на ПО и сервисы");
-                //await EnsureIncomeTypeAsync(context, "Инфраструктура", "#B91C1C", PaymentType.Expense, "Серверы/хостинг/CDN");
-                //await EnsureIncomeTypeAsync(context, "Маркетинг", "#7F1D1D", PaymentType.Expense, "Реклама и продвижение");
-                //await EnsureIncomeTypeAsync(context, "Прочие расходы", "#991B1B", PaymentType.Expense, "Иные расходы");
             }
 
             if (!await context.PaymentSources.AnyAsync())
@@ -111,33 +87,102 @@ namespace PayPlanner.Api.Services
                 context.PaymentSources.AddRange(paymentSources);
                 await context.SaveChangesAsync();
             }
-            else
-            {
-                //await EnsurePaymentSourceAsync(context, "Банковский перевод", "#6B7280", "Прямой банковский перевод");
-                //await EnsurePaymentSourceAsync(context, "Банковская карта", "#4B5563", "Оплата банковской картой");
-                //await EnsurePaymentSourceAsync(context, "PayPal", "#374151", "Оплата через PayPal");
-                //await EnsurePaymentSourceAsync(context, "Чек", "#1F2937", "Оплата банковским чеком");
-                //await EnsurePaymentSourceAsync(context, "Наличные", "#111827", "Оплата наличными");
-            }
 
             if (!await context.PaymentStatuses.AnyAsync())
             {
                 var paymentStatuses = new[]
                 {
-                    new PaymentStatusEntity { Name = "Ожидается", Description = "Оплата находится в ожидании",  ColorHex = "#F59E0B" },
-                    new PaymentStatusEntity { Name = "Выполнено", Description = "Оплата успешно завершена",    ColorHex = "#10B981" },
-                    new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",          ColorHex = "#EF4444" }
+                    new PaymentStatusEntity { Name = "Ожидается",  Description = "Оплата находится в ожидании",  ColorHex = "#F59E0B" },
+                    new PaymentStatusEntity { Name = "Выполнено",  Description = "Оплата успешно завершена",    ColorHex = "#10B981" },
+                    new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",           ColorHex = "#EF4444" }
                 };
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
             }
-            else
-            {
-                //await EnsurePaymentStatusAsync(context, "Ожидается", "#F59E0B", "Оплата находится в ожидании");
-                //await EnsurePaymentStatusAsync(context, "Выполнено", "#10B981", "Оплата успешно завершена");
-                //await EnsurePaymentStatusAsync(context, "Просрочено", "#EF4444", "Срок оплаты истёк");
-            }
         }
+
+        /// <summary>
+        /// Создаёт роли admin и user (если отсутствуют).
+        /// </summary>
+        private static async Task SeedRolesAsync(PaymentContext context)
+        {
+            if (!await context.Roles.AnyAsync())
+            {
+                context.Roles.AddRange(
+                    new Role { Name = "admin", Description = "Администратор системы" },
+                    new Role { Name = "user", Description = "Обычный пользователь" }
+                );
+                await context.SaveChangesAsync();
+                return;
+            }
+
+            // Досеять недостающие роли
+            await EnsureRoleAsync(context, "admin", "Администратор системы");
+            await EnsureRoleAsync(context, "user", "Обычный пользователь");
+        }
+
+        /// <summary>
+        /// Создаёт пользователя-администратора, если его ещё нет.
+        /// Email/пароль можно задать через переменные окружения:
+        ///  - PAYPLANNER_ADMIN_EMAIL (по умолчанию admin@payplanner.local)
+        ///  - PAYPLANNER_ADMIN_PASSWORD (по умолчанию ChangeMeAdmin#12345)
+        ///  - PAYPLANNER_ADMIN_FULLNAME (по умолчанию System Administrator)
+        /// </summary>
+        private static async Task SeedAdminUserAsync(PaymentContext context)
+        {
+            var adminEmail = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_EMAIL") ?? "admin@payplanner.local";
+            var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "123456";
+            var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "System Administrator";
+
+            // уже есть админ с таким email?
+            var exists = await context.Users.AsNoTracking().AnyAsync(u => u.Email == adminEmail);
+            if (exists) return;
+
+            // получаем id роли admin (после SeedRolesAsync она должна существовать)
+            var adminRoleId = await context.Roles
+                .Where(r => r.Name == "admin")
+                .Select(r => r.Id)
+                .FirstOrDefaultAsync();
+
+            if (adminRoleId == 0)
+            {
+                // подстраховка — досоздаём роль
+                context.Roles.Add(new Role { Name = "admin", Description = "Администратор системы" });
+                await context.SaveChangesAsync();
+                adminRoleId = await context.Roles.Where(r => r.Name == "admin").Select(r => r.Id).FirstAsync();
+            }
+
+            // настраиваем PasswordHasher под те же параметры, что и в Program.cs
+            var hasher = new PasswordHasher<User>(
+                Options.Create(new PasswordHasherOptions
+                {
+                    CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV3,
+                    IterationCount = 210_000
+                })
+            );
+
+            var now = DateTime.UtcNow;
+
+            var admin = new User
+            {
+                Email = adminEmail,
+                FullName = adminFullName,
+                RoleId = adminRoleId,
+                IsActive = true,
+                IsApproved = true,
+                ApprovedAt = now,
+                ApprovedByUserId = null,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            admin.PasswordHash = hasher.HashPassword(admin, adminPassword);
+
+            context.Users.Add(admin);
+            await context.SaveChangesAsync();
+        }
+
+        // ----------------------- ниже — сид клиентов/дел, платежей -----------------------
 
         private static async Task SeedClientsCasesPaymentsAsync(PaymentContext context)
         {
@@ -383,12 +428,14 @@ namespace PayPlanner.Api.Services
             }
         }
 
-        private static async Task EnsureDealTypeAsync(PaymentContext ctx, string name, string color, string? desc)
+        // ----------------------- helpers -----------------------
+
+        private static async Task EnsureRoleAsync(PaymentContext ctx, string name, string? desc)
         {
-            var exists = await ctx.DealTypes.AsNoTracking().AnyAsync(x => x.Name == name);
+            var exists = await ctx.Roles.AsNoTracking().AnyAsync(r => r.Name == name);
             if (!exists)
             {
-                ctx.DealTypes.Add(new DealType { Name = name, ColorHex = color, Description = desc ?? string.Empty, IsActive = true });
+                ctx.Roles.Add(new Role { Name = name, Description = desc ?? string.Empty });
                 await ctx.SaveChangesAsync();
             }
         }

@@ -1,4 +1,6 @@
 ﻿using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services
 {

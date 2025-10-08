@@ -1,4 +1,4 @@
-namespace PayPlanner.Api.Models
+namespace PayPlanner.Api.Models.Responses
 {
     /// <summary>
     /// <para>Результат расчёта: переплата, итог к оплате и построчный график.</para>

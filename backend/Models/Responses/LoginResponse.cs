@@ -1,4 +1,4 @@
-namespace PayPlanner.Api.Models;
+namespace PayPlanner.Api.Models.Responses;
 
 public class LoginResponse
 {

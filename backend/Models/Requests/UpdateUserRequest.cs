@@ -1,4 +1,4 @@
-namespace PayPlanner.Api.Models;
+namespace PayPlanner.Api.Models.Requests;
 
 public class UpdateUserRequest
 {
