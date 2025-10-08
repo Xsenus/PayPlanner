@@ -92,7 +92,7 @@ export const Roles = () => {
 
   return (
     <div className="p-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900">Управление ролями</h1>
