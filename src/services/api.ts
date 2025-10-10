@@ -1,3 +1,17 @@
+import type {
+  Payment,
+  Client,
+  ClientStats,
+  ClientCase,
+  DealType,
+  IncomeType,
+  PaymentSource,
+  PaymentStatusEntity,
+  ClientPayload,
+  Company,
+  CompanyPayload,
+} from '../types';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
 function getAuthToken(): string | null {
@@ -177,16 +191,40 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
-  async createClient(client: Omit<Client, 'id' | 'createdAt'>) {
+  async createClient(client: ClientPayload) {
     return this.request<Client>('/clients', { method: 'POST', body: JSON.stringify(client) });
   }
 
-  async updateClient(id: number, client: Omit<Client, 'id' | 'createdAt'>) {
+  async updateClient(id: number, client: ClientPayload) {
     return this.request<Client>(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(client) });
   }
 
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Companies =====
+  async getCompanies() {
+    return this.request<Company[]>('/companies');
+  }
+
+  async getCompany(id: number) {
+    return this.request<Company>(`/companies/${id}`);
+  }
+
+  async createCompany(company: CompanyPayload) {
+    return this.request<Company>('/companies', { method: 'POST', body: JSON.stringify(company) });
+  }
+
+  async updateCompany(id: number, company: CompanyPayload) {
+    return this.request<Company>(`/companies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(company),
+    });
+  }
+
+  async deleteCompany(id: number) {
+    return this.request<void>(`/companies/${id}`, { method: 'DELETE' });
   }
 
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)

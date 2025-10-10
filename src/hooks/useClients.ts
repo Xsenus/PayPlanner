@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import type { Client, ClientStats, ClientCase } from '../types';
+import type { Client, ClientStats, ClientCase, ClientPayload, CompanyLink } from '../types';
 
 function isClient(x: unknown): x is Client {
   if (typeof x !== 'object' || x === null) return false;
@@ -22,6 +22,7 @@ export function useClients() {
       const normalized: Client[] = (base as Client[]).map((c) => ({
         ...c,
         cases: (c.cases ?? []) as ClientCase[],
+        companies: (c.companies ?? []) as CompanyLink[],
       }));
 
       setClients(normalized);
@@ -36,12 +37,16 @@ export function useClients() {
     void fetchClients();
   }, [fetchClients]);
 
-  const createClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
+  const createClient = async (client: ClientPayload) => {
     try {
       const created = await apiService.createClient(client);
       if (isClient(created)) {
         setClients((prev) => [
-          { ...created, cases: (created.cases ?? []) as ClientCase[] },
+          {
+            ...created,
+            cases: (created.cases ?? []) as ClientCase[],
+            companies: (created.companies ?? []) as CompanyLink[],
+          },
           ...prev,
         ]);
       } else {
@@ -53,14 +58,18 @@ export function useClients() {
     }
   };
 
-  const updateClient = async (id: number, patch: Omit<Client, 'id' | 'createdAt'>) => {
+  const updateClient = async (id: number, patch: ClientPayload) => {
     try {
       const updated = await apiService.updateClient(id, patch);
       if (isClient(updated)) {
         setClients((prev) =>
           prev.map((c) =>
             c.id === id
-              ? { ...updated, cases: (updated.cases ?? c.cases ?? []) as ClientCase[] }
+              ? {
+                  ...updated,
+                  cases: (updated.cases ?? c.cases ?? []) as ClientCase[],
+                  companies: (updated.companies ?? []) as CompanyLink[],
+                }
               : c,
           ),
         );

@@ -11,18 +11,22 @@ import {
   Edit,
   Trash2,
   PlusCircle,
+  Mail,
+  Phone,
+  Building,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { PaymentModal } from '../Calendar/PaymentModal';
-import type { Payment, ClientCase } from '../../types';
+import type { Payment, ClientCase, Client } from '../../types';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { useTranslation } from '../../hooks/useTranslation';
 
 interface ClientDetailProps {
   clientId: number;
@@ -80,7 +84,9 @@ const MIN_DATE = '1900-01-01';
 const MAX_DATE = '2100-12-31';
 
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
+  const { t } = useTranslation();
   const [clientName, setClientName] = useState<string>('...');
+  const [clientInfo, setClientInfo] = useState<Client | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
 
   const { cases: serverCases } = useClientCases(clientId);
@@ -107,10 +113,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     apiService
       .getClient(clientId)
       .then((c) => {
-        if (alive) setClientName(c.name ?? `Client #${clientId}`);
+        if (!alive) return;
+        setClientInfo(c);
+        setClientName(c.name ?? `Client #${clientId}`);
       })
       .catch(() => {
-        if (alive) setClientName(`Client #${clientId}`);
+        if (!alive) return;
+        setClientInfo(null);
+        setClientName(`Client #${clientId}`);
       });
     return () => {
       alive = false;
@@ -264,6 +274,55 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </button>
           </div>
         </div>
+
+        {clientInfo && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 text-sm text-gray-700">
+                {clientInfo.email && (
+                  <div className="flex items-center gap-2">
+                    <Mail size={16} className="text-blue-600" />
+                    <span className="truncate">{clientInfo.email}</span>
+                  </div>
+                )}
+                {clientInfo.phone && (
+                  <div className="flex items-center gap-2">
+                    <Phone size={16} className="text-blue-600" />
+                    <span className="truncate">{clientInfo.phone}</span>
+                  </div>
+                )}
+                {clientInfo.address && (
+                  <div className="flex items-center gap-2">
+                    <Building size={16} className="text-blue-600" />
+                    <span className="truncate">{clientInfo.address}</span>
+                  </div>
+                )}
+                {clientInfo.notes && (
+                  <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    {clientInfo.notes}
+                  </p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">{t('companies')}</p>
+                {clientInfo.companies && clientInfo.companies.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {clientInfo.companies.map((company) => (
+                      <span
+                        key={`detail-${clientId}-${company.id}`}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-full">
+                        {company.name}
+                        {company.role ? <span className="text-blue-500">• {company.role}</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">{t('noCompaniesYet')}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <TwoTypeStats
           clientId={clientId}

@@ -2,17 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
-import type { Client } from '../../types';
+import type { Client, ClientPayload, Company } from '../../types';
 
 interface ClientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<void>;
+  onSubmit: (client: ClientPayload) => Promise<void>;
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
+  availableCompanies: Company[];
 }
 
-export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: ClientModalProps) {
+export function ClientModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  onDelete,
+  client,
+  availableCompanies,
+}: ClientModalProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -25,6 +33,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
     notes: '',
     isActive: true,
   });
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -46,6 +55,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
         notes: client.notes || '',
         isActive: client.isActive,
       });
+      setSelectedCompanyIds((client.companies ?? []).map((c) => c.id));
     } else {
       setFormData({
         name: '',
@@ -56,6 +66,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
         notes: '',
         isActive: true,
       });
+      setSelectedCompanyIds([]);
     }
   }, [client]);
 
@@ -64,7 +75,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
     e.stopPropagation();
     setLoading(true);
     try {
-      await onSubmit(formData);
+      await onSubmit({ ...formData, companyIds: selectedCompanyIds });
       onClose();
     } catch (error) {
       console.error('Failed to save client:', error);
@@ -80,6 +91,14 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
       ...prev,
       [name]: el.type === 'checkbox' ? el.checked : value,
     }));
+  };
+
+  const toggleCompany = (companyId: number) => {
+    setSelectedCompanyIds((prev) =>
+      prev.includes(companyId)
+        ? prev.filter((id) => id !== companyId)
+        : [...prev, companyId],
+    );
   };
 
   const handleDelete = async () => {
@@ -189,6 +208,43 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder={t('additionalInfo')}
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('companies')}</label>
+              {availableCompanies.length === 0 ? (
+                <p className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-300 rounded-lg p-3">
+                  {t('noCompaniesYet')}
+                </p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y">
+                  {availableCompanies.map((company) => {
+                    const checked = selectedCompanyIds.includes(company.id);
+                    return (
+                      <label
+                        key={company.id}
+                        className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          checked={checked}
+                          onChange={() => toggleCompany(company.id)}
+                        />
+                        <span className="text-sm text-gray-700">
+                          <span className="font-medium text-gray-900 block">{company.name}</span>
+                          {company.email ? (
+                            <span className="text-xs text-gray-500 block">{company.email}</span>
+                          ) : null}
+                          {company.phone ? (
+                            <span className="text-xs text-gray-500 block">{company.phone}</span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">{t('selectCompanies')}</p>
             </div>
 
             <div className="flex items-center">
