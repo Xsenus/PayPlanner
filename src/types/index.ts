@@ -1,5 +1,13 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 
+export interface CompanyLink {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  role?: string;
+}
+
 export interface Client {
   id: number;
   name: string;
@@ -11,6 +19,18 @@ export interface Client {
   createdAt: string;
   isActive: boolean;
   cases?: ClientCase[];
+  companies?: CompanyLink[];
+}
+
+export interface ClientPayload {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  address: string;
+  notes: string;
+  isActive: boolean;
+  companyIds: number[];
 }
 
 export interface ClientCase {
@@ -20,6 +40,36 @@ export interface ClientCase {
   description?: string;
   status: string;
   createdAt: string;
+}
+
+export interface CompanyMember {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  role?: string;
+}
+
+export interface Company {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  notes: string;
+  isActive: boolean;
+  createdAt: string;
+  members?: CompanyMember[];
+}
+
+export interface CompanyPayload {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  notes: string;
+  isActive: boolean;
+  clientIds: number[];
 }
 
 export interface DealType {
