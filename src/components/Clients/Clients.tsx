@@ -31,7 +31,7 @@ export function Clients() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
         <div className="flex flex-wrap items-center gap-4 border-b border-gray-200 pb-4 mb-6">
           <h1 className="text-3xl font-bold text-gray-900">{t('clients')}</h1>
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full p-1">

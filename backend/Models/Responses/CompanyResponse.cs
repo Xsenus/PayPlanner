@@ -7,9 +7,14 @@ public class CompanyResponse
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string ShortName { get; set; } = string.Empty;
+    public string Inn { get; set; } = string.Empty;
+    public string Kpp { get; set; } = string.Empty;
+    public string ActualAddress { get; set; } = string.Empty;
+    public string LegalAddress { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
-    public string Address { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public bool IsActive { get; set; }

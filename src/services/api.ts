@@ -10,6 +10,7 @@ import type {
   ClientPayload,
   Company,
   CompanyPayload,
+  CompanyLookupResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
@@ -225,6 +226,20 @@ export class ApiService {
 
   async deleteCompany(id: number) {
     return this.request<void>(`/companies/${id}`, { method: 'DELETE' });
+  }
+
+  async lookupCompanyByInn(inn: string) {
+    if (!inn) return null;
+    try {
+      return await this.request<CompanyLookupResponse>(
+        `/companies/lookup/inn/${encodeURIComponent(inn)}`,
+      );
+    } catch (err) {
+      if (err instanceof Error && /HTTP\s+404/.test(err.message)) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)

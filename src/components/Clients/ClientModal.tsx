@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { Client, ClientPayload, Company } from '../../types';
 
@@ -34,6 +34,7 @@ export function ClientModal({
     isActive: true,
   });
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
+  const [showCompanyDictionary, setShowCompanyDictionary] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -68,6 +69,7 @@ export function ClientModal({
       });
       setSelectedCompanyIds([]);
     }
+    setShowCompanyDictionary(false);
   }, [client]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -100,6 +102,16 @@ export function ClientModal({
         : [...prev, companyId],
     );
   };
+
+  const sortedCompanies = [...availableCompanies].sort((a, b) => {
+    const aName = a.shortName || a.name || a.fullName || '';
+    const bName = b.shortName || b.name || b.fullName || '';
+    return aName.localeCompare(bName, undefined, { sensitivity: 'base' });
+  });
+
+  const selectedCompanies = selectedCompanyIds
+    .map((id) => availableCompanies.find((companyItem) => companyItem.id === id))
+    .filter((companyItem): companyItem is Company => Boolean(companyItem));
 
   const handleDelete = async () => {
     if (!client || !onDelete) return;
@@ -176,7 +188,7 @@ export function ClientModal({
               />
             </div>
 
-            <div>
+            <div className="hidden">
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('company')}</label>
               <input
                 type="text"
@@ -212,39 +224,79 @@ export function ClientModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('companies')}</label>
-              {availableCompanies.length === 0 ? (
-                <p className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-300 rounded-lg p-3">
-                  {t('noCompaniesYet')}
-                </p>
-              ) : (
-                <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y">
-                  {availableCompanies.map((company) => {
-                    const checked = selectedCompanyIds.includes(company.id);
-                    return (
-                      <label
-                        key={company.id}
-                        className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          checked={checked}
-                          onChange={() => toggleCompany(company.id)}
-                        />
-                        <span className="text-sm text-gray-700">
-                          <span className="font-medium text-gray-900 block">{company.name}</span>
-                          {company.email ? (
-                            <span className="text-xs text-gray-500 block">{company.email}</span>
-                          ) : null}
-                          {company.phone ? (
-                            <span className="text-xs text-gray-500 block">{company.phone}</span>
-                          ) : null}
-                        </span>
-                      </label>
-                    );
-                  })}
+              {selectedCompanies.length > 0 ? (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {selectedCompanies.map((companyItem) => (
+                    <span
+                      key={companyItem.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-sm text-blue-700">
+                      <span>{companyItem.shortName || companyItem.name || companyItem.fullName}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleCompany(companyItem.id)}
+                        className="rounded-full p-1 hover:bg-blue-100"
+                        aria-label={t('delete') || 'Удалить'}>
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
                 </div>
+              ) : (
+                <p className="mb-3 text-sm text-gray-500">
+                  {t('noCompaniesSelected') || t('selectCompanies')}
+                </p>
               )}
-              <p className="text-xs text-gray-500 mt-1">{t('selectCompanies')}</p>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCompanyDictionary((prev) => !prev)}
+                  className="inline-flex items-center gap-2 self-start rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  {showCompanyDictionary ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                  {showCompanyDictionary
+                    ? t('hideDictionary') || 'Скрыть справочник'
+                    : t('openCompaniesDictionary') || 'Открыть справочник'}
+                </button>
+
+                {showCompanyDictionary && (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+                    {sortedCompanies.length === 0 ? (
+                      <p className="p-3 text-sm text-gray-500">{t('noCompaniesYet')}</p>
+                    ) : (
+                      sortedCompanies.map((companyItem) => {
+                        const isSelected = selectedCompanyIds.includes(companyItem.id);
+                        return (
+                          <button
+                            type="button"
+                            key={companyItem.id}
+                            onClick={() => toggleCompany(companyItem.id)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm transition ${
+                              isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
+                            }`}>
+                            <span>
+                              <span className="block font-medium text-gray-900">
+                                {companyItem.shortName || companyItem.name || companyItem.fullName}
+                              </span>
+                              {companyItem.inn ? (
+                                <span className="text-xs text-gray-500">ИНН {companyItem.inn}</span>
+                              ) : null}
+                            </span>
+                            {isSelected ? <Check className="h-4 w-4 text-blue-600" /> : null}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-1 text-xs text-gray-500">
+                {t('selectCompaniesFromDictionaryHint') || t('selectCompanies')}
+              </p>
             </div>
 
             <div className="flex items-center">

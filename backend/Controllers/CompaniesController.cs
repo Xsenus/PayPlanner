@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -14,16 +16,27 @@ namespace PayPlanner.Api.Controllers;
 public class CompaniesController : ControllerBase
 {
     private readonly PaymentContext _db;
-    public CompaniesController(PaymentContext db) => _db = db;
+    private readonly IDadataService _dadataService;
+
+    public CompaniesController(PaymentContext db, IDadataService dadataService)
+    {
+        _db = db;
+        _dadataService = dadataService;
+    }
 
     private static CompanyResponse MapCompany(Company company)
         => new()
         {
             Id = company.Id,
-            Name = company.Name,
+            Name = string.IsNullOrWhiteSpace(company.Name) ? company.ShortName : company.Name,
+            FullName = company.FullName,
+            ShortName = company.ShortName,
+            Inn = company.Inn,
+            Kpp = company.Kpp,
+            ActualAddress = company.ActualAddress,
+            LegalAddress = company.LegalAddress,
             Email = company.Email,
             Phone = company.Phone,
-            Address = company.Address,
             Notes = company.Notes,
             CreatedAt = company.CreatedAt,
             IsActive = company.IsActive,
@@ -82,10 +95,15 @@ public class CompaniesController : ControllerBase
     {
         var entity = new Company
         {
-            Name = request.Name,
-            Email = request.Email,
-            Phone = request.Phone,
-            Address = request.Address,
+            Name = GetShortName(request),
+            FullName = GetFullName(request),
+            ShortName = GetShortName(request),
+            Inn = request.Inn?.Trim() ?? string.Empty,
+            Kpp = request.Kpp?.Trim() ?? string.Empty,
+            Email = request.Email?.Trim() ?? string.Empty,
+            Phone = request.Phone?.Trim() ?? string.Empty,
+            ActualAddress = request.ActualAddress?.Trim() ?? string.Empty,
+            LegalAddress = request.LegalAddress?.Trim() ?? string.Empty,
             Notes = request.Notes,
             IsActive = request.IsActive,
         };
@@ -117,10 +135,15 @@ public class CompaniesController : ControllerBase
 
         if (entity is null) return NotFound();
 
-        entity.Name = request.Name;
-        entity.Email = request.Email;
-        entity.Phone = request.Phone;
-        entity.Address = request.Address;
+        entity.Name = GetShortName(request);
+        entity.FullName = GetFullName(request);
+        entity.ShortName = GetShortName(request);
+        entity.Inn = request.Inn?.Trim() ?? string.Empty;
+        entity.Kpp = request.Kpp?.Trim() ?? string.Empty;
+        entity.Email = request.Email?.Trim() ?? string.Empty;
+        entity.Phone = request.Phone?.Trim() ?? string.Empty;
+        entity.ActualAddress = request.ActualAddress?.Trim() ?? string.Empty;
+        entity.LegalAddress = request.LegalAddress?.Trim() ?? string.Empty;
         entity.Notes = request.Notes;
         entity.IsActive = request.IsActive;
 
@@ -138,8 +161,57 @@ public class CompaniesController : ControllerBase
             if (!existingIds.Contains(clientId))
             {
                 entity.Members.Add(new CompanyClient { ClientId = clientId, Company = entity });
-            }
+}
+
+    private static string GetShortName(CompanyRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.ShortName))
+        {
+            return request.ShortName.Trim();
         }
+
+        if (!string.IsNullOrWhiteSpace(request.Name))
+        {
+            return request.Name.Trim();
+        }
+
+        return request.FullName?.Trim() ?? string.Empty;
+    }
+
+    private static string GetFullName(CompanyRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.FullName))
+        {
+            return request.FullName.Trim();
+        }
+
+        return request.Name?.Trim() ?? string.Empty;
+    }
+
+    [HttpGet("lookup/inn/{inn}")]
+    public async Task<IActionResult> LookupByInn(string inn, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(inn))
+        {
+            return BadRequest(new { message = "ИНН не должен быть пустым" });
+        }
+
+        try
+        {
+            var suggestion = await _dadataService.FindCompanyByInnAsync(inn, ct);
+            if (suggestion is null)
+            {
+                return NotFound();
+            }
+
+            return Ok(suggestion);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
+        }
+    }
+}
 
         await _db.SaveChangesAsync(ct);
 

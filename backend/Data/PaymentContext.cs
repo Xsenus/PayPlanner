@@ -66,14 +66,20 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.FullName).HasMaxLength(400);
+            entity.Property(e => e.ShortName).HasMaxLength(200);
+            entity.Property(e => e.Inn).HasMaxLength(12);
+            entity.Property(e => e.Kpp).HasMaxLength(9);
             entity.Property(e => e.Email).HasMaxLength(200);
             entity.Property(e => e.Phone).HasMaxLength(50);
-            entity.Property(e => e.Address).HasMaxLength(500);
+            entity.Property(e => e.ActualAddress).HasMaxLength(500);
+            entity.Property(e => e.LegalAddress).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
 
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Companies_Name");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_Companies_IsActive");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Companies_CreatedAt");
+            entity.HasIndex(e => e.Inn).HasDatabaseName("IX_Companies_Inn");
         });
 
         // ------------------ CompanyClient ------------------

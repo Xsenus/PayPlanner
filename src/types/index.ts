@@ -53,9 +53,14 @@ export interface CompanyMember {
 export interface Company {
   id: number;
   name: string;
+  fullName: string;
+  shortName: string;
+  inn: string;
+  kpp: string;
   email: string;
   phone: string;
-  address: string;
+  actualAddress: string;
+  legalAddress: string;
   notes: string;
   isActive: boolean;
   createdAt: string;
@@ -64,12 +69,26 @@ export interface Company {
 
 export interface CompanyPayload {
   name: string;
+  fullName: string;
+  shortName: string;
+  inn: string;
+  kpp: string;
   email: string;
   phone: string;
-  address: string;
+  actualAddress: string;
+  legalAddress: string;
   notes: string;
   isActive: boolean;
   clientIds: number[];
+}
+
+export interface CompanyLookupResponse {
+  fullName: string;
+  shortName: string;
+  inn: string;
+  kpp: string;
+  actualAddress: string;
+  legalAddress: string;
 }
 
 export interface DealType {

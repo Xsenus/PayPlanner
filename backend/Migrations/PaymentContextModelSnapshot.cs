@@ -85,7 +85,7 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Address")
+                    b.Property<string>("ActualAddress")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
@@ -98,8 +98,28 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Inn")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kpp")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LegalAddress")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -116,10 +136,18 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ShortName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_Companies_CreatedAt");
+
+                    b.HasIndex("Inn")
+                        .HasDatabaseName("IX_Companies_Inn");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_Companies_IsActive");
