@@ -4,6 +4,21 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Data;
 
 /// <summary>
+/// Êîíòåêñò áàçû äàííûõ äëÿ ìîäóëÿ óïðàâëåíèÿ ïëàòåæàìè, êëèåíòàìè è ïîëüçîâàòåëÿìè.
+/// Ñîäåðæèò DbSet äëÿ âñåõ îñíîâíûõ ñóùíîñòåé è êîíôèãóðàöèþ èíäåêñîâ.
+/// </summary>
+public class PaymentContext : DbContext
+{
+    /// <summary>
+    /// Ñîçäà¸ò íîâûé ýêçåìïëÿð êîíòåêñòà áàçû äàííûõ.
+    /// </summary>
+    public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
+
+    /// <summary>
+    /// Êîíôèãóðàöèÿ ñóùíîñòåé, ñâÿçåé è èíäåêñîâ.
+    /// </summary>
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
         // ------------------ Act ------------------
         modelBuilder.Entity<Act>(entity =>
         {
@@ -35,21 +50,6 @@ namespace PayPlanner.Api.Data;
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
         });
 
-/// Êîíòåêñò áàçû äàííûõ äëÿ ìîäóëÿ óïðàâëåíèÿ ïëàòåæàìè, êëèåíòàìè è ïîëüçîâàòåëÿìè.
-/// Ñîäåðæèò DbSet äëÿ âñåõ îñíîâíûõ ñóùíîñòåé è êîíôèãóðàöèþ èíäåêñîâ.
-/// </summary>
-public class PaymentContext : DbContext
-{
-    /// <summary>
-    /// Ñîçäà¸ò íîâûé ýêçåìïëÿð êîíòåêñòà áàçû äàííûõ.
-    /// </summary>
-    public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
-
-    /// <summary>
-    /// Êîíôèãóðàöèÿ ñóùíîñòåé, ñâÿçåé è èíäåêñîâ.
-    /// </summary>
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
         // ------------------ Payment ------------------
         modelBuilder.Entity<Payment>(entity =>
         {
