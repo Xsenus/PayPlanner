@@ -1284,53 +1284,33 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Дата
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Сумма
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Направление
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Дело / контакт
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Описание и заметки
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Статус
-                        </th>
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <colgroup>
+                      <col className="w-48" />
+                      <col className="w-56" />
+                      <col className="w-60" />
+                      <col className="w-56" />
+                      <col className="w-[18rem]" />
+                      <col className="w-56" />
+                      {clientPermissions.canEdit || clientPermissions.canDelete ? <col className="w-36" /> : null}
+                    </colgroup>
+                    <thead className="bg-slate-50">
+                      <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th scope="col" className="px-4 py-3">Период</th>
+                        <th scope="col" className="px-4 py-3">Сумма и тип</th>
+                        <th scope="col" className="px-4 py-3">Категория / источник</th>
+                        <th scope="col" className="px-4 py-3">Дело и контакт</th>
+                        <th scope="col" className="px-4 py-3">Документы и комментарии</th>
+                        <th scope="col" className="px-4 py-3">Статус и прогресс</th>
                         {(clientPermissions.canEdit || clientPermissions.canDelete) && (
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            Действия
-                          </th>
+                          <th scope="col" className="px-4 py-3 text-right">Действия</th>
                         )}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-gray-100 text-slate-700">
                       {visiblePayments.map((payment) => {
                         const status = normalizeStatus(payment.status);
-                        const statusLabel =
-                          payment.paymentStatusEntity?.name || payment.status || '—';
+                        const statusLabel = payment.paymentStatusEntity?.name || payment.status || '—';
                         const statusBadgeClass =
                           status === 'completed'
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -1356,121 +1336,164 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                           .filter((item): item is string => Boolean(item && item !== directionLabel))
                           .filter((value, index, self) => self.indexOf(value) === index);
                         const DirectionIcon = payment.type === 'Income' ? TrendingUp : TrendingDown;
+                        const hasProgress = payment.hasPartialPayment && payment.paidAmount > 0;
+                        const paidProgress = payment.amount > 0 ? Math.min(payment.paidAmount / payment.amount, 1) : 0;
 
                         return (
-                          <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-4 align-top text-sm text-gray-600 whitespace-nowrap">
-                              <div className="font-medium text-gray-900">{toRuDate(payment.date)}</div>
-                              {payment.plannedDate && payment.plannedDate !== payment.date && (
-                                <div className="text-xs text-gray-500">План: {toRuDate(payment.plannedDate)}</div>
-                              )}
-                              {payment.paidDate && (
-                                <div className="text-xs text-gray-500">Оплачен: {toRuDate(payment.paidDate)}</div>
-                              )}
+                          <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">
+                            <td className="px-4 py-4 text-slate-600">
+                              <div className="font-medium text-slate-900">{toRuDate(payment.date)}</div>
+                              {payment.plannedDate && payment.plannedDate !== payment.date ? (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  План: {toRuDate(payment.plannedDate)}
+                                </div>
+                              ) : null}
+                              {payment.paidDate ? (
+                                <div className="mt-1 text-xs text-emerald-600">
+                                  Оплачен: {toRuDate(payment.paidDate)}
+                                </div>
+                              ) : null}
+                              <div className="mt-2 text-xs text-slate-400">
+                                Создан: {toRuDate(payment.createdAt)}
+                              </div>
+                              {payment.rescheduleCount > 0 ? (
+                                <div className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                  <RotateCcw size={12} className="mr-1" /> Переносов: {payment.rescheduleCount}
+                                </div>
+                              ) : null}
                             </td>
-                            <td className="px-4 py-4 align-top text-sm text-gray-900 whitespace-nowrap">
+                            <td className="px-4 py-4">
                               <div
-                                className={`flex items-center gap-2 font-semibold ${
+                                className={`flex items-center gap-2 text-sm font-semibold ${
                                   payment.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'
                                 }`}
                                 title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
                                 <DirectionIcon size={18} />
                                 {formatCurrencySmart(payment.amount).full}
                               </div>
-                              {payment.outstandingAmount > 0 && (
-                                <div className="text-xs text-rose-600">
+                              <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                {payment.type === 'Income' ? 'Поступление' : 'Списание'}
+                              </div>
+                              {payment.outstandingAmount > 0 ? (
+                                <div className="mt-2 text-xs text-rose-600">
                                   Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
                                 </div>
-                              )}
-                              {payment.hasPartialPayment && payment.paidAmount > 0 && (
-                                <div className="text-xs text-gray-500">
-                                  Оплачено: {formatCurrencySmart(payment.paidAmount).full}
+                              ) : null}
+                              {payment.hasPartialPayment && payment.paidAmount > 0 ? (
+                                <div className="mt-2">
+                                  <div className="flex items-center justify-between text-xs text-slate-500">
+                                    <span>Оплачено</span>
+                                    <span className="font-medium text-slate-700">
+                                      {formatCurrencySmart(payment.paidAmount).full}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 h-1.5 w-full rounded-full bg-slate-200">
+                                    <div
+                                      className={`h-full rounded-full ${
+                                        payment.type === 'Income' ? 'bg-emerald-500' : 'bg-rose-500'
+                                      }`}
+                                      style={{ width: `${Math.max(0, Math.min(100, paidProgress * 100))}%` }}
+                                    />
+                                  </div>
                                 </div>
-                              )}
+                              ) : null}
                             </td>
-                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[180px]">
-                              <div className="font-medium text-gray-900">{directionLabel}</div>
-                              {secondaryDirections.map((label) => (
-                                <div key={label} className="text-xs text-gray-500">
-                                  {label}
-                                </div>
-                              ))}
-                              {payment.account && (
-                                <div className="text-xs text-gray-500">Счёт: {payment.account}</div>
-                              )}
-                              {payment.accountDate && (
-                                <div className="text-xs text-gray-500">
+                            <td className="px-4 py-4">
+                              <div className="font-medium text-slate-900">{directionLabel}</div>
+                              {secondaryDirections.length ? (
+                                <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+                                  {secondaryDirections.map((label) => (
+                                    <li key={label}>{label}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {payment.account ? (
+                                <div className="mt-2 text-xs text-slate-500">Счёт: {payment.account}</div>
+                              ) : null}
+                              {payment.accountDate ? (
+                                <div className="text-xs text-slate-400">
                                   Дата счёта: {toRuDate(payment.accountDate)}
                                 </div>
-                              )}
+                              ) : null}
                             </td>
-                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[180px]">
+                            <td className="px-4 py-4">
                               {payment.clientCase?.title ? (
-                                <div className="font-medium text-gray-900">{payment.clientCase.title}</div>
+                                <div className="font-medium text-slate-900">{payment.clientCase.title}</div>
                               ) : (
-                                <div className="text-xs text-gray-400">Дело не указано</div>
+                                <div className="text-xs text-slate-400">Дело не указано</div>
                               )}
-                              {payment.client?.name && (
-                                <div className="text-xs text-gray-500">{payment.client.name}</div>
-                              )}
-                              {payment.clientCase?.status && (
-                                <div className="text-xs text-gray-400">
-                                  Статус: {caseStatusLabel(payment.clientCase.status)}
+                              {payment.client?.name ? (
+                                <div className="mt-1 text-xs text-slate-500">{payment.client.name}</div>
+                              ) : null}
+                              {payment.clientCase?.status ? (
+                                <div className="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+                                  {caseStatusLabel(payment.clientCase.status)}
                                 </div>
-                              )}
+                              ) : null}
                             </td>
-                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[220px]">
+                            <td className="px-4 py-4">
                               {payment.description ? (
-                                <div className="text-gray-700">{payment.description}</div>
+                                <div className="text-slate-800">{payment.description}</div>
                               ) : (
-                                <div className="text-xs text-gray-400">Без описания</div>
+                                <div className="text-xs text-slate-400">Без описания</div>
                               )}
-                              {payment.notes && (
-                                <div className="mt-1 text-xs text-gray-500" title={payment.notes}>
-                                  Заметка: {payment.notes}
+                              {payment.notes ? (
+                                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={payment.notes}>
+                                  <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
                                 </div>
-                              )}
-                              {payment.systemNotes && (
-                                <div className="mt-1 text-xs text-gray-400" title={payment.systemNotes}>
-                                  Системно: {payment.systemNotes}
+                              ) : null}
+                              {payment.systemNotes ? (
+                                <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={payment.systemNotes}>
+                                  <span className="font-medium text-slate-600">Системно:</span> {payment.systemNotes}
                                 </div>
-                              )}
+                              ) : null}
                             </td>
-                            <td className="px-4 py-4 align-top text-sm text-gray-600 whitespace-nowrap">
-                              <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
+                            <td className="px-4 py-4">
+                              <div
+                                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}
+                              >
                                 <StatusIcon size={14} />
                                 <span className="leading-none">{statusLabel}</span>
                               </div>
                               {payment.delayDays ? (
-                                <div className="mt-1 text-xs text-purple-700">Просрочка: {payment.delayDays} дн.</div>
+                                <div className="mt-2 inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                                  <AlertTriangle size={12} className="mr-1" /> Просрочка: {payment.delayDays} дн.
+                                </div>
                               ) : null}
-                              {payment.lastPaymentDate && (
-                                <div className="mt-1 text-xs text-gray-500">
+                              {payment.lastPaymentDate ? (
+                                <div className="mt-2 text-xs text-slate-500">
                                   Последний платёж: {toRuDate(payment.lastPaymentDate)}
                                 </div>
-                              )}
+                              ) : null}
+                              {payment.hasPartialPayment && !hasProgress ? (
+                                <div className="mt-2 text-xs text-slate-500">Оплачено частично</div>
+                              ) : null}
                             </td>
                             {(clientPermissions.canEdit || clientPermissions.canDelete) && (
-                              <td className="px-4 py-4 align-top text-right">
+                              <td className="px-4 py-4">
                                 <div className="flex items-center justify-end gap-2">
-                                  {clientPermissions.canEdit && (
+                                  {clientPermissions.canEdit ? (
                                     <button
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-blue-600 hover:border-blue-300 hover:bg-blue-50"
+                                      type="button"
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
                                       onClick={() => openEditPayment(payment)}
                                       title="Редактировать"
-                                      aria-label="Редактировать">
+                                      aria-label="Редактировать"
+                                    >
                                       <Edit size={16} />
                                     </button>
-                                  )}
-                                  {clientPermissions.canDelete && (
+                                  ) : null}
+                                  {clientPermissions.canDelete ? (
                                     <button
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50"
+                                      type="button"
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50"
                                       onClick={() => removePayment(payment.id)}
                                       title="Удалить"
-                                      aria-label="Удалить">
+                                      aria-label="Удалить"
+                                    >
                                       <Trash2 size={16} />
                                     </button>
-                                  )}
+                                  ) : null}
                                 </div>
                               </td>
                             )}
