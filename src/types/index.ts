@@ -112,15 +112,42 @@ export interface ActResponsible {
   fullName: string;
 }
 
+export type PaymentTimelineEventType =
+  | 'created'
+  | 'partialPayment'
+  | 'amountAdjusted'
+  | 'rescheduled'
+  | 'statusChanged'
+  | 'finalized';
+
+export interface PaymentTimelineEntry {
+  timestamp: string;
+  eventType: PaymentTimelineEventType;
+  amountDelta?: number | null;
+  effectiveDate?: string | null;
+  previousDate?: string | null;
+  newDate?: string | null;
+  previousAmount?: number | null;
+  newAmount?: number | null;
+  totalPaid?: number | null;
+  outstanding?: number | null;
+  previousStatus?: PaymentStatus | null;
+  newStatus?: PaymentStatus | null;
+  comment?: string | null;
+}
+
 export interface Payment {
   id: number;
   date: string;
   amount: number;
+  paidAmount: number;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   description: string;
   isPaid: boolean;
   paidDate?: string;
+  lastPaymentDate?: string | null;
+  originalDate?: string | null;
   notes: string;
   createdAt: string;
   clientId?: number | null;
@@ -137,6 +164,9 @@ export interface Payment {
   paymentStatusEntity?: PaymentStatusEntity;
   account?: string | null;
   accountDate?: string | null;
+  outstandingAmount: number;
+  hasPartialPayment: boolean;
+  timeline: PaymentTimelineEntry[];
 }
 
 export interface Invoice {

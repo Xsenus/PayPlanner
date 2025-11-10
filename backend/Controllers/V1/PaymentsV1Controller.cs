@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V1;
 
@@ -56,6 +57,7 @@ public class PaymentsV1Controller : ControllerBase
         }
 
         model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+        PaymentDomainService.PrepareForCreate(model);
         _db.Payments.Add(model);
         await _db.SaveChangesAsync();
         return Created($"/api/v1/payments/{model.Id}", model);
@@ -76,22 +78,7 @@ public class PaymentsV1Controller : ControllerBase
                 return BadRequest("IncomeType.PaymentType mismatches payment.Type");
         }
 
-        e.Date = model.Date;
-        e.Amount = model.Amount;
-        e.Type = model.Type;
-        e.Status = model.Status;
-        e.Description = model.Description;
-        e.IsPaid = model.IsPaid;
-        e.PaidDate = model.PaidDate;
-        e.Notes = model.Notes;
-        e.ClientId = model.ClientId;
-        e.ClientCaseId = model.ClientCaseId;
-        e.DealTypeId = model.DealTypeId;
-        e.IncomeTypeId = model.IncomeTypeId;
-        e.PaymentSourceId = model.PaymentSourceId;
-        e.PaymentStatusId = model.PaymentStatusId;
-        e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
-        e.AccountDate = model.AccountDate;
+        PaymentDomainService.ApplyUpdate(e, model);
 
         await _db.SaveChangesAsync();
         return Ok(e);

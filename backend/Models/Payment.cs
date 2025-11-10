@@ -1,128 +1,193 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
+
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Сущность платежа (приход или расход).
+    ///     РџР»Р°С‚С‘Р¶ (РґРѕС…РѕРґ РёР»Рё СЂР°СЃС…РѕРґ).
     /// </summary>
     public class Payment
     {
         /// <summary>
-        /// Счет.
+        ///     РќРѕРјРµСЂ СЃС‡С‘С‚Р°.
         /// </summary>
         public string? Account { get; set; }
 
         /// <summary>
-        /// Дата счета.
+        ///     Р”Р°С‚Р° СЃС‡С‘С‚Р°.
         /// </summary>
         public DateTime? AccountDate { get; set; }
 
         /// <summary>
-        /// Сумма платежа (в валюте учёта).
+        ///     РџР»Р°РЅРѕРІР°СЏ СЃСѓРјРјР° РїР»Р°С‚РµР¶Р° (РёС‚РѕРіРѕРІР°СЏ).
         /// </summary>
         public decimal Amount { get; set; }
 
         /// <summary>
-        /// Навигация на клиента.
+        ///     Р¤Р°РєС‚РёС‡РµСЃРєРё РѕРїР»Р°С‡РµРЅРЅР°СЏ СЃСѓРјРјР° (РЅР°РєРѕРїРёС‚РµР»СЊРЅРѕ).
+        /// </summary>
+        public decimal PaidAmount { get; set; }
+
+        /// <summary>
+        ///     Р”Р°С‚Р° РїРѕСЃР»РµРґРЅРµРіРѕ С„Р°РєС‚РёС‡РµСЃРєРѕРіРѕ РїРѕСЃС‚СѓРїР»РµРЅРёСЏ.
+        /// </summary>
+        public DateTime? LastPaymentDate { get; set; }
+
+        /// <summary>
+        ///     РљР»РёРµРЅС‚, Рє РєРѕС‚РѕСЂРѕРјСѓ РѕС‚РЅРѕСЃРёС‚СЃСЏ РїР»Р°С‚С‘Р¶.
         /// </summary>
         public Client? Client { get; set; }
 
         /// <summary>
-        /// Навигация на дело клиента.
+        ///     РљРµР№c РєР»РёРµРЅС‚Р°, РµСЃР»Рё РїСЂРёРІСЏР·Р°РЅ.
         /// </summary>
         public ClientCase? ClientCase { get; set; }
 
         /// <summary>
-        /// Внешний ключ на дело клиента, к которому относится платеж.
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєРµР№СЃР° РєР»РёРµРЅС‚Р°.
         /// </summary>
         public int? ClientCaseId { get; set; }
 
         /// <summary>
-        /// Внешний ключ на клиента.
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР»РёРµРЅС‚Р°.
         /// </summary>
         public int? ClientId { get; set; }
 
         /// <summary>
-        /// Дата и время создания записи (UTC).
+        ///     РњРѕРјРµРЅС‚ СЃРѕР·РґР°РЅРёСЏ Р·Р°РїРёСЃРё (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Плановая или фактическая дата платежа.
+        ///     РўРµРєСѓС‰Р°СЏ РїР»Р°РЅРѕРІР°СЏ РґР°С‚Р° РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public DateTime Date { get; set; }
 
         /// <summary>
-        /// Навигация на тип сделки.
+        ///     РР·РЅР°С‡Р°Р»СЊРЅРѕ Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРЅР°СЏ РґР°С‚Р° (СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ РїСЂРё РїРµСЂРµРЅРѕСЃР°С…).
+        /// </summary>
+        public DateTime? OriginalDate { get; set; }
+
+        /// <summary>
+        ///     РўРёРї СЃРґРµР»РєРё.
         /// </summary>
         public DealType? DealType { get; set; }
 
         /// <summary>
-        /// Внешний ключ на тип сделки (если используется справочник).
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ С‚РёРїР° СЃРґРµР»РєРё.
         /// </summary>
         public int? DealTypeId { get; set; }
 
         /// <summary>
-        /// Короткое описание платежа.
+        ///     РћРїРёСЃР°РЅРёРµ РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Уникальный идентификатор платежа.
+        ///     РЈРЅРёРєР°Р»СЊРЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ Р·Р°РїРёСЃРё.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Навигация на тип дохода.
+        ///     РљР°С‚РµРіРѕСЂРёСЏ РґРѕС…РѕРґР°/СЂР°СЃС…РѕРґР°.
         /// </summary>
         public IncomeType? IncomeType { get; set; }
 
         /// <summary>
-        /// Внешний ключ на тип дохода (если используется справочник).
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚РµРіРѕСЂРёРё РґРѕС…РѕРґР°/СЂР°СЃС…РѕРґР°.
         /// </summary>
         public int? IncomeTypeId { get; set; }
 
         /// <summary>
-        /// Признак, что платеж оплачен.
+        ///     РџСЂРёР·РЅР°Рє РїРѕР»РЅРѕР№ РѕРїР»Р°С‚С‹.
         /// </summary>
-        public bool IsPaid { get; set; } = false;
+        public bool IsPaid { get; set; }
 
         /// <summary>
-        /// Произвольные заметки по платежу.
+        ///     Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ Р·Р°РјРµС‚РєРё.
         /// </summary>
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
-        /// Дата фактической оплаты (если оплачено).
+        ///     Р”Р°С‚Р° Р·Р°РєСЂС‹С‚РёСЏ РїР»Р°С‚РµР¶Р° (РµСЃР»Рё РїРѕР»РЅРѕСЃС‚СЊСЋ РѕРїР»Р°С‡РµРЅ).
         /// </summary>
         public DateTime? PaidDate { get; set; }
 
         /// <summary>
-        /// Навигация на источник платежа.
+        ///     РСЃС‚РѕС‡РЅРёРє РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public PaymentSource? PaymentSource { get; set; }
 
         /// <summary>
-        /// Внешний ключ на источник платежа (если используется справочник).
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РёСЃС‚РѕС‡РЅРёРєР° РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public int? PaymentSourceId { get; set; }
 
         /// <summary>
-        /// Навигация на сущность статуса платежа.
+        ///     РџРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёР№ СЃС‚Р°С‚СѓСЃ РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public PaymentStatusEntity? PaymentStatusEntity { get; set; }
 
         /// <summary>
-        /// Внешний ключ на сущность статуса платежа (если используется справочник).
+        ///     РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРѕРіРѕ СЃС‚Р°С‚СѓСЃР°.
         /// </summary>
         public int? PaymentStatusId { get; set; }
 
         /// <summary>
-        /// Статус платежа (ожидается/выполнен/просрочен).
+        ///     РЎС‚Р°С‚СѓСЃ РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public PaymentStatus Status { get; set; }
 
         /// <summary>
-        /// Тип платежа (приход/расход).
+        ///     РўРёРї РїР»Р°С‚РµР¶Р° (РґРѕС…РѕРґ/СЂР°СЃС…РѕРґ).
         /// </summary>
         public PaymentType Type { get; set; }
+
+        /// <summary>
+        ///     РЎС‹СЂР°СЏ РёСЃС‚РѕСЂРёСЏ СЃРѕР±С‹С‚РёР№ РїРѕ РїР»Р°С‚РµР¶Сѓ.
+        /// </summary>
+        [JsonIgnore]
+        public string TimelineRaw { get; set; } = "[]";
+
+        /// <summary>
+        ///     РСЃС‚РѕСЂРёСЏ РёР·РјРµРЅРµРЅРёР№, СЂР°СЃСЃС‡РёС‚Р°РЅРЅР°СЏ РёР· JSON.
+        /// </summary>
+        public IReadOnlyList<PaymentTimelineEntry> Timeline => PaymentTimelineEntry.FromJson(TimelineRaw);
+
+        /// <summary>
+        ///     РћСЃС‚Р°С‚РѕРє Рє РѕРїР»Р°С‚Рµ.
+        /// </summary>
+        [NotMapped]
+        public decimal OutstandingAmount => Math.Round(Math.Max(0, Amount - PaidAmount), 2, MidpointRounding.AwayFromZero);
+
+        /// <summary>
+        ///     РџСЂРёР·РЅР°Рє С‡Р°СЃС‚РёС‡РЅРѕР№ РѕРїР»Р°С‚С‹.
+        /// </summary>
+        [NotMapped]
+        public bool HasPartialPayment => PaidAmount > 0 && OutstandingAmount > 0;
+
+        /// <summary>
+        ///     РџРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ РёСЃС‚РѕСЂРёСЋ СЃРѕР±С‹С‚РёР№.
+        /// </summary>
+        public void ReplaceTimelineEntries(IEnumerable<PaymentTimelineEntry> entries)
+        {
+            TimelineRaw = PaymentTimelineEntry.ToJson(entries);
+        }
+
+        /// <summary>
+        ///     Р’РѕР·РІСЂР°С‰Р°РµС‚ РёСЃС‚РѕСЂРёСЋ СЃРѕР±С‹С‚РёР№.
+        /// </summary>
+        public IReadOnlyList<PaymentTimelineEntry> GetTimelineEntries() => Timeline.ToList();
+
+        /// <summary>
+        ///     Р”РѕР±Р°РІР»СЏРµС‚ СЃРѕР±С‹С‚РёРµ РІ РёСЃС‚РѕСЂРёСЋ РїР»Р°С‚РµР¶Р°.
+        /// </summary>
+        public void AppendTimelineEntry(PaymentTimelineEntry entry)
+        {
+            if (entry is null) return;
+            var list = Timeline.ToList();
+            list.Add(entry);
+            ReplaceTimelineEntries(list);
+        }
     }
 }

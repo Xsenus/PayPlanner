@@ -1,6 +1,8 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import type { Payment } from '../../types';
 import type React from 'react';
+import { useTranslation } from '../../hooks/useTranslation';
+import { formatCurrencySmart } from '../../utils/formatters';
 
 interface PaymentCardProps {
   payment: Payment;
@@ -18,6 +20,17 @@ export function PaymentCard({
   className = '',
 }: PaymentCardProps) {
   const isIncome = payment.type === 'Income';
+  const { t } = useTranslation();
+
+  const outstanding = Math.max(
+    0,
+    payment.outstandingAmount ?? payment.amount - payment.paidAmount,
+  );
+  const hasPartial = outstanding > 0.009;
+  const amountText = hasPartial
+    ? `${formatCurrencySmart(payment.paidAmount).short} / ${formatCurrencySmart(payment.amount).short}`
+    : formatCurrencySmart(payment.amount).short;
+  const outstandingText = formatCurrencySmart(outstanding).short;
 
   const base = 'p-1.5 sm:p-2 rounded-lg text-[11px] sm:text-xs select-none pr-6';
   const interactive = onClick ? 'cursor-pointer hover:bg-gray-50 transition-colors' : '';
@@ -32,15 +45,21 @@ export function PaymentCard({
             <TrendingDown className="h-3.5 w-3.5 text-red-600" />
           )}
           <span className="font-medium text-gray-900">
-            {new Intl.NumberFormat('ru-RU').format(payment.amount)} ₽
+            {amountText}
           </span>
         </div>
 
         {!neutral && <span className="text-[10px] sm:text-xs text-gray-500">{payment.status}</span>}
       </div>
 
+      {hasPartial ? (
+        <div className="text-[10px] sm:text-xs text-amber-600 mb-0.5">
+          {(t('summaryRemainingAmount') ?? 'Остаток') + ': '} {outstandingText}
+        </div>
+      ) : null}
+
       <div className="truncate text-gray-700" title={payment.description}>
-        {payment.description || 'Без описания'}
+        {payment.description || t('noDescription') || 'Без описания'}
       </div>
 
       {payment.client && (

@@ -55,12 +55,16 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(p => p.Account).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
+            entity.Property(p => p.LastPaymentDate).HasColumnType("date");
+            entity.Property(p => p.OriginalDate).HasColumnType("date");
+            entity.Property(p => p.TimelineRaw).HasColumnType("TEXT");
 
             // Ñâÿçü ñ êëèåíòîì
             entity.HasOne(e => e.Client)
@@ -103,6 +107,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
             entity.HasIndex(e => new { e.Account, e.AccountDate }).HasDatabaseName("IX_Payments_Account_AccountDate");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Payments_Date");
+            entity.HasIndex(e => e.LastPaymentDate).HasDatabaseName("IX_Payments_LastPaymentDate");
+            entity.HasIndex(e => e.OriginalDate).HasDatabaseName("IX_Payments_OriginalDate");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Payments_CreatedAt");
             entity.HasIndex(e => e.DealTypeId).HasDatabaseName("IX_Payments_DealTypeId");
             entity.HasIndex(e => e.IncomeTypeId).HasDatabaseName("IX_Payments_IncomeTypeId");

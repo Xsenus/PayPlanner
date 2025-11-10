@@ -37,18 +37,55 @@ public class ClientsController : ControllerBase
 
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
 
-        var payments = await q.OrderByDescending(p => p.Date).AsNoTracking().ToListAsync(ct);
+        var payments = await q.OrderByDescending(p => p.LastPaymentDate ?? p.Date).AsNoTracking().ToListAsync(ct);
+
+        decimal totalIncome = 0m;
+        decimal totalExpenses = 0m;
+        DateTime? lastPaymentDate = null;
+
+        foreach (var payment in payments)
+        {
+            bool hasTimeline = false;
+            foreach (var entry in payment.Timeline)
+            {
+                if (entry.EventType != PaymentTimelineEventType.PartialPayment) continue;
+                var delta = entry.AmountDelta ?? 0m;
+                if (delta == 0m) continue;
+                hasTimeline = true;
+                if (payment.Type == PaymentType.Income) totalIncome += delta;
+                else if (payment.Type == PaymentType.Expense) totalExpenses += delta;
+
+                var eventDate = (entry.EffectiveDate ?? entry.Timestamp).Date;
+                if (!lastPaymentDate.HasValue || eventDate > lastPaymentDate.Value)
+                    lastPaymentDate = eventDate;
+            }
+
+            if (!hasTimeline && payment.IsPaid)
+            {
+                if (payment.Type == PaymentType.Income) totalIncome += payment.Amount;
+                else if (payment.Type == PaymentType.Expense) totalExpenses += payment.Amount;
+
+                var fallbackDate = (payment.PaidDate ?? payment.LastPaymentDate ?? payment.Date).Date;
+                if (!lastPaymentDate.HasValue || fallbackDate > lastPaymentDate.Value)
+                    lastPaymentDate = fallbackDate;
+            }
+            else if (payment.LastPaymentDate.HasValue)
+            {
+                if (!lastPaymentDate.HasValue || payment.LastPaymentDate > lastPaymentDate)
+                    lastPaymentDate = payment.LastPaymentDate;
+            }
+        }
 
         var stats = new ClientStats
         {
             ClientId = client.Id,
             ClientName = client.Name,
-            TotalIncome = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount),
-            TotalExpenses = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount),
+            TotalIncome = Math.Round(totalIncome, 2, MidpointRounding.AwayFromZero),
+            TotalExpenses = Math.Round(totalExpenses, 2, MidpointRounding.AwayFromZero),
             TotalPayments = payments.Count,
             PaidPayments = payments.Count(p => p.IsPaid),
             PendingPayments = payments.Count(p => !p.IsPaid),
-            LastPaymentDate = payments.FirstOrDefault()?.Date,
+            LastPaymentDate = lastPaymentDate,
             RecentPayments = payments.ToList()
         };
         stats.NetAmount = stats.TotalIncome - stats.TotalExpenses;

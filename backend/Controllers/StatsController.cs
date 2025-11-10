@@ -21,12 +21,58 @@ public class StatsController : ControllerBase
         var endDate = startDate.AddMonths(1).AddDays(-1);
 
         var payments = await _db.Payments
-            .Where(p => p.Date >= startDate && p.Date <= endDate)
+            .Where(p =>
+                (p.Date >= startDate && p.Date <= endDate) ||
+                (p.LastPaymentDate.HasValue && p.LastPaymentDate.Value >= startDate && p.LastPaymentDate.Value <= endDate) ||
+                (p.OriginalDate.HasValue && p.OriginalDate.Value >= startDate && p.OriginalDate.Value <= endDate))
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var income = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount);
-        var expense = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount);
+        decimal income = 0m;
+        decimal expense = 0m;
+
+        foreach (var payment in payments)
+        {
+            bool hasTimelinePayments = false;
+            foreach (var entry in payment.Timeline)
+            {
+                if (entry.EventType != PaymentTimelineEventType.PartialPayment) continue;
+                var effectiveDate = (entry.EffectiveDate ?? entry.Timestamp).Date;
+                if (effectiveDate < startDate || effectiveDate > endDate) continue;
+
+                var delta = entry.AmountDelta ?? 0m;
+                if (delta == 0m) continue;
+                hasTimelinePayments = true;
+
+                if (payment.Type == PaymentType.Income)
+                {
+                    income += delta;
+                }
+                else if (payment.Type == PaymentType.Expense)
+                {
+                    expense += delta;
+                }
+            }
+
+            if (!hasTimelinePayments && payment.IsPaid)
+            {
+                var paidDate = (payment.PaidDate ?? payment.LastPaymentDate ?? payment.Date).Date;
+                if (paidDate >= startDate && paidDate <= endDate)
+                {
+                    if (payment.Type == PaymentType.Income)
+                    {
+                        income += payment.Amount;
+                    }
+                    else if (payment.Type == PaymentType.Expense)
+                    {
+                        expense += payment.Amount;
+                    }
+                }
+            }
+        }
+
+        income = Math.Round(income, 2, MidpointRounding.AwayFromZero);
+        expense = Math.Round(expense, 2, MidpointRounding.AwayFromZero);
         var profit = income - expense;
 
         var completed = payments.Count(p => p.IsPaid);

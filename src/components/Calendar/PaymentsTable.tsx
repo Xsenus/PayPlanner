@@ -123,7 +123,14 @@ export function PaymentsTable({
               payments.map((payment) => {
                 const isIncome = payment.type === 'Income';
                 const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
+                const outstanding = Math.max(
+                  0,
+                  payment.outstandingAmount ?? payment.amount - payment.paidAmount,
+                );
+                const hasPartial = outstanding > 0.009;
                 const amountFmt = formatCurrencySmart(payment.amount).full;
+                const paidFmt = formatCurrencySmart(payment.paidAmount).full;
+                const outstandingFmt = formatCurrencySmart(outstanding).full;
                 const category =
                   payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
 
@@ -192,8 +199,20 @@ export function PaymentsTable({
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {category}
                     </td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 whitespace-nowrap">
-                      {amountFmt}
+                    <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                      {hasPartial ? (
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-gray-900">
+                            {paidFmt}{' '}
+                            <span className="text-xs text-gray-500">/ {amountFmt}</span>
+                          </span>
+                          <span className="text-xs text-amber-600">
+                            {(t('summaryRemainingAmount') ?? 'Остаток') + ': '} {outstandingFmt}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-gray-900">{amountFmt}</span>
+                      )}
                     </td>
                   </tr>
                 );

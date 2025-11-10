@@ -1284,89 +1284,112 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {visiblePayments.map((payment) => (
-                    <div
-                      key={payment.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="mt-0.5">
-                          {payment.type === 'Income' ? (
-                            <TrendingUp size={20} className="text-emerald-600" />
-                          ) : (
-                            <TrendingDown size={20} className="text-red-600" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p
-                            className="font-medium text-gray-900"
-                            title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
-                            {formatCurrencySmart(payment.amount).full}
-                          </p>
-                          {payment.description && (
-                            <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
-                              {payment.description}
+                  {visiblePayments.map((payment) => {
+                    const outstanding = Math.max(
+                      0,
+                      payment.outstandingAmount ?? payment.amount - payment.paidAmount,
+                    );
+                    const hasPartial = outstanding > 0.009;
+                    const totalFmt = formatCurrencySmart(payment.amount).full;
+                    const paidFmt = formatCurrencySmart(payment.paidAmount).full;
+                    const outstandingFmt = formatCurrencySmart(outstanding).full;
+
+                    return (
+                      <div
+                        key={payment.id}
+                        className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className="mt-0.5">
+                            {payment.type === 'Income' ? (
+                              <TrendingUp size={20} className="text-emerald-600" />
+                            ) : (
+                              <TrendingDown size={20} className="text-red-600" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p
+                              className="font-medium text-gray-900"
+                              title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
+                              {hasPartial ? (
+                                <>
+                                  {paidFmt}{' '}
+                                  <span className="text-xs text-gray-500">/ {totalFmt}</span>
+                                </>
+                              ) : (
+                                totalFmt
+                              )}
                             </p>
-                          )}
+                            {hasPartial ? (
+                              <p className="text-xs text-amber-600">
+                                {(t('summaryRemainingAmount') ?? 'Остаток') + ': '} {outstandingFmt}
+                              </p>
+                            ) : null}
+                            {payment.description && (
+                              <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
+                                {payment.description}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
-                        <div className="flex items-center justify-end gap-2">
-                          <p className="text-sm font-medium text-gray-900 leading-none">
-                            {toRuDate(payment.date)}
-                          </p>
-                          {clientPermissions.canEdit && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
-                              onClick={() => openEditPayment(payment)}
-                              title="Редактировать"
-                              aria-label="Редактировать">
-                              <Edit size={16} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          {(() => {
-                            const s = normalizeStatus(payment.status);
-                            if (s === 'overdue') {
+                        <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
+                          <div className="flex items-center justify-end gap-2">
+                            <p className="text-sm font-medium text-gray-900 leading-none">
+                              {toRuDate(payment.date)}
+                            </p>
+                            {clientPermissions.canEdit && (
+                              <button
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
+                                onClick={() => openEditPayment(payment)}
+                                title="Редактировать"
+                                aria-label="Редактировать">
+                                <Edit size={16} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            {(() => {
+                              const s = normalizeStatus(payment.status);
+                              if (s === 'overdue') {
+                                return (
+                                  <>
+                                    <AlertTriangle size={14} className="text-purple-700" />
+                                    <span className="text-xs text-purple-700 leading-none">
+                                      Просрочено
+                                    </span>
+                                  </>
+                                );
+                              }
+                              if (s === 'completed') {
+                                return (
+                                  <>
+                                    <CheckCircle size={14} className="text-emerald-600" />
+                                    <span className="text-xs text-emerald-600 leading-none">
+                                      Выполнено
+                                    </span>
+                                  </>
+                                );
+                              }
                               return (
                                 <>
-                                  <AlertTriangle size={14} className="text-purple-700" />
-                                  <span className="text-xs text-purple-700 leading-none">
-                                    Просрочено
-                                  </span>
+                                  <Clock size={14} className="text-amber-600" />
+                                  <span className="text-xs text-amber-600 leading-none">Ожидается</span>
                                 </>
                               );
-                            }
-                            if (s === 'completed') {
-                              return (
-                                <>
-                                  <CheckCircle size={14} className="text-emerald-600" />
-                                  <span className="text-xs text-emerald-600 leading-none">
-                                    Выполнено
-                                  </span>
-                                </>
-                              );
-                            }
-                            return (
-                              <>
-                                <Clock size={14} className="text-amber-600" />
-                                <span className="text-xs text-amber-600 leading-none">Ожидается</span>
-                              </>
-                            );
-                          })()}
-                          {clientPermissions.canDelete && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
-                              onClick={() => removePayment(payment.id)}
-                              title="Удалить"
-                              aria-label="Удалить">
-                              <Trash2 size={16} />
-                            </button>
-                          )}
+                            })()}
+                            {clientPermissions.canDelete && (
+                              <button
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
+                                onClick={() => removePayment(payment.id)}
+                                title="Удалить"
+                                aria-label="Удалить">
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             ) : activeSection === 'accounts' ? (

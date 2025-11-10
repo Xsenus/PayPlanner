@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services
 {
@@ -496,6 +497,11 @@ namespace PayPlanner.Api.Services
                 },
             };
             var toAdd = new List<Payment>();
+            var partialPayments = new Dictionary<string, (decimal amount, DateTime date)>
+            {
+                { "Окончательный расчёт", (80_000m, today.AddDays(-1)) },
+                { "Этап 2 — UI", (45_000m, today.AddDays(-2)) }
+            };
 
             foreach (var p in paymentsToEnsure)
             {
@@ -525,11 +531,16 @@ namespace PayPlanner.Api.Services
 
                 if (exists) continue;
 
+                partialPayments.TryGetValue(p.Description, out var partialInfo);
+                var seedPaidAmount = partialInfo.amount;
+                var seedPaidDate = partialInfo.date;
+
                 var payment = new Payment
                 {
                     ClientId = cli.Id,
                     ClientCaseId = caseEnt.Id,
                     Date = p.Date,
+                    OriginalDate = p.Date,
                     AccountDate = p.AccountDate,
                     Account = string.IsNullOrWhiteSpace(p.Account) ? null : p.Account,
                     Amount = p.Amount,
@@ -539,12 +550,17 @@ namespace PayPlanner.Api.Services
                     Notes = p.ActReference ?? string.Empty,
                     IsPaid = p.IsPaid,
                     PaidDate = p.PaidDate,
+                    PaidAmount = seedPaidAmount > 0 ? seedPaidAmount : (p.IsPaid ? p.Amount : 0m),
+                    LastPaymentDate = seedPaidAmount > 0
+                        ? seedPaidDate
+                        : (p.IsPaid ? p.PaidDate ?? p.AccountDate ?? p.Date : (DateTime?)null),
                     DealTypeId = GetIdOrThrow(dealTypeByName, p.DealType, "DealType"),
                     IncomeTypeId = GetIdOrThrow(incomeTypeByName, p.IncomeType, "IncomeType"),
                     PaymentSourceId = GetIdOrThrow(sourceByName, p.Source, "PaymentSource"),
                     PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus")
                 };
 
+                PaymentDomainService.PrepareForCreate(payment);
                 toAdd.Add(payment);
             }
 

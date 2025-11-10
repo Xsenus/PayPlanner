@@ -4,12 +4,23 @@ import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Payment, PaymentStatus, ClientCase } from '../../types';
+import type {
+  Payment,
+  PaymentStatus,
+  ClientCase,
+  PaymentTimelineEntry,
+  PaymentTimelineEventType,
+} from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
+import { formatCurrencySmart } from '../../utils/formatters';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
+type PaymentUpsert = Omit<
+  Payment,
+  'id' | 'createdAt' | 'outstandingAmount' | 'hasPartialPayment' | 'timeline'
+>;
 
 interface PaymentModalProps {
   defaultClientId?: number;
@@ -19,9 +30,7 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (
-    payment:
-      | Omit<Payment, 'id' | 'createdAt'>
-      | ({ id: number } & Omit<Payment, 'id' | 'createdAt'>),
+    payment: PaymentUpsert | ({ id: number } & PaymentUpsert),
   ) => Promise<void>;
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
@@ -59,10 +68,13 @@ export function PaymentModal({
   const [formData, setFormData] = useState({
     date: todayYMD(),
     amount: '',
+    paidAmount: '',
     status: 'Pending' as PaymentStatus,
     description: '',
     isPaid: false,
     paidDate: '',
+    lastPaymentDate: '',
+    originalDate: todayYMD(),
     notes: '',
     clientId: '',
     clientCaseId: '',
@@ -74,6 +86,8 @@ export function PaymentModal({
     account: '',
     accountDate: '',
   });
+
+  const [syncExpectedWithLastPayment, setSyncExpectedWithLastPayment] = useState(false);
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
@@ -159,13 +173,24 @@ export function PaymentModal({
       const p = paymentRef.current;
 
       if (p) {
-        setFormData({
-          date: toDateInputValue(p.date) || todayYMD(),
+        const normalizedDate = toDateInputValue(p.date) || todayYMD();
+        const normalizedPaidAmount = Number.isFinite(p.paidAmount)
+          ? p.paidAmount.toFixed(2)
+          : '';
+        const normalizedLastPayment = toDateInputValue(p.lastPaymentDate) || '';
+        const normalizedOriginal =
+          toDateInputValue(p.originalDate ?? p.date) || normalizedDate;
+
+        const next = {
+          date: normalizedDate,
           amount: Number.isFinite(p.amount) ? p.amount.toFixed(2) : '',
+          paidAmount: normalizedPaidAmount,
           status: p.status,
           description: p.description,
           isPaid: p.isPaid,
           paidDate: toDateInputValue(p.paidDate) || '',
+          lastPaymentDate: normalizedLastPayment,
+          originalDate: normalizedOriginal,
           notes: p.notes || '',
           clientId: (p.clientId ?? defaultClientId)?.toString() || '',
           clientCaseId: (p.clientCaseId ?? defaultClientCaseId)?.toString() || '',
@@ -176,15 +201,23 @@ export function PaymentModal({
           type: (p.type as PaymentKind) ?? type ?? 'Income',
           account: p.account ?? '',
           accountDate: toDateInputValue(p.accountDate) || '',
-        });
+        };
+
+        setFormData(next);
+        setSyncExpectedWithLastPayment(
+          Boolean(next.lastPaymentDate) && next.lastPaymentDate === next.date,
+        );
       } else {
-        setFormData({
+        const reset = {
           date: todayYMD(),
           amount: '',
-          status: 'Pending',
+          paidAmount: '',
+          status: 'Pending' as PaymentStatus,
           description: '',
           isPaid: false,
           paidDate: '',
+          lastPaymentDate: '',
+          originalDate: todayYMD(),
           notes: '',
           clientId: defaultClientId?.toString() || '',
           clientCaseId: defaultClientCaseId?.toString() || '',
@@ -195,7 +228,9 @@ export function PaymentModal({
           type: (type ?? 'Income') as PaymentKind,
           account: '',
           accountDate: '',
-        });
+        };
+        setFormData(reset);
+        setSyncExpectedWithLastPayment(false);
       }
 
       prevOpenRef.current = true;
@@ -217,11 +252,26 @@ export function PaymentModal({
   useEffect(() => {
     if (!isOpen) return;
     setFormData((s) => {
-      if (!s.amount?.trim()) return s;
-      const n = Number(String(s.amount).replace(',', '.'));
-      if (!Number.isFinite(n)) return s;
-      const fixed = n.toFixed(2);
-      return s.amount === fixed ? s : { ...s, amount: fixed };
+      let next = s;
+
+      const normalize = (value: string | undefined) => {
+        if (!value?.trim()) return null;
+        const n = Number(String(value).replace(',', '.'));
+        if (!Number.isFinite(n)) return null;
+        return n.toFixed(2);
+      };
+
+      const amountFixed = normalize(s.amount);
+      if (amountFixed && amountFixed !== s.amount) {
+        next = { ...next, amount: amountFixed };
+      }
+
+      const paidFixed = normalize(s.paidAmount);
+      if (paidFixed && paidFixed !== s.paidAmount) {
+        next = { ...next, paidAmount: paidFixed };
+      }
+
+      return next;
     });
   }, [isOpen]);
 
@@ -320,22 +370,39 @@ export function PaymentModal({
   ]);
 
   const markPaid = () =>
-    setFormData((s) => ({
-      ...s,
-      isPaid: true,
-      status: 'Completed',
-      paidDate: s.paidDate || todayYMD(),
-    }));
+    setFormData((s) => {
+      const amountStr = s.amount?.trim() ? s.amount : '0.00';
+      const lastDate = s.lastPaymentDate || s.paidDate || todayYMD();
+      return {
+        ...s,
+        isPaid: true,
+        status: 'Completed',
+        paidAmount: amountStr,
+        paidDate: s.paidDate || lastDate,
+        lastPaymentDate: lastDate,
+      };
+    });
 
   const markPending = () =>
-    setFormData((s) => ({
-      ...s,
-      isPaid: false,
-      status: 'Pending',
-      paidDate: '',
-    }));
+    setFormData((s) => {
+      const nextStatus = s.status === 'Cancelled' || s.status === 'Processing' ? s.status : 'Pending';
+      return {
+        ...s,
+        isPaid: false,
+        status: nextStatus,
+        paidDate: nextStatus === 'Completed' ? s.paidDate : '',
+      };
+    });
+
+  const parseMoneyValue = (value: string) => {
+    if (!value?.trim()) return NaN;
+    const cleaned = value.replace(',', '.').replace(/[^\d.-]/g, '');
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : NaN;
+  };
 
   const amountRef = useRef<HTMLInputElement>(null);
+  const paidAmountRef = useRef<HTMLInputElement>(null);
   const handleAmountInput = (raw: string, el?: HTMLInputElement) => {
     let v = raw.replace(/[^\d.,]/g, '');
     const caret = el?.selectionStart ?? v.length;
@@ -395,6 +462,135 @@ export function PaymentModal({
     setFormData((s) => ({ ...s, amount: fixed }));
   };
 
+  const handlePaidAmountInput = (raw: string, el?: HTMLInputElement) => {
+    let v = raw.replace(/[^\d.,]/g, '');
+    const caret = el?.selectionStart ?? v.length;
+    if (!v) {
+      setFormData((s) => ({ ...s, paidAmount: '' }));
+      return;
+    }
+
+    const firstSepIdx = v.search(/[.,]/);
+    if (firstSepIdx === -1) {
+      const intPart = v.replace(/^0+(?=\d)/, '') || '0';
+      const newVal = `${intPart}.00`;
+      const nextCaret = Math.min(caret, intPart.length);
+
+      setFormData((s) => {
+        const previous = parseMoneyValue(s.paidAmount);
+        const nextState = { ...s, paidAmount: newVal };
+        if (!s.lastPaymentDate && parseMoneyValue(newVal) > Math.max(previous, 0)) {
+          nextState.lastPaymentDate = todayYMD();
+        }
+        return nextState;
+      });
+      requestAnimationFrame(() => {
+        const node = paidAmountRef.current;
+        if (node) node.setSelectionRange(nextCaret, nextCaret);
+      });
+      return;
+    }
+
+    const sep = v[firstSepIdx];
+    v = v.slice(0, firstSepIdx + 1) + v.slice(firstSepIdx + 1).replace(/[.,]/g, '');
+    const [intRaw, fracRaw = ''] = v.split(sep);
+
+    const intPart = (intRaw || '0').replace(/^0+(?=\d)/, '') || '0';
+    const fracPart = fracRaw.slice(0, 2);
+    const newVal = fracPart ? `${intPart}${sep}${fracPart}` : `${intPart}${sep}`;
+
+    let nextCaret: number;
+    if (caret <= firstSepIdx) {
+      nextCaret = Math.min(caret, intPart.length);
+    } else {
+      const offsetInFrac = Math.max(0, caret - (firstSepIdx + 1));
+      nextCaret = intPart.length + 1 + Math.min(offsetInFrac, fracPart.length);
+    }
+
+    setFormData((s) => {
+      const previous = parseMoneyValue(s.paidAmount);
+      const nextState = { ...s, paidAmount: newVal };
+      if (!s.lastPaymentDate && parseMoneyValue(newVal) > Math.max(previous, 0)) {
+        nextState.lastPaymentDate = todayYMD();
+      }
+      return nextState;
+    });
+    requestAnimationFrame(() => {
+      const node = paidAmountRef.current;
+      if (node) node.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  const formatPaidAmountOnBlur = () => {
+    const raw = formData.paidAmount.trim();
+    if (!raw) return;
+
+    const cleaned = raw.replace(',', '.').replace(/[^\d.]/g, '');
+    const num = Number(cleaned);
+    if (!Number.isFinite(num)) {
+      setFormData((s) => ({ ...s, paidAmount: '' }));
+      return;
+    }
+    const fixed = num.toFixed(2);
+    setFormData((s) => ({ ...s, paidAmount: fixed }));
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData((prev) => {
+      const amountValue = parseMoneyValue(prev.amount);
+      const paidValueRaw = parseMoneyValue(prev.paidAmount);
+      const amountNumber = Number.isFinite(amountValue) ? Number(amountValue) : 0;
+      const paidNumber = Number.isFinite(paidValueRaw) ? Math.max(0, Number(paidValueRaw)) : 0;
+      const tolerance = 0.01;
+
+      if (amountNumber <= 0) {
+        if (!prev.isPaid || prev.status === 'Cancelled' || prev.status === 'Processing') return prev;
+        if (prev.status !== 'Completed') return prev;
+        return { ...prev, isPaid: false, status: 'Pending', paidDate: '' };
+      }
+
+      if (paidNumber >= amountNumber - tolerance) {
+        const fixed = amountNumber.toFixed(2);
+        const lastDate = prev.lastPaymentDate || prev.paidDate || todayYMD();
+        if (
+          prev.isPaid &&
+          prev.status === 'Completed' &&
+          prev.paidAmount === fixed &&
+          prev.paidDate
+        ) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          isPaid: true,
+          status: 'Completed',
+          paidAmount: fixed,
+          paidDate: prev.paidDate || lastDate,
+          lastPaymentDate: prev.lastPaymentDate || lastDate,
+        };
+      }
+
+      if (prev.status === 'Cancelled' || prev.status === 'Processing') {
+        return prev.isPaid ? { ...prev, isPaid: false, paidDate: '' } : prev;
+      }
+
+      if (!prev.isPaid && prev.status !== 'Completed') return prev;
+
+      return { ...prev, isPaid: false, status: 'Pending', paidDate: '' };
+    });
+  }, [formData.amount, formData.paidAmount, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !syncExpectedWithLastPayment) return;
+    if (!formData.lastPaymentDate) return;
+    setFormData((prev) => {
+      if (prev.date === formData.lastPaymentDate) return prev;
+      return { ...prev, date: formData.lastPaymentDate };
+    });
+  }, [formData.lastPaymentDate, syncExpectedWithLastPayment, isOpen]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
@@ -407,27 +603,42 @@ export function PaymentModal({
 
     if (loading) return;
 
-    const amountNum = parseFloat(formData.amount.replace(',', '.'));
-    if (!Number.isFinite(amountNum) || amountNum < 0) {
+    const amountParsed = parseMoneyValue(formData.amount);
+    if (!Number.isFinite(amountParsed) || Number(amountParsed) < 0) {
       console.error('Invalid amount value:', formData.amount);
       return;
     }
+
+    const amountNum = Number(amountParsed);
+    const paidAmountParsed = parseMoneyValue(formData.paidAmount);
+    const paidAmountNum = Number.isFinite(paidAmountParsed)
+      ? Math.max(0, Number(paidAmountParsed))
+      : 0;
 
     setLoading(true);
 
     const normalizedDate = fromInputToApiDate(formData.date)!;
     const normalizedPaidDate =
       formData.isPaid && formData.paidDate ? fromInputToApiDate(formData.paidDate) : undefined;
+    const normalizedLastPayment = formData.lastPaymentDate
+      ? fromInputToApiDate(formData.lastPaymentDate)
+      : undefined;
+    const normalizedOriginalDate = formData.originalDate
+      ? fromInputToApiDate(formData.originalDate)
+      : normalizedDate;
 
     try {
-      const paymentData = {
+      const paymentData: PaymentUpsert = {
         date: normalizedDate,
         amount: amountNum,
+        paidAmount: Math.min(Math.max(paidAmountNum, 0), Math.max(amountNum, 0)),
         type: formData.type,
         status: formData.status,
         description: formData.description,
         isPaid: formData.isPaid,
         paidDate: normalizedPaidDate,
+        lastPaymentDate: normalizedLastPayment,
+        originalDate: normalizedOriginalDate,
         notes: formData.notes,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
@@ -441,7 +652,7 @@ export function PaymentModal({
           : undefined,
         account: formData.account?.trim() || undefined,
         accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
-      } as Omit<Payment, 'id' | 'createdAt'>;
+      };
 
       if (payment) {
         await onSubmit({ id: payment.id, ...paymentData });
@@ -476,6 +687,22 @@ export function PaymentModal({
       return;
     }
 
+    if (name === 'lastPaymentDate') {
+      const nextValue = value;
+      setFormData((prev) => {
+        if (syncExpectedWithLastPayment && nextValue) {
+          return { ...prev, lastPaymentDate: nextValue, date: nextValue };
+        }
+        return { ...prev, lastPaymentDate: nextValue };
+      });
+      return;
+    }
+
+    if (name === 'originalDate') {
+      setFormData((prev) => ({ ...prev, originalDate: value }));
+      return;
+    }
+
     if (name === 'clientId') {
       setFormData((prev) => ({ ...prev, clientId: value, clientCaseId: '' }));
       return;
@@ -494,6 +721,95 @@ export function PaymentModal({
       ...prev,
       [name]: inputType === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
     }));
+  };
+
+  const amountValueForSummary = parseMoneyValue(formData.amount);
+  const amountNumber = Number.isFinite(amountValueForSummary) ? Number(amountValueForSummary) : 0;
+  const paidValueForSummary = parseMoneyValue(formData.paidAmount);
+  const paidAmountNumber = Number.isFinite(paidValueForSummary)
+    ? Math.max(0, Number(paidValueForSummary))
+    : 0;
+  const remainingAmount = Math.max(0, Number((amountNumber - paidAmountNumber).toFixed(2)));
+  const completionPercent =
+    amountNumber > 0 ? Math.min(100, Math.round((paidAmountNumber / amountNumber) * 100)) : 0;
+  const hasPartialPayment = paidAmountNumber > 0 && remainingAmount > 0.009;
+  const summaryClasses = hasPartialPayment
+    ? 'border-amber-200 bg-amber-50 text-amber-700'
+    : amountNumber > 0 && remainingAmount <= 0.009
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-slate-200 bg-slate-50 text-slate-700';
+
+  const statusDisplay = (status?: PaymentStatus | null) => {
+    if (!status) return t('statusNotSet') ?? 'Не задан';
+    switch (status) {
+      case 'Completed':
+        return t('statusCompleted') ?? t('completedStatus') ?? 'Выполнено';
+      case 'Pending':
+        return t('pending') ?? 'Ожидается';
+      case 'Overdue':
+        return t('overdue') ?? 'Просрочено';
+      case 'Processing':
+        return t('processingStatus') ?? 'В обработке';
+      case 'Cancelled':
+        return t('cancelledStatus') ?? 'Отменено';
+      default:
+        return status;
+    }
+  };
+
+  const timeline: PaymentTimelineEntry[] = [...(payment?.timeline ?? [])].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+
+  const timelineLabels: Record<PaymentTimelineEventType, string> = {
+    created: t('timelineCreated') ?? 'Создание',
+    partialPayment: t('timelinePartial') ?? 'Поступление',
+    amountAdjusted: t('timelineAmountAdjusted') ?? 'Изменение суммы',
+    rescheduled: t('timelineRescheduled') ?? 'Перенос',
+    statusChanged: t('timelineStatusChanged') ?? 'Изменение статуса',
+    finalized: t('timelineFinalized') ?? 'Закрытие',
+  };
+
+  const describeTimelineEntry = (entry: PaymentTimelineEntry) => {
+    const formatAmount = (value?: number | null) => formatCurrencySmart(Math.max(0, value ?? 0)).full;
+    const dateText = toRuDate(entry.effectiveDate ?? entry.newDate ?? entry.timestamp);
+
+    switch (entry.eventType) {
+      case 'created':
+        return (
+          (t('timelineCreatedDescription') ?? 'Платёж создан') +
+          (entry.newAmount !== undefined ? ` на сумму ${formatAmount(entry.newAmount)}` : '') +
+          ` (${dateText})`
+        );
+      case 'partialPayment': {
+        const delta = entry.amountDelta ?? 0;
+        const direction =
+          delta >= 0
+            ? t('timelinePartialPositive') ?? 'Получено'
+            : t('timelinePartialNegative') ?? 'Коррекция';
+        const totalText = formatAmount(entry.totalPaid);
+        const outstandingText = formatAmount(entry.outstanding);
+        return `${direction} ${formatAmount(Math.abs(delta))}. ${
+          t('timelineTotalPaid') ?? 'Всего оплачено'
+        }: ${totalText}. ${(t('timelineOutstanding') ?? 'Остаток') + ': '} ${outstandingText}`;
+      }
+      case 'amountAdjusted':
+        return `${t('timelineAmountAdjustedDescription') ?? 'Изменена сумма'}: ${formatAmount(
+          entry.previousAmount,
+        )} → ${formatAmount(entry.newAmount)}`;
+      case 'rescheduled':
+        return `${t('timelineRescheduledDescription') ?? 'Перенос даты'}: ${
+          entry.previousDate ? toRuDate(entry.previousDate) : '—'
+        } → ${entry.newDate ? toRuDate(entry.newDate) : dateText}`;
+      case 'statusChanged':
+        return `${t('timelineStatusChangedDescription') ?? 'Статус'}: ${statusDisplay(
+          entry.previousStatus,
+        )} → ${statusDisplay(entry.newStatus)}`;
+      case 'finalized':
+        return `${t('timelineFinalizedDescription') ?? 'Платёж закрыт'} (${dateText})`;
+      default:
+        return `${entry.eventType} ${dateText}`;
+    }
   };
 
   const canDelete = !!payment && !!onDelete;
@@ -547,21 +863,114 @@ export function PaymentModal({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
-              <input
-                ref={amountRef}
-                type="text"
-                name="amount"
-                value={formData.amount}
-                onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
-                onBlur={formatAmountOnBlur}
-                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
-                inputMode="decimal"
-                pattern="^\d+([.,]\d{0,2})?$"
-                placeholder="0.00"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
+                <input
+                  ref={amountRef}
+                  type="text"
+                  name="amount"
+                  value={formData.amount}
+                  onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
+                  onBlur={formatAmountOnBlur}
+                  onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                  inputMode="decimal"
+                  pattern="^\d+([.,]\d{0,2})?$"
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('paidAmountTotal') ?? 'Оплачено (всего)'}
+                </label>
+                <input
+                  ref={paidAmountRef}
+                  type="text"
+                  name="paidAmount"
+                  value={formData.paidAmount}
+                  onChange={(e) => handlePaidAmountInput(e.target.value, e.currentTarget)}
+                  onBlur={formatPaidAmountOnBlur}
+                  onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                  inputMode="decimal"
+                  pattern="^\d+([.,]\d{0,2})?$"
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('lastPaymentDate') ?? 'Дата последнего поступления'}
+                </label>
+                <input
+                  type="date"
+                  name="lastPaymentDate"
+                  value={formData.lastPaymentDate}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <label className="mt-2 flex items-start gap-2 text-xs sm:text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={syncExpectedWithLastPayment}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSyncExpectedWithLastPayment(checked);
+                      if (checked && formData.lastPaymentDate) {
+                        setFormData((prev) => ({ ...prev, date: formData.lastPaymentDate }));
+                      }
+                    }}
+                  />
+                  <span>{t('syncExpectedWithLastPayment') ?? 'Использовать эту дату как ожидаемую'}</span>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('originalPaymentDate') ?? 'Изначальная дата'}
+                </label>
+                <input
+                  type="date"
+                  name="originalDate"
+                  value={formData.originalDate}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  {t('originalPaymentDateHint') ?? 'Эта дата сохраняет исходный график платежа.'}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className={`rounded-lg border ${summaryClasses} px-4 py-3 text-sm leading-relaxed transition-colors`}
+            >
+              <div className="font-medium text-base">
+                {(t('paymentSummaryTitle') ?? 'Итог по платежу') + ':'}
+              </div>
+              <div className="mt-1">
+                {(t('summaryPaidAmount') ?? 'Оплачено') + ': '}
+                {formatCurrencySmart(paidAmountNumber).full}
+              </div>
+              <div>
+                {(t('summaryRemainingAmount') ?? 'Остаток') + ': '}
+                {formatCurrencySmart(remainingAmount).full}
+              </div>
+              {amountNumber > 0 ? (
+                <div className="mt-1 text-xs text-gray-600">
+                  {t('summaryCompletion') ?? 'Выполнено'}: {completionPercent}%
+                </div>
+              ) : null}
+              {hasPartialPayment ? (
+                <div className="mt-1 text-xs text-amber-700">
+                  {t('partialPaymentHint') ?? 'Получена частичная оплата, ожидается доплата.'}
+                </div>
+              ) : null}
             </div>
 
             <div>
@@ -907,6 +1316,35 @@ export function PaymentModal({
                 placeholder={t('additionalNotes')}
               />
             </div>
+
+            {timeline.length > 0 ? (
+              <div className="pt-2">
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">
+                  {t('paymentHistoryTitle') ?? 'История изменений'}
+                </h3>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {timeline.map((entry, idx) => (
+                    <div
+                      key={`${entry.timestamp}-${entry.eventType}-${idx}`}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <span>{toRuDate(entry.effectiveDate ?? entry.newDate ?? entry.timestamp)}</span>
+                        <span className="font-medium text-gray-700">
+                          {timelineLabels[entry.eventType]}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-sm text-gray-700 leading-snug">
+                        {describeTimelineEntry(entry)}
+                      </div>
+                      {entry.comment ? (
+                        <div className="mt-1 text-xs text-gray-500">{entry.comment}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex flex-col sm:flex-row gap-3 pt-4">
               {canDelete && (
