@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using System.Collections.Generic;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -63,8 +64,10 @@ public class StatsV2Controller : ControllerBase
                 .AsNoTracking()
                 .ToListAsync(ct);
 
-            var income = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount);
-            var expense = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount);
+            decimal SumPaid(IEnumerable<Payment> source) => source.Sum(p => p.PaidAmount > 0 ? p.PaidAmount : p.Amount);
+
+            var income = SumPaid(payments.Where(p => p.Type == PaymentType.Income && p.IsPaid));
+            var expense = SumPaid(payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid));
             var profit = income - expense;
 
             var completed = payments.Count(p => p.IsPaid);

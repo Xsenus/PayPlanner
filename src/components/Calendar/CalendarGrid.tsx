@@ -93,7 +93,8 @@ export function CalendarGrid({
   const paymentsByDate = useMemo(() => {
     const acc: Record<number, Payment[]> = {};
     for (const p of payments) {
-      const ymd = toDateInputValue(p.date);
+      const effective = p.effectiveDate ?? p.paidDate ?? p.date;
+      const ymd = toDateInputValue(effective);
       if (!ymd) continue;
       const [ys, ms, ds] = ymd.split('-');
       const y = +ys,

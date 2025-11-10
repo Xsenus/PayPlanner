@@ -1,6 +1,7 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import type { Payment } from '../../types';
 import type React from 'react';
+import { useTranslation } from '../../hooks/useTranslation';
 
 interface PaymentCardProps {
   payment: Payment;
@@ -18,6 +19,15 @@ export function PaymentCard({
   className = '',
 }: PaymentCardProps) {
   const isIncome = payment.type === 'Income';
+  const { t } = useTranslation();
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      value,
+    );
+
+  const paidAmount = payment.paidAmount ?? 0;
+  const outstanding = payment.outstandingAmount ?? Math.max(payment.amount - paidAmount, 0);
+  const hasPartial = payment.hasPartialPayment || (!payment.isPaid && paidAmount > 0 && outstanding > 0);
 
   const base = 'p-1.5 sm:p-2 rounded-lg text-[11px] sm:text-xs select-none pr-6';
   const interactive = onClick ? 'cursor-pointer hover:bg-gray-50 transition-colors' : '';
@@ -41,6 +51,17 @@ export function PaymentCard({
 
       <div className="truncate text-gray-700" title={payment.description}>
         {payment.description || 'Без описания'}
+      </div>
+
+      <div className="text-[10px] sm:text-xs text-gray-600 mt-1">
+        {t('paidAmount') ?? 'Оплачено'}: {formatCurrency(paidAmount)} ₽
+        {hasPartial && (
+          <span className="text-amber-600">
+            {' '}
+            • {(t('remainingToPay') ?? 'Остаток:').replace(/[:：]$/, '')}{' '}
+            {formatCurrency(outstanding)} ₽
+          </span>
+        )}
       </div>
 
       {payment.client && (

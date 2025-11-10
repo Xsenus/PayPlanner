@@ -124,6 +124,11 @@ export function PaymentsTable({
                 const isIncome = payment.type === 'Income';
                 const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
                 const amountFmt = formatCurrencySmart(payment.amount).full;
+                const paidFmt = formatCurrencySmart(payment.paidAmount ?? 0).full;
+                const outstandingValue =
+                  payment.outstandingAmount ?? Math.max(payment.amount - (payment.paidAmount ?? 0), 0);
+                const outstandingFmt = formatCurrencySmart(outstandingValue).full;
+                const showOutstanding = outstandingValue > 0.009;
                 const category =
                   payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
 
@@ -143,7 +148,11 @@ export function PaymentsTable({
                         : undefined
                     }>
                     <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
-                      {payment.date ? formatDate(payment.date) : '—'}
+                      {payment.effectiveDate
+                        ? formatDate(payment.effectiveDate)
+                        : payment.date
+                        ? formatDate(payment.date)
+                        : '—'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 min-w-[160px]">
                       {payment.client ? (
@@ -192,8 +201,17 @@ export function PaymentsTable({
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {category}
                     </td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 whitespace-nowrap">
-                      {amountFmt}
+                    <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                      <div className="font-semibold">{amountFmt}</div>
+                      <div className="text-xs text-gray-500">
+                        {(t('paidAmount') ?? 'Оплачено') + ': '} {paidFmt}
+                        {showOutstanding && (
+                          <span className="text-amber-600">
+                            {' '}
+                            • {(t('remainingToPay') ?? 'Остаток:').replace(/[:：]$/, '')} {outstandingFmt}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

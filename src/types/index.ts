@@ -121,6 +121,7 @@ export interface Payment {
   description: string;
   isPaid: boolean;
   paidDate?: string;
+  paidAmount: number;
   notes: string;
   createdAt: string;
   clientId?: number | null;
@@ -137,6 +138,14 @@ export interface Payment {
   paymentStatusEntity?: PaymentStatusEntity;
   account?: string | null;
   accountDate?: string | null;
+  initialDate?: string | null;
+  rescheduleCount?: number;
+  systemNotes?: string;
+  outstandingAmount?: number;
+  outstandingAmountHuman?: string;
+  hasPartialPayment?: boolean;
+  effectiveDate?: string;
+  daysOverdue?: number | null;
 }
 
 export interface Invoice {

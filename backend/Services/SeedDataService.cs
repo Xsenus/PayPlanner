@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services
@@ -545,6 +546,7 @@ namespace PayPlanner.Api.Services
                     PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus")
                 };
 
+                PaymentBusinessLogic.PrepareForCreate(payment, DateTime.UtcNow);
                 toAdd.Add(payment);
             }
 

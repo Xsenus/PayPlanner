@@ -165,6 +165,17 @@ export const ru = {
   editPayment: 'Редактировать платёж',
   date: 'Дата',
   amount: 'Сумма (₽)',
+  paidAmount: 'Оплачено фактически',
+  remainingToPay: 'Остаток к оплате:',
+  partialPaymentHint:
+    'Зафиксирован частичный платёж — укажите дату и условия следующего платежа.',
+  alignExpectedDateWithPayment: 'Перенести дату ожидания на фактическую дату оплаты',
+  initialPlannedDate: 'Изначально запланированная дата',
+  rescheduleCount: 'Количество переносов',
+  systemNotes: 'История изменений',
+  invalidAmount: 'Укажите корректную сумму платежа.',
+  confirmPartialPayment:
+    'Внесена частичная оплата. Остаток будет перенесён на указанную дату. Продолжить?',
   client: 'Клиент',
   dealType: 'Тип сделки',
   incomeType: 'Тип дохода',

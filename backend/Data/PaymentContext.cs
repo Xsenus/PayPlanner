@@ -59,6 +59,10 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.InitialDate).HasColumnType("date");
+            entity.Property(e => e.RescheduleCount).HasDefaultValue(0);
+            entity.Property(e => e.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.Account).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
 

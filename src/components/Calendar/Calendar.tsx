@@ -35,7 +35,12 @@ type CalendarProps = {
 function makeStatsSignature(payments: Payment[]): string {
   if (!payments || payments.length === 0) return 'empty';
   return payments
-    .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}`)
+    .map(
+      (p) =>
+        `${p.id}:${p.amount}:${p.paidAmount}:${p.status}:${p.type}:${p.effectiveDate ?? p.date}:${
+          p.outstandingAmount ?? ''
+        }`,
+    )
     .sort()
     .join('|');
 }

@@ -1,128 +1,208 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Globalization;
+
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Сущность платежа (приход или расход).
+    ///   (  ).
     /// </summary>
     public class Payment
     {
         /// <summary>
-        /// Счет.
+        /// .
         /// </summary>
         public string? Account { get; set; }
 
         /// <summary>
-        /// Дата счета.
+        ///  .
         /// </summary>
         public DateTime? AccountDate { get; set; }
 
         /// <summary>
-        /// Сумма платежа (в валюте учёта).
+        ///   (  ).
         /// </summary>
         public decimal Amount { get; set; }
 
         /// <summary>
-        /// Навигация на клиента.
+        ///   .
         /// </summary>
         public Client? Client { get; set; }
 
         /// <summary>
-        /// Навигация на дело клиента.
+        ///    .
         /// </summary>
         public ClientCase? ClientCase { get; set; }
 
         /// <summary>
-        /// Внешний ключ на дело клиента, к которому относится платеж.
+        ///     ,    .
         /// </summary>
         public int? ClientCaseId { get; set; }
 
         /// <summary>
-        /// Внешний ключ на клиента.
+        ///    .
         /// </summary>
         public int? ClientId { get; set; }
 
         /// <summary>
-        /// Дата и время создания записи (UTC).
+        ///      (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Плановая или фактическая дата платежа.
+        ///     .
         /// </summary>
         public DateTime Date { get; set; }
 
         /// <summary>
-        /// Навигация на тип сделки.
+        ///    .
         /// </summary>
         public DealType? DealType { get; set; }
 
         /// <summary>
-        /// Внешний ключ на тип сделки (если используется справочник).
+        ///      (  ).
         /// </summary>
         public int? DealTypeId { get; set; }
 
         /// <summary>
-        /// Короткое описание платежа.
+        ///   .
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Уникальный идентификатор платежа.
+        ///   .
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Навигация на тип дохода.
+        ///    .
         /// </summary>
         public IncomeType? IncomeType { get; set; }
 
         /// <summary>
-        /// Внешний ключ на тип дохода (если используется справочник).
+        ///      (  ).
         /// </summary>
         public int? IncomeTypeId { get; set; }
 
         /// <summary>
-        /// Признак, что платеж оплачен.
+        /// ,   .
         /// </summary>
         public bool IsPaid { get; set; } = false;
 
         /// <summary>
-        /// Произвольные заметки по платежу.
+        ///    .
         /// </summary>
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
-        /// Дата фактической оплаты (если оплачено).
+        ///    ( ).
         /// </summary>
         public DateTime? PaidDate { get; set; }
 
         /// <summary>
-        /// Навигация на источник платежа.
+        ///    .
         /// </summary>
         public PaymentSource? PaymentSource { get; set; }
 
         /// <summary>
-        /// Внешний ключ на источник платежа (если используется справочник).
+        ///      (  ).
         /// </summary>
         public int? PaymentSourceId { get; set; }
 
         /// <summary>
-        /// Навигация на сущность статуса платежа.
+        ///     .
         /// </summary>
         public PaymentStatusEntity? PaymentStatusEntity { get; set; }
 
         /// <summary>
-        /// Внешний ключ на сущность статуса платежа (если используется справочник).
+        ///       (  ).
         /// </summary>
         public int? PaymentStatusId { get; set; }
 
         /// <summary>
-        /// Статус платежа (ожидается/выполнен/просрочен).
+        ///   (//).
         /// </summary>
         public PaymentStatus Status { get; set; }
 
         /// <summary>
-        /// Тип платежа (приход/расход).
+        ///   (/).
         /// </summary>
         public PaymentType Type { get; set; }
+
+        /// <summary>
+        /// РЎСѓРјРјР°, С„Р°РєС‚РёС‡РµСЃРєРё РїРѕР»СѓС‡РµРЅРЅР°СЏ РїРѕ РїР»Р°С‚РµР¶Сѓ.
+        /// </summary>
+        public decimal PaidAmount { get; set; }
+
+        /// <summary>
+        /// РР·РЅР°С‡Р°Р»СЊРЅРѕ Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРЅР°СЏ РґР°С‚Р° РїР»Р°С‚РµР¶Р°.
+        /// </summary>
+        public DateTime? InitialDate { get; set; }
+
+        /// <summary>
+        /// РљРѕР»РёС‡РµСЃС‚РІРѕ РїРµСЂРµРЅРѕСЃРѕРІ РїР»Р°С‚РµР¶Р°.
+        /// </summary>
+        public int RescheduleCount { get; set; }
+
+        /// <summary>
+        /// РЎРёСЃС‚РµРјРЅС‹Рµ Р·Р°РјРµС‚РєРё вЂ” Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃС„РѕСЂРјРёСЂРѕРІР°РЅРЅР°СЏ РёСЃС‚РѕСЂРёСЏ РёР·РјРµРЅРµРЅРёР№.
+        /// </summary>
+        public string SystemNotes { get; set; } = string.Empty;
+
+        /// <summary>
+        /// РћСЃС‚Р°С‚РѕРє Рє РѕРїР»Р°С‚Рµ СЃ СѓС‡С‘С‚РѕРј С‡Р°СЃС‚РёС‡РЅС‹С… РѕРїР»Р°С‚.
+        /// </summary>
+        [NotMapped]
+        public decimal OutstandingAmount
+        {
+            get
+            {
+                var amount = Amount < 0 ? 0 : Amount;
+                var paid = PaidAmount < 0 ? 0 : PaidAmount;
+                var remaining = amount - paid;
+                return remaining > 0 ? decimal.Round(remaining, 2) : 0m;
+            }
+        }
+
+        /// <summary>
+        /// РџСЂРёР·РЅР°Рє С‚РѕРіРѕ, С‡С‚Рѕ РїРѕ РїР»Р°С‚РµР¶Сѓ РїСЂРѕРІРµРґРµРЅР° С‡Р°СЃС‚РёС‡РЅР°СЏ РѕРїР»Р°С‚Р°.
+        /// </summary>
+        [NotMapped]
+        public bool HasPartialPayment => PaidAmount > 0 && OutstandingAmount > 0;
+
+        /// <summary>
+        /// Р­С„С„РµРєС‚РёРІРЅР°СЏ РґР°С‚Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ вЂ” С„Р°РєС‚РёС‡РµСЃРєР°СЏ РґР°С‚Р° РѕРїР»Р°С‚С‹ Р»РёР±Рѕ С‚РµРєСѓС‰Р°СЏ РґР°С‚Р° РїРѕ РіСЂР°С„РёРєСѓ.
+        /// </summary>
+        [NotMapped]
+        public DateTime EffectiveDate => IsPaid && PaidDate.HasValue ? PaidDate.Value : Date;
+
+        /// <summary>
+        /// Р§РёСЃР»Рѕ РґРЅРµР№ РїСЂРѕСЃСЂРѕС‡РєРё РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ РёСЃС…РѕРґРЅРѕР№ РґР°С‚С‹.
+        /// </summary>
+        [NotMapped]
+        public int? DaysOverdue
+        {
+            get
+            {
+                if (!InitialDate.HasValue) return null;
+                var planned = InitialDate.Value.Date;
+                if (IsPaid && PaidDate.HasValue)
+                {
+                    var fact = PaidDate.Value.Date;
+                    var diff = (fact - planned).Days;
+                    return diff > 0 ? diff : 0;
+                }
+
+                var today = DateTime.UtcNow.Date;
+                if (today <= planned) return 0;
+                if (Date.Date <= planned) return (today - planned).Days;
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Р¤РѕСЂРјР°С‚РёСЂРѕРІР°РЅРЅРѕРµ РїСЂРµРґСЃС‚Р°РІР»РµРЅРёРµ РѕСЃС‚Р°С‚РєР° РґР»СЏ СЃРёСЃС‚РµРјРЅС‹С… Р·Р°РїРёСЃРµР№.
+        /// </summary>
+        [NotMapped]
+        public string OutstandingAmountHuman => string.Format(CultureInfo.GetCultureInfo("ru-RU"), "{0:N2}", OutstandingAmount);
     }
 }

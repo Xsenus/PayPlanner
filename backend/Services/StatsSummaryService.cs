@@ -81,7 +81,10 @@ namespace PayPlanner.Api.Services
                 {
                     g.Key.Type,
                     g.Key.Status,
-                    Amount = g.Sum(v => (decimal?)v.Amount) ?? 0m,
+                    Amount = g.Sum(v => (decimal?)(
+                        v.Status == PaymentStatus.Completed
+                            ? (v.PaidAmount > 0 ? v.PaidAmount : v.Amount)
+                            : ((v.Amount - v.PaidAmount) > 0 ? (v.Amount - v.PaidAmount) : 0))) ?? 0m,
                     Count = g.Count()
                 })
                 .ToListAsync(ct);

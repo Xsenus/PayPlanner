@@ -1312,7 +1312,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                       <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
                         <div className="flex items-center justify-end gap-2">
                           <p className="text-sm font-medium text-gray-900 leading-none">
-                            {toRuDate(payment.date)}
+                            {toRuDate(payment.effectiveDate ?? payment.date)}
                           </p>
                           {clientPermissions.canEdit && (
                             <button

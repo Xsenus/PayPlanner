@@ -63,6 +63,7 @@ export function PaymentModal({
     description: '',
     isPaid: false,
     paidDate: '',
+    paidAmount: '',
     notes: '',
     clientId: '',
     clientCaseId: '',
@@ -73,11 +74,15 @@ export function PaymentModal({
     type: (type ?? 'Income') as PaymentKind,
     account: '',
     accountDate: '',
+    initialDate: '',
+    systemNotes: '',
+    rescheduleCount: 0,
   });
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [autoAlignExpectedDate, setAutoAlignExpectedDate] = useState(false);
 
   /* -------------------- Подсказки по счёту -------------------- */
   useEffect(() => {
@@ -166,6 +171,7 @@ export function PaymentModal({
           description: p.description,
           isPaid: p.isPaid,
           paidDate: toDateInputValue(p.paidDate) || '',
+          paidAmount: Number.isFinite(p.paidAmount) ? p.paidAmount.toFixed(2) : '',
           notes: p.notes || '',
           clientId: (p.clientId ?? defaultClientId)?.toString() || '',
           clientCaseId: (p.clientCaseId ?? defaultClientCaseId)?.toString() || '',
@@ -176,6 +182,9 @@ export function PaymentModal({
           type: (p.type as PaymentKind) ?? type ?? 'Income',
           account: p.account ?? '',
           accountDate: toDateInputValue(p.accountDate) || '',
+          initialDate: toDateInputValue(p.initialDate ?? p.date) || toDateInputValue(p.date) || todayYMD(),
+          systemNotes: p.systemNotes ?? '',
+          rescheduleCount: p.rescheduleCount ?? 0,
         });
       } else {
         setFormData({
@@ -185,6 +194,7 @@ export function PaymentModal({
           description: '',
           isPaid: false,
           paidDate: '',
+          paidAmount: '',
           notes: '',
           clientId: defaultClientId?.toString() || '',
           clientCaseId: defaultClientCaseId?.toString() || '',
@@ -195,10 +205,14 @@ export function PaymentModal({
           type: (type ?? 'Income') as PaymentKind,
           account: '',
           accountDate: '',
+          initialDate: todayYMD(),
+          systemNotes: '',
+          rescheduleCount: 0,
         });
       }
 
       prevOpenRef.current = true;
+      setAutoAlignExpectedDate(false);
     }
   }, [isOpen, defaultClientId, defaultClientCaseId, type]);
 
@@ -213,6 +227,19 @@ export function PaymentModal({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!autoAlignExpectedDate) return;
+    if (!formData.paidDate) return;
+    setFormData((s) => ({ ...s, date: s.paidDate }));
+  }, [autoAlignExpectedDate, formData.paidDate, isOpen]);
+
+  useEffect(() => {
+    if (!hasPartialPayment && autoAlignExpectedDate) {
+      setAutoAlignExpectedDate(false);
+    }
+  }, [autoAlignExpectedDate, hasPartialPayment]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -234,6 +261,22 @@ export function PaymentModal({
   useEffect(() => {
     caseIdRef.current = formData.clientCaseId;
   }, [formData.clientCaseId]);
+
+  const parseMoneyValue = (value: string): number => {
+    if (!value) return 0;
+    const normalized = value.replace(/\s+/g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const clampPaidAmount = (paid: number, amount: number): number => {
+    if (!Number.isFinite(paid)) return 0;
+    const safePaid = paid < 0 ? 0 : paid;
+    if (!Number.isFinite(amount) || amount <= 0) return safePaid;
+    return safePaid > amount ? amount : safePaid;
+  };
+
+  const formatMoneyString = (value: number): string => value.toFixed(2);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -319,13 +362,36 @@ export function PaymentModal({
     defaultClientCaseId,
   ]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData((s) => {
+      if (!s.amount?.trim()) {
+        return s.paidAmount ? { ...s, paidAmount: '' } : s;
+      }
+      const amountValue = parseMoneyValue(s.amount);
+      if (!Number.isFinite(amountValue)) return s;
+      const paidValue = parseMoneyValue(s.paidAmount);
+      const clamped = clampPaidAmount(paidValue, amountValue);
+      const normalized = formatMoneyString(clamped);
+      if (paidValue !== clamped) {
+        return { ...s, paidAmount: clamped === 0 ? '' : normalized };
+      }
+      return s;
+    });
+  }, [formData.amount, isOpen]);
+
   const markPaid = () =>
-    setFormData((s) => ({
-      ...s,
-      isPaid: true,
-      status: 'Completed',
-      paidDate: s.paidDate || todayYMD(),
-    }));
+    setFormData((s) => {
+      const amountValue = parseMoneyValue(s.amount);
+      const nextPaid = amountValue > 0 ? formatMoneyString(amountValue) : s.paidAmount || '';
+      return {
+        ...s,
+        isPaid: true,
+        status: 'Completed',
+        paidDate: s.paidDate || todayYMD(),
+        paidAmount: nextPaid,
+      };
+    });
 
   const markPending = () =>
     setFormData((s) => ({
@@ -336,11 +402,18 @@ export function PaymentModal({
     }));
 
   const amountRef = useRef<HTMLInputElement>(null);
-  const handleAmountInput = (raw: string, el?: HTMLInputElement) => {
+  const paidAmountRef = useRef<HTMLInputElement>(null);
+
+  const handleCurrencyInput = (
+    raw: string,
+    field: 'amount' | 'paidAmount',
+    ref: React.RefObject<HTMLInputElement>,
+    el?: HTMLInputElement,
+  ) => {
     let v = raw.replace(/[^\d.,]/g, '');
     const caret = el?.selectionStart ?? v.length;
     if (!v) {
-      setFormData((s) => ({ ...s, amount: '' }));
+      setFormData((s) => ({ ...s, [field]: '' }));
       return;
     }
 
@@ -350,9 +423,9 @@ export function PaymentModal({
       const newVal = `${intPart}.00`;
       const nextCaret = Math.min(caret, intPart.length);
 
-      setFormData((s) => ({ ...s, amount: newVal }));
+      setFormData((s) => ({ ...s, [field]: newVal }));
       requestAnimationFrame(() => {
-        const node = amountRef.current;
+        const node = ref.current;
         if (node) node.setSelectionRange(nextCaret, nextCaret);
       });
       return;
@@ -374,25 +447,48 @@ export function PaymentModal({
       nextCaret = intPart.length + 1 + Math.min(offsetInFrac, fracPart.length);
     }
 
-    setFormData((s) => ({ ...s, amount: newVal }));
+    setFormData((s) => {
+      const next = { ...s, [field]: newVal } as typeof s;
+      if (field === 'paidAmount') {
+        const amountValue = parseMoneyValue(next.amount);
+        const paidValue = parseMoneyValue(newVal);
+        const clamped = clampPaidAmount(paidValue, amountValue);
+        const normalized = formatMoneyString(clamped);
+        if (clamped !== paidValue) {
+          next.paidAmount = normalized;
+          requestAnimationFrame(() => {
+            const node = ref.current;
+            if (node) node.setSelectionRange(normalized.length, normalized.length);
+          });
+        }
+      }
+      return next;
+    });
     requestAnimationFrame(() => {
-      const node = amountRef.current;
+      const node = ref.current;
       if (node) node.setSelectionRange(nextCaret, nextCaret);
     });
   };
 
-  const formatAmountOnBlur = () => {
-    const raw = formData.amount.trim();
+  const formatCurrencyOnBlur = (field: 'amount' | 'paidAmount') => {
+    const raw = formData[field].trim();
     if (!raw) return;
 
     const cleaned = raw.replace(',', '.').replace(/[^\d.]/g, '');
     const num = Number(cleaned);
     if (!Number.isFinite(num)) {
-      setFormData((s) => ({ ...s, amount: '' }));
+      setFormData((s) => ({ ...s, [field]: '' }));
       return;
     }
     const fixed = num.toFixed(2);
-    setFormData((s) => ({ ...s, amount: fixed }));
+    setFormData((s) => {
+      if (field === 'paidAmount') {
+        const amountValue = parseMoneyValue(s.amount);
+        const clamped = clampPaidAmount(num, amountValue);
+        return { ...s, paidAmount: formatMoneyString(clamped) };
+      }
+      return { ...s, amount: fixed };
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -407,26 +503,63 @@ export function PaymentModal({
 
     if (loading) return;
 
-    const amountNum = parseFloat(formData.amount.replace(',', '.'));
+    const amountNum = parseMoneyValue(formData.amount);
     if (!Number.isFinite(amountNum) || amountNum < 0) {
-      console.error('Invalid amount value:', formData.amount);
+      alert(t('invalidAmount') ?? 'Укажите корректную сумму платежа.');
       return;
+    }
+
+    let paidAmountNum = clampPaidAmount(parseMoneyValue(formData.paidAmount), amountNum);
+    if (formData.isPaid) {
+      paidAmountNum = amountNum;
+    }
+
+    const remaining = amountNum - paidAmountNum;
+    const hasPartialPayment = paidAmountNum > 0 && remaining > 0.009;
+
+    if (hasPartialPayment) {
+      const confirmMessage =
+        t('confirmPartialPayment') ??
+        `Внесено ${paidAmountNum.toFixed(2)} из ${amountNum.toFixed(2)}. Остаток ${remaining.toFixed(
+          2,
+        )}. Продолжить?`;
+      const confirmed = window.confirm(confirmMessage);
+      if (!confirmed) return;
     }
 
     setLoading(true);
 
     const normalizedDate = fromInputToApiDate(formData.date)!;
     const normalizedPaidDate =
-      formData.isPaid && formData.paidDate ? fromInputToApiDate(formData.paidDate) : undefined;
+      (formData.isPaid || paidAmountNum === amountNum) && formData.paidDate
+        ? fromInputToApiDate(formData.paidDate)
+        : undefined;
+    const normalizedInitialDate = formData.initialDate
+      ? fromInputToApiDate(formData.initialDate)
+      : undefined;
 
     try {
+      const isCompleted =
+        formData.status === 'Cancelled' || formData.status === 'Processing'
+          ? false
+          : formData.isPaid || Math.abs(paidAmountNum - amountNum) < 0.01;
+
+      const statusToSend =
+        formData.status === 'Cancelled' || formData.status === 'Processing'
+          ? formData.status
+          : isCompleted
+          ? 'Completed'
+          : formData.status === 'Completed'
+          ? 'Pending'
+          : formData.status;
+
       const paymentData = {
         date: normalizedDate,
         amount: amountNum,
         type: formData.type,
-        status: formData.status,
+        status: statusToSend,
         description: formData.description,
-        isPaid: formData.isPaid,
+        isPaid: isCompleted,
         paidDate: normalizedPaidDate,
         notes: formData.notes,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
@@ -441,6 +574,8 @@ export function PaymentModal({
           : undefined,
         account: formData.account?.trim() || undefined,
         accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
+        paidAmount: Number(paidAmountNum.toFixed(2)),
+        initialDate: normalizedInitialDate,
       } as Omit<Payment, 'id' | 'createdAt'>;
 
       if (payment) {
@@ -496,6 +631,11 @@ export function PaymentModal({
     }));
   };
 
+  const amountNumber = parseMoneyValue(formData.amount);
+  const paidAmountNumber = parseMoneyValue(formData.paidAmount);
+  const remainingAmount = Math.max(amountNumber - paidAmountNumber, 0);
+  const hasPartialPayment = paidAmountNumber > 0 && remainingAmount > 0.009;
+
   const canDelete = !!payment && !!onDelete;
   if (!isOpen) return null;
 
@@ -548,20 +688,87 @@ export function PaymentModal({
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('initialPlannedDate') ?? 'Изначально запланированная дата'}
+              </label>
+              <input
+                type="date"
+                name="initialDate"
+                value={formData.initialDate}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {formData.rescheduleCount > 0 && (
+                <div className="mt-1 text-xs text-gray-600">
+                  {(t('rescheduleCount') ?? 'Количество переносов:') + ' '}
+                  <span className="font-medium">{formData.rescheduleCount}</span>
+                </div>
+              )}
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
               <input
                 ref={amountRef}
                 type="text"
                 name="amount"
                 value={formData.amount}
-                onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
-                onBlur={formatAmountOnBlur}
+                onChange={(e) => handleCurrencyInput(e.target.value, 'amount', amountRef, e.currentTarget)}
+                onBlur={() => formatCurrencyOnBlur('amount')}
                 onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
                 inputMode="decimal"
                 pattern="^\d+([.,]\d{0,2})?$"
                 placeholder="0.00"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('paidAmount') ?? 'Оплачено фактически'}
+              </label>
+              <input
+                ref={paidAmountRef}
+                type="text"
+                name="paidAmount"
+                value={formData.paidAmount}
+                onChange={(e) =>
+                  handleCurrencyInput(e.target.value, 'paidAmount', paidAmountRef, e.currentTarget)
+                }
+                onBlur={() => formatCurrencyOnBlur('paidAmount')}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                inputMode="decimal"
+                pattern="^\d+([.,]\d{0,2})?$"
+                placeholder="0.00"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <div className="mt-1 text-xs text-gray-600 space-y-1">
+                <div>
+                  {(t('remainingToPay') ?? 'Остаток к оплате:')}{' '}
+                  <span className={remainingAmount > 0 ? 'text-amber-600 font-medium' : ''}>
+                    {formatMoneyString(remainingAmount)} ₽
+                  </span>
+                </div>
+                {hasPartialPayment && (
+                  <div className="text-amber-600">
+                    {t('partialPaymentHint') ??
+                      'Зафиксирован частичный платёж — укажите дату и условия следующего платежа.'}
+                  </div>
+                )}
+              </div>
+              {hasPartialPayment && (
+                <label className="mt-3 flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={autoAlignExpectedDate}
+                    onChange={(e) => setAutoAlignExpectedDate(e.target.checked)}
+                  />
+                  <span>
+                    {t('alignExpectedDateWithPayment') ??
+                      'Перенести дату ожидания на фактическую дату оплаты'}
+                  </span>
+                </label>
+              )}
             </div>
 
             <div>
@@ -895,6 +1102,20 @@ export function PaymentModal({
                 placeholder={t('paymentDescription')}
               />
             </div>
+
+            {formData.systemNotes && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('systemNotes') ?? 'Системные комментарии'}
+                </label>
+                <textarea
+                  value={formData.systemNotes}
+                  readOnly
+                  rows={Math.min(6, Math.max(3, formData.systemNotes.split('\n').length))}
+                  className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm text-gray-700"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
