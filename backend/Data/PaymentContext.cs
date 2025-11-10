@@ -226,6 +226,27 @@ public class PaymentContext : DbContext
                   .HasDatabaseName("IX_Roles_Name");
         });
 
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Section).HasMaxLength(100).IsRequired();
+
+            entity.HasIndex(e => new { e.RoleId, e.Section })
+                  .IsUnique()
+                  .HasDatabaseName("IX_RolePermissions_RoleId_Section");
+
+            entity.Property(e => e.CanView).HasDefaultValue(true);
+            entity.Property(e => e.CanCreate).HasDefaultValue(true);
+            entity.Property(e => e.CanEdit).HasDefaultValue(true);
+            entity.Property(e => e.CanDelete).HasDefaultValue(true);
+            entity.Property(e => e.CanExport).HasDefaultValue(true);
+
+            entity.HasOne(e => e.Role)
+                  .WithMany(r => r.Permissions)
+                  .HasForeignKey(e => e.RoleId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // ================== Users ==================
         modelBuilder.Entity<User>(entity =>
         {
@@ -312,6 +333,8 @@ public class PaymentContext : DbContext
     /// Акты оказанных услуг.
     /// </summary>
     public DbSet<Act> Acts { get; set; }
+
+    public DbSet<RolePermission> RolePermissions { get; set; }
 
     /// <summary>
     /// Типы сделок.

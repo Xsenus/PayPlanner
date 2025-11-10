@@ -1,53 +1,52 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Act, ActInput, ActStatus, ActsSummary } from '../types';
+import type { Invoice, InvoiceInput, InvoiceSummary, PaymentStatus } from '../types';
 
-export type ActsSortKey =
+export type InvoicesSortKey =
   | 'date'
   | 'number'
   | 'amount'
-  | 'invoiceNumber'
-  | 'counterpartyInn'
+  | 'dueDate'
   | 'status'
   | 'client'
   | 'responsible'
   | 'createdAt';
 
-export interface ActsFilters {
+export interface InvoicesFilters {
   from?: string;
   to?: string;
-  status?: ActStatus;
+  status?: PaymentStatus;
   clientId?: number;
   responsibleId?: number;
   search?: string;
-  sortBy?: ActsSortKey;
+  sortBy?: InvoicesSortKey;
   sortDir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
   disabled?: boolean;
 }
 
-export interface ActsPagination {
+export interface InvoicesPagination {
   page: number;
   pageSize: number;
   total: number;
 }
 
-interface UseActsResult {
-  acts: Act[];
+interface UseInvoicesResult {
+  invoices: Invoice[];
   loading: boolean;
   refreshing: boolean;
   error: string | null;
-  summary: ActsSummary | null;
+  summary: InvoiceSummary | null;
   summaryLoading: boolean;
-  pagination: ActsPagination;
+  pagination: InvoicesPagination;
   refresh: () => Promise<void>;
-  createAct: (payload: ActInput) => Promise<Act>;
-  updateAct: (id: number, payload: ActInput) => Promise<Act>;
-  deleteAct: (id: number) => Promise<void>;
+  createInvoice: (payload: InvoiceInput) => Promise<Invoice>;
+  updateInvoice: (id: number, payload: InvoiceInput) => Promise<Invoice>;
+  deleteInvoice: (id: number) => Promise<void>;
 }
 
-function makeSummaryKey(filters: ActsFilters): string {
+function makeSummaryKey(filters: InvoicesFilters): string {
   return JSON.stringify({
     from: filters.from ?? null,
     to: filters.to ?? null,
@@ -58,14 +57,14 @@ function makeSummaryKey(filters: ActsFilters): string {
   });
 }
 
-export function useActs(filters: ActsFilters): UseActsResult {
-  const [acts, setActs] = useState<Act[]>([]);
+export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<ActsSummary | null>(null);
+  const [summary, setSummary] = useState<InvoiceSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState<boolean>(false);
-  const [pagination, setPagination] = useState<ActsPagination>({
+  const [pagination, setPagination] = useState<InvoicesPagination>({
     page: filters.page ?? 1,
     pageSize: filters.pageSize ?? 20,
     total: 0,
@@ -77,12 +76,12 @@ export function useActs(filters: ActsFilters): UseActsResult {
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
-  const fetchActs = useCallback(
+  const fetchInvoices = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
       if (filters.disabled) {
         hasLoadedRef.current = true;
         setError(null);
-        setActs([]);
+        setInvoices([]);
         setPagination({
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 20,
@@ -101,7 +100,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
       }
       setError(null);
       try {
-        const response = await apiService.getActs({
+        const response = await apiService.getInvoices({
           from: filters.from,
           to: filters.to,
           status: filters.status,
@@ -113,7 +112,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           page: filters.page,
           pageSize: filters.pageSize,
         });
-        setActs(response.items ?? []);
+        setInvoices(response.items ?? []);
         setPagination({
           page: response.page ?? filters.page ?? 1,
           pageSize: response.pageSize ?? filters.pageSize ?? 20,
@@ -121,10 +120,10 @@ export function useActs(filters: ActsFilters): UseActsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Не удалось загрузить акты';
+        const message = err instanceof Error ? err.message : 'Не удалось загрузить счета';
         setError(message);
         if (!hasLoadedRef.current) {
-          setActs([]);
+          setInvoices([]);
           setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
         }
       } finally {
@@ -164,7 +163,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         setSummaryLoading(true);
       }
       try {
-        const response = await apiService.getActsSummary({
+        const response = await apiService.getInvoicesSummary({
           from: filters.from,
           to: filters.to,
           status: filters.status,
@@ -198,8 +197,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
   useEffect(() => {
     hasLoadedRef.current = false;
     setLoading(true);
-    void fetchActs('auto');
-  }, [filtersKey, fetchActs]);
+    void fetchInvoices('auto');
+  }, [filtersKey, fetchInvoices]);
 
   useEffect(() => {
     hasSummaryLoadedRef.current = false;
@@ -207,37 +206,37 @@ export function useActs(filters: ActsFilters): UseActsResult {
   }, [summaryKey, fetchSummary]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([fetchActs('refresh'), fetchSummary('refresh')]);
-  }, [fetchActs, fetchSummary]);
+    await Promise.all([fetchInvoices('refresh'), fetchSummary('refresh')]);
+  }, [fetchInvoices, fetchSummary]);
 
-  const createAct = useCallback(
-    async (payload: ActInput) => {
-      const created = await apiService.createAct(payload);
+  const createInvoice = useCallback(
+    async (payload: InvoiceInput) => {
+      const created = await apiService.createInvoice(payload);
       await refresh();
       return created;
     },
     [refresh],
   );
 
-  const updateAct = useCallback(
-    async (id: number, payload: ActInput) => {
-      const updated = await apiService.updateAct(id, payload);
+  const updateInvoice = useCallback(
+    async (id: number, payload: InvoiceInput) => {
+      const updated = await apiService.updateInvoice(id, payload);
       await refresh();
       return updated;
     },
     [refresh],
   );
 
-  const deleteAct = useCallback(
+  const deleteInvoice = useCallback(
     async (id: number) => {
-      await apiService.deleteAct(id);
+      await apiService.deleteInvoice(id);
       await refresh();
     },
     [refresh],
   );
 
   return {
-    acts,
+    invoices,
     loading,
     refreshing,
     error,
@@ -245,8 +244,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
     summaryLoading,
     pagination,
     refresh,
-    createAct,
-    updateAct,
-    deleteAct,
+    createInvoice,
+    updateInvoice,
+    deleteInvoice,
   };
 }

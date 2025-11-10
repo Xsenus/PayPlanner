@@ -1,3 +1,31 @@
+import type {
+  Act,
+  ActInput,
+  ActResponsible,
+  ActStatus,
+  ActsSummary,
+  Payment,
+  Invoice,
+  InvoiceInput,
+  InvoiceSummary,
+  PaymentStatus,
+  Client,
+  InstallmentRequest,
+  ClientStats,
+  DealType,
+  IncomeType,
+  PaymentSource,
+  PaymentStatusEntity,
+  MonthlyStats,
+  ClientCase,
+  AccountSuggestion,
+  SummaryStats,
+  PeriodKey,
+  SummaryStatus,
+} from '../types';
+import type { RolePermissions } from '../types/permissions';
+import { BaseDictItem } from '../types/dictionaries';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
 function getAuthToken(): string | null {
@@ -37,6 +65,16 @@ type ActsSortKey =
   | 'amount'
   | 'invoiceNumber'
   | 'counterpartyInn'
+  | 'status'
+  | 'client'
+  | 'responsible'
+  | 'createdAt';
+
+type InvoicesSortKey =
+  | 'date'
+  | 'number'
+  | 'amount'
+  | 'dueDate'
   | 'status'
   | 'client'
   | 'responsible'
@@ -134,6 +172,54 @@ export class ApiService {
 
   async deleteAct(id: number) {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Invoices =====
+  async getInvoices(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+    sortBy?: InvoicesSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Invoice>>(`/invoices${q}`);
+  }
+
+  async getInvoicesSummary(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<InvoiceSummary>(`/invoices/summary${q}`);
+  }
+
+  async createInvoice(payload: InvoiceInput) {
+    return this.request<Invoice>('/invoices', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateInvoice(id: number, payload: InvoiceInput) {
+    return this.request<Invoice>(`/invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteInvoice(id: number) {
+    return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
   }
 
   // ===== Payments (back-compat + расширенные варианты) =====
@@ -246,6 +332,22 @@ export class ApiService {
 
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Role permissions =====
+  async getRolePermissions(roleId: number) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`);
+  }
+
+  async updateRolePermissions(roleId: number, permissions: RolePermissions) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(permissions),
+    });
+  }
+
+  async resetRolePermissions(roleId: number) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`, { method: 'DELETE' });
   }
 
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)
@@ -594,27 +696,3 @@ export class ApiService {
 }
 
 export const apiService = new ApiService();
-
-// ---- types import ----
-import type {
-  Act,
-  ActInput,
-  ActResponsible,
-  ActStatus,
-  ActsSummary,
-  Payment,
-  Client,
-  InstallmentRequest,
-  ClientStats,
-  DealType,
-  IncomeType,
-  PaymentSource,
-  PaymentStatusEntity,
-  MonthlyStats,
-  ClientCase,
-  AccountSuggestion,
-  SummaryStats,
-  PeriodKey,
-  SummaryStatus,
-} from '../types';
-import { BaseDictItem } from '../types/dictionaries';

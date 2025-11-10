@@ -4,12 +4,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Shield, ShieldPlus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
-import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
 import {
-  MENU_SECTION_KEYS,
-  type MenuPermissionKey,
-  type RolePermissions,
-} from '../../types/permissions';
+  fetchRolePermissions,
+  getRolePermissions,
+  subscribeOnPermissionsChange,
+} from '../../services/permissionsService';
+import { MENU_SECTION_KEYS, type MenuPermissionKey } from '../../types/permissions';
 
 const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {
   calendar: 'Календарь',
@@ -58,6 +58,12 @@ export const Roles = () => {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    roles.forEach((role) => {
+      void fetchRolePermissions(role.id).catch(() => undefined);
+    });
+  }, [roles]);
 
   const fetchRoles = async () => {
     try {
