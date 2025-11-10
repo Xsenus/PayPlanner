@@ -60,6 +60,58 @@ export interface PaymentStatusEntity {
   createdAt: string;
 }
 
+export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
+
+export interface Act {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  amount: number;
+  invoiceNumber?: string | null;
+  counterpartyInn?: string | null;
+  status: ActStatus;
+  clientId?: number | null;
+  clientName?: string | null;
+  responsibleId?: number | null;
+  responsibleName?: string | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface ActInput {
+  number: string;
+  title?: string | null;
+  date: string;
+  amount: number;
+  invoiceNumber?: string | null;
+  counterpartyInn?: string | null;
+  status: ActStatus;
+  clientId?: number | null;
+  responsibleId?: number | null;
+  comment?: string | null;
+}
+
+export interface ActSummaryBucket {
+  amount: number;
+  count: number;
+}
+
+export interface ActsSummary {
+  created: ActSummaryBucket;
+  transferred: ActSummaryBucket;
+  signed: ActSummaryBucket;
+  terminated: ActSummaryBucket;
+  totalAmount: number;
+  totalCount: number;
+}
+
+export interface ActResponsible {
+  id: number;
+  fullName: string;
+}
+
 export interface Payment {
   id: number;
   date: string;

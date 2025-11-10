@@ -4,21 +4,52 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Data;
 
 /// <summary>
-/// Контекст базы данных для модуля управления платежами, клиентами и пользователями.
-/// Содержит DbSet для всех основных сущностей и конфигурацию индексов.
+/// РљРѕРЅС‚РµРєСЃС‚ Р±Р°Р·С‹ РґР°РЅРЅС‹С… РјРѕРґСѓР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ РїР»Р°С‚РµР¶Р°РјРё, РєР»РёРµРЅС‚Р°РјРё Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРјРё.
+/// РЎРѕРґРµСЂР¶РёС‚ РЅР°Р±РѕСЂС‹ СЃСѓС‰РЅРѕСЃС‚РµР№ Рё РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ РёРЅРґРµРєСЃРѕРІ РґР»СЏ РІСЃРµС… РґРѕРјРµРЅРЅС‹С… РјРѕРґРµР»РµР№.
 /// </summary>
 public class PaymentContext : DbContext
 {
     /// <summary>
-    /// Создаёт новый экземпляр контекста базы данных.
+    /// РЎРѕР·РґР°РµС‚ РЅРѕРІС‹Р№ СЌРєР·РµРјРїР»СЏСЂ РєРѕРЅС‚РµРєСЃС‚Р° Р±Р°Р·С‹ РґР°РЅРЅС‹С….
     /// </summary>
     public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
 
     /// <summary>
-    /// Конфигурация сущностей, связей и индексов.
+    /// Р’С‹РїРѕР»РЅСЏРµС‚ РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ СЃСѓС‰РЅРѕСЃС‚РµР№, СЃРІСЏР·РµР№ Рё РёРЅРґРµРєСЃРѕРІ.
     /// </summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // ------------------ Act ------------------
+        modelBuilder.Entity<Act>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200);
+            entity.Property(e => e.InvoiceNumber).HasMaxLength(100);
+            entity.Property(e => e.CounterpartyInn).HasMaxLength(32);
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Date).HasColumnType("date");
+
+            entity.HasOne(e => e.Client)
+                  .WithMany(c => c.Acts)
+                  .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.Responsible)
+                  .WithMany(u => u.Acts)
+                  .HasForeignKey(e => e.ResponsibleId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_Acts_Date");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_Acts_Status");
+            entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_Acts_ClientId");
+            entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
+            entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
+        });
+
         // ------------------ Payment ------------------
         modelBuilder.Entity<Payment>(entity =>
         {
@@ -31,43 +62,43 @@ public class PaymentContext : DbContext
             entity.Property(p => p.Account).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
 
-            // Связь с клиентом
+            // Г‘ГўГїГ§Гј Г± ГЄГ«ГЁГҐГ­ГІГ®Г¬
             entity.HasOne(e => e.Client)
                   .WithMany(c => c.Payments)
                   .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Связь с делом клиента
+            // Г‘ГўГїГ§Гј Г± Г¤ГҐГ«Г®Г¬ ГЄГ«ГЁГҐГ­ГІГ 
             entity.HasOne(e => e.ClientCase)
                   .WithMany(cc => cc.Payments)
                   .HasForeignKey(e => e.ClientCaseId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Связь с типом сделки
+            // Г‘ГўГїГ§Гј Г± ГІГЁГЇГ®Г¬ Г±Г¤ГҐГ«ГЄГЁ
             entity.HasOne(e => e.DealType)
                   .WithMany(d => d.Payments)
                   .HasForeignKey(e => e.DealTypeId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Связь с типом дохода
+            // Г‘ГўГїГ§Гј Г± ГІГЁГЇГ®Г¬ Г¤Г®ГµГ®Г¤Г 
             entity.HasOne(e => e.IncomeType)
                   .WithMany(i => i.Payments)
                   .HasForeignKey(e => e.IncomeTypeId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Связь с источником платежа
+            // Г‘ГўГїГ§Гј Г± ГЁГ±ГІГ®Г·Г­ГЁГЄГ®Г¬ ГЇГ«Г ГІГҐГ¦Г 
             entity.HasOne(e => e.PaymentSource)
                   .WithMany(p => p.Payments)
                   .HasForeignKey(e => e.PaymentSourceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Связь со статусом платежа
+            // Г‘ГўГїГ§Гј Г±Г® Г±ГІГ ГІГіГ±Г®Г¬ ГЇГ«Г ГІГҐГ¦Г 
             entity.HasOne(e => e.PaymentStatusEntity)
                   .WithMany(s => s.Payments)
                   .HasForeignKey(e => e.PaymentStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- Индексы Account
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» Account
             entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
             entity.HasIndex(e => new { e.Account, e.AccountDate }).HasDatabaseName("IX_Payments_Account_AccountDate");
@@ -97,7 +128,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Address).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_Clients_IsActive");
@@ -112,13 +143,13 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(1000);
 
-            // Связь с клиентом
+            // Г‘ГўГїГ§Гј Г± ГЄГ«ГЁГҐГ­ГІГ®Г¬
             entity.HasOne(cc => cc.Client)
                   .WithMany(c => c.Cases)
                   .HasForeignKey(cc => cc.ClientId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCases_Status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCases_CreatedAt");
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_ClientId_CreatedAt");
@@ -146,7 +177,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ColorHex).HasMaxLength(7);
             entity.Property(e => e.PaymentType).HasConversion<int>().IsRequired().HasDefaultValue(PaymentType.Income);
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_IncomeTypes_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_IncomeTypes_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_IncomeTypes_IsActive_Name");
@@ -162,7 +193,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentSources_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentSources_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentSources_IsActive_Name");
@@ -176,7 +207,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentStatuses_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentStatuses_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentStatuses_IsActive_Name");
@@ -189,7 +220,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
 
-            // ---- Индексы ----
+            // ---- Г€Г­Г¤ГҐГЄГ±Г» ----
             entity.HasIndex(e => e.Name)
                   .IsUnique()
                   .HasDatabaseName("IX_Roles_Name");
@@ -208,7 +239,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.PasswordHash).IsRequired();
             entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
 
-            // --- дополнительные поля профиля ---
+            // --- Г¤Г®ГЇГ®Г«Г­ГЁГІГҐГ«ГјГ­Г»ГҐ ГЇГ®Г«Гї ГЇГ°Г®ГґГЁГ«Гї ---
             entity.Property(e => e.FirstName).HasMaxLength(100);
             entity.Property(e => e.LastName).HasMaxLength(100);
             entity.Property(e => e.MiddleName).HasMaxLength(100);
@@ -222,17 +253,17 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Messenger).HasMaxLength(100);
             entity.Property(e => e.Viber).HasMaxLength(100);
 
-            // --- даты как date ---
+            // --- Г¤Г ГІГ» ГЄГ ГЄ date ---
             entity.Property(e => e.DateOfBirth).HasColumnType("date");
             entity.Property(e => e.EmploymentStartDate).HasColumnType("date");
             entity.Property(e => e.EmploymentEndDate).HasColumnType("date");
 
-            // --- флаги/дефолты ---
+            // --- ГґГ«Г ГЈГЁ/Г¤ГҐГґГ®Г«ГІГ» ---
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.IsApproved).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-            // --- связи ---
+            // --- Г±ГўГїГ§ГЁ ---
             entity.HasOne(e => e.Role)
                   .WithMany(r => r.Users)
                   .HasForeignKey(e => e.RoleId)
@@ -243,7 +274,7 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ApprovedByUserId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // --- индексы ---
+            // --- ГЁГ­Г¤ГҐГЄГ±Г» ---
             entity.HasIndex(e => e.Email)
                   .IsUnique()
                   .HasDatabaseName("IX_Users_Email");
@@ -258,7 +289,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
                   .HasDatabaseName("idx_users_employment_range");
 
-            // --- проверки целостности ---
+            // --- ГЇГ°Г®ГўГҐГ°ГЄГЁ Г¶ГҐГ«Г®Г±ГІГ­Г®Г±ГІГЁ ---
             entity.ToTable(tb =>
             {
                 tb.HasCheckConstraint("CK_Users_Employment_Range",
@@ -268,47 +299,52 @@ public class PaymentContext : DbContext
     }
 
     /// <summary>
-    /// Дела/кейсы клиентов.
+    /// Р”РµР»Р° (РєРµР№СЃС‹) РєР»РёРµРЅС‚РѕРІ.
     /// </summary>
     public DbSet<ClientCase> ClientCases { get; set; }
 
     /// <summary>
-    /// Клиенты.
+    /// РљР°СЂС‚РѕС‡РєРё РєР»РёРµРЅС‚РѕРІ.
     /// </summary>
     public DbSet<Client> Clients { get; set; }
 
     /// <summary>
-    /// Типы сделок.
+    /// РђРєС‚С‹ РѕРєР°Р·Р°РЅРЅС‹С… СѓСЃР»СѓРі.
+    /// </summary>
+    public DbSet<Act> Acts { get; set; }
+
+    /// <summary>
+    /// РўРёРїС‹ СЃРґРµР»РѕРє.
     /// </summary>
     public DbSet<DealType> DealTypes { get; set; }
 
     /// <summary>
-    /// Типы доходов.
+    /// РўРёРїС‹ РґРѕС…РѕРґРѕРІ.
     /// </summary>
     public DbSet<IncomeType> IncomeTypes { get; set; }
 
     /// <summary>
-    /// Платежи.
+    /// РџР»Р°С‚РµР¶Рё РєР»РёРµРЅС‚РѕРІ.
     /// </summary>
     public DbSet<Payment> Payments { get; set; }
 
     /// <summary>
-    /// Источники платежей.
+    /// РСЃС‚РѕС‡РЅРёРєРё РїР»Р°С‚РµР¶РµР№.
     /// </summary>
     public DbSet<PaymentSource> PaymentSources { get; set; }
 
     /// <summary>
-    /// Статусы платежей.
+    /// РЎС‚Р°С‚СѓСЃС‹ РїР»Р°С‚РµР¶РµР№.
     /// </summary>
     public DbSet<PaymentStatusEntity> PaymentStatuses { get; set; }
 
     /// <summary>
-    /// Роли пользователей.
+    /// Р РѕР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.
     /// </summary>
     public DbSet<Role> Roles { get; set; }
 
     /// <summary>
-    /// Пользователи.
+    /// РџРѕР»СЊР·РѕРІР°С‚РµР»Рё СЃРёСЃС‚РµРјС‹.
     /// </summary>
     public DbSet<User> Users { get; set; }
 }
