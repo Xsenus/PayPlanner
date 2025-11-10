@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navigation from './components/Navigation/Navigation';
 import { Calendar } from './components/Calendar/Calendar';
@@ -6,6 +6,9 @@ import { Reports } from './components/Reports/Reports';
 import { Calculator } from './components/Calculator/Calculator';
 import { Clients } from './components/Clients/Clients';
 import { ClientDetail } from './components/Clients/ClientDetail';
+import { Accounts } from './components/Accounts/Accounts';
+import { Acts } from './components/Acts/Acts';
+import { Contracts } from './components/Contracts/Contracts';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
@@ -13,11 +16,13 @@ import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import type { Tab } from './types/tabs';
+import { useRolePermissions } from './hooks/useRolePermissions';
 
 type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
   const { user, loading } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
 
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -25,6 +30,9 @@ function AppContent() {
   const [authView, setAuthView] = useState<AuthView>('login');
 
   const handleOpenClient = (clientId: number, caseId?: number) => {
+    if (!permissions.clients.canView) {
+      return;
+    }
     setSelectedClientId(clientId);
     setInitialCaseId(typeof caseId === 'number' ? caseId : 'all');
     setActiveTab('clientDetail');
@@ -40,6 +48,82 @@ function AppContent() {
     }
     location.reload();
   };
+
+  const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
+
+  const accessibleMenuTabs = useMemo(
+    () =>
+      [
+        { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
+        { tab: 'reports' as Tab, allowed: permissions.reports.canView },
+        { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
+        { tab: 'clients' as Tab, allowed: permissions.clients.canView },
+        { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'acts' as Tab, allowed: permissions.acts.canView },
+        { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
+        { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
+      ]
+        .filter((entry) => entry.allowed)
+        .map((entry) => entry.tab),
+    [permissions],
+  );
+
+  const canViewTab = useCallback(
+    (tab: Tab) => {
+      switch (tab) {
+        case 'calendar':
+          return permissions.calendar.canView;
+        case 'reports':
+          return permissions.reports.canView;
+        case 'calculator':
+          return permissions.calculator.canView;
+        case 'clients':
+        case 'clientDetail':
+          return permissions.clients.canView;
+        case 'accounts':
+          return permissions.accounts.canView;
+        case 'acts':
+          return permissions.acts.canView;
+        case 'contracts':
+          return permissions.contracts.canView;
+        case 'dictionaries':
+          return permissions.dictionaries.canView;
+        case 'users':
+        case 'roles':
+          return isAdminRole;
+        default:
+          return true;
+      }
+    },
+    [permissions, isAdminRole],
+  );
+
+  useEffect(() => {
+    if (canViewTab(activeTab)) {
+      return;
+    }
+    if (activeTab === 'clientDetail') {
+      setSelectedClientId(null);
+    }
+    const fallback = accessibleMenuTabs[0];
+    if (fallback) {
+      setActiveTab(fallback);
+    }
+  }, [activeTab, accessibleMenuTabs, canViewTab]);
+
+  const renderNoAccess = useCallback(
+    (message: string) => (
+      <div className="p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+            <h2 className="text-xl font-bold text-red-900 mb-2">Доступ ограничен</h2>
+            <p className="text-red-700">{message}</p>
+          </div>
+        </div>
+      </div>
+    ),
+    [],
+  );
 
   if (loading) {
     return (
@@ -94,61 +178,62 @@ function AppContent() {
     );
   }
 
-  const isAdmin = (user?.role?.name ?? '').toLowerCase() === 'admin';
-
   const renderContent = () => {
     switch (activeTab) {
       case 'calendar':
-        return <Calendar onOpenClient={handleOpenClient} />;
+        return permissions.calendar.canView
+          ? <Calendar onOpenClient={handleOpenClient} />
+          : renderNoAccess('Раздел календаря недоступен для вашей роли.');
       case 'reports':
-        return <Reports />;
+        return permissions.reports.canView
+          ? <Reports />
+          : renderNoAccess('Просмотр отчётов недоступен для вашей роли.');
       case 'calculator':
-        return <Calculator />;
+        return permissions.calculator.canView
+          ? <Calculator />
+          : renderNoAccess('Калькулятор недоступен для вашей роли.');
       case 'clientDetail':
+        if (!permissions.clients.canView || !selectedClientId) {
+          return renderNoAccess('Просмотр клиентов недоступен для вашей роли.');
+        }
         return (
-          selectedClientId && (
-            <ClientDetail
-              clientId={selectedClientId}
-              initialCaseId={initialCaseId}
-              onBack={() => {
-                setActiveTab('clients');
-                setSelectedClientId(null);
-              }}
-            />
-          )
+          <ClientDetail
+            clientId={selectedClientId}
+            initialCaseId={initialCaseId}
+            onBack={() => {
+              setActiveTab('clients');
+              setSelectedClientId(null);
+            }}
+          />
         );
       case 'users':
-        return isAdmin ? (
-          <Users />
-        ) : (
-          <div className="p-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
-                <p className="text-red-700">Нужны права администратора.</p>
-              </div>
-            </div>
-          </div>
-        );
+        return isAdminRole ? <Users /> : renderNoAccess('Нужны права администратора.');
       case 'clients':
-        return <Clients />;
+        return permissions.clients.canView
+          ? <Clients />
+          : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
+      case 'accounts':
+        return permissions.accounts.canView
+          ? <Accounts />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'acts':
+        return permissions.acts.canView
+          ? <Acts />
+          : renderNoAccess('Раздел актов недоступен для вашей роли.');
+      case 'contracts':
+        return permissions.contracts.canView
+          ? <Contracts />
+          : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'roles':
-        return isAdmin ? (
-          <Roles />
-        ) : (
-          <div className="p-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <h2 className="text-xl font-bold text-red-900 mb-2">Доступ запрещён</h2>
-                <p className="text-red-700">Нужны права администратора.</p>
-              </div>
-            </div>
-          </div>
-        );
+        return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
       case 'dictionaries':
-        return <Dictionaries />;
+        return permissions.dictionaries.canView
+          ? <Dictionaries />
+          : renderNoAccess('Справочники недоступны для вашей роли.');
       default:
-        return <Calendar onOpenClient={handleOpenClient} />;
+        return permissions.calendar.canView
+          ? <Calendar onOpenClient={handleOpenClient} />
+          : renderNoAccess('Раздел календаря недоступен для вашей роли.');
     }
   };
 
@@ -157,7 +242,7 @@ function AppContent() {
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab: Tab) => {
-          if ((tab === 'users' || tab === 'roles') && !isAdmin) return;
+          if (!canViewTab(tab)) return;
           setActiveTab(tab);
         }}
       />

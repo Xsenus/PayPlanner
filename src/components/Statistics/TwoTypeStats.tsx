@@ -16,6 +16,7 @@ type Props = {
   reloadToken?: number;
   rawPayments?: Payment[];
   className?: string;
+  onCardSelect?: (payload: { kind: 'Income' | 'Expense'; metric: 'completed' | 'pending' | 'overdue' | 'overall' | 'debt'; title: string }) => void;
 };
 
 function StatsGroup({
@@ -56,6 +57,7 @@ export function TwoTypeStats({
   reloadToken,
   rawPayments,
   className = '',
+  onCardSelect,
 }: Props) {
   const [tab, setTab] = useState<'Income' | 'Expense'>('Income');
 
@@ -109,6 +111,7 @@ export function TwoTypeStats({
               search={search}
               reloadToken={reloadToken}
               rawPayments={rawPayments}
+              onCardSelect={onCardSelect}
             />
           </StatsGroup>
         ) : (
@@ -124,6 +127,7 @@ export function TwoTypeStats({
               search={search}
               reloadToken={reloadToken}
               rawPayments={rawPayments}
+              onCardSelect={onCardSelect}
             />
           </StatsGroup>
         )}
@@ -142,6 +146,7 @@ export function TwoTypeStats({
             search={search}
             reloadToken={reloadToken}
             rawPayments={rawPayments}
+            onCardSelect={onCardSelect}
           />
         </StatsGroup>
         <StatsGroup title="Расходы" Icon={TrendingDown} tone="expense">
@@ -156,6 +161,7 @@ export function TwoTypeStats({
             search={search}
             reloadToken={reloadToken}
             rawPayments={rawPayments}
+            onCardSelect={onCardSelect}
           />
         </StatsGroup>
       </div>

@@ -19,6 +19,7 @@ type Props = {
   reloadToken?: number;
   rawPayments?: Payment[];
   className?: string;
+  onCardSelect?: (payload: { kind: 'Income' | 'Expense'; metric: 'completed' | 'pending' | 'overdue' | 'overall' | 'debt'; title: string }) => void;
 };
 
 function mapServerStats(raw: unknown, kind: 'Income' | 'Expense') {
@@ -115,6 +116,7 @@ export function TypeStatsBlock({
   reloadToken,
   rawPayments,
   className = '',
+  onCardSelect,
 }: Props) {
   const apiStatus: SummaryStatus | undefined =
     statusFilter && statusFilter !== 'All' ? (statusFilter as SummaryStatus) : undefined;
@@ -175,6 +177,14 @@ export function TypeStatsBlock({
           Сумма платежей где статус равен 'Выполнено' в выбранном диапазоне дат
         </div>
       ),
+      onClick: onCardSelect
+        ? () =>
+            onCardSelect({
+              kind,
+              metric: 'completed',
+              title,
+            })
+        : undefined,
     },
     {
       title: 'Ожидается',
@@ -188,6 +198,14 @@ export function TypeStatsBlock({
           Сумма платежей где статус равен 'Ожидается' в выбранном диапазоне дат
         </div>
       ),
+      onClick: onCardSelect
+        ? () =>
+            onCardSelect({
+              kind,
+              metric: 'pending',
+              title: 'Ожидается',
+            })
+        : undefined,
     },
     {
       title: 'Просрочено',
@@ -201,6 +219,14 @@ export function TypeStatsBlock({
           Сумма платежей где статус равен 'Просрочено' в выбранном диапазоне дат
         </div>
       ),
+      onClick: onCardSelect
+        ? () =>
+            onCardSelect({
+              kind,
+              metric: 'overdue',
+              title: 'Просрочено',
+            })
+        : undefined,
     },
     {
       title: 'Общая сумма',
@@ -210,6 +236,14 @@ export function TypeStatsBlock({
       color: 'text-cyan-700',
       bg: 'bg-cyan-50',
       hint: <div className="text-xs leading-5">Оплачено + Ожидается + Просрочено</div>,
+      onClick: onCardSelect
+        ? () =>
+            onCardSelect({
+              kind,
+              metric: 'overall',
+              title: 'Общая сумма',
+            })
+        : undefined,
     },
     {
       title: 'Остаток долга',
@@ -219,6 +253,14 @@ export function TypeStatsBlock({
       color: 'text-sky-700',
       bg: 'bg-sky-50',
       hint: <div className="text-xs leading-5">Ожидается + Просрочено</div>,
+      onClick: onCardSelect
+        ? () =>
+            onCardSelect({
+              kind,
+              metric: 'debt',
+              title: 'Остаток долга',
+            })
+        : undefined,
     },
   ];
 

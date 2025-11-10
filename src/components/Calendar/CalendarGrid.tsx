@@ -80,7 +80,7 @@ export function CalendarGrid({
 
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
-  const firstDayWeekday = firstDayOfMonth.getDay();
+  const firstDayWeekday = ((firstDayOfMonth.getDay() + 6) % 7);
   const daysInMonth = lastDayOfMonth.getDate();
 
   const calendarDays: (number | null)[] = useMemo(() => {
@@ -106,13 +106,13 @@ export function CalendarGrid({
   }, [payments, year, month]);
 
   const weekDays = [
-    t('sunday'),
     t('monday'),
     t('tuesday'),
     t('wednesday'),
     t('thursday'),
     t('friday'),
     t('saturday'),
+    t('sunday'),
   ];
 
   const [isDesktop, setIsDesktop] = useState<boolean>(() =>

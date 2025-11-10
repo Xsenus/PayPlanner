@@ -10,9 +10,13 @@ import {
   LogOut,
   Menu,
   X,
+  WalletCards,
+  FileCheck2,
+  FileSignature,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
 
 interface NavigationProps {
@@ -28,6 +32,7 @@ const STYLE_ID = 'pp-sidebar-style';
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
   const { signOut, user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -80,14 +85,26 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   // Базовые вкладки доступны всем
   const baseTabs = useMemo(
     () =>
-      [
-        { id: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar },
-        { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart },
-        { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator },
-        { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users },
-        { id: 'dictionaries' as Tab, label: t('dictionaries') ?? 'Справочники', icon: Settings },
-      ] as const,
-    [t],
+      (
+        [
+          { id: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar, allowed: permissions.calendar.canView },
+          { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart, allowed: permissions.reports.canView },
+          { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator, allowed: permissions.calculator.canView },
+          { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users, allowed: permissions.clients.canView },
+          { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards, allowed: permissions.accounts.canView },
+          { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2, allowed: permissions.acts.canView },
+          { id: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature, allowed: permissions.contracts.canView },
+          {
+            id: 'dictionaries' as Tab,
+            label: t('dictionaries') ?? 'Справочники',
+            icon: Settings,
+            allowed: permissions.dictionaries.canView,
+          },
+        ] as Array<{ id: Tab; label: string; icon: typeof Calendar; allowed: boolean }>
+      )
+        .filter((tab) => tab.allowed)
+        .map(({ allowed: _allowed, ...rest }) => rest),
+    [t, permissions],
   );
 
   // Админские вкладки добавляем отдельно

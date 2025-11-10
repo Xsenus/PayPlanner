@@ -1,18 +1,32 @@
 import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, Table, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
 import { PaymentModal } from './PaymentModal';
+import { PaymentsTable } from './PaymentsTable';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { Payment } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
 type SubmitDTO = CreatePaymentDTO | UpdatePaymentDTO;
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
+
+type StatMetric = 'completed' | 'pending' | 'overdue' | 'overall' | 'debt';
+type CalendarViewMode = 'calendar' | 'table';
+type TableFilter = {
+  type?: 'Income' | 'Expense';
+  statuses?: Payment['status'][];
+  label: string;
+  metric: StatMetric;
+};
+
+const VIEW_MODE_STORAGE_KEY = 'pp.calendar_view';
 
 type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -35,6 +49,7 @@ function ymEnd(ym: string): string {
 }
 
 export function Calendar({ onOpenClient }: CalendarProps) {
+  const { user } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
@@ -44,11 +59,52 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [range, setRange] = useState<MonthRange>({});
+  const [viewMode, setViewMode] = useState<CalendarViewMode>(() => {
+    try {
+      const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+      if (stored === 'calendar' || stored === 'table') {
+        return stored;
+      }
+    } catch {
+      /** */
+    }
+    return 'calendar';
+  });
+  const [tableFilter, setTableFilter] = useState<TableFilter | null>(null);
+  const permissions = useRolePermissions(user?.role?.id);
+  const calendarPermissions = permissions.calendar;
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
   const [statsReloadKey, setStatsReloadKey] = useState(0);
   const bumpStats = () => setStatsReloadKey((x) => x + 1);
 
   const { t, formatMonth } = useTranslation();
+  const permissionTimerRef = useRef<number | null>(null);
+
+  const showPermissionNotice = (message: string) => {
+    setPermissionMessage(message);
+    if (permissionTimerRef.current) {
+      window.clearTimeout(permissionTimerRef.current);
+    }
+    permissionTimerRef.current = window.setTimeout(() => {
+      setPermissionMessage(null);
+      permissionTimerRef.current = null;
+    }, 4000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (permissionTimerRef.current) {
+        window.clearTimeout(permissionTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!calendarPermissions.canViewAnalytics && tableFilter) {
+      setTableFilter(null);
+    }
+  }, [calendarPermissions.canViewAnalytics, tableFilter]);
 
   const year = currentDate.getFullYear();
   const m0 = currentDate.getMonth();
@@ -115,6 +171,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     }
   }, [payments, isModalOpen]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+    } catch {
+      /** */
+    }
+  }, [viewMode]);
+
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate((prev) => {
       const d = new Date(prev);
@@ -124,15 +188,43 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleAddPayment = (type: 'Income' | 'Expense') => {
+    if (!calendarPermissions.canCreate) {
+      showPermissionNotice(
+        t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.',
+      );
+      return;
+    }
     setModalType(type);
     setEditingPayment(null);
     setIsModalOpen(true);
   };
 
   const handleEditPayment = (payment: Payment) => {
+    if (!calendarPermissions.canEdit) {
+      showPermissionNotice(
+        t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.',
+      );
+      return;
+    }
     setEditingPayment(payment);
     setModalType(payment.type);
     setIsModalOpen(true);
+  };
+
+  const handleDeletePayment = async (payment: Payment) => {
+    if (!calendarPermissions.canDelete) {
+      showPermissionNotice(
+        t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.',
+      );
+      return;
+    }
+    const ok = window.confirm(
+      t('confirmDeletePayment') ?? 'Вы уверены, что хотите удалить этот платёж?',
+    );
+    if (!ok) return;
+    await deletePayment(payment.id);
+    await refreshPayments();
+    bumpStats();
   };
 
   const handleCloseModal = async () => {
@@ -172,6 +264,54 @@ export function Calendar({ onOpenClient }: CalendarProps) {
 
   const clearRange = () => setRange({});
 
+  const tableFilteredPayments = useMemo(() => {
+    if (!tableFilter) return filteredPayments;
+    return filteredPayments.filter((p) => {
+      if (tableFilter.type && p.type !== tableFilter.type) return false;
+      if (tableFilter.statuses && tableFilter.statuses.length > 0) {
+        return tableFilter.statuses.includes(p.status);
+      }
+      return true;
+    });
+  }, [filteredPayments, tableFilter]);
+
+  const handleViewModeChange = (mode: CalendarViewMode) => {
+    setViewMode(mode);
+  };
+
+  const handleClearTableFilter = () => setTableFilter(null);
+
+  const handleStatCardSelect = ({
+    kind,
+    metric,
+    title,
+  }: {
+    kind: 'Income' | 'Expense';
+    metric: StatMetric;
+    title: string;
+  }) => {
+    if (!calendarPermissions.canViewAnalytics) return;
+    const statusesByMetric: Record<StatMetric, Payment['status'][] | undefined> = {
+      completed: ['Completed'],
+      pending: ['Pending'],
+      overdue: ['Overdue'],
+      overall: undefined,
+      debt: ['Pending', 'Overdue'],
+    };
+    const typeLabel =
+      kind === 'Income'
+        ? t('incomePlural') ?? 'Доходы'
+        : t('expensePlural') ?? 'Расходы';
+    const label = `${typeLabel} · ${title}`;
+    setTableFilter({
+      type: kind,
+      statuses: statusesByMetric[metric],
+      label,
+      metric,
+    });
+    setViewMode('table');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
@@ -208,8 +348,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             </div>
           </div>
 
-          <div className="mt-3 w-full flex flex-col sm:flex-row gap-3 items-center sm:justify-end">
-            <div className="relative w-full max-w-md sm:w-80">
+        <div className="mt-3 w-full grid gap-3 xl:grid-cols-[1fr_auto] items-start">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-center">
+            <div className="relative w-full sm:w-72 lg:w-80 max-w-full">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                 size={18}
@@ -227,8 +368,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               className="w-full sm:w-auto sm:min-w-[220px] bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-              title={t('statusFilter') ?? 'Status filter'}
-              aria-label={t('statusFilter') ?? 'Status filter'}>
+              title={t('status') ?? 'Статус'}
+              aria-label={t('status') ?? 'Статус'}>
               <option value="All">{t('allStatuses') ?? 'All statuses'}</option>
               <option value="Pending">{t('pending') ?? 'Pending'}</option>
               <option value="Completed">{t('completed') ?? 'Completed'}</option>
@@ -253,40 +394,141 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               )}
             </div>
           </div>
+
+          <div className="flex justify-end items-center">
+            <div className="flex w-full sm:w-auto justify-end gap-1 bg-gray-100 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('calendar')}
+                aria-pressed={viewMode === 'calendar'}
+                className={[
+                  'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  viewMode === 'calendar'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
+                ].join(' ')}
+                title={t('calendarView') ?? 'Календарь'}>
+                <CalendarDays className="h-4 w-4" />
+                <span className="hidden sm:inline">{t('calendarView') ?? 'Календарь'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('table')}
+                aria-pressed={viewMode === 'table'}
+                className={[
+                  'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  viewMode === 'table'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
+                ].join(' ')}
+                title={t('tableView') ?? 'Таблица'}>
+                <Table className="h-4 w-4" />
+                <span className="hidden sm:inline">{t('tableView') ?? 'Таблица'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
         </div>
 
-        <TwoTypeStats
-          from={fromDateStr}
-          to={toDateStr}
-          statusFilter={statusFilter}
-          search={deferredSearch}
-          reloadToken={statsReloadKey}
-          rawPayments={payments}
-        />
+        {permissionMessage ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            {permissionMessage}
+          </div>
+        ) : null}
+
+        {calendarPermissions.canViewAnalytics ? (
+          <TwoTypeStats
+            from={fromDateStr}
+            to={toDateStr}
+            statusFilter={statusFilter}
+            search={deferredSearch}
+            reloadToken={statsReloadKey}
+            rawPayments={payments}
+            onCardSelect={handleStatCardSelect}
+          />
+        ) : (
+          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-sm text-amber-700 shadow-sm">
+            {t('permissionNoAnalytics') ?? 'Просмотр аналитики недоступен для вашей роли.'}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6 mt-4">
           <button
             type="button"
             onClick={() => handleAddPayment('Income')}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm">
+            disabled={!calendarPermissions.canCreate}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            title={
+              !calendarPermissions.canCreate
+                ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
+                : undefined
+            }
+            aria-disabled={!calendarPermissions.canCreate}
+          >
             <Plus className="h-4 w-4" /> {t('addIncome')}
           </button>
 
           <button
             type="button"
             onClick={() => handleAddPayment('Expense')}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm">
+            disabled={!calendarPermissions.canCreate}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            title={
+              !calendarPermissions.canCreate
+                ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
+                : undefined
+            }
+            aria-disabled={!calendarPermissions.canCreate}
+          >
             <Plus className="h-4 w-4" /> {t('addExpense')}
           </button>
         </div>
 
-        <CalendarGrid
-          currentDate={currentDate}
-          payments={filteredPayments}
-          onEditPayment={handleEditPayment}
-          newPaymentIds={newIds}
-          onOpenClient={onOpenClient}
-        />
+        {viewMode === 'table' && (
+          <div className="mb-6 -mt-2 rounded-xl border border-emerald-100 bg-white/80 px-4 py-3 sm:flex sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-600 space-y-1 sm:space-y-0">
+              <div className="font-semibold text-gray-900">
+                {tableFilter
+                  ? `${t('activeFilter') ?? 'Активный фильтр:'} ${tableFilter.label}`
+                  : t('filteredSummary') ?? 'Сводка по текущему фильтру'}
+              </div>
+              <div className="text-gray-500">
+                {(t('recordsFound') ?? 'Найдено записей:')} {tableFilteredPayments.length}
+              </div>
+            </div>
+            {tableFilter ? (
+              <button
+                type="button"
+                onClick={handleClearTableFilter}
+                className="mt-3 sm:mt-0 inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+                <X className="h-4 w-4" /> {t('clear') ?? 'Очистить'}
+              </button>
+            ) : null}
+          </div>
+        )}
+
+        {viewMode === 'calendar' ? (
+          <CalendarGrid
+            currentDate={currentDate}
+            payments={filteredPayments}
+            onEditPayment={handleEditPayment}
+            newPaymentIds={newIds}
+            onOpenClient={onOpenClient}
+          />
+        ) : (
+          <PaymentsTable
+            payments={tableFilteredPayments}
+            onEditPayment={handleEditPayment}
+            onOpenClient={onOpenClient}
+            onAddPayment={handleAddPayment}
+            onDeletePayment={handleDeletePayment}
+            canAdd={calendarPermissions.canCreate}
+            canEdit={calendarPermissions.canEdit}
+            canDelete={calendarPermissions.canDelete}
+          />
+        )}
 
         <PaymentModal
           isOpen={isModalOpen}
@@ -294,14 +536,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           type={modalType}
           onSubmit={handleSubmit}
           payment={editingPayment}
-          onDelete={async (id) => {
-            if (!window.confirm('Удалить платёж?')) return;
-            await deletePayment(id);
-            await refreshPayments();
-            setIsModalOpen(false);
-            setEditingPayment(null);
-            setTimeout(() => bumpStats(), 0);
-          }}
+          onDelete={
+            calendarPermissions.canDelete
+              ? async (id) => {
+                  await deletePayment(id);
+                  await refreshPayments();
+                  setIsModalOpen(false);
+                  setEditingPayment(null);
+                  setTimeout(() => bumpStats(), 0);
+                }
+              : undefined
+          }
         />
       </div>
     </div>
