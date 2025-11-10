@@ -7,25 +7,25 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Services
 {
     /// <summary>
-    /// Ïåðâè÷íîå íàïîëíåíèå ÁÄ òåñòîâûìè äàííûìè: ðîëè, àäìèí, êëèåíòû, äåëà, ñëîâàðè è ïëàòåæè.
+    /// Первичное наполнение БД тестовыми данными: роли, админ, клиенты, дела, словари и платежи.
     /// </summary>
     public static class SeedDataService
     {
         /// <summary>
-        /// Âûïîëíèòü ñèäû.
+        /// Выполнить сиды.
         /// </summary>
         /// <param name="context">DbContext</param>
         /// <param name="seedClientsAndPayments">
-        /// Åñëè true — äîáàâèòü êëèåíòîâ, äåëà è ïëàòåæè (äàæå åñëè òàáëèöà íå ïóñòàÿ).
-        /// Åñëè false — êëèåíòû/äåëà/ïëàòåæè ñèäÿòñÿ òîëüêî êîãäà Clients ïóñò.
+        /// Если true — добавить клиентов, дела и платежи (даже если таблица не пустая).
+        /// Если false — клиенты/дела/платежи сидятся только когда Clients пуст.
         /// </param>
         public static async Task SeedAsync(PaymentContext context, bool seedClientsAndPayments = false)
         {
-            await SeedDictionariesAsync(context);          // ñëîâàðè
-            await SeedRolesAsync(context);                 // ðîëè (admin, user)
-            await SeedAdminUserAsync(context);             // àäìèíèñòðàòîð
+            await SeedDictionariesAsync(context);          // словари
+            await SeedRolesAsync(context);                 // роли (admin, user)
+            await SeedAdminUserAsync(context);             // администратор
 
-            // Âîçìîæíîñòü îòêëþ÷èòü êëèåíòñêèå ñèäû íà ïðîäå:
+            // Возможность отключить клиентские сиды на проде:
             var skipClientsByEnv =
                 string.Equals(Environment.GetEnvironmentVariable("PAYPLANNER_SKIP_CLIENT_SEED"), "1",
                     StringComparison.OrdinalIgnoreCase);
@@ -42,13 +42,13 @@ namespace PayPlanner.Api.Services
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"[SEED][Clients] skipped due to error: {ex.GetType().Name}: {ex.Message}");
-                    // Íå âàëèì ïðîöåññ — ïðîñòî ïðîïóñòèì êëèåíòñêóþ ÷àñòü
+                    // Не валим процесс — просто пропустим клиентскую часть
                 }
             }
         }
 
         /// <summary>
-        /// Ñëîâàðè (deal types, income types, sources, statuses).
+        /// Словари (deal types, income types, sources, statuses).
         /// </summary>
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
@@ -56,11 +56,11 @@ namespace PayPlanner.Api.Services
             {
                 var dealTypes = new[]
                 {
-                    new DealType { Name = "Êîíñàëòèíã",      Description = "Ïðîôåññèîíàëüíûå êîíñóëüòàöèîííûå óñëóãè", ColorHex = "#3B82F6" },
-                    new DealType { Name = "Ïðîäàæà òîâàðà",   Description = "Ïðÿìàÿ ïðîäàæà ïðîäóêöèè",                ColorHex = "#10B981" },
-                    new DealType { Name = "Ïîäïèñêà",         Description = "Ðåãóëÿðíûå ïîäïèñíûå óñëóãè",             ColorHex = "#8B5CF6" },
-                    new DealType { Name = "Ïðîåêò",           Description = "Ðàáîòà ïî ïðîåêòó ñ ôèêñèðîâàííûì îáú¸ìîì", ColorHex = "#F59E0B" },
-                    new DealType { Name = "Îáñëóæèâàíèå",     Description = "Äîëãîñðî÷íûå êîíòðàêòû íà îáñëóæèâàíèå",  ColorHex = "#EF4444" }
+                    new DealType { Name = "Консалтинг",      Description = "Профессиональные консультационные услуги", ColorHex = "#3B82F6" },
+                    new DealType { Name = "Продажа товара",   Description = "Прямая продажа продукции",                ColorHex = "#10B981" },
+                    new DealType { Name = "Подписка",         Description = "Регулярные подписные услуги",             ColorHex = "#8B5CF6" },
+                    new DealType { Name = "Проект",           Description = "Работа по проекту с фиксированным объёмом", ColorHex = "#F59E0B" },
+                    new DealType { Name = "Обслуживание",     Description = "Долгосрочные контракты на обслуживание",  ColorHex = "#EF4444" }
                 };
                 context.DealTypes.AddRange(dealTypes);
                 await context.SaveChangesAsync();
@@ -70,8 +70,8 @@ namespace PayPlanner.Api.Services
             {
                 var incomeTypes = new[]
                 {
-                    new IncomeType { Name = "Äîõîä îò óñëóã",  Description = "Äîõîä îò îêàçàíèÿ óñëóã",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
-                    new IncomeType { Name = "Ïðî÷èå äîõîäû",    Description = "Ïðî÷èå äîõîäû",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
+                    new IncomeType { Name = "Доход от услуг",  Description = "Доход от оказания услуг",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
+                    new IncomeType { Name = "Прочие доходы",    Description = "Прочие доходы",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
                 };
                 context.IncomeTypes.AddRange(incomeTypes);
                 await context.SaveChangesAsync();
@@ -81,7 +81,7 @@ namespace PayPlanner.Api.Services
             {
                 var expenseTypes = new[]
                 {
-                    new IncomeType { Name = "Ïðî÷èå ðàñõîäû", Description = "Èíûå ðàñõîäû", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
+                    new IncomeType { Name = "Прочие расходы", Description = "Иные расходы", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
                 };
                 context.IncomeTypes.AddRange(expenseTypes);
                 await context.SaveChangesAsync();
@@ -91,11 +91,11 @@ namespace PayPlanner.Api.Services
             {
                 var paymentSources = new[]
                 {
-                    new PaymentSource { Name = "Áàíêîâñêèé ïåðåâîä", Description = "Ïðÿìîé áàíêîâñêèé ïåðåâîä", ColorHex = "#6B7280" },
-                    new PaymentSource { Name = "Áàíêîâñêàÿ êàðòà",   Description = "Îïëàòà áàíêîâñêîé êàðòîé",  ColorHex = "#4B5563" },
-                    new PaymentSource { Name = "PayPal",             Description = "Îïëàòà ÷åðåç PayPal",       ColorHex = "#374151" },
-                    new PaymentSource { Name = "×åê",                Description = "Îïëàòà áàíêîâñêèì ÷åêîì",   ColorHex = "#1F2937" },
-                    new PaymentSource { Name = "Íàëè÷íûå",           Description = "Îïëàòà íàëè÷íûìè",          ColorHex = "#111827" }
+                    new PaymentSource { Name = "Банковский перевод", Description = "Прямой банковский перевод", ColorHex = "#6B7280" },
+                    new PaymentSource { Name = "Банковская карта",   Description = "Оплата банковской картой",  ColorHex = "#4B5563" },
+                    new PaymentSource { Name = "PayPal",             Description = "Оплата через PayPal",       ColorHex = "#374151" },
+                    new PaymentSource { Name = "Чек",                Description = "Оплата банковским чеком",   ColorHex = "#1F2937" },
+                    new PaymentSource { Name = "Наличные",           Description = "Оплата наличными",          ColorHex = "#111827" }
                 };
                 context.PaymentSources.AddRange(paymentSources);
                 await context.SaveChangesAsync();
@@ -105,9 +105,9 @@ namespace PayPlanner.Api.Services
             {
                 var paymentStatuses = new[]
                 {
-                    new PaymentStatusEntity { Name = "Îæèäàåòñÿ",  Description = "Îïëàòà íàõîäèòñÿ â îæèäàíèè",  ColorHex = "#F59E0B" },
-                    new PaymentStatusEntity { Name = "Âûïîëíåíî",  Description = "Îïëàòà óñïåøíî çàâåðøåíà",    ColorHex = "#10B981" },
-                    new PaymentStatusEntity { Name = "Ïðîñðî÷åíî", Description = "Ñðîê îïëàòû èñò¸ê",           ColorHex = "#EF4444" }
+                    new PaymentStatusEntity { Name = "Ожидается",  Description = "Оплата находится в ожидании",  ColorHex = "#F59E0B" },
+                    new PaymentStatusEntity { Name = "Выполнено",  Description = "Оплата успешно завершена",    ColorHex = "#10B981" },
+                    new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",           ColorHex = "#EF4444" }
                 };
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
@@ -115,27 +115,27 @@ namespace PayPlanner.Api.Services
         }
 
         /// <summary>
-        /// Ñîçäà¸ò ðîëè admin è user (åñëè îòñóòñòâóþò).
+        /// Создаёт роли admin и user (если отсутствуют).
         /// </summary>
         private static async Task SeedRolesAsync(PaymentContext context)
         {
             if (!await context.Roles.AnyAsync())
             {
                 context.Roles.AddRange(
-                    new Role { Name = "admin", Description = "Àäìèíèñòðàòîð ñèñòåìû" },
-                    new Role { Name = "user", Description = "Îáû÷íûé ïîëüçîâàòåëü" }
+                    new Role { Name = "admin", Description = "Администратор системы" },
+                    new Role { Name = "user", Description = "Обычный пользователь" }
                 );
                 await context.SaveChangesAsync();
                 return;
             }
 
-            // Äîñåÿòü íåäîñòàþùèå ðîëè
-            await EnsureRoleAsync(context, "admin", "Àäìèíèñòðàòîð ñèñòåìû");
-            await EnsureRoleAsync(context, "user", "Îáû÷íûé ïîëüçîâàòåëü");
+            // Досеять недостающие роли
+            await EnsureRoleAsync(context, "admin", "Администратор системы");
+            await EnsureRoleAsync(context, "user", "Обычный пользователь");
         }
 
         /// <summary>
-        /// Ñîçäà¸ò ïîëüçîâàòåëÿ-àäìèíèñòðàòîðà, åñëè åãî åù¸ íåò.
+        /// Создаёт пользователя-администратора, если его ещё нет.
         /// </summary>
         private static async Task SeedAdminUserAsync(PaymentContext context)
         {
@@ -153,7 +153,7 @@ namespace PayPlanner.Api.Services
 
             if (adminRoleId == 0)
             {
-                context.Roles.Add(new Role { Name = "admin", Description = "Àäìèíèñòðàòîð ñèñòåìû" });
+                context.Roles.Add(new Role { Name = "admin", Description = "Администратор системы" });
                 await context.SaveChangesAsync();
                 adminRoleId = await context.Roles.Where(r => r.Name == "admin").Select(r => r.Id).FirstAsync();
             }
@@ -187,11 +187,11 @@ namespace PayPlanner.Api.Services
             await context.SaveChangesAsync();
         }
 
-        // ----------------------- íèæå — ñèä êëèåíòîâ/äåë, ïëàòåæåé -----------------------
+        // ----------------------- ниже — сид клиентов/дел, платежей -----------------------
 
         private static async Task SeedClientsCasesPaymentsAsync(PaymentContext context)
         {
-            // ×èòàåì ñïðàâî÷íèêè è ñòðîèì áåçîïàñíûå êàðòû (áåç ïàäåíèÿ íà äóáëÿõ)
+            // Читаем справочники и строим безопасные карты (без падения на дублях)
             var dealTypes = await context.DealTypes.AsNoTracking().ToListAsync();
             var dealTypeByName = BuildNameMap(dealTypes, d => d.Name, d => d.Id);
 
@@ -204,14 +204,14 @@ namespace PayPlanner.Api.Services
             var statuses = await context.PaymentStatuses.AsNoTracking().ToListAsync();
             var statusByName = BuildNameMap(statuses, s => s.Name, s => s.Id);
 
-            // Èäåìïîòåíòíûå êëèåíòû
+            // Идемпотентные клиенты
             var clients = new[]
             {
-                new Client { Name = "Èâàí Èâàíîâ",      Email = "ivan@example.com",  Phone = "+7-900-010-01-01", Company = "ÒåõÊîðï",                Address = "óë. Ëåíèíà, ä. 10, Ìîñêâà" },
-                new Client { Name = "Ìàðèÿ Ïåòðîâà",    Email = "maria@company.com", Phone = "+7-900-010-01-02", Company = "Ñòóäèÿ Äèçàéíà",         Address = "ïð. Ìèðà, ä. 25, Ñàíêò-Ïåòåðáóðã" },
-                new Client { Name = "Àëåêñåé Ñìèðíîâ",  Email = "alex@business.com", Phone = "+7-900-010-01-03", Company = "Ñìèðíîâ Èíäàñòðèç",      Address = "óë. Ñîâåòñêàÿ, ä. 5, Åêàòåðèíáóðã" },
-                new Client { Name = "Åêàòåðèíà Ñèäîðîâà", Email = "katya@startup.com", Phone = "+7-900-010-01-04", Company = "Èííîâàöèîííûå Ëàáîðàòîðèè", Address = "óë. Ãàãàðèíà, ä. 12, Íîâîñèáèðñê" },
-                new Client { Name = "Äìèòðèé Êóçíåöîâ", Email = "dmitry@consulting.com", Phone = "+7-900-010-01-05", Company = "Êóçíåöîâ Êîíñàëòèíã", Address = "óë. Ïóøêèíà, ä. 8, Êàçàíü" }
+                new Client { Name = "Иван Иванов",      Email = "ivan@example.com",  Phone = "+7-900-010-01-01", Company = "ТехКорп",                Address = "ул. Ленина, д. 10, Москва" },
+                new Client { Name = "Мария Петрова",    Email = "maria@company.com", Phone = "+7-900-010-01-02", Company = "Студия Дизайна",         Address = "пр. Мира, д. 25, Санкт-Петербург" },
+                new Client { Name = "Алексей Смирнов",  Email = "alex@business.com", Phone = "+7-900-010-01-03", Company = "Смирнов Индастриз",      Address = "ул. Советская, д. 5, Екатеринбург" },
+                new Client { Name = "Екатерина Сидорова", Email = "katya@startup.com", Phone = "+7-900-010-01-04", Company = "Инновационные Лаборатории", Address = "ул. Гагарина, д. 12, Новосибирск" },
+                new Client { Name = "Дмитрий Кузнецов", Email = "dmitry@consulting.com", Phone = "+7-900-010-01-05", Company = "Кузнецов Консалтинг", Address = "ул. Пушкина, д. 8, Казань" }
             };
 
             var existingClients = await context.Clients.AsNoTracking().ToListAsync();
@@ -238,12 +238,12 @@ namespace PayPlanner.Api.Services
 
             var casesToEnsure = new List<(string clientEmail, string title, string? desc, ClientCaseStatus status)>
             {
-                ("ivan@example.com",   "Ïîäãîòîâêà äîãîâîðà êîíñàëòèíãà", "Àíàëèòèêà + ÒÇ", ClientCaseStatus.Open),
-                ("ivan@example.com",   "Ïîääåðæêà ïîäïèñêè SaaS",         "Ìåñÿ÷íàÿ ïîäïèñêà", ClientCaseStatus.Open),
-                ("maria@company.com",  "Ðåäèçàéí ñàéòà",                  "UI/UX + â¸ðñòêà", ClientCaseStatus.OnHold),
-                ("alex@business.com",  "Ïîñòàâêà ïàðòèè ¹101",            "Îòãðóçêà 50 øò.", ClientCaseStatus.Open),
-                ("katya@startup.com",  "Íàó÷íûé ïðîåêò R&D",              "Ýòàï 1 — ÍÈÐ", ClientCaseStatus.Open),
-                ("dmitry@consulting.com","Ñîïðîâîæäåíèå 2025",            "Ïîìåñÿ÷íîå îáñëóæèâàíèå", ClientCaseStatus.Closed)
+                ("ivan@example.com",   "Подготовка договора консалтинга", "Аналитика + ТЗ", ClientCaseStatus.Open),
+                ("ivan@example.com",   "Поддержка подписки SaaS",         "Месячная подписка", ClientCaseStatus.Open),
+                ("maria@company.com",  "Редизайн сайта",                  "UI/UX + вёрстка", ClientCaseStatus.OnHold),
+                ("alex@business.com",  "Поставка партии №101",            "Отгрузка 50 шт.", ClientCaseStatus.Open),
+                ("katya@startup.com",  "Научный проект R&D",              "Этап 1 — НИР", ClientCaseStatus.Open),
+                ("dmitry@consulting.com","Сопровождение 2025",            "Помесячное обслуживание", ClientCaseStatus.Closed)
             };
 
             var caseEntities = new List<ClientCase>();
@@ -282,122 +282,167 @@ namespace PayPlanner.Api.Services
             var today = DateTime.UtcNow.Date;
             var paymentsToEnsure = new[]
             {
-                // Èâàí Èâàíîâ — Ïîäãîòîâêà äîãîâîðà êîíñàëòèíãà
-                new {
+                new
+                {
                     Email = "ivan@example.com",
-                    CaseTitle = "Ïîäãîòîâêà äîãîâîðà êîíñàëòèíãà",
+                    CaseTitle = "Подготовка договора консалтинга",
                     Date = today.AddDays(-10),
+                    AccountDate = (DateTime?)today.AddDays(-12),
+                    Account = "1306",
                     Amount = 150_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Completed,
-                    Description = "Àâàíñ ïî äîãîâîðó",
+                    Description = "Аванс по договору",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-10),
-                    DealType = "Êîíñàëòèíã",
-                    IncomeType = "Äîõîä îò óñëóã",
-                    Source = "Áàíêîâñêèé ïåðåâîä",
-                    StatusName = "Âûïîëíåíî"
+                    DealType = "Консалтинг",
+                    IncomeType = "Доход от услуг",
+                    Source = "Банковский перевод",
+                    StatusName = "Выполнено",
+                    ActReference = (string?)null
                 },
-                new {
+                new
+                {
                     Email = "ivan@example.com",
-                    CaseTitle = "Ïîäãîòîâêà äîãîâîðà êîíñàëòèíãà",
+                    CaseTitle = "Подготовка договора консалтинга",
                     Date = today.AddDays(20),
+                    AccountDate = (DateTime?)today.AddDays(15),
+                    Account = "INV-2026",
                     Amount = 200_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Îêîí÷àòåëüíûé ðàñ÷¸ò",
+                    Description = "Окончательный расчёт",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Êîíñàëòèíã",
-                    IncomeType = "Äîõîä îò óñëóã",
-                    Source = "Áàíêîâñêàÿ êàðòà",
-                    StatusName = "Îæèäàåòñÿ"
+                    DealType = "Консалтинг",
+                    IncomeType = "Доход от услуг",
+                    Source = "Банковская карта",
+                    StatusName = "Ожидается",
+                    ActReference = (string?)null
                 },
 
-                // Ìàðèÿ Ïåòðîâà — Ðåäèçàéí ñàéòà
-                new {
+                // Мария Петрова — Редизайн сайта
+                new
+                {
                     Email = "maria@company.com",
-                    CaseTitle = "Ðåäèçàéí ñàéòà",
+                    CaseTitle = "Редизайн сайта",
                     Date = today.AddDays(-5),
+                    AccountDate = (DateTime?)today.AddDays(-7),
+                    Account = "1305",
                     Amount = 90_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Completed,
-                    Description = "Ýòàï 1 — ïðîòîòèïû",
+                    Description = "Этап 1 — прототипы",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-5),
-                    DealType = "Ïðîåêò",
-                    IncomeType = "Äîõîä îò óñëóã",
+                    DealType = "Проект",
+                    IncomeType = "Доход от услуг",
                     Source = "PayPal",
-                    StatusName = "Âûïîëíåíî"
+                    StatusName = "Выполнено",
+                    ActReference = (string?)null
                 },
-                new {
+                new
+                {
                     Email = "maria@company.com",
-                    CaseTitle = "Ðåäèçàéí ñàéòà",
+                    CaseTitle = "Редизайн сайта",
                     Date = today.AddDays(-1),
+                    AccountDate = (DateTime?)today.AddDays(-3),
+                    Account = "INV-2042",
                     Amount = 110_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Overdue,
-                    Description = "Ýòàï 2 — UI",
+                    Description = "Этап 2 — UI",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Ïðîåêò",
-                    IncomeType = "Äîõîä îò óñëóã",
-                    Source = "Áàíêîâñêèé ïåðåâîä",
-                    StatusName = "Ïðîñðî÷åíî"
+                    DealType = "Проект",
+                    IncomeType = "Доход от услуг",
+                    Source = "Банковский перевод",
+                    StatusName = "Просрочено",
+                    ActReference = "Акт ожидается"
+                },
+                new
+                {
+                    Email = "maria@company.com",
+                    CaseTitle = "Редизайн сайта",
+                    Date = today.AddDays(-2),
+                    AccountDate = (DateTime?)today.AddDays(-4),
+                    Account = "154",
+                    Amount = 65_000m,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    Description = "Счёт за тестирование",
+                    IsPaid = false,
+                    PaidDate = (DateTime?)null,
+                    DealType = "Проект",
+                    IncomeType = "Доход от услуг",
+                    Source = "Банковский перевод",
+                    StatusName = "Ожидается",
+                    ActReference = "Акт будет подписан в ноябре"
                 },
 
-                // Àëåêñåé Ñìèðíîâ — Ïîñòàâêà ïàðòèè ¹101
-                new {
+                // Алексей Смирнов — Поставка партии №101
+                new
+                {
                     Email = "alex@business.com",
-                    CaseTitle = "Ïîñòàâêà ïàðòèè ¹101",
+                    CaseTitle = "Поставка партии №101",
                     Date = today.AddDays(7),
+                    AccountDate = (DateTime?)today.AddDays(2),
+                    Account = "1307",
                     Amount = 350_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Îïëàòà çà ïîñòàâêó",
+                    Description = "Оплата за поставку",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Ïðîäàæà òîâàðà",
-                    IncomeType = "Ïðî÷èå äîõîäû",
-                    Source = "×åê",
-                    StatusName = "Îæèäàåòñÿ"
+                    DealType = "Продажа товара",
+                    IncomeType = "Прочие доходы",
+                    Source = "Чек",
+                    StatusName = "Ожидается",
+                    ActReference = (string?)null
                 },
 
-                // Åêàòåðèíà Ñèäîðîâà — Íàó÷íûé ïðîåêò R&D
-                new {
+                // Екатерина Сидорова — Научный проект R&D
+                new
+                {
                     Email = "katya@startup.com",
-                    CaseTitle = "Íàó÷íûé ïðîåêò R&D",
+                    CaseTitle = "Научный проект R&D",
                     Date = today.AddDays(30),
+                    AccountDate = (DateTime?)today.AddDays(28),
+                    Account = "INV-RD-001",
                     Amount = 500_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Ýòàï 1 — ÍÈÐ",
+                    Description = "Этап 1 — НИР",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Ïðîåêò",
-                    IncomeType = "Ïðî÷èå äîõîäû",
-                    Source = "Áàíêîâñêèé ïåðåâîä",
-                    StatusName = "Îæèäàåòñÿ"
+                    DealType = "Проект",
+                    IncomeType = "Прочие доходы",
+                    Source = "Банковский перевод",
+                    StatusName = "Ожидается",
+                    ActReference = (string?)null
                 },
 
-                // Äìèòðèé Êóçíåöîâ — Ñîïðîâîæäåíèå 2025 (ÐÀÑÕÎÄ)
-                new {
+                // Дмитрий Кузнецов — Сопровождение 2025 (РАСХОД)
+                new
+                {
                     Email = "dmitry@consulting.com",
-                    CaseTitle = "Ñîïðîâîæäåíèå 2025",
+                    CaseTitle = "Сопровождение 2025",
                     Date = today.AddDays(-3),
+                    AccountDate = (DateTime?)null,
+                    Account = (string?)null,
                     Amount = 25_000m,
                     Type = PaymentType.Expense,
                     Status = PaymentStatus.Completed,
-                    Description = "Çàêóïêà ÏÎ äëÿ ñîïðîâîæäåíèÿ",
+                    Description = "Закупка ПО для сопровождения",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-3),
-                    DealType = "Îáñëóæèâàíèå",
-                    IncomeType = "Ïðî÷èå ðàñõîäû",
-                    Source = "Íàëè÷íûå",
-                    StatusName = "Âûïîëíåíî"
+                    DealType = "Обслуживание",
+                    IncomeType = "Прочие расходы",
+                    Source = "Наличные",
+                    StatusName = "Выполнено",
+                    ActReference = (string?)null
                 },
             };
-
             var toAdd = new List<Payment>();
 
             foreach (var p in paymentsToEnsure)
@@ -433,10 +478,13 @@ namespace PayPlanner.Api.Services
                     ClientId = cli.Id,
                     ClientCaseId = caseEnt.Id,
                     Date = p.Date,
+                    AccountDate = p.AccountDate,
+                    Account = string.IsNullOrWhiteSpace(p.Account) ? null : p.Account,
                     Amount = p.Amount,
                     Type = p.Type,
                     Status = p.Status,
                     Description = p.Description,
+                    Notes = p.ActReference ?? string.Empty,
                     IsPaid = p.IsPaid,
                     PaidDate = p.PaidDate,
                     DealTypeId = GetIdOrThrow(dealTypeByName, p.DealType, "DealType"),
@@ -464,7 +512,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-001",
-                    Title = "   ",
+                    Title = "Акт передачи макетов по редизайну сайта",
                     Date = today.AddDays(-15),
                     Amount = 51721.64m,
                     Invoice = "1305",
@@ -475,7 +523,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-002",
-                    Title = " ",
+                    Title = "Акт оказанных услуг по консалтингу",
                     Date = today.AddDays(-5),
                     Amount = 118000m,
                     Invoice = "1306",
@@ -486,7 +534,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-003",
-                    Title = " ",
+                    Title = "Акт приёма-передачи партии №101",
                     Date = today.AddDays(-2),
                     Amount = 90000m,
                     Invoice = "1307",
@@ -593,7 +641,7 @@ namespace PayPlanner.Api.Services
             }
         }
 
-        // --- íîðìàëèçàöèÿ è áåçîïàñíûå êàðòû èì¸í ---
+        // --- нормализация и безопасные карты имён ---
 
         private static string Norm(string? s) =>
             (s ?? string.Empty).Trim().ToUpperInvariant();
