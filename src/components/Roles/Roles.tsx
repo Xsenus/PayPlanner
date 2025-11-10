@@ -8,7 +8,6 @@ import { getRolePermissions, subscribeOnPermissionsChange } from '../../services
 import {
   MENU_SECTION_KEYS,
   type MenuPermissionKey,
-  type RolePermissions,
 } from '../../types/permissions';
 
 const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {

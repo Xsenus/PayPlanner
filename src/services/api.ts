@@ -42,6 +42,16 @@ type ActsSortKey =
   | 'responsible'
   | 'createdAt';
 
+type InvoicesSortKey =
+  | 'date'
+  | 'number'
+  | 'amount'
+  | 'dueDate'
+  | 'status'
+  | 'client'
+  | 'responsible'
+  | 'createdAt';
+
 function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -134,6 +144,70 @@ export class ApiService {
 
   async deleteAct(id: number) {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Invoices =====
+  async getInvoices(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+    sortBy?: InvoicesSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Invoice>>(`/invoices${q}`);
+  }
+
+  async getInvoicesSummary(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<InvoiceSummary>(`/invoices/summary${q}`);
+  }
+
+  async createInvoice(payload: InvoiceInput) {
+    return this.request<Invoice>('/invoices', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateInvoice(id: number, payload: InvoiceInput) {
+    return this.request<Invoice>(`/invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteInvoice(id: number) {
+    return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Role permissions =====
+  async getRolePermissions(roleId: number) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`);
+  }
+
+  async updateRolePermissions(roleId: number, permissions: RolePermissions) {
+    return this.request<void>(`/role-permissions/${roleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(permissions),
+    });
+  }
+
+  async resetRolePermissions(roleId: number) {
+    return this.request<void>(`/role-permissions/${roleId}`, { method: 'DELETE' });
   }
 
   // ===== Payments (back-compat + расширенные варианты) =====
@@ -603,6 +677,10 @@ import type {
   ActStatus,
   ActsSummary,
   Payment,
+  Invoice,
+  InvoiceInput,
+  InvoiceSummary,
+  PaymentStatus,
   Client,
   InstallmentRequest,
   ClientStats,
@@ -618,3 +696,4 @@ import type {
   SummaryStatus,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
+import type { RolePermissions } from '../types/permissions';

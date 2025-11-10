@@ -226,6 +226,28 @@ public class PaymentContext : DbContext
                   .HasDatabaseName("IX_Roles_Name");
         });
 
+        // ================== Role Permissions ==================
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Section).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CanView).HasDefaultValue(false);
+            entity.Property(e => e.CanCreate).HasDefaultValue(false);
+            entity.Property(e => e.CanEdit).HasDefaultValue(false);
+            entity.Property(e => e.CanDelete).HasDefaultValue(false);
+            entity.Property(e => e.CanExport).HasDefaultValue(false);
+            entity.Property(e => e.CanViewAnalytics).HasDefaultValue(false);
+
+            entity.HasIndex(e => new { e.RoleId, e.Section })
+                  .IsUnique()
+                  .HasDatabaseName("IX_RolePermissions_Role_Section");
+
+            entity.HasOne(e => e.Role)
+                  .WithMany(r => r.Permissions)
+                  .HasForeignKey(e => e.RoleId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // ================== Users ==================
         modelBuilder.Entity<User>(entity =>
         {
@@ -342,6 +364,11 @@ public class PaymentContext : DbContext
     /// Роли пользователей.
     /// </summary>
     public DbSet<Role> Roles { get; set; }
+
+    /// <summary>
+    /// Настройки прав ролей по разделам.
+    /// </summary>
+    public DbSet<RolePermission> RolePermissions { get; set; }
 
     /// <summary>
     /// Пользователи системы.

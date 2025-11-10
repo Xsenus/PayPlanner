@@ -139,6 +139,62 @@ export interface Payment {
   accountDate?: string | null;
 }
 
+export interface Invoice {
+  id: number;
+  number: string;
+  date: string;
+  dueDate?: string | null;
+  amount: number;
+  status: PaymentStatus;
+  isPaid: boolean;
+  paidDate?: string | null;
+  clientId?: number | null;
+  clientName?: string | null;
+  clientCompany?: string | null;
+  clientCaseId?: number | null;
+  clientCaseTitle?: string | null;
+  description?: string | null;
+  actReference?: string | null;
+  actId?: number | null;
+  actNumber?: string | null;
+  actTitle?: string | null;
+  actStatus?: ActStatus | null;
+  responsibleId?: number | null;
+  responsibleName?: string | null;
+  counterpartyInn?: string | null;
+  paymentStatusName?: string | null;
+  createdAt: string;
+}
+
+export interface InvoiceInput {
+  number: string;
+  date: string;
+  dueDate?: string | null;
+  amount: number;
+  status: PaymentStatus;
+  clientId: number;
+  clientCaseId?: number | null;
+  description?: string | null;
+  actReference?: string | null;
+  paymentSourceId?: number | null;
+  incomeTypeId?: number | null;
+  dealTypeId?: number | null;
+  paymentStatusEntityId?: number | null;
+  paidDate?: string | null;
+}
+
+export interface InvoiceSummaryBucket {
+  amount: number;
+  count: number;
+}
+
+export interface InvoiceSummary {
+  total: InvoiceSummaryBucket;
+  pending: InvoiceSummaryBucket;
+  paid: InvoiceSummaryBucket;
+  overdue: InvoiceSummaryBucket;
+}
+
 export type AccountSuggestion = {
   account: string;
   accountDate: string | null;

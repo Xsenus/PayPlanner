@@ -19,6 +19,7 @@ import {
   getRolePermissions,
   setRolePermissions,
   resetRolePermissions,
+  subscribeOnPermissionsChange,
 } from '../../services/permissionsService';
 import {
   MENU_PERMISSION_KEYS,
@@ -163,9 +164,22 @@ function PermissionToggle({ label, description, checked, onChange, disabled }: P
 export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProps) {
   const { t } = useTranslation();
   const [permissions, setPermissions] = useState<RolePermissions>(() => getRolePermissions(role.id));
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setPermissions(getRolePermissions(role.id));
+    setErrorMessage(null);
+  }, [role.id]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeOnPermissionsChange((changedRoleId) => {
+      if (changedRoleId === undefined || changedRoleId === role.id) {
+        setPermissions(getRolePermissions(role.id));
+      }
+    });
+    return unsubscribe;
   }, [role.id]);
 
   const updateSection = <K extends MenuSectionKey>(
@@ -224,14 +238,30 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
     });
   };
 
-  const handleSave = () => {
-    setRolePermissions(role.id, permissions);
-    onClose();
+  const handleSave = async () => {
+    setSaving(true);
+    setErrorMessage(null);
+    try {
+      await setRolePermissions(role.id, permissions);
+      onClose();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Не удалось сохранить права');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleReset = () => {
-    resetRolePermissions(role.id);
-    setPermissions(getRolePermissions(role.id));
+  const handleReset = async () => {
+    setResetting(true);
+    setErrorMessage(null);
+    try {
+      await resetRolePermissions(role.id);
+      setPermissions(getRolePermissions(role.id));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Не удалось сбросить права');
+    } finally {
+      setResetting(false);
+    }
   };
 
   const sectionTitle = (key: string) => t(key) ?? key;
@@ -261,6 +291,11 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
         </div>
 
         <div className="px-6 py-5 space-y-6 max-h-[70vh] overflow-y-auto">
+          {errorMessage ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          ) : null}
           {SECTION_CONFIG.map(({ key, icon: Icon, titleKey, descriptionKey }) => {
             const section = permissions[key];
             return (
@@ -279,14 +314,18 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
                     <button
                       type="button"
                       onClick={() => setSectionAll(key, true)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      disabled={saving || resetting}
+                    >
                       <Unlock className="h-3.5 w-3.5" />
                       {t('permissionAllowAll') ?? 'Разрешить всё'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setSectionAll(key, false)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100">
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                      disabled={saving || resetting}
+                    >
                       <Lock className="h-3.5 w-3.5" />
                       {t('permissionDenyAll') ?? 'Запретить всё'}
                     </button>
@@ -300,7 +339,7 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
                       description={sectionDescription(descKey)}
                       checked={section[permKey]}
                       onChange={() => toggleBasePermission(key, permKey)}
-                      disabled={permKey !== 'canView' && !section.canView}
+                      disabled={saving || resetting || (permKey !== 'canView' && !section.canView)}
                     />
                   ))}
                   {key === 'calendar' ? (
@@ -309,7 +348,7 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
                       description={sectionDescription(CALENDAR_EXTRA_META.descriptionKey)}
                       checked={(section as RolePermissions['calendar']).canViewAnalytics}
                       onChange={toggleCalendarExtra}
-                      disabled={!section.canView}
+                      disabled={saving || resetting || !section.canView}
                     />
                   ) : null}
                 </div>
@@ -322,22 +361,28 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            {t('resetPermissions') ?? 'Сбросить по умолчанию'}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={saving || resetting}
+          >
+            {t('permissionResetDefaults') ?? t('resetPermissions') ?? 'Сбросить по умолчанию'}
           </button>
 
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
               {t('cancel') ?? 'Отмена'}
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
-              {t('savePermissions') ?? 'Сохранить права'}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={saving || resetting}
+            >
+              <ShieldCheck className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+              {saving ? t('saving') ?? 'Сохранение…' : t('savePermissions') ?? 'Сохранить права'}
             </button>
           </div>
         </div>
