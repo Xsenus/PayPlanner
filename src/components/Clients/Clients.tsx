@@ -3,6 +3,7 @@ import {
   Users,
   Plus,
   Building,
+  Building2,
   Mail,
   Phone,
   Eye,
@@ -19,11 +20,12 @@ import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
-import type { Client, ClientCase } from '../../types';
+import type { Client, ClientCase, ClientInput } from '../../types';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
@@ -85,13 +87,27 @@ function matchesClient(c: Client, q: string): boolean {
   const email = (c.email ?? '').toLowerCase();
   const phone = (c.phone ?? '').toLowerCase();
   const phoneDigits = (c.phone ?? '').replace(/\D/g, '');
+  const legal = c.legalEntity;
+  const legalShort = (legal?.shortName ?? '').toLowerCase();
+  const legalFull = (legal?.fullName ?? '').toLowerCase();
+  const legalInn = (legal?.inn ?? '').toLowerCase();
+  const legalOgrn = (legal?.ogrn ?? '').toLowerCase();
+  const legalKpp = (legal?.kpp ?? '').toLowerCase();
+  const legalDigits = [legal?.inn ?? '', legal?.ogrn ?? '', legal?.kpp ?? '']
+    .map((value) => value.replace(/\D/g, ''))
+    .join(' ');
 
   return (
     name.includes(ql) ||
     company.includes(ql) ||
     email.includes(ql) ||
     phone.includes(ql) ||
-    (!!qDigits && phoneDigits.includes(qDigits))
+    legalShort.includes(ql) ||
+    legalFull.includes(ql) ||
+    legalInn.includes(ql) ||
+    legalOgrn.includes(ql) ||
+    legalKpp.includes(ql) ||
+    (!!qDigits && (phoneDigits.includes(qDigits) || legalDigits.includes(qDigits)))
   );
 }
 
@@ -178,6 +194,7 @@ function highlightPhone(phone: string, q: string): ReactNode {
 export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
+  const { legalEntities, loading: legalEntitiesLoading } = useLegalEntities();
   const { t } = useTranslation();
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
@@ -272,7 +289,7 @@ export function Clients() {
     );
   }
 
-  if (loading) {
+  if (loading || legalEntitiesLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-gray-500">{t('loading')}</div>
@@ -303,7 +320,7 @@ export function Clients() {
     setEditingClient(null);
   };
 
-  const handleSubmitClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
+  const handleSubmitClient = async (clientData: ClientInput) => {
     if (editingClient) {
       if (!canEditClients) {
         showPermissionWarning('Недостаточно прав для редактирования клиентов.');
@@ -549,6 +566,9 @@ export function Clients() {
                       Клиент
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      {t('legalEntity') || 'Юр. лицо'}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       Контакты
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -591,6 +611,30 @@ export function Clients() {
                               )}
                             </div>
                           </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {client.legalEntity ? (
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-2 text-gray-700">
+                                <Building2 size={14} className="text-blue-500" />
+                                <span className="truncate">
+                                  {highlight(client.legalEntity.shortName ?? '', query)}
+                                </span>
+                              </div>
+                              {client.legalEntity.inn && (
+                                <div className="text-xs text-gray-500">
+                                  ИНН: {highlight(client.legalEntity.inn ?? '', query)}
+                                </div>
+                              )}
+                              {client.legalEntity.ogrn && (
+                                <div className="text-xs text-gray-500">
+                                  ОГРН: {highlight(client.legalEntity.ogrn ?? '', query)}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">{t('legalEntityNotAssigned') || 'Не указано'}</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm space-y-1">
@@ -755,24 +799,32 @@ export function Clients() {
                       </button>
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0 flex flex-col">
-                    {client.email && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Mail size={14} />
-                        <span className="truncate">{highlight(client.email ?? '', query)}</span>
-                      </div>
-                    )}
-                    {client.phone && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Phone size={14} />
-                        <span className="truncate">
-                          {highlightPhone(client.phone ?? '', query)}
-                        </span>
-                      </div>
-                    )}
-                    {client.address && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Building size={14} />
+                    <div className="flex-1 min-h-0 flex flex-col gap-1">
+                      {client.email && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Mail size={14} />
+                          <span className="truncate">{highlight(client.email ?? '', query)}</span>
+                        </div>
+                      )}
+                      {client.phone && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Phone size={14} />
+                          <span className="truncate">
+                            {highlightPhone(client.phone ?? '', query)}
+                          </span>
+                        </div>
+                      )}
+                      {client.legalEntity && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Building2 size={14} className="text-blue-500" />
+                          <span className="truncate">
+                            {highlight(client.legalEntity.shortName ?? '', query)}
+                          </span>
+                        </div>
+                      )}
+                      {client.address && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Building size={14} />
                         <span className="truncate">{client.address}</span>
                       </div>
                     )}
@@ -889,6 +941,7 @@ export function Clients() {
           onSubmit={handleSubmitClient}
           onDelete={handleDeleteClient}
           client={editingClient ?? undefined}
+          legalEntities={legalEntities}
         />
 
         {caseModalOpen && (

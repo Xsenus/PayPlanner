@@ -50,6 +50,32 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
         });
 
+        // ------------------ LegalEntity ------------------
+        modelBuilder.Entity<LegalEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ShortName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.FullName).HasMaxLength(500);
+            entity.Property(e => e.Inn).HasMaxLength(20);
+            entity.Property(e => e.Kpp).HasMaxLength(20);
+            entity.Property(e => e.Ogrn).HasMaxLength(20);
+            entity.Property(e => e.Address).HasMaxLength(500);
+            entity.Property(e => e.Phone).HasMaxLength(100);
+            entity.Property(e => e.Email).HasMaxLength(200);
+            entity.Property(e => e.Director).HasMaxLength(200);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasMany(e => e.Clients)
+                  .WithOne(c => c.LegalEntity)
+                  .HasForeignKey(c => c.LegalEntityId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ShortName).HasDatabaseName("IX_LegalEntities_ShortName");
+            entity.HasIndex(e => e.Inn).HasDatabaseName("IX_LegalEntities_Inn");
+            entity.HasIndex(e => e.Kpp).HasDatabaseName("IX_LegalEntities_Kpp");
+        });
+
         // ------------------ Payment ------------------
         modelBuilder.Entity<Payment>(entity =>
         {
@@ -137,12 +163,18 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Address).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
 
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany(le => le.Clients)
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Èíäåêñû ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_Clients_IsActive");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Clients_CreatedAt");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Clients_IsActive_Name");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Clients_LegalEntityId");
         });
 
         // ------------------ ClientCase ------------------
@@ -328,6 +360,11 @@ public class PaymentContext : DbContext
             });
         });
     }
+
+    /// <summary>
+    /// Юридические лица, связанные с клиентами.
+    /// </summary>
+    public DbSet<LegalEntity> LegalEntities { get; set; }
 
     /// <summary>
     /// Дела (кейсы) клиентов.
