@@ -1,8 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -17,6 +21,77 @@ public class ClientsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
         => Ok(await _db.Clients.Include(c => c.Cases).AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+
+    [HttpGet("lookup")]
+    public async Task<ActionResult<IEnumerable<ClientLookupDto>>> Lookup(
+        [FromQuery] string? search,
+        [FromQuery] bool includeInactive = true,
+        [FromQuery] int limit = 50,
+        [FromQuery] List<int>? ids = null,
+        CancellationToken ct = default)
+    {
+        limit = limit <= 0 ? 50 : Math.Min(limit, 200);
+
+        var query = _db.Clients.AsNoTracking();
+
+        if (!includeInactive)
+        {
+            query = query.Where(c => c.IsActive);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{EscapeLike(search.Trim())}%";
+            query = query.Where(c =>
+                EF.Functions.Like(c.Name, pattern, "\\") ||
+                (c.Company != null && EF.Functions.Like(c.Company, pattern, "\\")));
+        }
+
+        var results = await query
+            .OrderBy(c => c.Name)
+            .ThenBy(c => c.Id)
+            .Take(limit)
+            .Select(c => new ClientLookupDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Company = c.Company,
+                IsActive = c.IsActive,
+            })
+            .ToListAsync(ct);
+
+        if (ids is { Count: > 0 })
+        {
+            var knownIds = results.Select(c => c.Id).ToHashSet();
+            var missing = ids.Where(id => !knownIds.Contains(id)).ToArray();
+
+            if (missing.Length > 0)
+            {
+                var extra = await _db.Clients
+                    .AsNoTracking()
+                    .Where(c => missing.Contains(c.Id))
+                    .Select(c => new ClientLookupDto
+                    {
+                        Id = c.Id,
+                        Name = c.Name,
+                        Company = c.Company,
+                        IsActive = c.IsActive,
+                    })
+                    .ToListAsync(ct);
+
+                foreach (var item in extra)
+                {
+                    knownIds.Add(item.Id);
+                    results.Add(item);
+                }
+            }
+        }
+
+        return Ok(results
+            .OrderBy(c => c.Name)
+            .ThenBy(c => c.Id)
+            .ToList());
+    }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
@@ -113,4 +188,9 @@ public class ClientsController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    private static string EscapeLike(string value)
+        => value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 }

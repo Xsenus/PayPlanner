@@ -342,6 +342,27 @@ export class ApiService {
     return this.request<Client[]>('/clients');
   }
 
+  async lookupClients(params?: {
+    search?: string;
+    includeInactive?: boolean;
+    limit?: number;
+    ids?: number[];
+  }) {
+    const query = new URLSearchParams();
+    if (params?.search) {
+      query.append('search', params.search);
+    }
+    if (params?.includeInactive !== undefined) {
+      query.append('includeInactive', String(params.includeInactive));
+    }
+    if (params?.limit) {
+      query.append('limit', String(params.limit));
+    }
+    params?.ids?.forEach((id) => query.append('ids', String(id)));
+    const suffix = query.toString();
+    return this.request<ClientLookup[]>(`/clients/lookup${suffix ? `?${suffix}` : ''}`);
+  }
+
   async getClient(id: number) {
     return this.request<Client>(`/clients/${id}`);
   }
@@ -728,6 +749,7 @@ import type {
   InvoiceSummary,
   PaymentStatus,
   Client,
+  ClientLookup,
   InstallmentRequest,
   ClientStats,
   DealType,

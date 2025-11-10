@@ -16,7 +16,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
-import type { Client, Contract, ContractInput } from '../../types';
+import type { ClientLookup, Contract, ContractInput } from '../../types';
 import { toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { ContractModal } from './ContractModal';
 
@@ -89,7 +89,7 @@ export function Contracts() {
     pageSize,
   });
 
-  const [clients, setClients] = useState<Client[]>([]);
+  const [clients, setClients] = useState<ClientLookup[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
 
@@ -113,7 +113,7 @@ export function Contracts() {
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
     try {
-      const data = await apiService.getClients();
+      const data = await apiService.lookupClients({ includeInactive: true, limit: 200 });
       setClients(data ?? []);
       setClientsError(null);
     } catch (err) {
@@ -198,8 +198,8 @@ export function Contracts() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
+    <div className="min-h-screen bg-gray-50 pb-12">
+      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 pt-8 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-3 text-slate-900">
@@ -240,7 +240,7 @@ export function Contracts() {
           </div>
         </div>
 
-        <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mt-6 grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:p-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <label className="flex flex-col gap-2 text-sm text-slate-600">
               <span className="flex items-center gap-2 font-medium text-slate-700">
@@ -321,7 +321,7 @@ export function Contracts() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {loading ? (
             <div className="flex items-center justify-center gap-3 py-16 text-slate-500">
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -511,7 +511,6 @@ export function Contracts() {
           </div>
         )}
       </div>
-
       <ContractModal
         open={modalOpen}
         mode={modalMode}
@@ -523,9 +522,6 @@ export function Contracts() {
         onSubmit={handleSubmit}
         submitting={submitting}
         errorMessage={modalError}
-        clients={clients}
-        clientsLoading={clientsLoading}
-        clientsError={clientsError}
       />
     </div>
   );

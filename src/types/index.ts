@@ -14,6 +14,13 @@ export interface Client {
   contracts?: Contract[];
 }
 
+export interface ClientLookup {
+  id: number;
+  name: string;
+  company?: string | null;
+  isActive?: boolean;
+}
+
 export interface ClientCase {
   id: number;
   clientId: number;

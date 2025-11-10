@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
-import type { Client, Contract, ContractInput } from '../../types';
+import { Loader2, Search, X } from 'lucide-react';
+import type { Contract, ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { apiService } from '../../services/api';
 
 interface ContractModalProps {
   open: boolean;
@@ -12,9 +14,6 @@ interface ContractModalProps {
   onSubmit: (payload: ContractInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
-  clients: Client[];
-  clientsLoading: boolean;
-  clientsError?: string | null;
 }
 
 type FormState = {
@@ -24,7 +23,13 @@ type FormState = {
   amount: string;
   description: string;
   validUntil: string;
-  clientIds: string[];
+};
+
+type SelectedClient = {
+  id: number;
+  name: string;
+  company?: string | null;
+  isActive?: boolean;
 };
 
 function normalizeContractToForm(contract: Contract | null): FormState {
@@ -37,7 +42,6 @@ function normalizeContractToForm(contract: Contract | null): FormState {
       amount: '',
       description: '',
       validUntil: '',
-      clientIds: [],
     };
   }
 
@@ -51,8 +55,15 @@ function normalizeContractToForm(contract: Contract | null): FormState {
         : '',
     description: contract.description ?? '',
     validUntil: toDateInputValue(contract.validUntil) ?? '',
-    clientIds: (contract.clients ?? []).map((client) => String(client.id)),
   };
+}
+
+function normalizeContractClients(contract: Contract | null): SelectedClient[] {
+  return (contract?.clients ?? []).map((client: ContractClient) => ({
+    id: client.id,
+    name: client.name,
+    company: client.company ?? undefined,
+  }));
 }
 
 export function ContractModal({
@@ -63,38 +74,125 @@ export function ContractModal({
   onSubmit,
   submitting,
   errorMessage,
-  clients,
-  clientsLoading,
-  clientsError,
 }: ContractModalProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract));
   const [localError, setLocalError] = useState<string | null>(null);
+  const [selectedClients, setSelectedClients] = useState<SelectedClient[]>(() =>
+    normalizeContractClients(contract),
+  );
+  const [clientQuery, setClientQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(clientQuery.trim(), 300);
+  const selectedClientIds = useMemo(
+    () => selectedClients.map((client) => client.id),
+    [selectedClients],
+  );
+  const selectedClientIdsKey = useMemo(
+    () => selectedClientIds.join(','),
+    [selectedClientIds],
+  );
+  const [clientOptions, setClientOptions] = useState<SelectedClient[]>([]);
+  const [clientOptionsLoading, setClientOptionsLoading] = useState(false);
+  const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setForm(normalizeContractToForm(contract));
       setLocalError(null);
+      setSelectedClients(normalizeContractClients(contract));
+      setClientQuery('');
     }
   }, [open, contract]);
 
   const isEdit = mode === 'edit';
 
-  const sortedClients = useMemo(
-    () => [...clients].sort((a, b) => a.name.localeCompare(b.name)),
-    [clients],
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    setClientOptionsLoading(true);
+    setClientOptionsError(null);
+
+    const loadOptions = async () => {
+      try {
+        const lookup = await apiService.lookupClients({
+          search: debouncedQuery || undefined,
+          includeInactive: true,
+          limit: 20,
+          ids: selectedClientIds,
+        });
+        if (cancelled) return;
+        setSelectedClients((prev) => {
+          let changed = false;
+          const enriched = prev.map((client) => {
+            const match = lookup.find((item) => item.id === client.id);
+            if (!match) return client;
+            const company = match.company ?? undefined;
+            const isActive = match.isActive;
+            if (client.company !== company || client.isActive !== isActive) {
+              changed = true;
+              return {
+                ...client,
+                company,
+                isActive,
+              };
+            }
+            return client;
+          });
+          return changed ? enriched : prev;
+        });
+        setClientOptions(
+          lookup.map((client) => ({
+            id: client.id,
+            name: client.name,
+            company: client.company ?? undefined,
+            isActive: client.isActive,
+          })),
+        );
+        setClientOptionsError(null);
+      } catch (error) {
+        if (cancelled) return;
+        setClientOptionsError(
+          error instanceof Error
+            ? error.message
+            : t('contractClientsLoadError') ?? 'Не удалось загрузить клиентов',
+        );
+        setClientOptions([]);
+      } finally {
+        if (!cancelled) {
+          setClientOptionsLoading(false);
+        }
+      }
+    };
+
+    void loadOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, debouncedQuery, selectedClientIdsKey, t]);
+
+  const availableClients = useMemo(
+    () =>
+      clientOptions.filter(
+        (option) => !selectedClients.some((selected) => selected.id === option.id),
+      ),
+    [clientOptions, selectedClients],
   );
 
-  const toggleClient = (id: string) => {
-    setForm((prev) => {
-      const exists = prev.clientIds.includes(id);
-      return {
-        ...prev,
-        clientIds: exists
-          ? prev.clientIds.filter((value) => value !== id)
-          : [...prev.clientIds, id],
-      };
+  const removeClient = (id: number) => {
+    setSelectedClients((prev) => prev.filter((client) => client.id !== id));
+  };
+
+  const handleSelectClient = (client: SelectedClient) => {
+    setSelectedClients((prev) => {
+      if (prev.some((existing) => existing.id === client.id)) {
+        return prev;
+      }
+      const next = [...prev, client];
+      return next.sort((a, b) => a.name.localeCompare(b.name));
     });
+    setClientQuery('');
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -111,7 +209,7 @@ export function ContractModal({
       return;
     }
 
-    if (form.clientIds.length === 0) {
+    if (selectedClients.length === 0) {
       setLocalError(t('contractClientsRequired') ?? 'Выберите хотя бы одного клиента');
       return;
     }
@@ -138,7 +236,7 @@ export function ContractModal({
       description: form.description.trim() ? form.description.trim() : undefined,
       amount: amountValue,
       validUntil: form.validUntil ? fromInputToApiDate(form.validUntil) ?? form.validUntil : undefined,
-      clientIds: form.clientIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
+      clientIds: selectedClients.map((client) => client.id),
     };
 
     try {
@@ -236,42 +334,96 @@ export function ContractModal({
             <div className="flex flex-col gap-2 text-sm sm:col-span-2">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-slate-700">{t('contractClients') ?? 'Клиенты'}</span>
-                {clientsLoading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+                {clientOptionsLoading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
               </div>
-              <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                {clientsError ? (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                    {clientsError}
-                  </div>
-                ) : sortedClients.length === 0 ? (
-                  <p className="text-sm text-slate-500">
-                    {t('contractNoClients') ?? 'Нет доступных клиентов для выбора.'}
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {sortedClients.map((client) => {
-                      const value = String(client.id);
-                      const checked = form.clientIds.includes(value);
-                      return (
-                        <label
-                          key={client.id}
-                          className="flex items-center gap-2 rounded-lg border border-transparent bg-white px-3 py-2 text-sm text-slate-600 shadow-sm transition hover:border-emerald-200"
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex flex-wrap gap-2">
+                  {selectedClients.length === 0 ? (
+                    <span className="text-sm text-slate-500">
+                      {t('contractClientsEmpty') ?? 'Клиенты не выбраны.'}
+                    </span>
+                  ) : (
+                    selectedClients.map((client) => (
+                      <span
+                        key={client.id}
+                        className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-sm text-slate-700 shadow-sm"
+                      >
+                        <span className="flex flex-col text-left">
+                          <span className="font-medium text-slate-800">{client.name}</span>
+                          {client.company && (
+                            <span className="text-xs text-slate-500">{client.company}</span>
+                          )}
+                          {client.isActive === false && (
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-amber-600">
+                              {t('contractClientInactive') ?? 'Неактивен'}
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeClient(client.id)}
+                          className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                          aria-label={t('remove') ?? 'Удалить'}
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleClient(value)}
-                            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <span className="flex flex-col">
-                            <span className="font-medium text-slate-700">{client.name}</span>
-                            {client.company && (
-                              <span className="text-xs text-slate-500">{client.company}</span>
-                            )}
-                          </span>
-                        </label>
-                      );
-                    })}
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    value={clientQuery}
+                    onChange={(event) => setClientQuery(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    placeholder={
+                      t('contractClientsSearchPlaceholder') ?? 'Начните вводить имя или компанию клиента'
+                    }
+                  />
+                </div>
+                {clientOptionsError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {clientOptionsError}
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                    {availableClients.length === 0 ? (
+                      <p className="px-3 py-3 text-sm text-slate-500">
+                        {clientQuery
+                          ? t('contractClientsNoMatches') ?? 'Не найдено клиентов по запросу'
+                          : t('contractClientsStartTyping') ??
+                            'Начните вводить имя или компанию, чтобы найти клиента'}
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-slate-100">
+                        {availableClients.map((client) => (
+                          <li key={client.id}>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectClient(client)}
+                              className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                            >
+                              <span className="flex flex-col">
+                                <span className="font-medium text-slate-800">{client.name}</span>
+                                {client.company && (
+                                  <span className="text-xs text-slate-500">{client.company}</span>
+                                )}
+                                {client.isActive === false && (
+                                  <span className="text-[11px] font-medium uppercase tracking-wide text-amber-600">
+                                    {t('contractClientInactive') ?? 'Неактивен'}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+                                {t('add') ?? 'Добавить'}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
               </div>
