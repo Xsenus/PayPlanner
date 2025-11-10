@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using System.Data;
+using System.Data.Common;
 
 namespace PayPlanner.Api.Services
 {
@@ -54,6 +57,8 @@ namespace PayPlanner.Api.Services
         /// </summary>
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
+            await EnsureIncomeTypeSchemaAsync(context);
+
             if (!await context.DealTypes.AnyAsync())
             {
                 var dealTypes = new[]
@@ -114,6 +119,59 @@ namespace PayPlanner.Api.Services
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
             }
+        }
+
+        private static async Task EnsureIncomeTypeSchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            try
+            {
+                var hasPaymentType = false;
+
+                await using (var checkCommand = connection.CreateCommand())
+                {
+                    checkCommand.CommandText = "PRAGMA table_info(\"IncomeTypes\");";
+                    await using var reader = await checkCommand.ExecuteReaderAsync(cancellationToken);
+
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        var columnName = reader.GetString(1);
+                        if (string.Equals(columnName, "PaymentType", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasPaymentType = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasPaymentType)
+                {
+                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"IncomeTypes\" ADD COLUMN \"PaymentType\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+                    await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_IncomeTypes_IsActive_PaymentType\" ON \"IncomeTypes\" (\"IsActive\", \"PaymentType\");", cancellationToken);
+                    await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_IncomeTypes_IsActive_PaymentType_Name\" ON \"IncomeTypes\" (\"IsActive\", \"PaymentType\", \"Name\");", cancellationToken);
+                }
+            }
+            finally
+            {
+                if (shouldClose && connection.State == ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
+        private static async Task ExecuteNonQueryAsync(DbConnection connection, string sql, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         /// <summary>
