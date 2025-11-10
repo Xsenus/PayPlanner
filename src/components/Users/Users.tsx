@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { authService, User } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -25,11 +25,7 @@ export const Users = () => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
 
-  useEffect(() => {
-    fetchUsers();
-  }, [filterTab]);
-
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       const status = filterTab === 'all' ? undefined : filterTab;
@@ -40,7 +36,11 @@ export const Users = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterTab]);
+
+  useEffect(() => {
+    void fetchUsers();
+  }, [fetchUsers]);
 
   const handleApprove = async (userId: number) => {
     if (!confirm('Подтвердить одобрение пользователя?')) return;

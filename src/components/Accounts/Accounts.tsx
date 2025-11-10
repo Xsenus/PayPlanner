@@ -96,12 +96,16 @@ export function Accounts() {
     return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
   }, [pagination.total, pagination.pageSize]);
 
-  const summaryBuckets = summary ?? {
-    total: { amount: 0, count: 0 },
-    pending: { amount: 0, count: 0 },
-    paid: { amount: 0, count: 0 },
-    overdue: { amount: 0, count: 0 },
-  };
+  const summaryBuckets = useMemo(
+    () =>
+      summary ?? {
+        total: { amount: 0, count: 0 },
+        pending: { amount: 0, count: 0 },
+        paid: { amount: 0, count: 0 },
+        overdue: { amount: 0, count: 0 },
+      },
+    [summary],
+  );
 
   const summaryCards: SummaryCard[] = useMemo(
     () => [
