@@ -115,13 +115,21 @@ export interface ActResponsible {
 export interface Payment {
   id: number;
   date: string;
+  plannedDate: string;
   amount: number;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   description: string;
   isPaid: boolean;
   paidDate?: string;
+  lastPaymentDate?: string | null;
   notes: string;
+  systemNotes: string;
+  rescheduleCount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  hasPartialPayment: boolean;
+  delayDays?: number | null;
   createdAt: string;
   clientId?: number | null;
   clientCaseId?: number | null;
@@ -138,6 +146,21 @@ export interface Payment {
   account?: string | null;
   accountDate?: string | null;
 }
+
+export type PaymentPayload = Omit<
+  Payment,
+  | 'id'
+  | 'createdAt'
+  | 'client'
+  | 'clientCase'
+  | 'dealType'
+  | 'incomeType'
+  | 'paymentSource'
+  | 'paymentStatusEntity'
+  | 'outstandingAmount'
+  | 'hasPartialPayment'
+  | 'delayDays'
+>;
 
 export interface Invoice {
   id: number;
@@ -209,7 +232,11 @@ export interface ClientStats {
   totalPayments: number;
   paidPayments: number;
   pendingPayments: number;
+  overduePayments: number;
   lastPaymentDate?: string;
+  outstandingIncome: number;
+  outstandingExpenses: number;
+  outstandingTotal: number;
   recentPayments: Payment[];
 }
 
@@ -272,6 +299,7 @@ export type PeriodKey =
 export type SummaryBucket = {
   totalAmount: number;
   totalCount: number;
+  collectedAmount: number;
   completedAmount: number;
   completedCount: number;
   pendingAmount: number;
@@ -289,6 +317,7 @@ export type SummaryStats = {
   income: SummaryBucket;
   expense: SummaryBucket;
   netCompleted: number;
+  netCollected: number;
   netTotal: number;
   netRemaining: number;
 };

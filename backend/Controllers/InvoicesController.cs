@@ -7,6 +7,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -342,22 +343,27 @@ public class InvoicesController : ControllerBase
 
     private static void ApplyPaidFlags(Payment payment, DateTime? paidDate)
     {
-        var hasPaidDate = paidDate.HasValue;
-        if (payment.Status == PaymentStatus.Completed)
+        var now = DateTime.UtcNow;
+        var effectiveDate = (paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+
+        if (payment.Status == PaymentStatus.Completed || paidDate.HasValue)
         {
-            payment.IsPaid = true;
-            payment.PaidDate = (paidDate ?? payment.AccountDate ?? payment.Date).Date;
-        }
-        else if (hasPaidDate)
-        {
-            payment.IsPaid = true;
-            payment.PaidDate = paidDate!.Value.Date;
+            payment.PaidAmount = payment.Amount;
+            payment.LastPaymentDate = effectiveDate;
+            payment.PaidDate = effectiveDate;
         }
         else
         {
-            payment.IsPaid = false;
-            payment.PaidDate = null;
+            payment.PaidAmount = Math.Min(payment.PaidAmount, payment.Amount);
+            if (payment.PaidAmount <= 0m)
+            {
+                payment.LastPaymentDate = null;
+                payment.PaidDate = null;
+            }
         }
+
+        PaymentDomainService.Normalize(payment);
+        PaymentDomainService.ApplyStatusRules(payment, now);
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

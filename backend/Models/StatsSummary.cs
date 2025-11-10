@@ -37,6 +37,11 @@
         public decimal NetCompleted => Income.CompletedAmount - Expense.CompletedAmount;
 
         /// <summary>
+        /// Нетто по фактически собранным средствам: Income.CollectedAmount - Expense.CollectedAmount.
+        /// </summary>
+        public decimal NetCollected => Income.CollectedAmount - Expense.CollectedAmount;
+
+        /// <summary>
         /// Нетто по остаткам: Income.RemainingAmount - Expense.RemainingAmount.
         /// </summary>
         public decimal NetRemaining => Income.RemainingAmount - Expense.RemainingAmount;

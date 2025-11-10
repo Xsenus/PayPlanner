@@ -245,11 +245,11 @@ export class ApiService {
     return this.request<Payment>(`/payments/${id}`);
   }
 
-  async createPayment(payment: Omit<Payment, 'id' | 'createdAt'>) {
+  async createPayment(payment: PaymentPayload) {
     return this.request<Payment>('/payments', { method: 'POST', body: JSON.stringify(payment) });
   }
 
-  async updatePayment(id: number, payment: Omit<Payment, 'id' | 'createdAt'>) {
+  async updatePayment(id: number, payment: PaymentPayload) {
     return this.request<Payment>(`/payments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payment),
@@ -677,6 +677,7 @@ import type {
   ActStatus,
   ActsSummary,
   Payment,
+  PaymentPayload,
   Invoice,
   InvoiceInput,
   InvoiceSummary,

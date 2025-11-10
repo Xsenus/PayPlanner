@@ -45,6 +45,7 @@ import type {
   Invoice,
   InvoiceInput,
   Payment,
+  PaymentPayload,
   PaymentStatus,
 } from '../../types';
 import type { MenuSectionKey } from '../../types/permissions';
@@ -62,10 +63,7 @@ interface ClientDetailProps {
   initialCaseId?: number | 'all';
 }
 
-type PaymentBody = Omit<Payment, 'id' | 'createdAt'>;
-type PaymentUpsert =
-  | Omit<Payment, 'id' | 'createdAt'>
-  | ({ id: number } & Omit<Payment, 'id' | 'createdAt'>);
+type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
 
@@ -774,9 +772,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setActModalError(null);
   };
 
-  const toBody = (p: PaymentBody): PaymentBody => ({
+  const toBody = (p: PaymentPayload): PaymentPayload => ({
     ...p,
-    notes: p.notes ?? null,
+    notes: p.notes ?? '',
+    systemNotes: p.systemNotes ?? '',
     clientId: p.clientId ?? clientId ?? null,
     clientCaseId: p.clientCaseId ?? caseIdForQuery ?? null,
     dealTypeId: p.dealTypeId ?? null,
@@ -798,9 +797,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       return;
     }
     if (isEdit) {
-      await updatePayment({ ...toBody(payload as PaymentBody), id: payload.id });
+      const { id, ...rest } = payload;
+      await updatePayment({ id, ...toBody(rest) });
     } else {
-      await createPayment(toBody(payload as PaymentBody));
+      await createPayment(toBody(payload));
     }
     closePayModal();
     await refreshPayments();

@@ -25,16 +25,20 @@ public class StatsController : ControllerBase
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var income = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount);
-        var expense = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount);
+        var income = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.PaidAmount);
+        var expense = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.PaidAmount);
         var profit = income - expense;
 
-        var completed = payments.Count(p => p.IsPaid);
-        var pending = payments.Count(p => !p.IsPaid && p.Status == PaymentStatus.Pending);
-        var overdue = payments.Count(p => !p.IsPaid && p.Status == PaymentStatus.Overdue);
+        var completed = payments.Count(p => p.Status == PaymentStatus.Completed);
+        var pending = payments.Count(p => p.Status == PaymentStatus.Pending && p.OutstandingAmount > 0m);
+        var overdue = payments.Count(p => p.Status == PaymentStatus.Overdue && p.OutstandingAmount > 0m);
         var total = payments.Count;
 
         var completionRate = total > 0 ? Math.Round((double)completed / total * 100, 1) : 0;
+
+        var completedAmount = payments.Where(p => p.Status == PaymentStatus.Completed).Sum(p => p.PaidAmount);
+        var pendingAmount = payments.Where(p => p.Status == PaymentStatus.Pending).Sum(p => p.OutstandingAmount);
+        var overdueAmount = payments.Where(p => p.Status == PaymentStatus.Overdue).Sum(p => p.OutstandingAmount);
 
         return Ok(new MonthlyStats
         {
@@ -48,7 +52,10 @@ public class StatsController : ControllerBase
                 Pending = pending,
                 Overdue = overdue,
                 Total = total
-            }
+            },
+            CompletedAmount = completedAmount,
+            PendingAmount = pendingAmount,
+            OverdueAmount = overdueAmount
         });
     }
 }

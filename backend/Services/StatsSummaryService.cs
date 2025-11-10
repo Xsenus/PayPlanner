@@ -76,37 +76,48 @@ namespace PayPlanner.Api.Services
             }
 
             var grouped = await qry
+                .Select(x => new
+                {
+                    x.Type,
+                    x.Status,
+                    x.Amount,
+                    x.PaidAmount,
+                    Outstanding = x.Amount - x.PaidAmount
+                })
                 .GroupBy(x => new { x.Type, x.Status })
                 .Select(g => new
                 {
                     g.Key.Type,
                     g.Key.Status,
-                    Amount = g.Sum(v => (decimal?)v.Amount) ?? 0m,
+                    PaidAmount = g.Sum(v => (decimal?)v.PaidAmount) ?? 0m,
+                    OutstandingAmount = g.Sum(v => (decimal?)((v.Outstanding > 0m) ? v.Outstanding : 0m)) ?? 0m,
+                    OriginalAmount = g.Sum(v => (decimal?)v.Amount) ?? 0m,
                     Count = g.Count()
                 })
                 .ToListAsync(ct);
 
             StatsBucket MakeBucket(PaymentType tpe)
             {
-                var byType = grouped.Where(x => x.Type == tpe);
+                var byType = grouped.Where(x => x.Type == tpe && x.Status != PaymentStatus.Cancelled).ToList();
                 var completed = byType.Where(x => x.Status == PaymentStatus.Completed);
-                var pending = byType.Where(x => x.Status == PaymentStatus.Pending);
+                var pending = byType.Where(x => x.Status == PaymentStatus.Pending || x.Status == PaymentStatus.Processing);
                 var overdue = byType.Where(x => x.Status == PaymentStatus.Overdue);
 
                 var b = new StatsBucket
                 {
-                    CompletedAmount = completed.Sum(x => x.Amount),
+                    CompletedAmount = completed.Sum(x => x.PaidAmount),
                     CompletedCount = completed.Sum(x => x.Count),
 
-                    PendingAmount = pending.Sum(x => x.Amount),
+                    PendingAmount = pending.Sum(x => x.OutstandingAmount),
                     PendingCount = pending.Sum(x => x.Count),
 
-                    OverdueAmount = overdue.Sum(x => x.Amount),
+                    OverdueAmount = overdue.Sum(x => x.OutstandingAmount),
                     OverdueCount = overdue.Sum(x => x.Count),
+                    CollectedAmount = byType.Sum(x => x.PaidAmount),
                 };
 
-                b.TotalAmount = b.CompletedAmount + b.PendingAmount + b.OverdueAmount;
-                b.TotalCount = b.CompletedCount + b.PendingCount + b.OverdueCount;
+                b.TotalAmount = byType.Sum(x => x.OriginalAmount);
+                b.TotalCount = byType.Sum(x => x.Count);
 
                 return b;
             }

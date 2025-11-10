@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services
 {
@@ -530,6 +531,7 @@ namespace PayPlanner.Api.Services
                     ClientId = cli.Id,
                     ClientCaseId = caseEnt.Id,
                     Date = p.Date,
+                    PlannedDate = p.Date,
                     AccountDate = p.AccountDate,
                     Account = string.IsNullOrWhiteSpace(p.Account) ? null : p.Account,
                     Amount = p.Amount,
@@ -539,11 +541,18 @@ namespace PayPlanner.Api.Services
                     Notes = p.ActReference ?? string.Empty,
                     IsPaid = p.IsPaid,
                     PaidDate = p.PaidDate,
+                    PaidAmount = p.IsPaid ? p.Amount : 0m,
+                    LastPaymentDate = p.PaidDate,
                     DealTypeId = GetIdOrThrow(dealTypeByName, p.DealType, "DealType"),
                     IncomeTypeId = GetIdOrThrow(incomeTypeByName, p.IncomeType, "IncomeType"),
                     PaymentSourceId = GetIdOrThrow(sourceByName, p.Source, "PaymentSource"),
-                    PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus")
+                    PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus"),
+                    SystemNotes = string.Empty,
+                    RescheduleCount = 0
                 };
+
+                PaymentDomainService.Normalize(payment);
+                PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow);
 
                 toAdd.Add(payment);
             }

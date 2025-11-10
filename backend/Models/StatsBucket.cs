@@ -7,6 +7,11 @@
     public class StatsBucket
     {
         /// <summary>
+        /// Сумма фактически полученных/оплаченных средств (вне зависимости от статуса).
+        /// </summary>
+        public decimal CollectedAmount { get; set; }
+
+        /// <summary>
         /// Сумма платежей со статусом Completed (выполнено/оплачено).
         /// </summary>
         public decimal CompletedAmount { get; set; }
