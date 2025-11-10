@@ -50,6 +50,41 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
         });
 
+        // ------------------ Contract ------------------
+        modelBuilder.Entity<Contract>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200);
+            entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.ValidUntil).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasMany(e => e.Clients)
+                  .WithMany(c => c.Contracts)
+                  .UsingEntity<ClientContract>(
+                      join => join.HasOne(cc => cc.Client)
+                                   .WithMany(c => c.ClientContracts)
+                                   .HasForeignKey(cc => cc.ClientId)
+                                   .OnDelete(DeleteBehavior.Cascade),
+                      join => join.HasOne(cc => cc.Contract)
+                                   .WithMany(c => c.ClientContracts)
+                                   .HasForeignKey(cc => cc.ContractId)
+                                   .OnDelete(DeleteBehavior.Cascade),
+                      join =>
+                      {
+                          join.HasKey(cc => new { cc.ContractId, cc.ClientId });
+                          join.ToTable("ClientContracts");
+                          join.HasIndex(cc => cc.ClientId).HasDatabaseName("IX_ClientContracts_ClientId");
+                      });
+
+            entity.HasIndex(e => e.Number).HasDatabaseName("IX_Contracts_Number");
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_Contracts_Date");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Contracts_CreatedAt");
+        });
+
         // ------------------ Payment ------------------
         modelBuilder.Entity<Payment>(entity =>
         {
@@ -343,6 +378,16 @@ public class PaymentContext : DbContext
     /// Акты оказанных услуг.
     /// </summary>
     public DbSet<Act> Acts { get; set; }
+
+    /// <summary>
+    /// Договоры с клиентами.
+    /// </summary>
+    public DbSet<Contract> Contracts { get; set; }
+
+    /// <summary>
+    /// Связи клиентов и договоров.
+    /// </summary>
+    public DbSet<ClientContract> ClientContracts { get; set; }
 
     /// <summary>
     /// Типы сделок.
