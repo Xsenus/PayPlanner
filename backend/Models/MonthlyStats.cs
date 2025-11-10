@@ -1,33 +1,48 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Месячная статистика по доходам, расходам и статусам платежей.
+    /// Aggregated metrics for a month in the legacy stats endpoint.
     /// </summary>
     public class MonthlyStats
     {
         /// <summary>
-        /// Процент выполнения (от 0 до 100).
+        /// Share of completed payments (0 to 100).
         /// </summary>
         public double CompletionRate { get; set; }
 
         /// <summary>
-        /// Статистика по статусам платежей.
+        /// Number of payments per status.
         /// </summary>
         public StatusCounts Counts { get; set; } = new();
 
         /// <summary>
-        /// Общая сумма расходов.
+        /// Total paid expenses.
         /// </summary>
         public decimal Expense { get; set; }
 
         /// <summary>
-        /// Общая сумма доходов.
+        /// Total paid income.
         /// </summary>
         public decimal Income { get; set; }
 
         /// <summary>
-        /// Прибыль (доходы минус расходы).
+        /// Net balance (income - expense).
         /// </summary>
         public decimal Profit { get; set; }
+
+        /// <summary>
+        /// Amount collected for completed payments.
+        /// </summary>
+        public decimal CompletedAmount { get; set; }
+
+        /// <summary>
+        /// Outstanding amount for pending payments.
+        /// </summary>
+        public decimal PendingAmount { get; set; }
+
+        /// <summary>
+        /// Outstanding amount for overdue payments.
+        /// </summary>
+        public decimal OverdueAmount { get; set; }
     }
 }

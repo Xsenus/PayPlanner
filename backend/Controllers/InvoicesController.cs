@@ -354,7 +354,17 @@ public class InvoicesController : ControllerBase
         }
         else
         {
-            payment.PaidAmount = Math.Min(payment.PaidAmount, payment.Amount);
+            if (payment.Status is PaymentStatus.Pending or PaymentStatus.Overdue)
+            {
+                payment.PaidAmount = 0m;
+                payment.LastPaymentDate = null;
+                payment.PaidDate = null;
+            }
+            else
+            {
+                payment.PaidAmount = Math.Min(payment.PaidAmount, payment.Amount);
+            }
+
             if (payment.PaidAmount <= 0m)
             {
                 payment.LastPaymentDate = null;
