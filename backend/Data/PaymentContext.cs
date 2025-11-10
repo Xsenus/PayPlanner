@@ -4,18 +4,18 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Data;
 
 /// <summary>
-/// Êîíòåêñò áàçû äàííûõ äëÿ ìîäóëÿ óïðàâëåíèÿ ïëàòåæàìè, êëèåíòàìè è ïîëüçîâàòåëÿìè.
-/// Ñîäåðæèò DbSet äëÿ âñåõ îñíîâíûõ ñóùíîñòåé è êîíôèãóðàöèþ èíäåêñîâ.
+/// Контекст базы данных модуля управления платежами, клиентами и пользователями.
+/// Содержит наборы сущностей и конфигурацию индексов для всех доменных моделей.
 /// </summary>
 public class PaymentContext : DbContext
 {
     /// <summary>
-    /// Ñîçäà¸ò íîâûé ýêçåìïëÿð êîíòåêñòà áàçû äàííûõ.
+    /// Создает новый экземпляр контекста базы данных.
     /// </summary>
     public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
 
     /// <summary>
-    /// Êîíôèãóðàöèÿ ñóùíîñòåé, ñâÿçåé è èíäåêñîâ.
+    /// Выполняет конфигурацию сущностей, связей и индексов.
     /// </summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -299,52 +299,52 @@ public class PaymentContext : DbContext
     }
 
     /// <summary>
-    /// Äåëà/êåéñû êëèåíòîâ.
+    /// Дела (кейсы) клиентов.
     /// </summary>
     public DbSet<ClientCase> ClientCases { get; set; }
 
     /// <summary>
-    /// Êëèåíòû.
+    /// Карточки клиентов.
     /// </summary>
     public DbSet<Client> Clients { get; set; }
 
     /// <summary>
-    /// <summary>
-    ///  .
+    /// Акты оказанных услуг.
     /// </summary>
     public DbSet<Act> Acts { get; set; }
 
-    /// Òèïû ñäåëîê.
+    /// <summary>
+    /// Типы сделок.
     /// </summary>
     public DbSet<DealType> DealTypes { get; set; }
 
     /// <summary>
-    /// Òèïû äîõîäîâ.
+    /// Типы доходов.
     /// </summary>
     public DbSet<IncomeType> IncomeTypes { get; set; }
 
     /// <summary>
-    /// Ïëàòåæè.
+    /// Платежи клиентов.
     /// </summary>
     public DbSet<Payment> Payments { get; set; }
 
     /// <summary>
-    /// Èñòî÷íèêè ïëàòåæåé.
+    /// Источники платежей.
     /// </summary>
     public DbSet<PaymentSource> PaymentSources { get; set; }
 
     /// <summary>
-    /// Ñòàòóñû ïëàòåæåé.
+    /// Статусы платежей.
     /// </summary>
     public DbSet<PaymentStatusEntity> PaymentStatuses { get; set; }
 
     /// <summary>
-    /// Ðîëè ïîëüçîâàòåëåé.
+    /// Роли пользователей.
     /// </summary>
     public DbSet<Role> Roles { get; set; }
 
     /// <summary>
-    /// Ïîëüçîâàòåëè.
+    /// Пользователи системы.
     /// </summary>
     public DbSet<User> Users { get; set; }
 }

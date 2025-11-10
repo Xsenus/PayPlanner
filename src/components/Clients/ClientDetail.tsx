@@ -7,6 +7,7 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
+  Loader2,
   Plus,
   Edit,
   Trash2,
@@ -17,17 +18,18 @@ import {
   Calculator,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { PaymentModal } from '../Calendar/PaymentModal';
-import type { Payment, ClientCase } from '../../types';
+import type { Act, ActInput, ActResponsible, ActStatus, Client, ClientCase, Payment } from '../../types';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { ActModal } from '../Acts/ActModal';
 
 interface ClientDetailProps {
   clientId: number;
@@ -101,6 +103,20 @@ const SECTION_META: Record<
   },
 };
 
+const ACT_STATUS_LABELS: Record<ActStatus, string> = {
+  Created: 'Создан',
+  Transferred: 'Передан',
+  Signed: 'Подписан',
+  Terminated: 'Расторгнут',
+};
+
+const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
+  Created: 'bg-slate-100 text-slate-700 border border-slate-200',
+  Transferred: 'bg-amber-100 text-amber-800 border border-amber-200',
+  Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
+};
+
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
   if (v.includes('complete') || v.includes('выполн')) return 'completed';
@@ -158,6 +174,21 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+
+  const [acts, setActs] = useState<Act[]>([]);
+  const [actsLoading, setActsLoading] = useState(false);
+  const [actsError, setActsError] = useState<string | null>(null);
+  const [actsLoaded, setActsLoaded] = useState(false);
+
+  const [actModalOpen, setActModalOpen] = useState(false);
+  const [actModalMode, setActModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedAct, setSelectedAct] = useState<Act | null>(null);
+  const [actSubmitting, setActSubmitting] = useState(false);
+  const [actModalError, setActModalError] = useState<string | null>(null);
+  const [actClients, setActClients] = useState<Client[]>([]);
+  const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
+  const [actLookupsLoading, setActLookupsLoading] = useState(false);
+  const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
@@ -237,6 +268,94 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return list.filter((p) => normalizeStatus(p.status) === statusFilter);
   }, [payments, statusFilter]);
 
+  const actModalClients = useMemo(() => {
+    const normalizedName = clientName && clientName !== '...' ? clientName : `Клиент #${clientId}`;
+    if (actClients.length === 0) {
+      return [
+        {
+          id: clientId,
+          name: normalizedName,
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '1970-01-01T00:00:00.000Z',
+          isActive: true,
+        } satisfies Client,
+      ];
+    }
+
+    const hasClient = actClients.some((c) => c.id === clientId);
+    if (!hasClient) {
+      return [
+        ...actClients,
+        {
+          id: clientId,
+          name: normalizedName,
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '1970-01-01T00:00:00.000Z',
+          isActive: true,
+        } satisfies Client,
+      ];
+    }
+
+    return actClients;
+  }, [actClients, clientId, clientName]);
+
+  const fetchActs = useCallback(async () => {
+    setActsLoading(true);
+    try {
+      const response = await apiService.getActs({
+        clientId,
+        page: 1,
+        pageSize: 100,
+        sortBy: 'date',
+        sortDir: 'desc',
+      });
+      setActs(response?.items ?? []);
+      setActsError(null);
+    } catch (error) {
+      setActsError(error instanceof Error ? error.message : 'Не удалось загрузить акты');
+    } finally {
+      setActsLoading(false);
+      setActsLoaded(true);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    void fetchActs();
+  }, [fetchActs]);
+
+  const ensureActLookups = useCallback(async () => {
+    if (actLookupsLoading) return;
+    if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
+    setActLookupsLoading(true);
+    try {
+      const [clientsResponse, responsiblesResponse] = await Promise.all([
+        apiService.getClients(),
+        apiService.getActResponsibles(),
+      ]);
+      setActClients(clientsResponse ?? []);
+      setActResponsibles(responsiblesResponse ?? []);
+      setActLookupsError(null);
+    } catch (error) {
+      setActLookupsError(error instanceof Error ? error.message : 'Не удалось загрузить справочники');
+    } finally {
+      setActLookupsLoading(false);
+    }
+  }, [actClients.length, actResponsibles.length, actLookupsError, actLookupsLoading]);
+
+  useEffect(() => {
+    if (actModalOpen) {
+      void ensureActLookups();
+    }
+  }, [actModalOpen, ensureActLookups]);
+
   const openAddPayment = () => {
     setActiveSection('payments');
     setEditingPayment(null);
@@ -247,6 +366,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setEditingPayment(p);
     setPayModalOpen(true);
   };
+  const openAddAct = () => {
+    setActiveSection('acts');
+    setActModalMode('create');
+    setSelectedAct(null);
+    setActModalError(null);
+    setActModalOpen(true);
+  };
+  const openEditAct = (act: Act) => {
+    setActiveSection('acts');
+    setActModalMode('edit');
+    setSelectedAct(act);
+    setActModalError(null);
+    setActModalOpen(true);
+  };
   const notifyFeatureInProgress = (section: ClientDetailSection) => {
     const meta = SECTION_META[section];
     alert(`${meta.label} пока в разработке.`);
@@ -254,6 +387,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const closePayModal = () => {
     setPayModalOpen(false);
     setEditingPayment(null);
+  };
+  const closeActModal = () => {
+    setActModalOpen(false);
+    setSelectedAct(null);
+    setActModalError(null);
   };
 
   const toBody = (p: PaymentBody): PaymentBody => ({
@@ -285,6 +423,45 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     await deletePayment(id);
     await refreshPayments();
     bumpStats();
+  };
+
+  const submitAct = async (payload: ActInput) => {
+    const resolvedClientId = payload.clientId ?? clientId;
+    if (!resolvedClientId) {
+      setActModalError('Клиент не выбран');
+      return;
+    }
+
+    setActSubmitting(true);
+    setActModalError(null);
+    const body: ActInput = {
+      ...payload,
+      clientId: resolvedClientId,
+    };
+
+    try {
+      if (actModalMode === 'edit' && selectedAct) {
+        await apiService.updateAct(selectedAct.id, body);
+      } else {
+        await apiService.createAct(body);
+      }
+      await fetchActs();
+      closeActModal();
+    } catch (error) {
+      setActModalError(error instanceof Error ? error.message : 'Не удалось сохранить акт');
+    } finally {
+      setActSubmitting(false);
+    }
+  };
+
+  const removeAct = async (act: Act) => {
+    if (!window.confirm(`Удалить акт №${act.number}?`)) return;
+    try {
+      await apiService.deleteAct(act.id);
+      await fetchActs();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Не удалось удалить акт');
+    }
   };
 
   const openAddCase = () => {
@@ -468,11 +645,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             </button>
             <button
               type="button"
-              onClick={() => {
-                setActiveSection('acts');
-                notifyFeatureInProgress('acts');
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              onClick={openAddAct}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
               <Plus size={16} /> {SECTION_META.acts.actionLabel}
             </button>
             <button
@@ -604,6 +778,111 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   ))}
                 </div>
               )
+            ) : activeSection === 'acts' ? (
+              actsLoading && !actsLoaded ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-gray-500">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Загрузка актов...
+                </div>
+              ) : actsError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  {actsError}
+                </div>
+              ) : acts.length === 0 ? (
+                <div className="text-center py-12">
+                  <FileCheck2 size={48} className="mx-auto mb-4 text-gray-300" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    {SECTION_META.acts.placeholderTitle}
+                  </h3>
+                  <p className="text-gray-500">{SECTION_META.acts.placeholderDescription}</p>
+                  <button
+                    type="button"
+                    onClick={openAddAct}
+                    className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                    <Plus size={16} /> {SECTION_META.acts.actionLabel}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {actsLoading && (
+                    <div className="mb-4 flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Обновление списка актов...
+                    </div>
+                  )}
+                  <div className="space-y-4">
+                    {acts.map((act) => {
+                      const title = act.title?.trim();
+                      return (
+                        <div
+                          key={act.id}
+                          className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                Акт №{act.number}
+                              </p>
+                              <p className="text-lg font-semibold text-gray-900">
+                                {title && title !== `№${act.number}` ? title : `Акт №${act.number}`}
+                              </p>
+                              {act.comment && (
+                                <p className="mt-2 text-sm text-gray-500">{act.comment}</p>
+                              )}
+                              {act.invoiceNumber && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                  Счёт {act.invoiceNumber}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${ACT_STATUS_CLASSES[act.status]}`}>
+                                {ACT_STATUS_LABELS[act.status]}
+                              </span>
+                              <div className="text-right text-sm text-gray-600">
+                                <span className="block font-medium text-gray-900">
+                                  {toRuDate(act.date)}
+                                </span>
+                                <span className="block text-xs text-gray-500">Дата</span>
+                              </div>
+                              <div className="text-right text-sm text-gray-600">
+                                <span className="block font-medium text-gray-900">
+                                  {formatCurrencySmart(act.amount).full}
+                                </span>
+                                <span className="block text-xs text-gray-500">Сумма</span>
+                              </div>
+                              <div className="text-right text-sm text-gray-600">
+                                <span className="block font-medium text-gray-900">
+                                  {act.responsibleName ?? 'Не назначен'}
+                                </span>
+                                <span className="block text-xs text-gray-500">Ответственный</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditAct(act)}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                                  title="Редактировать акт"
+                                  aria-label="Редактировать акт">
+                                  <Edit size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeAct(act)}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 transition-colors hover:bg-red-50"
+                                  title="Удалить акт"
+                                  aria-label="Удалить акт">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )
             ) : (
               (() => {
                 const meta = SECTION_META[activeSection];
@@ -624,6 +903,21 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             )}
           </div>
         </div>
+
+        <ActModal
+          open={actModalOpen}
+          mode={actModalMode}
+          act={selectedAct}
+          onClose={closeActModal}
+          onSubmit={submitAct}
+          submitting={actSubmitting}
+          errorMessage={actModalError}
+          clients={actModalClients}
+          responsibles={actResponsibles}
+          lookupsLoading={actLookupsLoading}
+          lookupsError={actLookupsError}
+          defaultClientId={clientId}
+        />
 
         <PaymentModal
           key={payModalOpen ? (editingPayment ? `edit-${editingPayment.id}` : 'new') : 'closed'}

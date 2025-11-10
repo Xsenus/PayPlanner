@@ -167,8 +167,8 @@ public class ActsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ActResponsibleDto>>> GetResponsibles(CancellationToken ct = default)
     {
         var items = await _db.Users.AsNoTracking()
-            .Where(u => u.IsActive && u.IsApproved && u.IsEmployee)
-            .OrderBy(u => u.FullName)
+            .Where(u => u.IsActive && u.IsApproved)
+            .OrderBy(u => string.IsNullOrWhiteSpace(u.FullName) ? u.Email : u.FullName)
             .Select(u => new ActResponsibleDto
             {
                 Id = u.Id,
