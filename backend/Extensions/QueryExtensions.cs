@@ -5,6 +5,68 @@ namespace PayPlanner.Api.Extensions
 {
     public static class QueryExtensions
     {
+        // ---------- Acts ----------
+        public static IQueryable<Act> ApplyActFilters(
+            this IQueryable<Act> q,
+            DateTime? from,
+            DateTime? to,
+            ActStatus? status,
+            int? clientId,
+            int? responsibleId,
+            string? search)
+        {
+            if (from.HasValue) q = q.Where(a => a.Date >= from.Value);
+            if (to.HasValue) q = q.Where(a => a.Date <= to.Value);
+            if (status.HasValue) q = q.Where(a => a.Status == status.Value);
+            if (clientId.HasValue) q = q.Where(a => a.ClientId == clientId.Value);
+            if (responsibleId.HasValue) q = q.Where(a => a.ResponsibleId == responsibleId.Value);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                var like = $"%{term}%";
+                q = q.Where(a =>
+                    (a.Number != null && EF.Functions.Like(a.Number, like)) ||
+                    (a.Title != null && EF.Functions.Like(a.Title, like)) ||
+                    (a.InvoiceNumber != null && EF.Functions.Like(a.InvoiceNumber, like)) ||
+                    (a.CounterpartyInn != null && EF.Functions.Like(a.CounterpartyInn, like)) ||
+                    (a.Comment != null && EF.Functions.Like(a.Comment, like)) ||
+                    (a.Client != null &&
+                        ((a.Client.Name != null && EF.Functions.Like(a.Client.Name, like)) ||
+                         (a.Client.Company != null && EF.Functions.Like(a.Client.Company, like)))) ||
+                    (a.Responsible != null &&
+                        (a.Responsible.FullName != null && EF.Functions.Like(a.Responsible.FullName, like)))
+                );
+            }
+
+            return q;
+        }
+
+        public static IQueryable<Act> ApplyActSort(this IQueryable<Act> q, string? sortBy, string? sortDir)
+        {
+            bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+            return (sortBy?.ToLowerInvariant()) switch
+            {
+                "number" => desc ? q.OrderByDescending(a => a.Number) : q.OrderBy(a => a.Number),
+                "amount" => desc ? q.OrderByDescending(a => a.Amount) : q.OrderBy(a => a.Amount),
+                "invoicenumber" => desc
+                    ? q.OrderByDescending(a => a.InvoiceNumber ?? string.Empty)
+                    : q.OrderBy(a => a.InvoiceNumber ?? string.Empty),
+                "status" => desc ? q.OrderByDescending(a => a.Status) : q.OrderBy(a => a.Status),
+                "client" => desc
+                    ? q.OrderByDescending(a => a.Client != null ? a.Client.Name : string.Empty)
+                    : q.OrderBy(a => a.Client != null ? a.Client.Name : string.Empty),
+                "inn" or "counterpartyinn" => desc
+                    ? q.OrderByDescending(a => a.CounterpartyInn ?? string.Empty)
+                    : q.OrderBy(a => a.CounterpartyInn ?? string.Empty),
+                "responsible" => desc
+                    ? q.OrderByDescending(a => a.Responsible != null ? a.Responsible.FullName : string.Empty)
+                    : q.OrderBy(a => a.Responsible != null ? a.Responsible.FullName : string.Empty),
+                "createdat" => desc ? q.OrderByDescending(a => a.CreatedAt) : q.OrderBy(a => a.CreatedAt),
+                _ => desc ? q.OrderByDescending(a => a.Date) : q.OrderBy(a => a.Date),
+            };
+        }
+
         // ---------- Payments ----------
         public static IQueryable<Payment> WithPaymentIncludes(this IQueryable<Payment> q) =>
             q.Include(p => p.Client)

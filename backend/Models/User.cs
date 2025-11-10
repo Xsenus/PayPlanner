@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace PayPlanner.Api.Models;
 
 public class User
@@ -34,4 +36,6 @@ public class User
 
     public Role? Role { get; set; }
     public User? ApprovedBy { get; set; }
+
+    public ICollection<Act> Acts { get; set; } = new List<Act>();
 }

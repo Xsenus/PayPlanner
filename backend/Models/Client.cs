@@ -1,62 +1,67 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Сущность клиента.
+    /// Г‘ГіГ№Г­Г®Г±ГІГј ГЄГ«ГЁГҐГ­ГІГ .
     /// </summary>
     public class Client
     {
         /// <summary>
-        /// Почтовый адрес клиента.
+        /// ГЏГ®Г·ГІГ®ГўГ»Г© Г Г¤Г°ГҐГ± ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public string Address { get; set; } = string.Empty;
 
         /// <summary>
-        /// Коллекция дел (кейсов) клиента.
+        /// ГЉГ®Г«Г«ГҐГЄГ¶ГЁГї Г¤ГҐГ« (ГЄГҐГ©Г±Г®Гў) ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public ICollection<ClientCase> Cases { get; set; } = new List<ClientCase>();
 
         /// <summary>
-        /// Компания клиента (если применимо).
+        /// ГЉГ®Г¬ГЇГ Г­ГЁГї ГЄГ«ГЁГҐГ­ГІГ  (ГҐГ±Г«ГЁ ГЇГ°ГЁГ¬ГҐГ­ГЁГ¬Г®).
         /// </summary>
         public string Company { get; set; } = string.Empty;
 
         /// <summary>
-        /// Дата и время создания записи (UTC).
+        /// Г„Г ГІГ  ГЁ ГўГ°ГҐГ¬Гї Г±Г®Г§Г¤Г Г­ГЁГї Г§Г ГЇГЁГ±ГЁ (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Электронная почта клиента.
+        /// ГќГ«ГҐГЄГІГ°Г®Г­Г­Г Гї ГЇГ®Г·ГІГ  ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public string Email { get; set; } = string.Empty;
 
         /// <summary>
-        /// Уникальный идентификатор клиента.
+        /// <summary>
+        ///  ,   .
+        /// </summary>
+        public ICollection<Act> Acts { get; set; } = new List<Act>();
+
+        /// Г“Г­ГЁГЄГ Г«ГјГ­Г»Г© ГЁГ¤ГҐГ­ГІГЁГґГЁГЄГ ГІГ®Г° ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активного клиента.
+        /// ГЏГ°ГЁГ§Г­Г ГЄ Г ГЄГІГЁГўГ­Г®ГЈГ® ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Имя/название клиента.
+        /// Г€Г¬Гї/Г­Г Г§ГўГ Г­ГЁГҐ ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Произвольные заметки по клиенту.
+        /// ГЏГ°Г®ГЁГ§ГўГ®Г«ГјГ­Г»ГҐ Г§Г Г¬ГҐГІГЄГЁ ГЇГ® ГЄГ«ГЁГҐГ­ГІГі.
         /// </summary>
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
-        /// Коллекция платежей, связанных с клиентом.
+        /// ГЉГ®Г«Г«ГҐГЄГ¶ГЁГї ГЇГ«Г ГІГҐГ¦ГҐГ©, Г±ГўГїГ§Г Г­Г­Г»Гµ Г± ГЄГ«ГЁГҐГ­ГІГ®Г¬.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
         /// <summary>
-        /// Телефон клиента.
+        /// Г’ГҐГ«ГҐГґГ®Г­ ГЄГ«ГЁГҐГ­ГІГ .
         /// </summary>
         public string Phone { get; set; } = string.Empty;
     }

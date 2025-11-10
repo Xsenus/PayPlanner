@@ -31,6 +31,16 @@ export interface PagedResult<T> {
 }
 
 type SortDir = 'asc' | 'desc';
+type ActsSortKey =
+  | 'date'
+  | 'number'
+  | 'amount'
+  | 'invoiceNumber'
+  | 'counterpartyInn'
+  | 'status'
+  | 'client'
+  | 'responsible'
+  | 'createdAt';
 
 function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const q = new URLSearchParams();
@@ -75,6 +85,55 @@ export class ApiService {
     }
 
     return (await response.json()) as T;
+  }
+
+  // ===== Acts =====
+  async getActs(params?: {
+    from?: string;
+    to?: string;
+    status?: ActStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+    sortBy?: ActsSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Act>>(`/acts${q}`);
+  }
+
+  async getActsSummary(params?: {
+    from?: string;
+    to?: string;
+    status?: ActStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<ActsSummary>(`/acts/summary${q}`);
+  }
+
+  async getActResponsibles() {
+    return this.request<ActResponsible[]>('/acts/responsibles');
+  }
+
+  async createAct(payload: ActInput) {
+    return this.request<Act>('/acts', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateAct(id: number, payload: ActInput) {
+    return this.request<Act>(`/acts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async deleteAct(id: number) {
+    return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
   }
 
   // ===== Payments (back-compat + расширенные варианты) =====
@@ -538,6 +597,11 @@ export const apiService = new ApiService();
 
 // ---- types import ----
 import type {
+  Act,
+  ActInput,
+  ActResponsible,
+  ActStatus,
+  ActsSummary,
   Payment,
   Client,
   InstallmentRequest,
