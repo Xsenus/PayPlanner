@@ -1,1 +1,12 @@
-export type Tab = 'calendar' | 'reports' | 'calculator' | 'clients' | 'clientDetail' | 'users' | 'roles' | 'dictionaries';
+export type Tab =
+  | 'calendar'
+  | 'reports'
+  | 'calculator'
+  | 'clients'
+  | 'accounts'
+  | 'acts'
+  | 'contracts'
+  | 'clientDetail'
+  | 'users'
+  | 'roles'
+  | 'dictionaries';

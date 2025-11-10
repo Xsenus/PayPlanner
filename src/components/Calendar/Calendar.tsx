@@ -1,7 +1,8 @@
 import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, Table, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
 import { PaymentModal } from './PaymentModal';
+import { PaymentsTable } from './PaymentsTable';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
@@ -13,6 +14,17 @@ type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
 type SubmitDTO = CreatePaymentDTO | UpdatePaymentDTO;
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
+
+type StatMetric = 'completed' | 'pending' | 'overdue' | 'overall' | 'debt';
+type CalendarViewMode = 'calendar' | 'table';
+type TableFilter = {
+  type?: 'Income' | 'Expense';
+  statuses?: Payment['status'][];
+  label: string;
+  metric: StatMetric;
+};
+
+const VIEW_MODE_STORAGE_KEY = 'pp.calendar_view';
 
 type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -44,6 +56,18 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [range, setRange] = useState<MonthRange>({});
+  const [viewMode, setViewMode] = useState<CalendarViewMode>(() => {
+    try {
+      const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+      if (stored === 'calendar' || stored === 'table') {
+        return stored;
+      }
+    } catch {
+      /** */
+    }
+    return 'calendar';
+  });
+  const [tableFilter, setTableFilter] = useState<TableFilter | null>(null);
 
   const [statsReloadKey, setStatsReloadKey] = useState(0);
   const bumpStats = () => setStatsReloadKey((x) => x + 1);
@@ -115,6 +139,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     }
   }, [payments, isModalOpen]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+    } catch {
+      /** */
+    }
+  }, [viewMode]);
+
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate((prev) => {
       const d = new Date(prev);
@@ -172,6 +204,53 @@ export function Calendar({ onOpenClient }: CalendarProps) {
 
   const clearRange = () => setRange({});
 
+  const tableFilteredPayments = useMemo(() => {
+    if (!tableFilter) return filteredPayments;
+    return filteredPayments.filter((p) => {
+      if (tableFilter.type && p.type !== tableFilter.type) return false;
+      if (tableFilter.statuses && tableFilter.statuses.length > 0) {
+        return tableFilter.statuses.includes(p.status);
+      }
+      return true;
+    });
+  }, [filteredPayments, tableFilter]);
+
+  const handleViewModeChange = (mode: CalendarViewMode) => {
+    setViewMode(mode);
+  };
+
+  const handleClearTableFilter = () => setTableFilter(null);
+
+  const handleStatCardSelect = ({
+    kind,
+    metric,
+    title,
+  }: {
+    kind: 'Income' | 'Expense';
+    metric: StatMetric;
+    title: string;
+  }) => {
+    const statusesByMetric: Record<StatMetric, Payment['status'][] | undefined> = {
+      completed: ['Completed'],
+      pending: ['Pending'],
+      overdue: ['Overdue'],
+      overall: undefined,
+      debt: ['Pending', 'Overdue'],
+    };
+    const typeLabel =
+      kind === 'Income'
+        ? t('incomePlural') ?? 'Доходы'
+        : t('expensePlural') ?? 'Расходы';
+    const label = `${typeLabel} · ${title}`;
+    setTableFilter({
+      type: kind,
+      statuses: statusesByMetric[metric],
+      label,
+      metric,
+    });
+    setViewMode('table');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
@@ -208,8 +287,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             </div>
           </div>
 
-          <div className="mt-3 w-full flex flex-col sm:flex-row gap-3 items-center sm:justify-end">
-            <div className="relative w-full max-w-md sm:w-80">
+        <div className="mt-3 w-full grid gap-3 xl:grid-cols-[1fr_auto] items-start">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-center">
+            <div className="relative w-full sm:w-72 lg:w-80 max-w-full">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                 size={18}
@@ -253,6 +333,42 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               )}
             </div>
           </div>
+
+          <div className="flex justify-end items-center">
+            <div className="flex w-full sm:w-auto justify-end gap-1 bg-gray-100 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('calendar')}
+                aria-pressed={viewMode === 'calendar'}
+                className={[
+                  'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  viewMode === 'calendar'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
+                ].join(' ')}
+                title={t('calendarView') ?? 'Календарь'}>
+                <CalendarDays className="h-4 w-4" />
+                <span className="hidden sm:inline">{t('calendarView') ?? 'Календарь'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('table')}
+                aria-pressed={viewMode === 'table'}
+                className={[
+                  'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  viewMode === 'table'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
+                ].join(' ')}
+                title={t('tableView') ?? 'Таблица'}>
+                <Table className="h-4 w-4" />
+                <span className="hidden sm:inline">{t('tableView') ?? 'Таблица'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
         </div>
 
         <TwoTypeStats
@@ -262,6 +378,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           search={deferredSearch}
           reloadToken={statsReloadKey}
           rawPayments={payments}
+          onCardSelect={handleStatCardSelect}
         />
 
         <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6 mt-4">
@@ -280,13 +397,44 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           </button>
         </div>
 
-        <CalendarGrid
-          currentDate={currentDate}
-          payments={filteredPayments}
-          onEditPayment={handleEditPayment}
-          newPaymentIds={newIds}
-          onOpenClient={onOpenClient}
-        />
+        {viewMode === 'table' && (
+          <div className="mb-6 -mt-2 rounded-xl border border-emerald-100 bg-white/80 px-4 py-3 sm:flex sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-600 space-y-1 sm:space-y-0">
+              <div className="font-semibold text-gray-900">
+                {tableFilter
+                  ? `${t('activeFilter') ?? 'Активный фильтр:'} ${tableFilter.label}`
+                  : t('filteredSummary') ?? 'Сводка по текущему фильтру'}
+              </div>
+              <div className="text-gray-500">
+                {(t('recordsFound') ?? 'Найдено записей:')} {tableFilteredPayments.length}
+              </div>
+            </div>
+            {tableFilter ? (
+              <button
+                type="button"
+                onClick={handleClearTableFilter}
+                className="mt-3 sm:mt-0 inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+                <X className="h-4 w-4" /> {t('clear') ?? 'Очистить'}
+              </button>
+            ) : null}
+          </div>
+        )}
+
+        {viewMode === 'calendar' ? (
+          <CalendarGrid
+            currentDate={currentDate}
+            payments={filteredPayments}
+            onEditPayment={handleEditPayment}
+            newPaymentIds={newIds}
+            onOpenClient={onOpenClient}
+          />
+        ) : (
+          <PaymentsTable
+            payments={tableFilteredPayments}
+            onEditPayment={handleEditPayment}
+            onOpenClient={onOpenClient}
+          />
+        )}
 
         <PaymentModal
           isOpen={isModalOpen}

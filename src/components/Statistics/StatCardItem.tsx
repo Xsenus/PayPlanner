@@ -9,6 +9,7 @@ export type StatCardItem = {
   color: string;
   bg: string;
   hint?: React.ReactNode;
+  onClick?: () => void;
 };
 
 interface StatsCardsProps {
@@ -60,15 +61,17 @@ export function StatsCards({ items, loading = false, lgCols = 6, skeletonCount }
       {items.map((c, i) => {
         const Icon = c.icon;
         const show = hovered === i;
+        const interactive = typeof c.onClick === 'function';
 
-        return (
-          <div
-            key={i}
-            className="relative bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100"
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-            onFocus={() => setHovered(i)}
-            onBlur={() => setHovered(null)}>
+        const commonProps = {
+          onMouseEnter: () => setHovered(i),
+          onMouseLeave: () => setHovered(null),
+          onFocus: () => setHovered(i),
+          onBlur: () => setHovered(null),
+        } as const;
+
+        const content = (
+          <>
             {c.hint ? (
               <div
                 className={[
@@ -105,6 +108,33 @@ export function StatsCards({ items, loading = false, lgCols = 6, skeletonCount }
                 {c.value}
               </span>
             </div>
+          </>
+        );
+
+        if (interactive) {
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={c.onClick}
+              className={[
+                'relative bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100 text-left',
+                'transition-transform duration-150 ease-out hover:-translate-y-0.5',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
+              ].join(' ')}
+              aria-label={c.title}
+              {...commonProps}>
+              {content}
+            </button>
+          );
+        }
+
+        return (
+          <div
+            key={i}
+            className="relative bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100"
+            {...commonProps}>
+            {content}
           </div>
         );
       })}

@@ -10,6 +10,9 @@ import {
   LogOut,
   Menu,
   X,
+  WalletCards,
+  FileCheck2,
+  FileSignature,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -85,6 +88,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart },
         { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator },
         { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users },
+        { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards },
+        { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2 },
+        { id: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature },
         { id: 'dictionaries' as Tab, label: t('dictionaries') ?? 'Справочники', icon: Settings },
       ] as const,
     [t],

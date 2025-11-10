@@ -6,6 +6,9 @@ import { Reports } from './components/Reports/Reports';
 import { Calculator } from './components/Calculator/Calculator';
 import { Clients } from './components/Clients/Clients';
 import { ClientDetail } from './components/Clients/ClientDetail';
+import { Accounts } from './components/Accounts/Accounts';
+import { Acts } from './components/Acts/Acts';
+import { Contracts } from './components/Contracts/Contracts';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
@@ -132,6 +135,12 @@ function AppContent() {
         );
       case 'clients':
         return <Clients />;
+      case 'accounts':
+        return <Accounts />;
+      case 'acts':
+        return <Acts />;
+      case 'contracts':
+        return <Contracts />;
       case 'roles':
         return isAdmin ? (
           <Roles />
