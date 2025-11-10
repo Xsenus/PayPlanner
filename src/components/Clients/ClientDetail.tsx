@@ -1310,7 +1310,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                                   title={t('edit') ?? 'Редактировать'}
                                   aria-label={t('edit') ?? 'Редактировать'}
                                 >
-                                  <Pencil className="h-4 w-4" />
+                                  <Edit className="h-4 w-4" />
                                 </button>
                                 <button
                                   type="button"
