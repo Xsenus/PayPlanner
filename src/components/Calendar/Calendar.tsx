@@ -188,7 +188,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleAddPayment = (type: 'Income' | 'Expense') => {
-    if (!calendarPermissions.canAddPayments) {
+    if (!calendarPermissions.canCreate) {
       showPermissionNotice(
         t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.',
       );
@@ -200,7 +200,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleEditPayment = (payment: Payment) => {
-    if (!calendarPermissions.canEditPayments) {
+    if (!calendarPermissions.canEdit) {
       showPermissionNotice(
         t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.',
       );
@@ -212,7 +212,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleDeletePayment = async (payment: Payment) => {
-    if (!calendarPermissions.canDeletePayments) {
+    if (!calendarPermissions.canDelete) {
       showPermissionNotice(
         t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.',
       );
@@ -458,14 +458,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           <button
             type="button"
             onClick={() => handleAddPayment('Income')}
-            disabled={!calendarPermissions.canAddPayments}
+            disabled={!calendarPermissions.canCreate}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
             title={
-              !calendarPermissions.canAddPayments
+              !calendarPermissions.canCreate
                 ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
                 : undefined
             }
-            aria-disabled={!calendarPermissions.canAddPayments}
+            aria-disabled={!calendarPermissions.canCreate}
           >
             <Plus className="h-4 w-4" /> {t('addIncome')}
           </button>
@@ -473,14 +473,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           <button
             type="button"
             onClick={() => handleAddPayment('Expense')}
-            disabled={!calendarPermissions.canAddPayments}
+            disabled={!calendarPermissions.canCreate}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
             title={
-              !calendarPermissions.canAddPayments
+              !calendarPermissions.canCreate
                 ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
                 : undefined
             }
-            aria-disabled={!calendarPermissions.canAddPayments}
+            aria-disabled={!calendarPermissions.canCreate}
           >
             <Plus className="h-4 w-4" /> {t('addExpense')}
           </button>
@@ -524,9 +524,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             onOpenClient={onOpenClient}
             onAddPayment={handleAddPayment}
             onDeletePayment={handleDeletePayment}
-            canAdd={calendarPermissions.canAddPayments}
-            canEdit={calendarPermissions.canEditPayments}
-            canDelete={calendarPermissions.canDeletePayments}
+            canAdd={calendarPermissions.canCreate}
+            canEdit={calendarPermissions.canEdit}
+            canDelete={calendarPermissions.canDelete}
           />
         )}
 
@@ -537,7 +537,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onSubmit={handleSubmit}
           payment={editingPayment}
           onDelete={
-            calendarPermissions.canDeletePayments
+            calendarPermissions.canDelete
               ? async (id) => {
                   await deletePayment(id);
                   await refreshPayments();

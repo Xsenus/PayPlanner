@@ -1,25 +1,77 @@
-export type CalendarPermissionKey =
-  | 'canAddPayments'
-  | 'canEditPayments'
-  | 'canDeletePayments'
-  | 'canViewAnalytics';
+export type MenuSectionKey =
+  | 'calendar'
+  | 'reports'
+  | 'calculator'
+  | 'clients'
+  | 'accounts'
+  | 'acts'
+  | 'contracts'
+  | 'dictionaries';
 
-export interface CalendarPermissions {
-  canAddPayments: boolean;
-  canEditPayments: boolean;
-  canDeletePayments: boolean;
+export type MenuPermissionKey =
+  | 'canView'
+  | 'canCreate'
+  | 'canEdit'
+  | 'canDelete'
+  | 'canExport';
+
+export interface MenuSectionPermissions {
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canExport: boolean;
+}
+
+export interface CalendarPermissions extends MenuSectionPermissions {
   canViewAnalytics: boolean;
 }
 
-export interface RolePermissions {
+type OtherSectionKey = Exclude<MenuSectionKey, 'calendar'>;
+
+export type RolePermissions = {
   calendar: CalendarPermissions;
-}
+} & {
+  [K in OtherSectionKey]: MenuSectionPermissions;
+};
+
+export const MENU_SECTION_KEYS: MenuSectionKey[] = [
+  'calendar',
+  'reports',
+  'calculator',
+  'clients',
+  'accounts',
+  'acts',
+  'contracts',
+  'dictionaries',
+];
+
+export const MENU_PERMISSION_KEYS: MenuPermissionKey[] = [
+  'canView',
+  'canCreate',
+  'canEdit',
+  'canDelete',
+  'canExport',
+];
+
+export const defaultMenuPermissions: MenuSectionPermissions = {
+  canView: true,
+  canCreate: true,
+  canEdit: true,
+  canDelete: true,
+  canExport: true,
+};
 
 export const defaultRolePermissions: RolePermissions = {
   calendar: {
-    canAddPayments: true,
-    canEditPayments: true,
-    canDeletePayments: true,
+    ...defaultMenuPermissions,
     canViewAnalytics: true,
   },
+  reports: { ...defaultMenuPermissions },
+  calculator: { ...defaultMenuPermissions },
+  clients: { ...defaultMenuPermissions },
+  accounts: { ...defaultMenuPermissions },
+  acts: { ...defaultMenuPermissions },
+  contracts: { ...defaultMenuPermissions },
+  dictionaries: { ...defaultMenuPermissions },
 };

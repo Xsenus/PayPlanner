@@ -1,9 +1,12 @@
-import { defaultRolePermissions, type RolePermissions } from '../types/permissions';
+import {
+  defaultRolePermissions,
+  type RolePermissions,
+} from '../types/permissions';
 
 const STORAGE_KEY = 'pp.role.permissions';
 const CHANGE_EVENT = 'pp.permissions.changed';
 
-type PermissionsMap = Record<string, RolePermissions>;
+type PermissionsMap = Record<string, Partial<RolePermissions>>;
 
 type ChangeListener = (roleId?: number) => void;
 
@@ -28,9 +31,55 @@ function writeStorage(data: PermissionsMap) {
   }
 }
 
-function clonePermissions(perms: RolePermissions): RolePermissions {
+function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
+  const source = perms ?? {};
   return {
-    calendar: { ...perms.calendar },
+    calendar: {
+      ...defaultRolePermissions.calendar,
+      ...(source.calendar ?? {}),
+    },
+    reports: {
+      ...defaultRolePermissions.reports,
+      ...(source.reports ?? {}),
+    },
+    calculator: {
+      ...defaultRolePermissions.calculator,
+      ...(source.calculator ?? {}),
+    },
+    clients: {
+      ...defaultRolePermissions.clients,
+      ...(source.clients ?? {}),
+    },
+    accounts: {
+      ...defaultRolePermissions.accounts,
+      ...(source.accounts ?? {}),
+    },
+    acts: {
+      ...defaultRolePermissions.acts,
+      ...(source.acts ?? {}),
+    },
+    contracts: {
+      ...defaultRolePermissions.contracts,
+      ...(source.contracts ?? {}),
+    },
+    dictionaries: {
+      ...defaultRolePermissions.dictionaries,
+      ...(source.dictionaries ?? {}),
+    },
+  };
+}
+
+function clonePermissions(perms: Partial<RolePermissions> | null | undefined): RolePermissions {
+  const normalized = normalizePermissions(perms);
+  return {
+    calendar: { ...normalized.calendar },
+    reports: { ...normalized.reports },
+    calculator: { ...normalized.calculator },
+    clients: { ...normalized.clients },
+    accounts: { ...normalized.accounts },
+    acts: { ...normalized.acts },
+    contracts: { ...normalized.contracts },
+    dictionaries: { ...normalized.dictionaries },
   };
 }
 
@@ -41,7 +90,7 @@ export function getRolePermissions(roleId?: number | null): RolePermissions {
   const map = readStorage();
   const key = String(roleId);
   const stored = map[key];
-  return stored ? clonePermissions(stored) : clonePermissions(defaultRolePermissions);
+  return clonePermissions(stored ?? defaultRolePermissions);
 }
 
 export function setRolePermissions(roleId: number, permissions: RolePermissions) {

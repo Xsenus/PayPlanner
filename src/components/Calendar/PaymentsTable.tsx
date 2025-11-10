@@ -70,11 +70,9 @@ export function PaymentsTable({
       if (event.key === 'Escape') setMenuState(null);
     };
     window.addEventListener('click', close);
-    window.addEventListener('contextmenu', close);
     window.addEventListener('keydown', handleKey);
     return () => {
       window.removeEventListener('click', close);
-      window.removeEventListener('contextmenu', close);
       window.removeEventListener('keydown', handleKey);
     };
   }, [menuState]);
@@ -206,7 +204,14 @@ export function PaymentsTable({
       </div>
 
       {menuState ? (
-        <div className="fixed inset-0 z-30" role="presentation" onClick={closeMenu}>
+        <div
+          className="fixed inset-0 z-30"
+          role="presentation"
+          onClick={closeMenu}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            closeMenu();
+          }}>
           <div
             role="menu"
             className="absolute z-40 min-w-[200px] rounded-lg border border-gray-200 bg-white py-2 shadow-xl"

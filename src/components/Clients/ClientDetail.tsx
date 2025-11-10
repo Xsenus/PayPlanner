@@ -11,7 +11,12 @@ import {
   Edit,
   Trash2,
   PlusCircle,
+  WalletCards,
+  FileCheck2,
+  FileSignature,
+  Calculator,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { apiService } from '../../services/api';
@@ -36,6 +41,65 @@ type PaymentUpsert =
   | ({ id: number } & Omit<Payment, 'id' | 'createdAt'>);
 
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
+
+type ClientDetailSection =
+  | 'payments'
+  | 'accounts'
+  | 'acts'
+  | 'contracts'
+  | 'settlement';
+
+const SECTION_ORDER: ClientDetailSection[] = [
+  'payments',
+  'accounts',
+  'acts',
+  'contracts',
+  'settlement',
+];
+
+const SECTION_META: Record<
+  ClientDetailSection,
+  {
+    label: string;
+    actionLabel: string;
+    placeholderTitle?: string;
+    placeholderDescription?: string;
+    icon?: LucideIcon | null;
+  }
+> = {
+  payments: {
+    label: 'Платежи',
+    actionLabel: 'Добавить платёж',
+  },
+  accounts: {
+    label: 'Счета',
+    actionLabel: 'Добавить счёт',
+    placeholderTitle: 'Счета клиента',
+    placeholderDescription: 'Здесь появится список счетов клиента после подключения модуля.',
+    icon: WalletCards,
+  },
+  acts: {
+    label: 'Акты',
+    actionLabel: 'Добавить акт',
+    placeholderTitle: 'Акты клиента',
+    placeholderDescription: 'Управление актами будет доступно после доработки раздела.',
+    icon: FileCheck2,
+  },
+  contracts: {
+    label: 'Договоры',
+    actionLabel: 'Добавить договор',
+    placeholderTitle: 'Договоры клиента',
+    placeholderDescription: 'Список договоров появится в этом разделе.',
+    icon: FileSignature,
+  },
+  settlement: {
+    label: 'Расчёт дела',
+    actionLabel: 'Расчёт дела',
+    placeholderTitle: 'Расчёт дела',
+    placeholderDescription: 'Инструменты расчёта будут добавлены на следующем этапе.',
+    icon: Calculator,
+  },
+};
 
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
@@ -98,6 +162,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('create');
+  const [activeSection, setActiveSection] = useState<ClientDetailSection>('payments');
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
@@ -173,12 +238,18 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   }, [payments, statusFilter]);
 
   const openAddPayment = () => {
+    setActiveSection('payments');
     setEditingPayment(null);
     setPayModalOpen(true);
   };
   const openEditPayment = (p: Payment) => {
+    setActiveSection('payments');
     setEditingPayment(p);
     setPayModalOpen(true);
+  };
+  const notifyFeatureInProgress = (section: ClientDetailSection) => {
+    const meta = SECTION_META[section];
+    alert(`${meta.label} пока в разработке.`);
   };
   const closePayModal = () => {
     setPayModalOpen(false);
@@ -265,97 +336,173 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        <TwoTypeStats
-          clientId={clientId}
-          caseId={caseIdForQuery}
-          from={fromDateStr}
-          to={toDateStr}
-          statusFilter={toStatsStatusFilter(statusFilter)}
-          reloadToken={statsReloadToken}
-          rawPayments={payments}
-          className="mb-6"
-        />
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
-          <div className="p-6 flex flex-wrap items-center gap-3">
-            <MonthRangePicker
-              value={{ from: monthFrom || undefined, to: monthTo || undefined }}
-              onChange={(r) => {
-                setMonthFrom(r.from ?? '');
-                setMonthTo(r.to ?? '');
-              }}
-              yearsBack={8}
-              yearsForward={1}
+        {activeSection === 'payments' ? (
+          <>
+            <TwoTypeStats
+              clientId={clientId}
+              caseId={caseIdForQuery}
+              from={fromDateStr}
+              to={toDateStr}
+              statusFilter={toStatsStatusFilter(statusFilter)}
+              reloadToken={statsReloadToken}
+              rawPayments={payments}
+              className="mb-6"
             />
 
-            <div className="relative w-full sm:w-56">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as 'all' | NormalizedStatus)}
-                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                <option value="all">Все статусы</option>
-                <option value="pending">Ожидается</option>
-                <option value="completed">Выполнено</option>
-                <option value="overdue">Просрочено</option>
-              </select>
-            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
+              <div className="p-6 flex flex-wrap items-center gap-3">
+                <MonthRangePicker
+                  value={{ from: monthFrom || undefined, to: monthTo || undefined }}
+                  onChange={(r) => {
+                    setMonthFrom(r.from ?? '');
+                    setMonthTo(r.to ?? '');
+                  }}
+                  yearsBack={8}
+                  yearsForward={1}
+                />
 
-            <div className="w-full sm:w-auto sm:ml-auto order-last sm:order-none">
-              <button
-                onClick={openAddPayment}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700">
-                <Plus size={16} /> Добавить платёж
-              </button>
+                <div className="relative w-full sm:w-56">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as 'all' | NormalizedStatus)}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <option value="all">Все статусы</option>
+                    <option value="pending">Ожидается</option>
+                    <option value="completed">Выполнено</option>
+                    <option value="overdue">Просрочено</option>
+                  </select>
+                </div>
+
+                <div className="w-full sm:w-auto sm:ml-auto order-last sm:order-none">
+                  <button
+                    onClick={openAddPayment}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700">
+                    <Plus size={16} /> {SECTION_META.payments.actionLabel}
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 pt-0">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCaseId('all')}
+                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                      selectedCaseId === 'all'
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}>
+                    Все дела
+                  </button>
+
+                  {cases.map((k) => {
+                    const active = selectedCaseId === k.id;
+                    const s = (k.status ?? '').toLowerCase();
+                    const statusClasses = s.includes('open')
+                      ? 'bg-green-50 text-green-700 border-green-200'
+                      : s.includes('hold')
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : s.includes('closed')
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-slate-50 text-slate-700 border-slate-200';
+                    return (
+                      <button
+                        key={k.id}
+                        type="button"
+                        onClick={() => setSelectedCaseId(k.id)}
+                        title={caseStatusLabel(k.status)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                          active
+                            ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                            : `${statusClasses} hover:opacity-90`
+                        }`}>
+                        {k.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
+          </>
+        ) : null}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+          <div className="flex flex-wrap gap-2">
+            {SECTION_ORDER.map((section) => {
+              const meta = SECTION_META[section];
+              const isActive = activeSection === section;
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  onClick={() => setActiveSection(section)}
+                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                    isActive
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>
+                  {meta.label}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="px-6 pb-6 pt-0">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedCaseId('all')}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                  selectedCaseId === 'all'
-                    ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}>
-                Все дела
-              </button>
-
-              {cases.map((k) => {
-                const active = selectedCaseId === k.id;
-                const s = (k.status ?? '').toLowerCase();
-                const statusClasses = s.includes('open')
-                  ? 'bg-green-50 text-green-700 border-green-200'
-                  : s.includes('hold')
-                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                  : s.includes('closed')
-                  ? 'bg-red-50 text-red-700 border-red-200'
-                  : 'bg-slate-50 text-slate-700 border-slate-200';
-                return (
-                  <button
-                    key={k.id}
-                    type="button"
-                    onClick={() => setSelectedCaseId(k.id)}
-                    title={caseStatusLabel(k.status)}
-                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                      active
-                        ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-                        : `${statusClasses} hover:opacity-90`
-                    }`}>
-                    {k.title}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('payments');
+                openAddPayment();
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              <Plus size={16} /> {SECTION_META.payments.actionLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('accounts');
+                notifyFeatureInProgress('accounts');
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <Plus size={16} /> {SECTION_META.accounts.actionLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('acts');
+                notifyFeatureInProgress('acts');
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <Plus size={16} /> {SECTION_META.acts.actionLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('contracts');
+                notifyFeatureInProgress('contracts');
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <Plus size={16} /> {SECTION_META.contracts.actionLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('settlement');
+                notifyFeatureInProgress('settlement');
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <Calculator size={16} /> {SECTION_META.settlement.actionLabel}
+            </button>
           </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-6 border-b border-gray-100">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">Платежи</h2>
-              {lastPaymentDate && (
+              <h2 className="text-xl font-semibold text-gray-900">
+                {SECTION_META[activeSection].label}
+              </h2>
+              {activeSection === 'payments' && lastPaymentDate && (
                 <div className="flex items-center gap-2 text-sm text-gray-500">
                   <CalendarIcon size={16} />
                   Последний платёж: {toRuDate(lastPaymentDate)}
@@ -365,96 +512,115 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
 
           <div className="p-6">
-            {loadingPayments ? (
-              <div className="text-center py-8 text-gray-500">Загрузка...</div>
-            ) : visiblePayments.length === 0 ? (
-              <div className="text-center py-8">
-                <CalendarIcon size={48} className="mx-auto mb-4 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Платежи не найдены</h3>
-                <p className="text-gray-500">Нет платежей по выбранному фильтру</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {visiblePayments.map((payment) => (
-                  <div
-                    key={payment.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="mt-0.5">
-                        {payment.type === 'Income' ? (
-                          <TrendingUp size={20} className="text-emerald-600" />
-                        ) : (
-                          <TrendingDown size={20} className="text-red-600" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p
-                          className="font-medium text-gray-900"
-                          title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
-                          {formatCurrencySmart(payment.amount).full}
-                        </p>
-                        {payment.description && (
-                          <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
-                            {payment.description}
+            {activeSection === 'payments' ? (
+              loadingPayments ? (
+                <div className="text-center py-8 text-gray-500">Загрузка...</div>
+              ) : visiblePayments.length === 0 ? (
+                <div className="text-center py-8">
+                  <CalendarIcon size={48} className="mx-auto mb-4 text-gray-300" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Платежи не найдены</h3>
+                  <p className="text-gray-500">Нет платежей по выбранному фильтру</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {visiblePayments.map((payment) => (
+                    <div
+                      key={payment.id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="mt-0.5">
+                          {payment.type === 'Income' ? (
+                            <TrendingUp size={20} className="text-emerald-600" />
+                          ) : (
+                            <TrendingDown size={20} className="text-red-600" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p
+                            className="font-medium text-gray-900"
+                            title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
+                            {formatCurrencySmart(payment.amount).full}
                           </p>
-                        )}
+                          {payment.description && (
+                            <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
+                              {payment.description}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
-                      <div className="flex items-center justify-end gap-2">
-                        <p className="text-sm font-medium text-gray-900 leading-none">
-                          {toRuDate(payment.date)}
-                        </p>
-                        <button
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
-                          onClick={() => openEditPayment(payment)}
-                          title="Редактировать"
-                          aria-label="Редактировать">
-                          <Edit size={16} />
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-end gap-2">
-                        {(() => {
-                          const s = normalizeStatus(payment.status);
-                          if (s === 'overdue') {
+                      <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
+                        <div className="flex items-center justify-end gap-2">
+                          <p className="text-sm font-medium text-gray-900 leading-none">
+                            {toRuDate(payment.date)}
+                          </p>
+                          <button
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
+                            onClick={() => openEditPayment(payment)}
+                            title="Редактировать"
+                            aria-label="Редактировать">
+                            <Edit size={16} />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          {(() => {
+                            const s = normalizeStatus(payment.status);
+                            if (s === 'overdue') {
+                              return (
+                                <>
+                                  <AlertTriangle size={14} className="text-purple-700" />
+                                  <span className="text-xs text-purple-700 leading-none">
+                                    Просрочено
+                                  </span>
+                                </>
+                              );
+                            }
+                            if (s === 'completed') {
+                              return (
+                                <>
+                                  <CheckCircle size={14} className="text-emerald-600" />
+                                  <span className="text-xs text-emerald-600 leading-none">
+                                    Выполнено
+                                  </span>
+                                </>
+                              );
+                            }
                             return (
                               <>
-                                <AlertTriangle size={14} className="text-purple-700" />
-                                <span className="text-xs text-purple-700 leading-none">
-                                  Просрочено
-                                </span>
+                                <Clock size={14} className="text-amber-600" />
+                                <span className="text-xs text-amber-600 leading-none">Ожидается</span>
                               </>
                             );
-                          }
-                          if (s === 'completed') {
-                            return (
-                              <>
-                                <CheckCircle size={14} className="text-emerald-600" />
-                                <span className="text-xs text-emerald-600 leading-none">
-                                  Выполнено
-                                </span>
-                              </>
-                            );
-                          }
-                          return (
-                            <>
-                              <Clock size={14} className="text-amber-600" />
-                              <span className="text-xs text-amber-600 leading-none">Ожидается</span>
-                            </>
-                          );
-                        })()}
-                        <button
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
-                          onClick={() => removePayment(payment.id)}
-                          title="Удалить"
-                          aria-label="Удалить">
-                          <Trash2 size={16} />
-                        </button>
+                          })()}
+                          <button
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
+                            onClick={() => removePayment(payment.id)}
+                            title="Удалить"
+                            aria-label="Удалить">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                     </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              (() => {
+                const meta = SECTION_META[activeSection];
+                if (!meta.placeholderTitle) {
+                  return null;
+                }
+                const PlaceholderIcon = meta.icon;
+                return (
+                  <div className="text-center py-12">
+                    {PlaceholderIcon ? (
+                      <PlaceholderIcon size={48} className="mx-auto mb-4 text-gray-300" />
+                    ) : null}
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">{meta.placeholderTitle}</h3>
+                    <p className="text-gray-500">{meta.placeholderDescription}</p>
                   </div>
-                ))}
-              </div>
+                );
+              })()
             )}
           </div>
         </div>

@@ -5,21 +5,31 @@ import { Shield, ShieldPlus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
 import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
-import type { CalendarPermissionKey } from '../../types/permissions';
+import {
+  MENU_SECTION_KEYS,
+  type MenuPermissionKey,
+  type RolePermissions,
+} from '../../types/permissions';
 
-const CALENDAR_KEYS: CalendarPermissionKey[] = [
-  'canAddPayments',
-  'canEditPayments',
-  'canDeletePayments',
-  'canViewAnalytics',
-];
-
-const CALENDAR_LABELS: Record<CalendarPermissionKey, string> = {
-  canAddPayments: 'Добавление',
-  canEditPayments: 'Редактирование',
-  canDeletePayments: 'Удаление',
-  canViewAnalytics: 'Аналитика',
+const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {
+  calendar: 'Календарь',
+  reports: 'Отчёты',
+  calculator: 'Калькулятор',
+  clients: 'Клиенты',
+  accounts: 'Счета',
+  acts: 'Акты',
+  contracts: 'Договоры',
+  dictionaries: 'Справочники',
 };
+
+const CALENDAR_OPERATIONS: Array<{ key: MenuPermissionKey | 'canViewAnalytics'; label: string }> = [
+  { key: 'canView', label: 'Просмотр' },
+  { key: 'canCreate', label: 'Создание' },
+  { key: 'canEdit', label: 'Редактирование' },
+  { key: 'canDelete', label: 'Удаление' },
+  { key: 'canExport', label: 'Экспорт' },
+  { key: 'canViewAnalytics', label: 'Аналитика' },
+];
 
 export interface Role {
   id: number;
@@ -153,79 +163,95 @@ export const Roles = () => {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                     Описание
                   </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Создана</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Создана
+                    Разделы меню
                   </th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Права календаря
-                  </th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
-                    Действия
-                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Календарь</th>
+                  <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {roles.map((role) => (
-                  <tr key={role.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-slate-400" />
-                        <span className="font-medium text-slate-900">{role.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-slate-600">{role.description || '—'}</td>
-                    <td className="px-6 py-4 text-slate-600 text-sm">
-                      {new Date(role.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const perms = getRolePermissions(role.id);
-                          return CALENDAR_KEYS.map((key) => {
-                            if (!perms.calendar[key]) {
-                              return (
-                                <span
-                                  key={key}
-                                  className="inline-flex items-center rounded-full border border-dashed border-slate-200 px-2.5 py-1 text-xs text-slate-400">
-                                  {CALENDAR_LABELS[key]}
-                                </span>
-                              );
-                            }
+                {roles.map((role) => {
+                  const perms = getRolePermissions(role.id);
+                  return (
+                    <tr key={role.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <Shield className="w-4 h-4 text-slate-400" />
+                          <span className="font-medium text-slate-900">{role.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-slate-600">{role.description || '—'}</td>
+                      <td className="px-6 py-4 text-slate-600 text-sm">
+                        {new Date(role.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {MENU_SECTION_KEYS.map((key) => {
+                            const allowed = perms[key].canView;
                             return (
                               <span
                                 key={key}
-                                className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                {CALENDAR_LABELS[key]}
+                                className={[
+                                  'inline-flex items-center rounded-full px-2.5 py-1 text-xs',
+                                  allowed
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                    : 'border border-dashed border-slate-200 text-slate-400',
+                                ].join(' ')}>
+                                {MENU_SECTION_LABELS[key]}
                               </span>
                             );
-                          });
-                        })()}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openPermissions(role)}
-                          className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Настроить права">
-                          <Settings2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleEdit(role)}
-                          className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Редактировать роль">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(role.id)}
-                          className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Удалить роль">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          })}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {CALENDAR_OPERATIONS.map(({ key, label }) => {
+                            const allowed =
+                              key === 'canViewAnalytics'
+                                ? perms.calendar.canViewAnalytics
+                                : perms.calendar[key as MenuPermissionKey];
+                            return (
+                              <span
+                                key={key}
+                                className={[
+                                  'inline-flex items-center rounded-full px-2.5 py-1 text-xs',
+                                  allowed
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                                    : 'border border-dashed border-slate-200 text-slate-400',
+                                ].join(' ')}>
+                                {label}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => openPermissions(role)}
+                            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Настроить права">
+                            <Settings2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEdit(role)}
+                            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Редактировать роль">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(role.id)}
+                            className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Удалить роль">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
