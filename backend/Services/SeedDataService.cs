@@ -230,6 +230,7 @@ namespace PayPlanner.Api.Services
                 "reports",
                 "calculator",
                 "clients",
+                "legalEntities",
                 "accounts",
                 "acts",
                 "contracts",

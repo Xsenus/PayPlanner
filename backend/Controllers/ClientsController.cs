@@ -16,12 +16,21 @@ public class ClientsController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _db.Clients.Include(c => c.Cases).AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+        => Ok(await _db.Clients
+            .Include(c => c.Cases)
+            .Include(c => c.LegalEntity)
+            .AsNoTracking()
+            .OrderBy(c => c.Name)
+            .ToListAsync(ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var client = await _db.Clients.Include(c => c.Cases).AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        var client = await _db.Clients
+            .Include(c => c.Cases)
+            .Include(c => c.LegalEntity)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null ? NotFound() : Ok(client);
     }
 
@@ -78,9 +87,31 @@ public class ClientsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model)
     {
-        _db.Clients.Add(model);
+        if (model.LegalEntityId.HasValue)
+        {
+            var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
+            if (!exists)
+            {
+                return BadRequest($"Юридическое лицо #{model.LegalEntityId.Value} не найдено");
+            }
+        }
+
+        var entity = new Client
+        {
+            Name = model.Name,
+            Email = model.Email,
+            Phone = model.Phone,
+            Company = model.Company,
+            Address = model.Address,
+            Notes = model.Notes,
+            IsActive = model.IsActive,
+            LegalEntityId = model.LegalEntityId,
+        };
+
+        _db.Clients.Add(entity);
         await _db.SaveChangesAsync();
-        return Created($"/api/clients/{model.Id}", model);
+        await _db.Entry(entity).Reference(c => c.LegalEntity).LoadAsync();
+        return Created($"/api/clients/{entity.Id}", entity);
     }
 
     [HttpPut("{id:int}")]
@@ -88,6 +119,14 @@ public class ClientsController : ControllerBase
     {
         var e = await _db.Clients.FindAsync(id);
         if (e is null) return NotFound();
+        if (model.LegalEntityId.HasValue)
+        {
+            var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
+            if (!exists)
+            {
+                return BadRequest($"Юридическое лицо #{model.LegalEntityId.Value} не найдено");
+            }
+        }
         e.Name = model.Name;
         e.Email = model.Email;
         e.Phone = model.Phone;
@@ -95,7 +134,9 @@ public class ClientsController : ControllerBase
         e.Address = model.Address;
         e.Notes = model.Notes;
         e.IsActive = model.IsActive;
+        e.LegalEntityId = model.LegalEntityId;
         await _db.SaveChangesAsync();
+        await _db.Entry(e).Reference(c => c.LegalEntity).LoadAsync();
         return Ok(e);
     }
 
