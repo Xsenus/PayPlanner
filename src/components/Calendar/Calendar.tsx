@@ -9,6 +9,8 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import type { Payment } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 
 type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
 type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
@@ -47,6 +49,7 @@ function ymEnd(ym: string): string {
 }
 
 export function Calendar({ onOpenClient }: CalendarProps) {
+  const { user } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
@@ -68,11 +71,40 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     return 'calendar';
   });
   const [tableFilter, setTableFilter] = useState<TableFilter | null>(null);
+  const permissions = useRolePermissions(user?.role?.id);
+  const calendarPermissions = permissions.calendar;
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
   const [statsReloadKey, setStatsReloadKey] = useState(0);
   const bumpStats = () => setStatsReloadKey((x) => x + 1);
 
   const { t, formatMonth } = useTranslation();
+  const permissionTimerRef = useRef<number | null>(null);
+
+  const showPermissionNotice = (message: string) => {
+    setPermissionMessage(message);
+    if (permissionTimerRef.current) {
+      window.clearTimeout(permissionTimerRef.current);
+    }
+    permissionTimerRef.current = window.setTimeout(() => {
+      setPermissionMessage(null);
+      permissionTimerRef.current = null;
+    }, 4000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (permissionTimerRef.current) {
+        window.clearTimeout(permissionTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!calendarPermissions.canViewAnalytics && tableFilter) {
+      setTableFilter(null);
+    }
+  }, [calendarPermissions.canViewAnalytics, tableFilter]);
 
   const year = currentDate.getFullYear();
   const m0 = currentDate.getMonth();
@@ -156,15 +188,43 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleAddPayment = (type: 'Income' | 'Expense') => {
+    if (!calendarPermissions.canAddPayments) {
+      showPermissionNotice(
+        t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.',
+      );
+      return;
+    }
     setModalType(type);
     setEditingPayment(null);
     setIsModalOpen(true);
   };
 
   const handleEditPayment = (payment: Payment) => {
+    if (!calendarPermissions.canEditPayments) {
+      showPermissionNotice(
+        t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.',
+      );
+      return;
+    }
     setEditingPayment(payment);
     setModalType(payment.type);
     setIsModalOpen(true);
+  };
+
+  const handleDeletePayment = async (payment: Payment) => {
+    if (!calendarPermissions.canDeletePayments) {
+      showPermissionNotice(
+        t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.',
+      );
+      return;
+    }
+    const ok = window.confirm(
+      t('confirmDeletePayment') ?? 'Вы уверены, что хотите удалить этот платёж?',
+    );
+    if (!ok) return;
+    await deletePayment(payment.id);
+    await refreshPayments();
+    bumpStats();
   };
 
   const handleCloseModal = async () => {
@@ -230,6 +290,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     metric: StatMetric;
     title: string;
   }) => {
+    if (!calendarPermissions.canViewAnalytics) return;
     const statusesByMetric: Record<StatMetric, Payment['status'][] | undefined> = {
       completed: ['Completed'],
       pending: ['Pending'],
@@ -307,8 +368,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               className="w-full sm:w-auto sm:min-w-[220px] bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-              title={t('statusFilter') ?? 'Status filter'}
-              aria-label={t('statusFilter') ?? 'Status filter'}>
+              title={t('status') ?? 'Статус'}
+              aria-label={t('status') ?? 'Статус'}>
               <option value="All">{t('allStatuses') ?? 'All statuses'}</option>
               <option value="Pending">{t('pending') ?? 'Pending'}</option>
               <option value="Completed">{t('completed') ?? 'Completed'}</option>
@@ -371,28 +432,56 @@ export function Calendar({ onOpenClient }: CalendarProps) {
         </div>
         </div>
 
-        <TwoTypeStats
-          from={fromDateStr}
-          to={toDateStr}
-          statusFilter={statusFilter}
-          search={deferredSearch}
-          reloadToken={statsReloadKey}
-          rawPayments={payments}
-          onCardSelect={handleStatCardSelect}
-        />
+        {permissionMessage ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            {permissionMessage}
+          </div>
+        ) : null}
+
+        {calendarPermissions.canViewAnalytics ? (
+          <TwoTypeStats
+            from={fromDateStr}
+            to={toDateStr}
+            statusFilter={statusFilter}
+            search={deferredSearch}
+            reloadToken={statsReloadKey}
+            rawPayments={payments}
+            onCardSelect={handleStatCardSelect}
+          />
+        ) : (
+          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-sm text-amber-700 shadow-sm">
+            {t('permissionNoAnalytics') ?? 'Просмотр аналитики недоступен для вашей роли.'}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:flex sm:flex-row gap-3 mb-6 mt-4">
           <button
             type="button"
             onClick={() => handleAddPayment('Income')}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm">
+            disabled={!calendarPermissions.canAddPayments}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            title={
+              !calendarPermissions.canAddPayments
+                ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
+                : undefined
+            }
+            aria-disabled={!calendarPermissions.canAddPayments}
+          >
             <Plus className="h-4 w-4" /> {t('addIncome')}
           </button>
 
           <button
             type="button"
             onClick={() => handleAddPayment('Expense')}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm">
+            disabled={!calendarPermissions.canAddPayments}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base font-medium rounded-lg bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            title={
+              !calendarPermissions.canAddPayments
+                ? t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.'
+                : undefined
+            }
+            aria-disabled={!calendarPermissions.canAddPayments}
+          >
             <Plus className="h-4 w-4" /> {t('addExpense')}
           </button>
         </div>
@@ -433,6 +522,11 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             payments={tableFilteredPayments}
             onEditPayment={handleEditPayment}
             onOpenClient={onOpenClient}
+            onAddPayment={handleAddPayment}
+            onDeletePayment={handleDeletePayment}
+            canAdd={calendarPermissions.canAddPayments}
+            canEdit={calendarPermissions.canEditPayments}
+            canDelete={calendarPermissions.canDeletePayments}
           />
         )}
 
@@ -442,14 +536,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           type={modalType}
           onSubmit={handleSubmit}
           payment={editingPayment}
-          onDelete={async (id) => {
-            if (!window.confirm('Удалить платёж?')) return;
-            await deletePayment(id);
-            await refreshPayments();
-            setIsModalOpen(false);
-            setEditingPayment(null);
-            setTimeout(() => bumpStats(), 0);
-          }}
+          onDelete={
+            calendarPermissions.canDeletePayments
+              ? async (id) => {
+                  await deletePayment(id);
+                  await refreshPayments();
+                  setIsModalOpen(false);
+                  setEditingPayment(null);
+                  setTimeout(() => bumpStats(), 0);
+                }
+              : undefined
+          }
         />
       </div>
     </div>

@@ -1,6 +1,6 @@
 export const ru = {
   search: 'Поиск',
-  statusFilter: 'Фильтр по статусу',
+  statusFilter: 'Статус',
   allStatuses: 'Все статусы',
   more: 'ещё',
   confirmDeletePayment: 'Вы уверены, что хотите удалить этот платёж? Это действие необратимо.',
@@ -111,8 +111,11 @@ export const ru = {
 
   // Status options
   pending: 'Ожидается',
+  statusCompleted: 'Выполнено',
   completedStatus: 'Выполнено',
   overdue: 'Просрочено',
+  processingStatus: 'В обработке',
+  cancelledStatus: 'Отменено',
 
   // Client Management
   manageClients: 'Управление клиентами',
@@ -190,6 +193,26 @@ export const ru = {
   no: 'Нет',
   cancelled: 'Отменено',
   processing: 'Обработка...',
+  permissionNoAddPayment: 'Недостаточно прав для добавления платежей.',
+  permissionNoEditPayment: 'Недостаточно прав для редактирования платежей.',
+  permissionNoDeletePayment: 'Недостаточно прав для удаления платежей.',
+  permissionNoAnalytics: 'Просмотр аналитики недоступен для вашей роли.',
+  contextMenuHint: 'ПКМ для действий',
+  contextAddPayment: 'Добавить платёж',
+  contextEditPayment: 'Редактировать платёж',
+  contextDeletePayment: 'Удалить платёж',
+  permissionsForRole: 'Права роли «{{role}}»',
+  calendarPermissionsTitle: 'Управление доступом к функциям календаря',
+  permissionCalendarAdd: 'Добавление платежей',
+  permissionCalendarAddDescription: 'Разрешить создание новых доходов и расходов в календаре.',
+  permissionCalendarEdit: 'Редактирование платежей',
+  permissionCalendarEditDescription: 'Разрешить открывать и изменять существующие платежи.',
+  permissionCalendarDelete: 'Удаление платежей',
+  permissionCalendarDeleteDescription: 'Разрешить удалять платежи из календаря.',
+  permissionCalendarAnalytics: 'Просмотр аналитики',
+  permissionCalendarAnalyticsDescription: 'Разрешить просматривать и использовать карточки статистики.',
+  resetPermissions: 'Сбросить по умолчанию',
+  savePermissions: 'Сохранить права',
 
   // Placeholders
   selectDealType: 'Выберите тип сделки',

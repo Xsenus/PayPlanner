@@ -1,8 +1,25 @@
 import { useState, useEffect } from 'react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
-import { Shield, ShieldPlus, Pencil, Trash2, CheckCircle } from 'lucide-react';
+import { Shield, ShieldPlus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { RoleModal } from './RoleModal';
+import { RolePermissionsModal } from './RolePermissionsModal';
+import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
+import type { CalendarPermissionKey } from '../../types/permissions';
+
+const CALENDAR_KEYS: CalendarPermissionKey[] = [
+  'canAddPayments',
+  'canEditPayments',
+  'canDeletePayments',
+  'canViewAnalytics',
+];
+
+const CALENDAR_LABELS: Record<CalendarPermissionKey, string> = {
+  canAddPayments: 'Добавление',
+  canEditPayments: 'Редактирование',
+  canDeletePayments: 'Удаление',
+  canViewAnalytics: 'Аналитика',
+};
 
 export interface Role {
   id: number;
@@ -18,9 +35,18 @@ export const Roles = () => {
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [permissionRole, setPermissionRole] = useState<Role | null>(null);
+  const [, forcePermissionsTick] = useState(0);
 
   useEffect(() => {
     fetchRoles();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeOnPermissionsChange(() => {
+      forcePermissionsTick((prev) => prev + 1);
+    });
+    return unsubscribe;
   }, []);
 
   const fetchRoles = async () => {
@@ -53,6 +79,10 @@ export const Roles = () => {
   const handleAdd = () => {
     setSelectedRole(null);
     setShowModal(true);
+  };
+
+  const openPermissions = (role: Role) => {
+    setPermissionRole(role);
   };
 
   const handleModalClose = () => {
@@ -126,6 +156,9 @@ export const Roles = () => {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                     Создана
                   </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                    Права календаря
+                  </th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
                     Действия
                   </th>
@@ -145,7 +178,38 @@ export const Roles = () => {
                       {new Date(role.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-2">
+                        {(() => {
+                          const perms = getRolePermissions(role.id);
+                          return CALENDAR_KEYS.map((key) => {
+                            if (!perms.calendar[key]) {
+                              return (
+                                <span
+                                  key={key}
+                                  className="inline-flex items-center rounded-full border border-dashed border-slate-200 px-2.5 py-1 text-xs text-slate-400">
+                                  {CALENDAR_LABELS[key]}
+                                </span>
+                              );
+                            }
+                            return (
+                              <span
+                                key={key}
+                                className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                {CALENDAR_LABELS[key]}
+                              </span>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => openPermissions(role)}
+                          className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Настроить права">
+                          <Settings2 className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleEdit(role)}
                           className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
@@ -176,6 +240,15 @@ export const Roles = () => {
       </div>
 
       {showModal && <RoleModal role={selectedRole} onClose={handleModalClose} />}
+      {permissionRole && (
+        <RolePermissionsModal
+          role={permissionRole}
+          onClose={() => {
+            setPermissionRole(null);
+            forcePermissionsTick((prev) => prev + 1);
+          }}
+        />
+      )}
     </div>
   );
 };
