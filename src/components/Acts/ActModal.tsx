@@ -16,6 +16,8 @@ interface ActModalProps {
   responsibles: ActResponsible[];
   lookupsLoading: boolean;
   lookupsError?: string | null;
+  defaultClientId?: number | null;
+  defaultResponsibleId?: number | null;
 }
 
 type FormState = {
@@ -33,7 +35,11 @@ type FormState = {
 
 const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 
-function normalizeActToForm(act: Act | null): FormState {
+function normalizeActToForm(
+  act: Act | null,
+  defaultClientId?: number | null,
+  defaultResponsibleId?: number | null,
+): FormState {
   if (!act) {
     const today = toDateInputValue(new Date());
     return {
@@ -44,8 +50,8 @@ function normalizeActToForm(act: Act | null): FormState {
       invoiceNumber: '',
       counterpartyInn: '',
       status: 'Created',
-      clientId: '',
-      responsibleId: '',
+      clientId: defaultClientId ? String(defaultClientId) : '',
+      responsibleId: defaultResponsibleId ? String(defaultResponsibleId) : '',
       comment: '',
     };
   }
@@ -58,8 +64,12 @@ function normalizeActToForm(act: Act | null): FormState {
     invoiceNumber: act.invoiceNumber ?? '',
     counterpartyInn: act.counterpartyInn ?? '',
     status: act.status,
-    clientId: act.clientId ? String(act.clientId) : '',
-    responsibleId: act.responsibleId ? String(act.responsibleId) : '',
+    clientId: act.clientId ? String(act.clientId) : defaultClientId ? String(defaultClientId) : '',
+    responsibleId: act.responsibleId
+      ? String(act.responsibleId)
+      : defaultResponsibleId
+      ? String(defaultResponsibleId)
+      : '',
     comment: act.comment ?? '',
   };
 }
@@ -76,17 +86,21 @@ export function ActModal({
   responsibles,
   lookupsLoading,
   lookupsError,
+  defaultClientId,
+  defaultResponsibleId,
 }: ActModalProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState<FormState>(() => normalizeActToForm(act));
+  const [form, setForm] = useState<FormState>(() =>
+    normalizeActToForm(act, defaultClientId, defaultResponsibleId),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeActToForm(act));
+      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId));
       setLocalError(null);
     }
-  }, [open, act]);
+  }, [open, act, defaultClientId, defaultResponsibleId]);
 
   const isEdit = mode === 'edit';
 
