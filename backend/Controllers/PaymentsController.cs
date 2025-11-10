@@ -82,6 +82,7 @@ public class PaymentsController : ControllerBase
 
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var actor = User.GetDisplayName();
 
         var originalDueDate = e.Date.Date;
         var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
@@ -134,7 +135,8 @@ public class PaymentsController : ControllerBase
             PaymentDomainService.AppendSystemNote(
                 e,
                 $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
-                now);
+                now,
+                actor);
         }
 
         var userChangedDueDate = model.Date.Date != originalDueDate;
@@ -144,14 +146,16 @@ public class PaymentsController : ControllerBase
             PaymentDomainService.AppendSystemNote(
                 e,
                 $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
-                now);
+                now,
+                actor);
         }
         else if (originalDueDate != e.Date.Date)
         {
             PaymentDomainService.AppendSystemNote(
                 e,
                 $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
-                now);
+                now,
+                actor);
         }
 
         if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
@@ -159,15 +163,17 @@ public class PaymentsController : ControllerBase
             PaymentDomainService.AppendSystemNote(
                 e,
                 $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
-                now);
+                now,
+                actor);
         }
 
         if (originalStatus != e.Status)
         {
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"Статус обновлён: {originalStatus} → {e.Status}",
-                now);
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
+                now,
+                actor);
         }
 
         e.RescheduleCount = rescheduleCount;

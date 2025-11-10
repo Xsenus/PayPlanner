@@ -79,12 +79,21 @@ public static class PaymentDomainService
     /// <summary>
     /// Добавляет строку в системные заметки, ограничивая их длину.
     /// </summary>
-    public static void AppendSystemNote(Payment payment, string message, DateTime utcNow)
+    public static void AppendSystemNote(
+        Payment payment,
+        string message,
+        DateTime utcNow,
+        string? userDisplayName = null)
     {
         ArgumentNullException.ThrowIfNull(payment);
         if (string.IsNullOrWhiteSpace(message)) return;
 
-        var stamp = $"[{utcNow:yyyy-MM-dd HH:mm}] {message.Trim()}";
+        var localStamp = utcNow.ToLocalTime();
+        var formattedTimestamp = $"{localStamp:dd.MM.yyyy} ({localStamp:HH:mm:ss})";
+        var author = string.IsNullOrWhiteSpace(userDisplayName)
+            ? "Система"
+            : userDisplayName!.Trim();
+        var stamp = $"• {formattedTimestamp} — {author}: {message.Trim()}";
         var existing = string.IsNullOrWhiteSpace(payment.SystemNotes)
             ? new List<string>()
             : payment.SystemNotes

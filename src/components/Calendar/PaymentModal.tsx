@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
@@ -82,6 +82,14 @@ export function PaymentModal({
     systemNotes: '',
     rescheduleCount: 0,
   });
+  const systemNotesEntries = useMemo(() => {
+    if (!formData.systemNotes) return [] as string[];
+    return formData.systemNotes
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => (line.startsWith('• ') ? line.slice(2) : line));
+  }, [formData.systemNotes]);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -1085,13 +1093,20 @@ export function PaymentModal({
               />
             </div>
 
-            {formData.systemNotes && (
+            {systemNotesEntries.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   {t('systemNotesLabel') ?? 'Служебные заметки'}
                 </label>
-                <div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-                  {formData.systemNotes}
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  <ul className="space-y-2">
+                    {systemNotesEntries.map((note, idx) => (
+                      <li key={`${note}-${idx}`} className="flex gap-2">
+                        <span className="text-gray-400 leading-6">•</span>
+                        <span className="flex-1 whitespace-pre-wrap">{note}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             )}
