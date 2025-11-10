@@ -287,7 +287,7 @@ public class ContractsController : ControllerBase
             .ToList()
     };
 
-    private async Task<(List<int> ClientIds, IActionResult? Error)> ValidateClientIdsAsync(
+    private async Task<(List<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
         CancellationToken ct)
     {
