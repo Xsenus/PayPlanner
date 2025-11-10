@@ -5,10 +5,7 @@ import { Shield, ShieldPlus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
 import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
-import {
-  MENU_SECTION_KEYS,
-  type MenuPermissionKey,
-} from '../../types/permissions';
+import { MENU_SECTION_KEYS } from '../../types/permissions';
 
 const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {
   calendar: 'Календарь',
@@ -20,15 +17,6 @@ const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = 
   contracts: 'Договоры',
   dictionaries: 'Справочники',
 };
-
-const CALENDAR_OPERATIONS: Array<{ key: MenuPermissionKey | 'canViewAnalytics'; label: string }> = [
-  { key: 'canView', label: 'Просмотр' },
-  { key: 'canCreate', label: 'Создание' },
-  { key: 'canEdit', label: 'Редактирование' },
-  { key: 'canDelete', label: 'Удаление' },
-  { key: 'canExport', label: 'Экспорт' },
-  { key: 'canViewAnalytics', label: 'Аналитика' },
-];
 
 export interface Role {
   id: number;
@@ -164,9 +152,8 @@ export const Roles = () => {
                   </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Создана</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Разделы меню
+                    Права доступа
                   </th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Календарь</th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">Действия</th>
                 </tr>
               </thead>
@@ -186,42 +173,48 @@ export const Roles = () => {
                         {new Date(role.createdAt).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2">
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           {MENU_SECTION_KEYS.map((key) => {
-                            const allowed = perms[key].canView;
+                            const sectionPerms = perms[key];
+                            const canView = sectionPerms.canView;
+                            const badges = [
+                              { label: 'Создание', allowed: sectionPerms.canCreate },
+                              { label: 'Редактирование', allowed: sectionPerms.canEdit },
+                              { label: 'Удаление', allowed: sectionPerms.canDelete },
+                              { label: 'Экспорт', allowed: sectionPerms.canExport },
+                            ];
+                            if (key === 'calendar') {
+                              badges.push({ label: 'Аналитика', allowed: perms.calendar.canViewAnalytics });
+                            }
                             return (
-                              <span
+                              <div
                                 key={key}
-                                className={[
-                                  'inline-flex items-center rounded-full px-2.5 py-1 text-xs',
-                                  allowed
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                                    : 'border border-dashed border-slate-200 text-slate-400',
-                                ].join(' ')}>
-                                {MENU_SECTION_LABELS[key]}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          {CALENDAR_OPERATIONS.map(({ key, label }) => {
-                            const allowed =
-                              key === 'canViewAnalytics'
-                                ? perms.calendar.canViewAnalytics
-                                : perms.calendar[key as MenuPermissionKey];
-                            return (
-                              <span
-                                key={key}
-                                className={[
-                                  'inline-flex items-center rounded-full px-2.5 py-1 text-xs',
-                                  allowed
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-100'
-                                    : 'border border-dashed border-slate-200 text-slate-400',
-                                ].join(' ')}>
-                                {label}
-                              </span>
+                                className="rounded-lg border border-slate-200 bg-slate-50 p-3 shadow-sm">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold text-slate-800">
+                                    {MENU_SECTION_LABELS[key]}
+                                  </span>
+                                  <span
+                                    className={`text-xs font-semibold ${
+                                      canView ? 'text-emerald-600' : 'text-slate-400'
+                                    }`}>
+                                    {canView ? 'Открыт' : 'Закрыт'}
+                                  </span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {badges.map((badge) => (
+                                    <span
+                                      key={`${key}-${badge.label}`}
+                                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                        badge.allowed
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                          : 'border border-dashed border-slate-200 text-slate-400'
+                                      }`}>
+                                      {badge.allowed ? '✓' : '✕'} {badge.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
                             );
                           })}
                         </div>

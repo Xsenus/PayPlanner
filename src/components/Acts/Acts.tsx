@@ -105,14 +105,18 @@ export function Acts() {
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
-  const summaryBuckets = summary ?? {
-    created: { amount: 0, count: 0 },
-    transferred: { amount: 0, count: 0 },
-    signed: { amount: 0, count: 0 },
-    terminated: { amount: 0, count: 0 },
-    totalAmount: 0,
-    totalCount: 0,
-  };
+  const summaryBuckets = useMemo(
+    () =>
+      summary ?? {
+        created: { amount: 0, count: 0 },
+        transferred: { amount: 0, count: 0 },
+        signed: { amount: 0, count: 0 },
+        terminated: { amount: 0, count: 0 },
+        totalAmount: 0,
+        totalCount: 0,
+      },
+    [summary],
+  );
 
   const statusLabels: Record<ActStatus, string> = {
     Created: t('actStatusCreated') ?? 'Создан',

@@ -32,6 +32,8 @@ import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
   Act,
@@ -45,6 +47,7 @@ import type {
   Payment,
   PaymentStatus,
 } from '../../types';
+import type { MenuSectionKey } from '../../types/permissions';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
@@ -125,6 +128,14 @@ const SECTION_META: Record<
   },
 };
 
+const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
+  payments: 'clients',
+  accounts: 'accounts',
+  acts: 'acts',
+  contracts: 'contracts',
+  settlement: 'clients',
+};
+
 const ACT_STATUS_ORDER: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 
 const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
@@ -186,6 +197,15 @@ const MAX_DATE = '2100-12-31';
 
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const clientPermissions = permissions.clients;
+  const accountPermissions = permissions.accounts;
+  const actPermissions = permissions.acts;
+  const sectionPermissions = useCallback(
+    (section: ClientDetailSection) => permissions[SECTION_PERMISSION_MAP[section]],
+    [permissions],
+  );
   const [clientName, setClientName] = useState<string>('...');
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
 
@@ -335,6 +355,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const openInvoiceCreate = () => {
+    if (!accountPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления счетов.');
+      return;
+    }
     setInvoiceModalMode('create');
     setSelectedInvoice(null);
     setInvoiceModalError(null);
@@ -342,6 +366,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const openInvoiceEdit = (invoice: Invoice) => {
+    if (!accountPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования счетов.');
+      return;
+    }
     setInvoiceModalMode('edit');
     setSelectedInvoice(invoice);
     setInvoiceModalError(null);
@@ -378,10 +406,19 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   }, [invoiceModalOpen, ensureInvoiceClients]);
 
   const submitInvoice = async (payload: InvoiceInput) => {
+    const isEdit = invoiceModalMode === 'edit' && selectedInvoice;
+    if (isEdit && !accountPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования счетов.');
+      return;
+    }
+    if (!isEdit && !accountPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления счетов.');
+      return;
+    }
     setInvoiceSubmitting(true);
     setInvoiceModalError(null);
     try {
-      if (invoiceModalMode === 'edit' && selectedInvoice) {
+      if (isEdit && selectedInvoice) {
         await updateClientInvoice(selectedInvoice.id, payload);
       } else {
         await createClientInvoice(payload);
@@ -395,6 +432,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const removeInvoice = async (invoice: Invoice) => {
+    if (!accountPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления счетов.');
+      return;
+    }
     if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
     try {
       await deleteClientInvoice(invoice.id);
@@ -423,10 +464,36 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('create');
-  const [activeSection, setActiveSection] = useState<ClientDetailSection>('payments');
+
+  const visibleSections = useMemo(
+    () => SECTION_ORDER.filter((section) => sectionPermissions(section).canView),
+    [sectionPermissions],
+  );
+
+  const [activeSection, setActiveSection] = useState<ClientDetailSection>(() => {
+    const firstAllowed = SECTION_ORDER.find((section) => {
+      try {
+        return sectionPermissions(section).canView;
+      } catch {
+        return false;
+      }
+    });
+    return firstAllowed ?? 'payments';
+  });
+
+  useEffect(() => {
+    if (!sectionPermissions(activeSection).canView) {
+      const fallback = SECTION_ORDER.find((section) => sectionPermissions(section).canView);
+      if (fallback) setActiveSection(fallback);
+    }
+  }, [activeSection, sectionPermissions]);
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
+
+  const showPermissionWarning = useCallback((message: string) => {
+    window.alert(message || 'Недостаточно прав для выполнения действия.');
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -658,16 +725,28 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   }, [actModalOpen, ensureActLookups]);
 
   const openAddPayment = () => {
+    if (!clientPermissions.canCreate) {
+      showPermissionWarning(t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.');
+      return;
+    }
     setActiveSection('payments');
     setEditingPayment(null);
     setPayModalOpen(true);
   };
   const openEditPayment = (p: Payment) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+      return;
+    }
     setActiveSection('payments');
     setEditingPayment(p);
     setPayModalOpen(true);
   };
   const openAddAct = () => {
+    if (!actPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления актов.');
+      return;
+    }
     setActiveSection('acts');
     setActModalMode('create');
     setSelectedAct(null);
@@ -675,15 +754,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setActModalOpen(true);
   };
   const openEditAct = (act: Act) => {
+    if (!actPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования актов.');
+      return;
+    }
     setActiveSection('acts');
     setActModalMode('edit');
     setSelectedAct(act);
     setActModalError(null);
     setActModalOpen(true);
-  };
-  const notifyFeatureInProgress = (section: ClientDetailSection) => {
-    const meta = SECTION_META[section];
-    alert(`${meta.label} пока в разработке.`);
   };
   const closePayModal = () => {
     setPayModalOpen(false);
@@ -709,7 +788,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   });
 
   const submitPayment = async (payload: PaymentUpsert) => {
-    if ('id' in payload) {
+    const isEdit = 'id' in payload;
+    if (isEdit && !clientPermissions.canEdit) {
+      showPermissionWarning(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+      return;
+    }
+    if (!isEdit && !clientPermissions.canCreate) {
+      showPermissionWarning(t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.');
+      return;
+    }
+    if (isEdit) {
       await updatePayment({ ...toBody(payload as PaymentBody), id: payload.id });
     } else {
       await createPayment(toBody(payload as PaymentBody));
@@ -720,6 +808,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const removePayment = async (id: number) => {
+    if (!clientPermissions.canDelete) {
+      showPermissionWarning(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
+      return;
+    }
     if (!window.confirm('Удалить платёж?')) return;
     await deletePayment(id);
     await refreshPayments();
@@ -741,7 +833,18 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     };
 
     try {
-      if (actModalMode === 'edit' && selectedAct) {
+      const isEdit = actModalMode === 'edit' && selectedAct;
+      if (isEdit && !actPermissions.canEdit) {
+        showPermissionWarning('Недостаточно прав для редактирования актов.');
+        setActSubmitting(false);
+        return;
+      }
+      if (!isEdit && !actPermissions.canCreate) {
+        showPermissionWarning('Недостаточно прав для добавления актов.');
+        setActSubmitting(false);
+        return;
+      }
+      if (isEdit && selectedAct) {
         await updateAct(selectedAct.id, body);
       } else {
         await createAct(body);
@@ -755,6 +858,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const removeAct = async (act: Act) => {
+    if (!actPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления актов.');
+      return;
+    }
     if (!window.confirm(`Удалить акт №${act.number}?`)) return;
     try {
       await deleteAct(act.id);
@@ -782,25 +889,83 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const openAddCase = () => {
+    if (!clientPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления дел.');
+      return;
+    }
     setEditingCase(null);
     setCaseMode('create');
     setCaseModalOpen(true);
   };
   const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
+    if (caseMode === 'edit' && editingCase) {
+      if (!clientPermissions.canEdit) {
+        showPermissionWarning('Недостаточно прав для редактирования дел.');
+        return;
+      }
+    } else if (!clientPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления дел.');
+      return;
+    }
+
     const base: Omit<ClientCase, 'id' | 'createdAt' | 'payments'> = {
       clientId,
-      title: (patch.title ?? '').trim(),
-      description: (patch.description ?? '').trim(),
-      status: (patch.status ?? 'Open') as ClientCase['status'],
+      title: (patch.title ?? editingCase?.title ?? '').trim(),
+      description: (patch.description ?? editingCase?.description ?? '').trim(),
+      status: (patch.status ?? editingCase?.status ?? 'Open') as ClientCase['status'],
     };
-    const created = await apiService.createCase(base);
-    setCasesLocal((prev) => [created, ...(prev ?? [])]);
-    setSelectedCaseId(created.id);
+
+    if (caseMode === 'edit' && editingCase) {
+      const updated = await apiService.updateCase(editingCase.id, base);
+      setCasesLocal((prev) =>
+        (prev ?? []).map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+      );
+      setCaseModalOpen(false);
+      setEditingCase(updated);
+    } else {
+      const created = await apiService.createCase(base);
+      setCasesLocal((prev) => [created, ...(prev ?? [])]);
+      setSelectedCaseId(created.id);
+      setCaseModalOpen(false);
+      setEditingCase(null);
+    }
+  };
+
+  const deleteCase = async (): Promise<void> => {
+    if (!editingCase) return;
+    if (!clientPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления дел.');
+      return;
+    }
+    await apiService.deleteCase(editingCase.id);
+    setCasesLocal((prev) => (prev ?? []).filter((item) => item.id !== editingCase.id));
     setCaseModalOpen(false);
     setEditingCase(null);
+    setSelectedCaseId('all');
   };
 
   const notFound = !loadingPayments && clientName === '...' && payments.length === 0;
+
+  if (visibleSections.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-white px-6 py-10 text-center shadow-sm">
+          <Ban className="mx-auto h-12 w-12 text-red-500" />
+          <h1 className="mt-4 text-2xl font-semibold text-red-700">Доступ к данным клиента ограничен</h1>
+          <p className="mt-2 text-sm text-red-600">
+            Недостаточно прав для просмотра разделов этой карточки. Обратитесь к администратору.
+          </p>
+          <button
+            type="button"
+            onClick={onBack}
+            className="mt-6 inline-flex items-center justify-center rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            Назад
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -819,14 +984,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               title={clientName}>
               {clientName}
             </h1>
-            <button
-              type="button"
-              onClick={openAddCase}
-              title="Добавить дело"
-              aria-label="Добавить дело"
-              className="order-3 sm:order-2 ml-auto sm:ml-2 w-12 h-12 inline-flex items-center justify-center rounded-lg border border-dashed border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 transition-colors shrink-0">
-              <PlusCircle size={24} />
-            </button>
+            {clientPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddCase}
+                title="Добавить дело"
+                aria-label="Добавить дело"
+                className="order-3 sm:order-2 ml-auto sm:ml-2 w-12 h-12 inline-flex items-center justify-center rounded-lg border border-dashed border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 transition-colors shrink-0">
+                <PlusCircle size={24} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1027,13 +1194,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 >
                   {t('invoiceFiltersReset') ?? 'Сбросить'}
                 </button>
-                <button
-                  type="button"
-                  onClick={openInvoiceCreate}
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-                >
-                  <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
-                </button>
+                {accountPermissions.canCreate && (
+                  <button
+                    type="button"
+                    onClick={openInvoiceCreate}
+                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+                  >
+                    <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
+                  </button>
+                )}
               </div>
             </div>
           </>
@@ -1041,7 +1210,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div className="flex flex-wrap gap-2">
-            {SECTION_ORDER.map((section) => {
+            {visibleSections.map((section) => {
               const meta = SECTION_META[section];
               const isActive = activeSection === section;
               return (
@@ -1061,48 +1230,30 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
 
           <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('payments');
-                openAddPayment();
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
-              <Plus size={16} /> {SECTION_META.payments.actionLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('accounts');
-                notifyFeatureInProgress('accounts');
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-              <Plus size={16} /> {SECTION_META.accounts.actionLabel}
-            </button>
-            <button
-              type="button"
-              onClick={openAddAct}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-              <Plus size={16} /> {SECTION_META.acts.actionLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('contracts');
-                notifyFeatureInProgress('contracts');
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-              <Plus size={16} /> {SECTION_META.contracts.actionLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('settlement');
-                notifyFeatureInProgress('settlement');
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-              <Calculator size={16} /> {SECTION_META.settlement.actionLabel}
-            </button>
+            {activeSection === 'payments' && clientPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddPayment}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                <Plus size={16} /> {SECTION_META.payments.actionLabel}
+              </button>
+            )}
+            {activeSection === 'accounts' && accountPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openInvoiceCreate}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                <Plus size={16} /> {SECTION_META.accounts.actionLabel}
+              </button>
+            )}
+            {activeSection === 'acts' && actPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddAct}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                <Plus size={16} /> {SECTION_META.acts.actionLabel}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1163,13 +1314,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                           <p className="text-sm font-medium text-gray-900 leading-none">
                             {toRuDate(payment.date)}
                           </p>
-                          <button
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
-                            onClick={() => openEditPayment(payment)}
-                            title="Редактировать"
-                            aria-label="Редактировать">
-                            <Edit size={16} />
-                          </button>
+                          {clientPermissions.canEdit && (
+                            <button
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
+                              onClick={() => openEditPayment(payment)}
+                              title="Редактировать"
+                              aria-label="Редактировать">
+                              <Edit size={16} />
+                            </button>
+                          )}
                         </div>
                         <div className="flex items-center justify-end gap-2">
                           {(() => {
@@ -1201,13 +1354,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                               </>
                             );
                           })()}
-                          <button
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
-                            onClick={() => removePayment(payment.id)}
-                            title="Удалить"
-                            aria-label="Удалить">
-                            <Trash2 size={16} />
-                          </button>
+                          {clientPermissions.canDelete && (
+                            <button
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
+                              onClick={() => removePayment(payment.id)}
+                              title="Удалить"
+                              aria-label="Удалить">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1303,24 +1458,28 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                             <td className="px-4 py-3 text-gray-900">{toRuDate(invoice.createdAt)}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => openInvoiceEdit(invoice)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                  title={t('edit') ?? 'Редактировать'}
-                                  aria-label={t('edit') ?? 'Редактировать'}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => removeInvoice(invoice)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
-                                  title={t('delete') ?? 'Удалить'}
-                                  aria-label={t('delete') ?? 'Удалить'}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                                {accountPermissions.canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openInvoiceEdit(invoice)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                    title={t('edit') ?? 'Редактировать'}
+                                    aria-label={t('edit') ?? 'Редактировать'}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </button>
+                                )}
+                                {accountPermissions.canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeInvoice(invoice)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                    title={t('delete') ?? 'Удалить'}
+                                    aria-label={t('delete') ?? 'Удалить'}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1558,24 +1717,28 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                                 <td className="px-4 py-3 text-gray-900">{act.counterpartyInn ?? '—'}</td>
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => openEditAct(act)}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                      title={t('edit') ?? 'Редактировать'}
-                                      aria-label={t('edit') ?? 'Редактировать'}
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeAct(act)}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
-                                      title={t('delete') ?? 'Удалить'}
-                                      aria-label={t('delete') ?? 'Удалить'}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
+                                    {actPermissions.canEdit && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditAct(act)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                        title={t('edit') ?? 'Редактировать'}
+                                        aria-label={t('edit') ?? 'Редактировать'}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    {actPermissions.canDelete && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeAct(act)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                        title={t('delete') ?? 'Удалить'}
+                                        aria-label={t('delete') ?? 'Удалить'}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1706,7 +1869,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   } as ClientCase)
             }
             onSave={saveCase}
-            onDelete={undefined}
+            onDelete={caseMode === 'edit' && clientPermissions.canDelete ? deleteCase : undefined}
           />
         )}
 

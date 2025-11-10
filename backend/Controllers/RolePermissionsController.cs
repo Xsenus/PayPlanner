@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -12,7 +13,6 @@ namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [Route("api/role-permissions")]
-[Authorize(Policy = "Admin")]
 public class RolePermissionsController : ControllerBase
 {
     private static readonly string[] Sections =
@@ -32,8 +32,29 @@ public class RolePermissionsController : ControllerBase
     public RolePermissionsController(PaymentContext db) => _db = db;
 
     [HttpGet("{roleId:int}")]
+    [Authorize]
     public async Task<ActionResult<RolePermissionsDto>> Get(int roleId, CancellationToken ct)
     {
+        if (!User.IsInRole("admin"))
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(userIdClaim, out var userId))
+            {
+                return Forbid();
+            }
+
+            var userRoleId = await _db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => u.RoleId)
+                .FirstOrDefaultAsync(ct);
+
+            if (userRoleId == 0 || userRoleId != roleId)
+            {
+                return Forbid();
+            }
+        }
+
         if (!await _db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct))
         {
             return NotFound();
@@ -48,6 +69,7 @@ public class RolePermissionsController : ControllerBase
     }
 
     [HttpPut("{roleId:int}")]
+    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> Update(int roleId, [FromBody] RolePermissionsDto request, CancellationToken ct)
     {
         if (!await _db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct))
@@ -101,6 +123,7 @@ public class RolePermissionsController : ControllerBase
     }
 
     [HttpDelete("{roleId:int}")]
+    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> Reset(int roleId, CancellationToken ct)
     {
         var entries = await _db.RolePermissions
