@@ -194,6 +194,22 @@ export class ApiService {
     return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
   }
 
+  // ===== Role permissions =====
+  async getRolePermissions(roleId: number) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`);
+  }
+
+  async updateRolePermissions(roleId: number, permissions: RolePermissions) {
+    return this.request<void>(`/role-permissions/${roleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(permissions),
+    });
+  }
+
+  async resetRolePermissions(roleId: number) {
+    return this.request<void>(`/role-permissions/${roleId}`, { method: 'DELETE' });
+  }
+
   // ===== Payments (back-compat + расширенные варианты) =====
 
   // Перегрузки — чтобы не ломать старые вызовы
@@ -680,3 +696,4 @@ import type {
   SummaryStatus,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
+import type { RolePermissions } from '../types/permissions';

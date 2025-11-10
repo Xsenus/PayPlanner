@@ -1,35 +1,19 @@
+import { apiService } from './api';
 import {
   defaultRolePermissions,
   type RolePermissions,
 } from '../types/permissions';
 
-const STORAGE_KEY = 'pp.role.permissions';
 const CHANGE_EVENT = 'pp.permissions.changed';
-
-type PermissionsMap = Record<string, Partial<RolePermissions>>;
 
 type ChangeListener = (roleId?: number) => void;
 
-function readStorage(): PermissionsMap {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return {};
-    return parsed as PermissionsMap;
-  } catch (error) {
-    console.warn('Не удалось прочитать настройки прав ролей', error);
-    return {};
-  }
-}
+type PermissionsCache = Map<number, RolePermissions>;
 
-function writeStorage(data: PermissionsMap) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (error) {
-    console.warn('Не удалось сохранить настройки прав ролей', error);
-  }
-}
+type LoadingCache = Map<number, Promise<RolePermissions>>;
+
+const cache: PermissionsCache = new Map();
+const loading: LoadingCache = new Map();
 
 function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
   const source = perms ?? {};
@@ -69,50 +53,84 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
   };
 }
 
-function clonePermissions(perms: Partial<RolePermissions> | null | undefined): RolePermissions {
-  const normalized = normalizePermissions(perms);
+function clonePermissions(perms: RolePermissions): RolePermissions {
   return {
-    calendar: { ...normalized.calendar },
-    reports: { ...normalized.reports },
-    calculator: { ...normalized.calculator },
-    clients: { ...normalized.clients },
-    accounts: { ...normalized.accounts },
-    acts: { ...normalized.acts },
-    contracts: { ...normalized.contracts },
-    dictionaries: { ...normalized.dictionaries },
+    calendar: { ...perms.calendar },
+    reports: { ...perms.reports },
+    calculator: { ...perms.calculator },
+    clients: { ...perms.clients },
+    accounts: { ...perms.accounts },
+    acts: { ...perms.acts },
+    contracts: { ...perms.contracts },
+    dictionaries: { ...perms.dictionaries },
   };
+}
+
+function notify(roleId?: number) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { roleId } }));
+  } catch (error) {
+    console.warn('Не удалось уведомить об изменении прав', error);
+  }
+}
+
+async function fetchRolePermissions(roleId: number): Promise<RolePermissions> {
+  if (loading.has(roleId)) {
+    return loading.get(roleId)!;
+  }
+
+  const promise = apiService
+    .getRolePermissions(roleId)
+    .then((response) => normalizePermissions(response))
+    .catch((error) => {
+      console.warn('Не удалось загрузить права роли', error);
+      return clonePermissions(defaultRolePermissions);
+    })
+    .then((normalized) => {
+      cache.set(roleId, normalized);
+      notify(roleId);
+      return normalized;
+    })
+    .finally(() => {
+      loading.delete(roleId);
+    });
+
+  loading.set(roleId, promise);
+  return promise;
 }
 
 export function getRolePermissions(roleId?: number | null): RolePermissions {
   if (!roleId) {
     return clonePermissions(defaultRolePermissions);
   }
-  const map = readStorage();
-  const key = String(roleId);
-  const stored = map[key];
-  return clonePermissions(stored ?? defaultRolePermissions);
+
+  const cached = cache.get(roleId);
+  if (cached) {
+    return clonePermissions(cached);
+  }
+
+  void fetchRolePermissions(roleId);
+  return clonePermissions(defaultRolePermissions);
 }
 
-export function setRolePermissions(roleId: number, permissions: RolePermissions) {
-  const map = readStorage();
-  map[String(roleId)] = clonePermissions(permissions);
-  writeStorage(map);
-  try {
-    window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { roleId } }));
-  } catch {
-    /* ignore */
-  }
+export async function refreshRolePermissions(roleId: number) {
+  await fetchRolePermissions(roleId);
 }
 
-export function resetRolePermissions(roleId: number) {
-  const map = readStorage();
-  delete map[String(roleId)];
-  writeStorage(map);
-  try {
-    window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { roleId } }));
-  } catch {
-    /* ignore */
-  }
+export async function setRolePermissions(roleId: number, permissions: RolePermissions) {
+  const normalized = normalizePermissions(permissions);
+  await apiService.updateRolePermissions(roleId, normalized);
+  cache.set(roleId, normalized);
+  notify(roleId);
+}
+
+export async function resetRolePermissions(roleId: number) {
+  await apiService.resetRolePermissions(roleId);
+  cache.delete(roleId);
+  notify(roleId);
 }
 
 export function subscribeOnPermissionsChange(listener: ChangeListener) {

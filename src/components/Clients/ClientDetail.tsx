@@ -28,17 +28,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
+import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { PaymentModal } from '../Calendar/PaymentModal';
-import type { Act, ActInput, ActResponsible, ActStatus, Client, ClientCase, Payment } from '../../types';
+import type {
+  Act,
+  ActInput,
+  ActResponsible,
+  ActStatus,
+  Client,
+  ClientCase,
+  Invoice,
+  InvoiceInput,
+  Payment,
+  PaymentStatus,
+} from '../../types';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ActModal } from '../Acts/ActModal';
+import { InvoiceModal } from '../Accounts/InvoiceModal';
 
 interface ClientDetailProps {
   clientId: number;
@@ -120,6 +133,14 @@ const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
   Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
   Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
 };
+
+const INVOICE_STATUS_ORDER: PaymentStatus[] = [
+  'Pending',
+  'Overdue',
+  'Completed',
+  'Processing',
+  'Cancelled',
+];
 
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
@@ -203,6 +224,34 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [actLookupsLoading, setActLookupsLoading] = useState(false);
   const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
+  const today = useMemo(() => new Date(), []);
+  const startOfYear = useMemo(
+    () => formatLocalYMD(new Date(today.getFullYear(), 0, 1)),
+    [today],
+  );
+  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
+
+  const [invoiceFrom, setInvoiceFrom] = useState<string>(startOfYear);
+  const [invoiceTo, setInvoiceTo] = useState<string>(todayYMD);
+  const [invoiceStatus, setInvoiceStatus] = useState<'all' | PaymentStatus>('all');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
+  const [invoiceSort, setInvoiceSort] = useState<{ key: InvoicesSortKey; direction: 'asc' | 'desc' }>({
+    key: 'date',
+    direction: 'desc',
+  });
+  const [invoicePage, setInvoicePage] = useState(1);
+  const invoicePageSize = 15;
+
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [invoiceModalMode, setInvoiceModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+  const [invoiceModalError, setInvoiceModalError] = useState<string | null>(null);
+  const [invoiceClients, setInvoiceClients] = useState<Client[]>([]);
+  const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
+  const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(null);
+
   const {
     acts: clientActs,
     loading: actsLoading,
@@ -229,6 +278,147 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   useEffect(() => {
     setActPage(1);
   }, [actFrom, actTo, actStatusFilter, debouncedActSearch, clientId]);
+
+  const {
+    invoices: clientInvoices,
+    loading: invoicesLoading,
+    refreshing: invoicesRefreshing,
+    error: invoicesError,
+    summary: invoicesSummary,
+    pagination: invoicesPagination,
+    refresh: refreshInvoices,
+    createInvoice: createClientInvoice,
+    updateInvoice: updateClientInvoice,
+    deleteInvoice: deleteClientInvoice,
+  } = useInvoices({
+    from: invoiceFrom || undefined,
+    to: invoiceTo || undefined,
+    status: invoiceStatus === 'all' ? undefined : invoiceStatus,
+    clientId,
+    search: debouncedInvoiceSearch || undefined,
+    sortBy: invoiceSort.key,
+    sortDir: invoiceSort.direction,
+    page: invoicePage,
+    pageSize: invoicePageSize,
+  });
+
+  useEffect(() => {
+    setInvoicePage(1);
+  }, [invoiceFrom, invoiceTo, invoiceStatus, debouncedInvoiceSearch, clientId]);
+
+  const invoiceTotalPages = useMemo(() => {
+    if (!invoicesPagination.pageSize) return 1;
+    return Math.max(1, Math.ceil((invoicesPagination.total ?? 0) / invoicesPagination.pageSize));
+  }, [invoicesPagination.pageSize, invoicesPagination.total]);
+
+  const invoiceSummaryBuckets = invoicesSummary ?? {
+    total: { amount: 0, count: 0 },
+    pending: { amount: 0, count: 0 },
+    paid: { amount: 0, count: 0 },
+    overdue: { amount: 0, count: 0 },
+  };
+
+  const invoiceStatusLabels: Record<PaymentStatus, string> = {
+    Pending: t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается',
+    Completed: t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачено',
+    Overdue: t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочено',
+    Processing: t('processingStatus') ?? 'В обработке',
+    Cancelled: t('cancelledStatus') ?? 'Отменено',
+  };
+
+  const invoiceStatusClasses: Record<PaymentStatus, string> = {
+    Pending: 'bg-amber-100 text-amber-700 border border-amber-200',
+    Completed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
+    Processing: 'bg-blue-100 text-blue-700 border border-blue-200',
+    Cancelled: 'bg-slate-100 text-slate-600 border border-slate-200',
+  };
+
+  const openInvoiceCreate = () => {
+    setInvoiceModalMode('create');
+    setSelectedInvoice(null);
+    setInvoiceModalError(null);
+    setInvoiceModalOpen(true);
+  };
+
+  const openInvoiceEdit = (invoice: Invoice) => {
+    setInvoiceModalMode('edit');
+    setSelectedInvoice(invoice);
+    setInvoiceModalError(null);
+    setInvoiceModalOpen(true);
+  };
+
+  const closeInvoiceModal = () => {
+    setInvoiceModalOpen(false);
+    setSelectedInvoice(null);
+    setInvoiceModalError(null);
+  };
+
+  const ensureInvoiceClients = useCallback(async () => {
+    if (!invoiceModalOpen) return;
+    if (invoiceClients.length > 0 && !invoiceLookupsError) return;
+    setInvoiceLookupsLoading(true);
+    try {
+      const list = await apiService.getClients();
+      setInvoiceClients(list ?? []);
+      setInvoiceLookupsError(null);
+    } catch (err) {
+      setInvoiceLookupsError(
+        err instanceof Error ? err.message : t('clientsLoadError') ?? 'Не удалось загрузить клиентов',
+      );
+    } finally {
+      setInvoiceLookupsLoading(false);
+    }
+  }, [invoiceModalOpen, invoiceClients.length, invoiceLookupsError, t]);
+
+  useEffect(() => {
+    if (invoiceModalOpen) {
+      void ensureInvoiceClients();
+    }
+  }, [invoiceModalOpen, ensureInvoiceClients]);
+
+  const submitInvoice = async (payload: InvoiceInput) => {
+    setInvoiceSubmitting(true);
+    setInvoiceModalError(null);
+    try {
+      if (invoiceModalMode === 'edit' && selectedInvoice) {
+        await updateClientInvoice(selectedInvoice.id, payload);
+      } else {
+        await createClientInvoice(payload);
+      }
+      closeInvoiceModal();
+    } catch (err) {
+      setInvoiceModalError(err instanceof Error ? err.message : 'Не удалось сохранить счёт');
+    } finally {
+      setInvoiceSubmitting(false);
+    }
+  };
+
+  const removeInvoice = async (invoice: Invoice) => {
+    if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
+    try {
+      await deleteClientInvoice(invoice.id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Не удалось удалить счёт');
+    }
+  };
+
+  const resetInvoiceFilters = () => {
+    setInvoiceFrom(startOfYear);
+    setInvoiceTo(todayYMD);
+    setInvoiceStatus('all');
+    setInvoiceSearch('');
+  };
+
+  const handleInvoiceSort = (key: InvoicesSortKey) => {
+    setInvoiceSort((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: key === 'date' || key === 'createdAt' ? 'desc' : 'asc' };
+    });
+    setInvoicePage(1);
+  };
 
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
@@ -346,6 +536,45 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
     return actClients;
   }, [actClients, clientId, clientName]);
+
+  const invoiceModalClients = useMemo(() => {
+    const normalizedName = clientName && clientName !== '...' ? clientName : `Клиент #${clientId}`;
+    if (invoiceClients.length === 0) {
+      return [
+        {
+          id: clientId,
+          name: normalizedName,
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '1970-01-01T00:00:00.000Z',
+          isActive: true,
+        } satisfies Client,
+      ];
+    }
+
+    const hasClient = invoiceClients.some((c) => c.id === clientId);
+    if (!hasClient) {
+      return [
+        ...invoiceClients,
+        {
+          id: clientId,
+          name: normalizedName,
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '1970-01-01T00:00:00.000Z',
+          isActive: true,
+        } satisfies Client,
+      ];
+    }
+
+    return invoiceClients;
+  }, [invoiceClients, clientId, clientName]);
 
   const actSummaryBuckets = useMemo(
     () =>
@@ -689,6 +918,125 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               </div>
             </div>
           </>
+        ) : activeSection === 'accounts' ? (
+          <>
+            <div className="grid gap-4 mb-6 md:grid-cols-3">
+              {[
+                {
+                  key: 'total',
+                  title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего',
+                  value: invoiceSummaryBuckets.total.amount,
+                  count: invoiceSummaryBuckets.total.count,
+                  accent: 'border border-blue-100 bg-blue-50 text-blue-700',
+                  icon: WalletCards,
+                },
+                {
+                  key: 'overdue',
+                  title: t('invoiceSummaryOverdue') ?? 'Просрочено',
+                  value: invoiceSummaryBuckets.overdue.amount,
+                  count: invoiceSummaryBuckets.overdue.count,
+                  accent: 'border border-rose-100 bg-rose-50 text-rose-700',
+                  icon: AlertTriangle,
+                },
+                {
+                  key: 'paid',
+                  title: t('invoiceSummaryPaid') ?? 'Оплачено',
+                  value: invoiceSummaryBuckets.paid.amount,
+                  count: invoiceSummaryBuckets.paid.count,
+                  accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700',
+                  icon: CheckCircle2,
+                },
+              ].map((card) => {
+                const Icon = card.icon;
+                return (
+                  <div key={card.key} className={`rounded-2xl p-5 shadow-sm ${card.accent}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{card.title}</p>
+                        <p className="mt-2 text-2xl font-semibold">
+                          {formatCurrencySmart(card.value).full}
+                        </p>
+                      </div>
+                      <Icon className="h-10 w-10 opacity-80" />
+                    </div>
+                    <p className="mt-4 text-xs">
+                      {(t('invoiceSummaryCount') ?? 'Количество счетов') + ': '} {card.count}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <CalendarRange className="h-4 w-4 text-gray-500" />
+                <input
+                  type="date"
+                  value={invoiceFrom}
+                  onChange={(e) => setInvoiceFrom(e.target.value)}
+                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                />
+                <span className="text-gray-500">—</span>
+                <input
+                  type="date"
+                  value={invoiceTo}
+                  onChange={(e) => setInvoiceTo(e.target.value)}
+                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={invoiceStatus}
+                  onChange={(e) => setInvoiceStatus(e.target.value as 'all' | PaymentStatus)}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                >
+                  <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+                  {INVOICE_STATUS_ORDER.map((status) => (
+                    <option key={status} value={status}>
+                      {invoiceStatusLabels[status]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  value={invoiceSearch}
+                  onChange={(e) => setInvoiceSearch(e.target.value)}
+                  placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта или акт'}
+                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => refreshInvoices()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <RotateCcw className={invoicesRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                  {t('invoiceRefresh') ?? 'Обновить'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetInvoiceFilters}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  {t('invoiceFiltersReset') ?? 'Сбросить'}
+                </button>
+                <button
+                  type="button"
+                  onClick={openInvoiceCreate}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+                >
+                  <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
+                </button>
+              </div>
+            </div>
+          </>
         ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -866,6 +1214,150 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   ))}
                 </div>
               )
+            ) : activeSection === 'accounts' ? (
+              <>
+                {invoicesLoading ? (
+                  <div className="py-10 text-center text-gray-500">
+                    <div className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {t('loading') ?? 'Загрузка...'}
+                    </div>
+                  </div>
+                ) : clientInvoices.length === 0 ? (
+                  <div className="py-10 text-center text-gray-500">
+                    {invoicesError ?? t('invoicesEmpty') ?? 'Счета не найдены'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          {[
+                            { key: 'date' as InvoicesSortKey, label: t('invoiceDate') ?? 'Дата' },
+                            { key: 'number' as InvoicesSortKey, label: t('invoiceNumber') ?? 'Номер счёта' },
+                            { key: 'amount' as InvoicesSortKey, label: t('invoiceAmount') ?? 'Сумма' },
+                            { key: 'status' as InvoicesSortKey, label: t('invoiceStatus') ?? 'Статус' },
+                            { key: 'dueDate' as InvoicesSortKey, label: t('invoiceDueDate') ?? 'Срок оплаты' },
+                            { key: 'responsible' as InvoicesSortKey, label: t('invoiceResponsible') ?? 'Ответственный' },
+                            { key: 'createdAt' as InvoicesSortKey, label: t('createdAt') ?? 'Создан' },
+                            { key: 'number' as InvoicesSortKey, label: t('actions') ?? 'Действия', sortable: false },
+                          ].map((column) => {
+                            const isSortable = column.sortable !== false;
+                            const isActive = invoiceSort.key === column.key;
+                            const direction = isActive ? invoiceSort.direction : undefined;
+                            return (
+                              <th key={column.label} scope="col" className="px-4 py-3">
+                                {isSortable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleInvoiceSort(column.key)}
+                                    className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                                  >
+                                    {column.label}
+                                    <span className="text-gray-400">
+                                      {isActive ? (direction === 'asc' ? '▲' : '▼') : ''}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span>{column.label}</span>
+                                )}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
+                        {clientInvoices.map((invoice) => (
+                          <tr key={invoice.id} className="hover:bg-gray-50/80">
+                            <td className="px-4 py-3 font-medium text-gray-900">{toRuDate(invoice.date)}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-gray-900">№{invoice.number}</div>
+                              {invoice.clientCaseTitle ? (
+                                <div className="text-xs text-gray-500">{invoice.clientCaseTitle}</div>
+                              ) : null}
+                              {invoice.actNumber ? (
+                                <div className="text-xs text-gray-500">
+                                  {(t('invoiceAct') ?? 'Акт')} №{invoice.actNumber}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-gray-900">
+                              {formatCurrencySmart(invoice.amount).full}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${invoiceStatusClasses[invoice.status]}`}
+                              >
+                                {invoiceStatusLabels[invoice.status]}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-900">
+                              {invoice.dueDate ? toRuDate(invoice.dueDate) : '—'}
+                              {invoice.paidDate ? (
+                                <div className="text-xs text-emerald-600">
+                                  {(t('invoicePaidOn') ?? 'Оплачен') + ': '} {toRuDate(invoice.paidDate)}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 text-gray-900">{invoice.responsibleName ?? '—'}</td>
+                            <td className="px-4 py-3 text-gray-900">{toRuDate(invoice.createdAt)}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openInvoiceEdit(invoice)}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                  title={t('edit') ?? 'Редактировать'}
+                                  aria-label={t('edit') ?? 'Редактировать'}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeInvoice(invoice)}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                  title={t('delete') ?? 'Удалить'}
+                                  aria-label={t('delete') ?? 'Удалить'}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {clientInvoices.length > 0 && !invoicesLoading ? (
+                  <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                    <div>
+                      {(t('recordsFound') ?? 'Найдено записей')}: {invoicesPagination.total}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setInvoicePage((value) => Math.max(1, value - 1))}
+                        disabled={invoicePage <= 1}
+                        className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t('previous') ?? 'Назад'}
+                      </button>
+                      <span>
+                        {invoicesPagination.page} / {invoiceTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setInvoicePage((value) => Math.min(invoiceTotalPages, value + 1))}
+                        disabled={invoicePage >= invoiceTotalPages}
+                        className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t('next') ?? 'Вперёд'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : activeSection === 'acts' ? (
               <>
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -1151,6 +1643,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             )}
           </div>
         </div>
+
+        <InvoiceModal
+          open={invoiceModalOpen}
+          mode={invoiceModalMode}
+          invoice={selectedInvoice}
+          onClose={closeInvoiceModal}
+          onSubmit={submitInvoice}
+          submitting={invoiceSubmitting}
+          errorMessage={invoiceModalError}
+          clients={invoiceModalClients}
+          lookupsLoading={invoiceLookupsLoading}
+          lookupsError={invoiceLookupsError}
+          defaultClientId={clientId}
+        />
 
         <ActModal
           open={actModalOpen}

@@ -23,6 +23,7 @@ namespace PayPlanner.Api.Services
         {
             await SeedDictionariesAsync(context);          // словари
             await SeedRolesAsync(context);                 // роли (admin, user)
+            await SeedRolePermissionsAsync(context);       // права по ролям
             await SeedAdminUserAsync(context);             // администратор
 
             // Возможность отключить клиентские сиды на проде:
@@ -132,6 +133,57 @@ namespace PayPlanner.Api.Services
             // Досеять недостающие роли
             await EnsureRoleAsync(context, "admin", "Администратор системы");
             await EnsureRoleAsync(context, "user", "Обычный пользователь");
+        }
+
+        private static async Task SeedRolePermissionsAsync(PaymentContext context)
+        {
+            var roles = await context.Roles.AsNoTracking().Select(r => new { r.Id }).ToListAsync();
+            if (roles.Count == 0)
+            {
+                return;
+            }
+
+            var sections = new[]
+            {
+                "calendar",
+                "reports",
+                "calculator",
+                "clients",
+                "accounts",
+                "acts",
+                "contracts",
+                "dictionaries",
+            };
+
+            var existing = await context.RolePermissions
+                .AsNoTracking()
+                .Select(rp => new { rp.RoleId, rp.Section })
+                .ToListAsync();
+
+            foreach (var role in roles)
+            {
+                foreach (var section in sections)
+                {
+                    if (existing.Any(rp => rp.RoleId == role.Id && rp.Section == section))
+                    {
+                        continue;
+                    }
+
+                    context.RolePermissions.Add(new RolePermission
+                    {
+                        RoleId = role.Id,
+                        Section = section,
+                        CanView = true,
+                        CanCreate = true,
+                        CanEdit = true,
+                        CanDelete = true,
+                        CanExport = true,
+                        CanViewAnalytics = section == "calendar",
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
         }
 
         /// <summary>
