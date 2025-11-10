@@ -190,6 +190,20 @@ function toStatsStatusFilter(
   }
 }
 
+function toRuPaymentStatus(status?: string, fallback: string = '—'): string {
+  if (!status) return fallback;
+  const normalized = status.toLowerCase();
+  if (normalized.includes('overdue') || normalized.includes('проср')) return 'Просрочено';
+  if (normalized.includes('complete') || normalized.includes('оплач')) return 'Оплачено';
+  if (normalized.includes('process')) return 'В обработке';
+  if (normalized.includes('cancel')) return 'Отменено';
+  if (normalized.includes('pending') || normalized.includes('ожид')) return 'Ожидается';
+  if (normalized.includes('draft')) return 'Черновик';
+  if (normalized.includes('schedule')) return 'Запланировано';
+  if (normalized.includes('fail') || normalized.includes('error')) return 'Ошибка';
+  return fallback;
+}
+
 const MIN_DATE = '1900-01-01';
 const MAX_DATE = '2100-12-31';
 
@@ -1310,7 +1324,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                     <tbody className="divide-y divide-gray-100 text-slate-700">
                       {visiblePayments.map((payment) => {
                         const status = normalizeStatus(payment.status);
-                        const statusLabel = payment.paymentStatusEntity?.name || payment.status || '—';
+                        const statusLabel = toRuPaymentStatus(
+                          payment.paymentStatusEntity?.name ?? payment.status,
+                          payment.paymentStatusEntity?.name || payment.status || '—',
+                        );
                         const statusBadgeClass =
                           status === 'completed'
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
