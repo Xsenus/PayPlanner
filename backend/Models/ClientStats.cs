@@ -1,57 +1,80 @@
+using System;
+using System.Collections.Generic;
+
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Статистика по клиенту, включая суммы, количество платежей и даты.
+    /// РЎС‚Р°С‚РёСЃС‚РёРєР° РїРѕ РєР»РёРµРЅС‚Сѓ, РІРєР»СЋС‡Р°СЏ СЃСѓРјРјС‹, РєРѕР»РёС‡РµСЃС‚РІРѕ РїР»Р°С‚РµР¶РµР№ Рё РґР°С‚С‹.
     /// </summary>
     public class ClientStats
     {
         /// <summary>
-        /// Идентификатор клиента.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР»РёРµРЅС‚Р°.
         /// </summary>
         public int ClientId { get; set; }
 
         /// <summary>
-        /// Имя клиента.
+        /// РРјСЏ РєР»РёРµРЅС‚Р°.
         /// </summary>
         public string ClientName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Дата последнего платежа.
+        /// Р”Р°С‚Р° РїРѕСЃР»РµРґРЅРµРіРѕ РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public DateTime? LastPaymentDate { get; set; }
 
         /// <summary>
-        /// Чистая сумма (доходы минус расходы).
+        /// Р§РёСЃС‚Р°СЏ СЃСѓРјРјР° (РґРѕС…РѕРґС‹ РјРёРЅСѓСЃ СЂР°СЃС…РѕРґС‹).
         /// </summary>
         public decimal NetAmount { get; set; }
 
         /// <summary>
-        /// Количество оплаченных платежей.
+        /// РљРѕР»РёС‡РµСЃС‚РІРѕ РїР»Р°С‚РµР¶РµР№ РІ РїСЂРѕСЃСЂРѕС‡РєРµ.
+        /// </summary>
+        public int OverduePayments { get; set; }
+
+        /// <summary>
+        /// РљРѕР»РёС‡РµСЃС‚РІРѕ РѕРїР»Р°С‡РµРЅРЅС‹С… РїР»Р°С‚РµР¶РµР№.
         /// </summary>
         public int PaidPayments { get; set; }
 
         /// <summary>
-        /// Количество ожидающих платежей.
+        /// РљРѕР»РёС‡РµСЃС‚РІРѕ РѕР¶РёРґР°СЋС‰РёС… РїР»Р°С‚РµР¶РµР№.
         /// </summary>
         public int PendingPayments { get; set; }
 
         /// <summary>
-        /// Список последних платежей.
+        /// РЎРїРёСЃРѕРє РїРѕСЃР»РµРґРЅРёС… РїР»Р°С‚РµР¶РµР№.
         /// </summary>
         public List<Payment> RecentPayments { get; set; } = new();
 
         /// <summary>
-        /// Общая сумма расходов клиента.
+        /// РћР±С‰Р°СЏ СЃСѓРјРјР° СЂР°СЃС…РѕРґРѕРІ РєР»РёРµРЅС‚Р° (СЃРѕР±СЂР°РЅРЅС‹Рµ СЃСЂРµРґСЃС‚РІР°).
         /// </summary>
         public decimal TotalExpenses { get; set; }
 
         /// <summary>
-        /// Общая сумма доходов клиента.
+        /// РћР±С‰Р°СЏ СЃСѓРјРјР° РґРѕС…РѕРґРѕРІ РєР»РёРµРЅС‚Р° (СЃРѕР±СЂР°РЅРЅС‹Рµ СЃСЂРµРґСЃС‚РІР°).
         /// </summary>
         public decimal TotalIncome { get; set; }
 
         /// <summary>
-        /// Общее количество платежей.
+        /// РЎСѓРјРјР° РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РїРѕ СЂР°СЃС…РѕРґР°Рј.
+        /// </summary>
+        public decimal OutstandingExpenses { get; set; }
+
+        /// <summary>
+        /// РЎСѓРјРјР° РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РїРѕ РґРѕС…РѕРґР°Рј.
+        /// </summary>
+        public decimal OutstandingIncome { get; set; }
+
+        /// <summary>
+        /// РЎРѕРІРѕРєСѓРїРЅС‹Р№ РѕСЃС‚Р°С‚РѕРє РїРѕ РєР»РёРµРЅС‚Сѓ (РґРѕС…РѕРґС‹ - СЂР°СЃС…РѕРґС‹, РµС‰С‘ РЅРµ Р·Р°РєСЂС‹С‚С‹Рµ).
+        /// </summary>
+        public decimal OutstandingTotal => OutstandingIncome + OutstandingExpenses;
+
+        /// <summary>
+        /// РћР±С‰РµРµ РєРѕР»РёС‡РµСЃС‚РІРѕ РїР»Р°С‚РµР¶РµР№.
         /// </summary>
         public int TotalPayments { get; set; }
     }

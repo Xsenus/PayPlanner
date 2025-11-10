@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
+using System.Data;
+using System.Data.Common;
 
 namespace PayPlanner.Api.Services
 {
@@ -53,6 +57,27 @@ namespace PayPlanner.Api.Services
         /// </summary>
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
+            await EnsureIncomeTypeSchemaAsync(context);
+
+            try
+            {
+                var payments = await context.Payments
+                    .Where(w => w.IsPaid && w.PaidAmount == 0 && w.LastPaymentDate == null)
+                    .ToListAsync();
+
+                if (payments.Count > 0)
+                {
+                    foreach (var payment in payments)
+                    {
+                        payment.PlannedDate = payment.PaidDate?.Date ?? default;
+                        payment.LastPaymentDate = payment.PaidDate;
+                        payment.PaidAmount = payment.Amount;
+                    }
+                    await context.SaveChangesAsync();
+                }
+            }
+            catch (Exception) { }
+
             if (!await context.DealTypes.AnyAsync())
             {
                 var dealTypes = new[]
@@ -67,26 +92,29 @@ namespace PayPlanner.Api.Services
                 await context.SaveChangesAsync();
             }
 
-            if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Income).AnyAsync())
+            if (!await context.IncomeTypes.AnyAsync())
             {
-                var incomeTypes = new[]
+                if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Income).AnyAsync())
                 {
-                    new IncomeType { Name = "Доход от услуг",  Description = "Доход от оказания услуг",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
-                    new IncomeType { Name = "Прочие доходы",    Description = "Прочие доходы",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
-                };
-                context.IncomeTypes.AddRange(incomeTypes);
-                await context.SaveChangesAsync();
-            }
+                    var incomeTypes = new[]
+                    {
+                        new IncomeType { Name = "Доход от услуг",  Description = "Доход от оказания услуг",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
+                        new IncomeType { Name = "Прочие доходы",    Description = "Прочие доходы",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
+                    };
+                    context.IncomeTypes.AddRange(incomeTypes);
+                    await context.SaveChangesAsync();
+                }
 
-            if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Expense).AnyAsync())
-            {
-                var expenseTypes = new[]
+                if (!await context.IncomeTypes.Where(w => w.PaymentType == PaymentType.Expense).AnyAsync())
                 {
+                    var expenseTypes = new[]
+                    {
                     new IncomeType { Name = "Прочие расходы", Description = "Иные расходы", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
                 };
-                context.IncomeTypes.AddRange(expenseTypes);
-                await context.SaveChangesAsync();
-            }
+                    context.IncomeTypes.AddRange(expenseTypes);
+                    await context.SaveChangesAsync();
+                }
+            }                
 
             if (!await context.PaymentSources.AnyAsync())
             {
@@ -113,6 +141,59 @@ namespace PayPlanner.Api.Services
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
             }
+        }
+
+        private static async Task EnsureIncomeTypeSchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            try
+            {
+                var hasPaymentType = false;
+
+                await using (var checkCommand = connection.CreateCommand())
+                {
+                    checkCommand.CommandText = "PRAGMA table_info(\"IncomeTypes\");";
+                    await using var reader = await checkCommand.ExecuteReaderAsync(cancellationToken);
+
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        var columnName = reader.GetString(1);
+                        if (string.Equals(columnName, "PaymentType", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasPaymentType = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasPaymentType)
+                {
+                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"IncomeTypes\" ADD COLUMN \"PaymentType\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+                    await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_IncomeTypes_IsActive_PaymentType\" ON \"IncomeTypes\" (\"IsActive\", \"PaymentType\");", cancellationToken);
+                    await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_IncomeTypes_IsActive_PaymentType_Name\" ON \"IncomeTypes\" (\"IsActive\", \"PaymentType\", \"Name\");", cancellationToken);
+                }
+            }
+            finally
+            {
+                if (shouldClose && connection.State == ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
+        private static async Task ExecuteNonQueryAsync(DbConnection connection, string sql, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         /// <summary>
@@ -530,6 +611,7 @@ namespace PayPlanner.Api.Services
                     ClientId = cli.Id,
                     ClientCaseId = caseEnt.Id,
                     Date = p.Date,
+                    PlannedDate = p.Date,
                     AccountDate = p.AccountDate,
                     Account = string.IsNullOrWhiteSpace(p.Account) ? null : p.Account,
                     Amount = p.Amount,
@@ -539,11 +621,18 @@ namespace PayPlanner.Api.Services
                     Notes = p.ActReference ?? string.Empty,
                     IsPaid = p.IsPaid,
                     PaidDate = p.PaidDate,
+                    PaidAmount = p.IsPaid ? p.Amount : 0m,
+                    LastPaymentDate = p.PaidDate,
                     DealTypeId = GetIdOrThrow(dealTypeByName, p.DealType, "DealType"),
                     IncomeTypeId = GetIdOrThrow(incomeTypeByName, p.IncomeType, "IncomeType"),
                     PaymentSourceId = GetIdOrThrow(sourceByName, p.Source, "PaymentSource"),
-                    PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus")
+                    PaymentStatusId = GetIdOrThrow(statusByName, p.StatusName, "PaymentStatus"),
+                    SystemNotes = string.Empty,
+                    RescheduleCount = 0
                 };
+
+                PaymentDomainService.Normalize(payment);
+                PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow);
 
                 toAdd.Add(payment);
             }

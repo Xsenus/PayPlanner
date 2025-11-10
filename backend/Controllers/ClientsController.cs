@@ -37,18 +37,38 @@ public class ClientsController : ControllerBase
 
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
 
-        var payments = await q.OrderByDescending(p => p.Date).AsNoTracking().ToListAsync(ct);
+        var payments = await q
+            .OrderByDescending(p => p.Date)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var totalIncome = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.PaidAmount);
+        var totalExpenses = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.PaidAmount);
+        var outstandingIncome = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.OutstandingAmount);
+        var outstandingExpenses = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.OutstandingAmount);
+        var paidPayments = payments.Count(p => p.Status == PaymentStatus.Completed);
+        var pendingPayments = payments.Count(p => p.Status != PaymentStatus.Completed && p.OutstandingAmount > 0m);
+        var overduePayments = payments.Count(p => p.Status == PaymentStatus.Overdue && p.OutstandingAmount > 0m);
+        var lastPaymentDate = payments
+            .Where(p => p.LastPaymentDate.HasValue)
+            .OrderByDescending(p => p.LastPaymentDate)
+            .Select(p => p.LastPaymentDate)
+            .FirstOrDefault()
+            ?? payments.OrderByDescending(p => p.Date).Select(p => (DateTime?)p.Date).FirstOrDefault();
 
         var stats = new ClientStats
         {
             ClientId = client.Id,
             ClientName = client.Name,
-            TotalIncome = payments.Where(p => p.Type == PaymentType.Income && p.IsPaid).Sum(p => p.Amount),
-            TotalExpenses = payments.Where(p => p.Type == PaymentType.Expense && p.IsPaid).Sum(p => p.Amount),
+            TotalIncome = totalIncome,
+            TotalExpenses = totalExpenses,
+            OutstandingIncome = outstandingIncome,
+            OutstandingExpenses = outstandingExpenses,
             TotalPayments = payments.Count,
-            PaidPayments = payments.Count(p => p.IsPaid),
-            PendingPayments = payments.Count(p => !p.IsPaid),
-            LastPaymentDate = payments.FirstOrDefault()?.Date,
+            PaidPayments = paidPayments,
+            PendingPayments = pendingPayments,
+            OverduePayments = overduePayments,
+            LastPaymentDate = lastPaymentDate,
             RecentPayments = payments.ToList()
         };
         stats.NetAmount = stats.TotalIncome - stats.TotalExpenses;

@@ -6,15 +6,13 @@ import { PaymentsTable } from './PaymentsTable';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
-import type { Payment } from '../../types';
+import type { Payment, PaymentPayload } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 
-type CreatePaymentDTO = Omit<Payment, 'id' | 'createdAt'>;
-type UpdatePaymentDTO = { id: number } & CreatePaymentDTO;
-type SubmitDTO = CreatePaymentDTO | UpdatePaymentDTO;
+type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
 
 type StatMetric = 'completed' | 'pending' | 'overdue' | 'overall' | 'debt';
@@ -35,7 +33,10 @@ type CalendarProps = {
 function makeStatsSignature(payments: Payment[]): string {
   if (!payments || payments.length === 0) return 'empty';
   return payments
-    .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}`)
+    .map(
+      (p) =>
+        `${p.id}:${p.amount}:${p.paidAmount}:${p.outstandingAmount}:${p.status}:${p.type}:${p.date}:${p.plannedDate}`,
+    )
     .sort()
     .join('|');
 }
