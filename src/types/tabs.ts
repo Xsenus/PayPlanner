@@ -2,6 +2,7 @@ export type Tab =
   | 'calendar'
   | 'reports'
   | 'calculator'
+  | 'legalEntities'
   | 'clients'
   | 'accounts'
   | 'acts'

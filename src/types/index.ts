@@ -1,5 +1,61 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 
+export interface LegalEntityClientLink {
+  id: number;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  isActive: boolean;
+}
+
+export interface LegalEntitySummary {
+  id: number;
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+  notes?: string | null;
+  clientsCount: number;
+  createdAt: string;
+  updatedAt?: string | null;
+  clients?: LegalEntityClientLink[];
+}
+
+export interface LegalEntityDetail extends LegalEntitySummary {
+  clients: LegalEntityClientLink[];
+}
+
+export interface LegalEntitySuggestion {
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+}
+
+export interface LegalEntityInput {
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+  notes?: string | null;
+  clientIds: number[];
+}
+
 export interface Client {
   id: number;
   name: string;
@@ -10,7 +66,20 @@ export interface Client {
   notes: string;
   createdAt: string;
   isActive: boolean;
+  legalEntityId?: number | null;
+  legalEntity?: LegalEntitySummary | null;
   cases?: ClientCase[];
+}
+
+export interface ClientInput {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  address: string;
+  notes: string;
+  isActive: boolean;
+  legalEntityId?: number | null;
 }
 
 export interface ClientCase {

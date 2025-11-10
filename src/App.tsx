@@ -5,6 +5,7 @@ import { Calendar } from './components/Calendar/Calendar';
 import { Reports } from './components/Reports/Reports';
 import { Calculator } from './components/Calculator/Calculator';
 import { Clients } from './components/Clients/Clients';
+import { LegalEntities } from './components/LegalEntities/LegalEntities';
 import { ClientDetail } from './components/Clients/ClientDetail';
 import { Accounts } from './components/Accounts/Accounts';
 import { Acts } from './components/Acts/Acts';
@@ -57,6 +58,7 @@ function AppContent() {
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
+        { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
@@ -77,6 +79,8 @@ function AppContent() {
           return permissions.reports.canView;
         case 'calculator':
           return permissions.calculator.canView;
+        case 'legalEntities':
+          return permissions.legalEntities.canView;
         case 'clients':
         case 'clientDetail':
           return permissions.clients.canView;
@@ -192,6 +196,10 @@ function AppContent() {
         return permissions.calculator.canView
           ? <Calculator />
           : renderNoAccess('Калькулятор недоступен для вашей роли.');
+      case 'legalEntities':
+        return permissions.legalEntities.canView
+          ? <LegalEntities />
+          : renderNoAccess('Раздел юридических лиц недоступен для вашей роли.');
       case 'clientDetail':
         if (!permissions.clients.canView || !selectedClientId) {
           return renderNoAccess('Просмотр клиентов недоступен для вашей роли.');

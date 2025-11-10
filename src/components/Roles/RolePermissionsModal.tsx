@@ -6,6 +6,7 @@ import {
   BarChart3,
   Calculator,
   Users,
+  Building2,
   WalletCards,
   FileCheck2,
   FileSignature,
@@ -71,6 +72,12 @@ const SECTION_CONFIG: SectionConfig[] = [
     titleKey: 'clients',
     descriptionKey: 'permissionSectionClients',
     icon: Users,
+  },
+  {
+    key: 'legalEntities',
+    titleKey: 'legalEntities',
+    descriptionKey: 'permissionSectionLegalEntities',
+    icon: Building2,
   },
   {
     key: 'accounts',

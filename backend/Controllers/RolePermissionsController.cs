@@ -21,6 +21,7 @@ public class RolePermissionsController : ControllerBase
         "reports",
         "calculator",
         "clients",
+        "legalEntities",
         "accounts",
         "acts",
         "contracts",
@@ -167,6 +168,9 @@ public class RolePermissionsController : ControllerBase
                 case "clients":
                     dto.Clients = ToSection(permission);
                     break;
+                case "legalEntities":
+                    dto.LegalEntities = ToSection(permission);
+                    break;
                 case "accounts":
                     dto.Accounts = ToSection(permission);
                     break;
@@ -192,6 +196,7 @@ public class RolePermissionsController : ControllerBase
             ["reports"] = ToValues(dto.Reports),
             ["calculator"] = ToValues(dto.Calculator),
             ["clients"] = ToValues(dto.Clients),
+            ["legalEntities"] = ToValues(dto.LegalEntities),
             ["accounts"] = ToValues(dto.Accounts),
             ["acts"] = ToValues(dto.Acts),
             ["contracts"] = ToValues(dto.Contracts),
@@ -223,6 +228,7 @@ public class RolePermissionsController : ControllerBase
             Reports = Clone(allTrue),
             Calculator = Clone(allTrue),
             Clients = Clone(allTrue),
+            LegalEntities = Clone(allTrue),
             Accounts = Clone(allTrue),
             Acts = Clone(allTrue),
             Contracts = Clone(allTrue),
