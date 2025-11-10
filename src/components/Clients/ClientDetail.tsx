@@ -1283,90 +1283,202 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   <p className="text-gray-500">Нет платежей по выбранному фильтру</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {visiblePayments.map((payment) => (
-                    <div
-                      key={payment.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="mt-0.5">
-                          {payment.type === 'Income' ? (
-                            <TrendingUp size={20} className="text-emerald-600" />
-                          ) : (
-                            <TrendingDown size={20} className="text-red-600" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p
-                            className="font-medium text-gray-900"
-                            title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
-                            {formatCurrencySmart(payment.amount).full}
-                          </p>
-                          {payment.description && (
-                            <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
-                              {payment.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
-                        <div className="flex items-center justify-end gap-2">
-                          <p className="text-sm font-medium text-gray-900 leading-none">
-                            {toRuDate(payment.date)}
-                          </p>
-                          {clientPermissions.canEdit && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
-                              onClick={() => openEditPayment(payment)}
-                              title="Редактировать"
-                              aria-label="Редактировать">
-                              <Edit size={16} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          {(() => {
-                            const s = normalizeStatus(payment.status);
-                            if (s === 'overdue') {
-                              return (
-                                <>
-                                  <AlertTriangle size={14} className="text-purple-700" />
-                                  <span className="text-xs text-purple-700 leading-none">
-                                    Просрочено
-                                  </span>
-                                </>
-                              );
-                            }
-                            if (s === 'completed') {
-                              return (
-                                <>
-                                  <CheckCircle size={14} className="text-emerald-600" />
-                                  <span className="text-xs text-emerald-600 leading-none">
-                                    Выполнено
-                                  </span>
-                                </>
-                              );
-                            }
-                            return (
-                              <>
-                                <Clock size={14} className="text-amber-600" />
-                                <span className="text-xs text-amber-600 leading-none">Ожидается</span>
-                              </>
-                            );
-                          })()}
-                          {clientPermissions.canDelete && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
-                              onClick={() => removePayment(payment.id)}
-                              title="Удалить"
-                              aria-label="Удалить">
-                              <Trash2 size={16} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Дата
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Сумма
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Направление
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Дело / контакт
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Описание и заметки
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Статус
+                        </th>
+                        {(clientPermissions.canEdit || clientPermissions.canDelete) && (
+                          <th
+                            scope="col"
+                            className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Действия
+                          </th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {visiblePayments.map((payment) => {
+                        const status = normalizeStatus(payment.status);
+                        const statusLabel =
+                          payment.paymentStatusEntity?.name || payment.status || '—';
+                        const statusBadgeClass =
+                          status === 'completed'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            : status === 'overdue'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-100'
+                              : 'bg-amber-50 text-amber-700 border border-amber-100';
+                        const StatusIcon =
+                          status === 'completed'
+                            ? CheckCircle
+                            : status === 'overdue'
+                              ? AlertTriangle
+                              : Clock;
+                        const directionLabel =
+                          payment.dealType?.name ||
+                          payment.incomeType?.name ||
+                          payment.paymentSource?.name ||
+                          '—';
+                        const secondaryDirections = [
+                          payment.dealType?.name,
+                          payment.incomeType?.name,
+                          payment.paymentSource?.name,
+                        ]
+                          .filter((item): item is string => Boolean(item && item !== directionLabel))
+                          .filter((value, index, self) => self.indexOf(value) === index);
+                        const DirectionIcon = payment.type === 'Income' ? TrendingUp : TrendingDown;
+
+                        return (
+                          <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-4 align-top text-sm text-gray-600 whitespace-nowrap">
+                              <div className="font-medium text-gray-900">{toRuDate(payment.date)}</div>
+                              {payment.plannedDate && payment.plannedDate !== payment.date && (
+                                <div className="text-xs text-gray-500">План: {toRuDate(payment.plannedDate)}</div>
+                              )}
+                              {payment.paidDate && (
+                                <div className="text-xs text-gray-500">Оплачен: {toRuDate(payment.paidDate)}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm text-gray-900 whitespace-nowrap">
+                              <div
+                                className={`flex items-center gap-2 font-semibold ${
+                                  payment.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'
+                                }`}
+                                title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
+                                <DirectionIcon size={18} />
+                                {formatCurrencySmart(payment.amount).full}
+                              </div>
+                              {payment.outstandingAmount > 0 && (
+                                <div className="text-xs text-rose-600">
+                                  Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
+                                </div>
+                              )}
+                              {payment.hasPartialPayment && payment.paidAmount > 0 && (
+                                <div className="text-xs text-gray-500">
+                                  Оплачено: {formatCurrencySmart(payment.paidAmount).full}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[180px]">
+                              <div className="font-medium text-gray-900">{directionLabel}</div>
+                              {secondaryDirections.map((label) => (
+                                <div key={label} className="text-xs text-gray-500">
+                                  {label}
+                                </div>
+                              ))}
+                              {payment.account && (
+                                <div className="text-xs text-gray-500">Счёт: {payment.account}</div>
+                              )}
+                              {payment.accountDate && (
+                                <div className="text-xs text-gray-500">
+                                  Дата счёта: {toRuDate(payment.accountDate)}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[180px]">
+                              {payment.clientCase?.title ? (
+                                <div className="font-medium text-gray-900">{payment.clientCase.title}</div>
+                              ) : (
+                                <div className="text-xs text-gray-400">Дело не указано</div>
+                              )}
+                              {payment.client?.name && (
+                                <div className="text-xs text-gray-500">{payment.client.name}</div>
+                              )}
+                              {payment.clientCase?.status && (
+                                <div className="text-xs text-gray-400">
+                                  Статус: {caseStatusLabel(payment.clientCase.status)}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm text-gray-600 min-w-[220px]">
+                              {payment.description ? (
+                                <div className="text-gray-700">{payment.description}</div>
+                              ) : (
+                                <div className="text-xs text-gray-400">Без описания</div>
+                              )}
+                              {payment.notes && (
+                                <div className="mt-1 text-xs text-gray-500" title={payment.notes}>
+                                  Заметка: {payment.notes}
+                                </div>
+                              )}
+                              {payment.systemNotes && (
+                                <div className="mt-1 text-xs text-gray-400" title={payment.systemNotes}>
+                                  Системно: {payment.systemNotes}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm text-gray-600 whitespace-nowrap">
+                              <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
+                                <StatusIcon size={14} />
+                                <span className="leading-none">{statusLabel}</span>
+                              </div>
+                              {payment.delayDays ? (
+                                <div className="mt-1 text-xs text-purple-700">Просрочка: {payment.delayDays} дн.</div>
+                              ) : null}
+                              {payment.lastPaymentDate && (
+                                <div className="mt-1 text-xs text-gray-500">
+                                  Последний платёж: {toRuDate(payment.lastPaymentDate)}
+                                </div>
+                              )}
+                            </td>
+                            {(clientPermissions.canEdit || clientPermissions.canDelete) && (
+                              <td className="px-4 py-4 align-top text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {clientPermissions.canEdit && (
+                                    <button
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-blue-600 hover:border-blue-300 hover:bg-blue-50"
+                                      onClick={() => openEditPayment(payment)}
+                                      title="Редактировать"
+                                      aria-label="Редактировать">
+                                      <Edit size={16} />
+                                    </button>
+                                  )}
+                                  {clientPermissions.canDelete && (
+                                    <button
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50"
+                                      onClick={() => removePayment(payment.id)}
+                                      title="Удалить"
+                                      aria-label="Удалить">
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )
             ) : activeSection === 'accounts' ? (
