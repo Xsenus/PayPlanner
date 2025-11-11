@@ -34,21 +34,18 @@ builder.Services.AddSwaggerGen();
 // ================= DbContext (SQLite) =================
 static string NormalizeSqliteConnection(string raw)
 {
-    var b = new SqliteConnectionStringBuilder(raw)
+    var builder = new SqliteConnectionStringBuilder(raw)
     {
+        // DefaultTimeout задаёт время ожидания завершения блокировок при выполнении команд (в секундах)
         DefaultTimeout = 30
     };
 
-    // Microsoft.Data.Sqlite не предоставляет строго типизированного свойства BusyTimeout,
-    // поэтому задаём его вручную через индексатор строки подключения.
-    b["BusyTimeout"] = (int)TimeSpan.FromSeconds(5).TotalMilliseconds;
-
-    if (!Path.IsPathRooted(b.DataSource))
+    if (!Path.IsPathRooted(builder.DataSource))
     {
-        b.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, b.DataSource));
+        builder.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, builder.DataSource));
     }
 
-    return b.ToString();
+    return builder.ToString();
 }
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
@@ -123,18 +120,18 @@ builder.Services.AddAuthorization(opts =>
 });
 
 // ================= Hosting URLs (ENV > config > default) =================
-// 1) ENV - ñàìûé âûñîêèé ïðèîðèòåò
+// 1) ENV - самый высокий приоритет
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
 
-// 2) config ("urls"/"Urls") - áåð¸ì, åñëè ENV íå çàäàí
+// 2) config ("urls"/"Urls") - берём, если ENV не задан
 var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
 
-// 3) äåôîëò — âíóòðåííèé ïîðò äëÿ ïðîêñèðîâàíèÿ ÷åðåç Nginx
+// 3) дефолт — внутренний порт для проксирования через Nginx
 var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
     ? urlsEnv
     : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5000");
 
-// ßâíî çàäà¸ì àäðåñà, ÷òîáû ïåðåîïðåäåëèòü âîçìîæíûå çíà÷åíèÿ èç appsettings
+// Явно задаём адреса, чтобы переопределить возможные значения из appsettings
 builder.WebHost.UseUrls(effectiveUrls);
 
 var app = builder.Build();
