@@ -90,6 +90,7 @@ export const ru = {
   invoiceActManualPlaceholder: 'Например: акт будет подписан позже',
   invoicePaidDate: 'Дата оплаты',
   acts: 'Акты',
+  actSectionTitle: 'Сводка и список',
   actSectionDescription: 'Управляйте исходящими актами и контролируйте их статусы.',
   actNumber: 'Номер акта',
   actDate: 'Дата',
@@ -202,6 +203,7 @@ export const ru = {
   // Payment Modal
   addPayment: 'Добавить платёж',
   editPayment: 'Редактировать платёж',
+  addCase: 'Добавить дело',
   date: 'Дата',
   expectedPaymentDate: 'Ожидаемая дата платежа',
   plannedScheduleDate: 'Плановая дата по графику',
@@ -308,6 +310,7 @@ export const ru = {
   goBack: 'Назад',
   clientNotFound: 'Клиент не найден',
   noClientsYet: 'Клиентов пока нет',
+  clientsLoadError: 'Не удалось загрузить клиентов',
   getStartedByAdding: 'Начните с добавления первого клиента',
   noPaymentsYet: 'Платежей пока нет',
   clientHasNotMadePayments: 'Этот клиент ещё не совершал платежей',
