@@ -112,8 +112,8 @@ const SECTION_META: Record<
   acts: {
     label: 'Акты',
     actionLabel: 'Добавить акт',
-    placeholderTitle: 'Акты клиента',
-    placeholderDescription: 'Управление актами будет доступно после доработки раздела.',
+    placeholderTitle: 'Документы клиента',
+    placeholderDescription: 'Управление документами будет доступно после доработки раздела.',
     icon: FileCheck2,
   },
   contracts: {
@@ -856,6 +856,29 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return invoiceClients;
   }, [invoiceClients, clientId, clientName]);
 
+  const contractDefaultClients = useMemo(
+    () => {
+      const resolvedName =
+        clientData?.name && clientData.name.trim().length > 0
+          ? clientData.name
+          : clientName && clientName !== '...'
+            ? clientName
+            : `Клиент #${clientId}`;
+      const resolvedCompany =
+        clientData?.company && clientData.company.trim().length > 0
+          ? clientData.company
+          : undefined;
+      return [
+        {
+          id: clientId,
+          name: resolvedName,
+          company: resolvedCompany,
+        },
+      ];
+    },
+    [clientData?.name, clientData?.company, clientName, clientId],
+  );
+
   const actSummaryBuckets = useMemo(
     () =>
       actsSummary ?? {
@@ -1202,18 +1225,22 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               <button
                 type="button"
                 onClick={openClientEdit}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50"
+                title={t('editClient') ?? 'Изменить клиента'}
+                aria-label={t('editClient') ?? 'Изменить клиента'}
               >
-                <Edit className="h-4 w-4" /> {t('editClient') ?? 'Изменить клиента'}
+                <Edit className="h-5 w-5" />
               </button>
             )}
             {clientPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openAddCase}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
+                title={t('addCase') ?? 'Добавить дело'}
+                aria-label={t('addCase') ?? 'Добавить дело'}
               >
-                <Plus className="h-4 w-4" /> {t('addCase') ?? 'Добавить дело'}
+                <Plus className="h-5 w-5" />
               </button>
             )}
           </div>
@@ -1914,7 +1941,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                           <Icon className="h-10 w-10 opacity-80" />
                         </div>
                         <p className="mt-4 text-xs text-gray-500">
-                          {(t('actsSummaryCount') ?? 'Количество актов')}: {card.bucket.count}
+                          {(t('actsSummaryCount') ?? 'Документов')}: {card.bucket.count}
                         </p>
                       </div>
                     );
@@ -2026,7 +2053,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                         ) : clientActs.length === 0 ? (
                           <tr>
                             <td colSpan={8} className="py-10 text-center text-gray-500">
-                              {actsError ?? t('actsEmpty') ?? 'Акты не найдены'}
+                              {actsError ?? t('actsEmpty') ?? 'Документы не найдены'}
                             </td>
                           </tr>
                         ) : (
@@ -2450,6 +2477,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           onSubmit={submitContract}
           submitting={contractSubmitting}
           errorMessage={contractModalError}
+          defaultClients={contractDefaultClients}
         />
 
         <PaymentModal

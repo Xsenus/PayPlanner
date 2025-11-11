@@ -14,6 +14,7 @@ interface ContractModalProps {
   onSubmit: (payload: ContractInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
+  defaultClients?: ContractClient[];
 }
 
 type FormState = {
@@ -59,11 +60,14 @@ export function ContractModal({
   onSubmit,
   submitting,
   errorMessage,
+  defaultClients,
 }: ContractModalProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract));
   const [localError, setLocalError] = useState<string | null>(null);
-  const [selectedClients, setSelectedClients] = useState<ContractClient[]>(() => contract?.clients ?? []);
+  const [selectedClients, setSelectedClients] = useState<ContractClient[]>(
+    () => contract?.clients ?? defaultClients ?? [],
+  );
   const [clientSearch, setClientSearch] = useState('');
   const debouncedClientSearch = useDebouncedValue(clientSearch.trim(), 350);
   const [clientOptions, setClientOptions] = useState<ContractClient[]>([]);
@@ -71,14 +75,22 @@ export function ContractModal({
   const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setForm(normalizeContractToForm(contract));
-      setLocalError(null);
-      setSelectedClients(contract?.clients ?? []);
-      setClientSearch('');
-      setClientOptionsError(null);
+    if (!open) {
+      return;
     }
-  }, [open, contract]);
+
+    setForm(normalizeContractToForm(contract));
+    setLocalError(null);
+    if (contract?.clients && contract.clients.length > 0) {
+      setSelectedClients(contract.clients);
+    } else if (defaultClients && defaultClients.length > 0) {
+      setSelectedClients(defaultClients);
+    } else {
+      setSelectedClients([]);
+    }
+    setClientSearch('');
+    setClientOptionsError(null);
+  }, [open, contract, defaultClients]);
 
   const isEdit = mode === 'edit';
 
