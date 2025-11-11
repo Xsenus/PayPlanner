@@ -7,6 +7,8 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useTabNavigation } from '../../contexts/TabContext';
+import { storeInstallmentDraft } from '../../utils/installmentBridge';
 
 type FormState = {
   number: string;
@@ -95,6 +97,7 @@ export function InvoiceModal({
   defaultClientId,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
+  const { setActiveTab } = useTabNavigation();
   const [form, setForm] = useState<FormState>(() => normalizeInvoiceToForm(invoice, defaultClientId));
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -258,6 +261,23 @@ export function InvoiceModal({
     }
   };
 
+  const handleOpenInstallmentCalculator = () => {
+    const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
+    const hasValidAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
+    const clientIdNumber = form.clientId ? Number.parseInt(form.clientId, 10) : undefined;
+
+    storeInstallmentDraft({
+      total: hasValidAmount ? parsedAmount : undefined,
+      startDate: form.date || undefined,
+      clientId: Number.isFinite(clientIdNumber) ? clientIdNumber : undefined,
+      clientName: selectedClient?.name ?? undefined,
+      invoiceNumber: form.number.trim() ? form.number.trim() : undefined,
+    });
+
+    setActiveTab('calculator');
+    onClose();
+  };
+
   if (!open) return null;
 
   return (
@@ -319,7 +339,16 @@ export function InvoiceModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceAmount') ?? 'Сумма'}</span>
+              <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
+                {t('invoiceAmount') ?? 'Сумма'}
+                <button
+                  type="button"
+                  onClick={handleOpenInstallmentCalculator}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                >
+                  {t('invoiceInstallmentButton') ?? 'Рассрочка'}
+                </button>
+              </span>
               <input
                 type="number"
                 step="0.01"

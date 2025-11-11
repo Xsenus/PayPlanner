@@ -377,12 +377,19 @@ export interface InstallmentRequest {
   annualRate: number;
   months: number;
   startDate: string;
+  roundingMode?: 'none' | 'down' | 'up';
+  roundingStep?: number | null;
 }
 
 export interface InstallmentResponse {
   overpay: number;
   toPay: number;
   items: InstallmentItem[];
+  loanAmount?: number;
+  baseMonthlyPayment?: number;
+  roundedMonthlyPayment?: number | null;
+  roundingMode?: 'none' | 'down' | 'up';
+  roundingStep?: number | null;
 }
 
 export interface InstallmentItem {
