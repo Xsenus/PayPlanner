@@ -10,4 +10,5 @@ export type Tab =
   | 'clientDetail'
   | 'users'
   | 'roles'
+  | 'userActivity'
   | 'dictionaries';

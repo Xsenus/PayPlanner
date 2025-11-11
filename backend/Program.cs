@@ -6,8 +6,10 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.UserActivity;
 using PayPlanner.Api.Services.LegalEntities;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -15,7 +17,10 @@ using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 
 // ================= JSON + MVC =================
-builder.Services.AddControllers().AddJsonOptions(options =>
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<UserActivityLoggingFilter>();
+}).AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
@@ -29,14 +34,28 @@ builder.Services.AddSwaggerGen();
 // ================= DbContext (SQLite) =================
 static string NormalizeSqliteConnection(string raw)
 {
-    var b = new SqliteConnectionStringBuilder(raw);
-    if (!Path.IsPathRooted(b.DataSource))
-        b.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, b.DataSource));
-    return b.ToString();
+    var builder = new SqliteConnectionStringBuilder(raw)
+    {
+        // DefaultTimeout задаёт время ожидания завершения блокировок при выполнении команд (в секундах)
+        DefaultTimeout = 30
+    };
+
+    if (!Path.IsPathRooted(builder.DataSource))
+    {
+        builder.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, builder.DataSource));
+    }
+
+    return builder.ToString();
 }
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
-builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(normalizedCs));
+void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
+
+builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
+builder.Services.AddScoped<PaymentContext>(sp =>
+    sp.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext());
+
+builder.Services.AddHttpContextAccessor();
 
 // ================= Services & Backgrounds =================
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
@@ -48,6 +67,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<IUserActivityService, UserActivityService>();
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<DatabaseBackupService>();
@@ -101,18 +121,18 @@ builder.Services.AddAuthorization(opts =>
 });
 
 // ================= Hosting URLs (ENV > config > default) =================
-// 1) ENV - ñàìûé âûñîêèé ïðèîðèòåò
+// 1) ENV - самый высокий приоритет
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
 
-// 2) config ("urls"/"Urls") - áåð¸ì, åñëè ENV íå çàäàí
+// 2) config ("urls"/"Urls") - берём, если ENV не задан
 var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
 
-// 3) äåôîëò — âíóòðåííèé ïîðò äëÿ ïðîêñèðîâàíèÿ ÷åðåç Nginx
+// 3) дефолт — внутренний порт для проксирования через Nginx
 var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
     ? urlsEnv
     : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5000");
 
-// ßâíî çàäà¸ì àäðåñà, ÷òîáû ïåðåîïðåäåëèòü âîçìîæíûå çíà÷åíèÿ èç appsettings
+// Явно задаём адреса, чтобы переопределить возможные значения из appsettings
 builder.WebHost.UseUrls(effectiveUrls);
 
 var app = builder.Build();

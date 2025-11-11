@@ -53,6 +53,26 @@ namespace PayPlanner.Api.Services
             return value / divisor;
         }
 
+        private static decimal ApplyRounding(decimal value, decimal step, InstallmentRoundingMode mode)
+        {
+            if (mode == InstallmentRoundingMode.None)
+                return Round2(value);
+
+            decimal normalizedStep = Math.Abs(step);
+            if (normalizedStep <= 0m)
+                return Round2(value);
+
+            decimal scaled = value / normalizedStep;
+            decimal adjusted = mode switch
+            {
+                InstallmentRoundingMode.Down => Math.Floor(scaled),
+                InstallmentRoundingMode.Up => Math.Ceiling(scaled),
+                _ => Math.Round(scaled, MidpointRounding.AwayFromZero),
+            };
+
+            return Round2(adjusted * normalizedStep);
+        }
+
         /// <summary>
         /// Выполняет расчёт графика рассрочки по аннуитетной схеме.
         /// </summary>
@@ -91,6 +111,30 @@ namespace PayPlanner.Api.Services
             }
             decimal monthlyPayment = Round2(monthlyPaymentRaw);
 
+            InstallmentRoundingMode roundingMode = request.RoundingMode;
+            decimal? roundingStep = request.RoundingStep.HasValue && request.RoundingStep.Value > 0m
+                ? Math.Abs(request.RoundingStep.Value)
+                : null;
+            bool roundingEnabled = roundingMode != InstallmentRoundingMode.None && roundingStep.HasValue;
+
+            decimal? roundedMonthlyPayment = null;
+            if (roundingEnabled)
+            {
+                decimal candidate = ApplyRounding(monthlyPayment, roundingStep!.Value, roundingMode);
+                if (candidate <= 0m)
+                {
+                    candidate = monthlyPayment;
+                }
+
+                decimal firstMonthInterest = Round2(loanAmount * monthlyRate);
+                if (candidate < firstMonthInterest)
+                {
+                    candidate = firstMonthInterest;
+                }
+
+                roundedMonthlyPayment = Round2(candidate);
+            }
+
             var items = new List<InstallmentItem>(capacity: request.Months);
             decimal balance = loanAmount;
 
@@ -99,26 +143,39 @@ namespace PayPlanner.Api.Services
 
             for (int i = 0; i < request.Months; i++)
             {
-                // Проценты за месяц от текущего остатка
                 decimal interestPayment = Round2(balance * monthlyRate);
-
-                // Базовый principal как разница между фиксированным платёжом и процентами
-                decimal principalPayment = Round2(monthlyPayment - interestPayment);
-
                 bool isLast = i == request.Months - 1;
+
+                decimal paymentThisMonth;
+                if (isLast)
+                {
+                    paymentThisMonth = Round2(balance + interestPayment);
+                }
+                else
+                {
+                    paymentThisMonth = roundingEnabled && roundedMonthlyPayment.HasValue
+                        ? roundedMonthlyPayment.Value
+                        : monthlyPayment;
+
+                    if (paymentThisMonth < interestPayment)
+                    {
+                        paymentThisMonth = interestPayment;
+                    }
+                }
+
+                decimal principalPayment = Round2(paymentThisMonth - interestPayment);
 
                 if (isLast)
                 {
-                    // В последний месяц закрываем остаток без остаточных копеек
                     principalPayment = Round2(balance);
+                    paymentThisMonth = Round2(principalPayment + interestPayment);
+                }
+                else if (principalPayment > balance)
+                {
+                    principalPayment = Round2(balance);
+                    paymentThisMonth = Round2(principalPayment + interestPayment);
                 }
 
-                // Итоговый платёж месяца:
-                // - для всех, кроме последнего, фиксированный "кассовый" платёж;
-                // - для последнего — сумма процент+тело (может отличаться на копейку из-за выравнивания).
-                decimal paymentThisMonth = isLast ? Round2(principalPayment + interestPayment) : monthlyPayment;
-
-                // Обновляем остаток
                 balance = Round2(balance - principalPayment);
                 if (balance < 0m) balance = 0m;
 
@@ -141,6 +198,11 @@ namespace PayPlanner.Api.Services
             {
                 Overpay = overpay,
                 ToPay = Round2(totalPayments + request.DownPayment),
+                LoanAmount = Round2(loanAmount),
+                BaseMonthlyPayment = monthlyPayment,
+                RoundedMonthlyPayment = roundingEnabled ? roundedMonthlyPayment : null,
+                RoundingMode = roundingEnabled ? roundingMode : InstallmentRoundingMode.None,
+                RoundingStep = roundingEnabled ? roundingStep : null,
                 Items = items
             };
         }
