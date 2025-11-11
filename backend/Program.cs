@@ -6,8 +6,10 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.UserActivity;
 using PayPlanner.Api.Services.LegalEntities;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -15,7 +17,10 @@ using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 
 // ================= JSON + MVC =================
-builder.Services.AddControllers().AddJsonOptions(options =>
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<UserActivityLoggingFilter>();
+}).AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
@@ -38,6 +43,8 @@ var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source
 var normalizedCs = NormalizeSqliteConnection(rawCs);
 builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(normalizedCs));
 
+builder.Services.AddHttpContextAccessor();
+
 // ================= Services & Backgrounds =================
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.Configure<PasswordHasherOptions>(opt =>
@@ -48,6 +55,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<IUserActivityService, UserActivityService>();
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<DatabaseBackupService>();

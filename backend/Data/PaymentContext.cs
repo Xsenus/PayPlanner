@@ -414,6 +414,39 @@ public class PaymentContext : DbContext
                     "(EmploymentStartDate IS NULL OR EmploymentEndDate IS NULL OR EmploymentStartDate <= EmploymentEndDate)");
             });
         });
+
+        // ------------------ UserActivityLog ------------------
+        modelBuilder.Entity<UserActivityLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Category).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Action).HasMaxLength(160).IsRequired();
+            entity.Property(e => e.Section).HasMaxLength(160);
+            entity.Property(e => e.ObjectType).HasMaxLength(160);
+            entity.Property(e => e.ObjectId).HasMaxLength(160);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.UserEmail).HasMaxLength(256);
+            entity.Property(e => e.UserFullName).HasMaxLength(256);
+            entity.Property(e => e.IpAddress).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.Property(e => e.HttpMethod).HasMaxLength(16);
+            entity.Property(e => e.Path).HasMaxLength(512);
+            entity.Property(e => e.QueryString).HasMaxLength(512);
+            entity.Property(e => e.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(e => e.MetadataJson).HasColumnType("text");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_UserActivityLogs_CreatedAt");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("IX_UserActivityLogs_UserId");
+            entity.HasIndex(e => e.Category).HasDatabaseName("IX_UserActivityLogs_Category");
+            entity.HasIndex(e => e.Action).HasDatabaseName("IX_UserActivityLogs_Action");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_UserActivityLogs_Status");
+        });
     }
 
     /// <summary>
@@ -485,6 +518,11 @@ public class PaymentContext : DbContext
     /// Настройки прав ролей по разделам.
     /// </summary>
     public DbSet<RolePermission> RolePermissions { get; set; }
+
+    /// <summary>
+    /// Журнал действий пользователей.
+    /// </summary>
+    public DbSet<UserActivityLog> UserActivityLogs { get; set; }
 
     /// <summary>
     /// Пользователи системы.
