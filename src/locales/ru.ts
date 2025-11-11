@@ -261,6 +261,7 @@ export const ru = {
   legalEntityPhone: 'Телефон',
   legalEntityEmail: 'Email',
   legalEntityNotes: 'Заметки',
+  editLegalEntity: 'Редактирование юридического лица',
   legalEntityRequisites: 'Реквизиты',
   legalEntityClients: 'Клиенты юридического лица',
   legalEntityClientsHint: 'Отметьте клиентов, которые относятся к этому юридическому лицу.',
@@ -408,12 +409,14 @@ export const ru = {
   savePermissions: 'Сохранить права',
 
   // Placeholders
+  searchClientsPlaceholder: 'Поиск клиентов',
   selectDealType: 'Выберите тип сделки',
   selectIncomeType: 'Выберите тип дохода',
   selectPaymentSource: 'Выберите источник платежа',
   paymentDescription: 'Описание платежа...',
   additionalNotes: 'Дополнительные заметки...',
   selectedCount: 'Выбрано',
+  selectAll: 'Выбрать всех',
   andMore: 'ещё',
   additionalInfo: 'Дополнительная информация...',
 
