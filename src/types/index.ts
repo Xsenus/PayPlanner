@@ -1,5 +1,61 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 
+export interface LegalEntityClientLink {
+  id: number;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  isActive: boolean;
+}
+
+export interface LegalEntitySummary {
+  id: number;
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+  notes?: string | null;
+  clientsCount: number;
+  createdAt: string;
+  updatedAt?: string | null;
+  clients?: LegalEntityClientLink[];
+}
+
+export interface LegalEntityDetail extends LegalEntitySummary {
+  clients: LegalEntityClientLink[];
+}
+
+export interface LegalEntitySuggestion {
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+}
+
+export interface LegalEntityInput {
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  director?: string | null;
+  notes?: string | null;
+  clientIds: number[];
+}
+
 export interface Client {
   id: number;
   name: string;
@@ -10,7 +66,21 @@ export interface Client {
   notes: string;
   createdAt: string;
   isActive: boolean;
+  legalEntityId?: number | null;
+  legalEntity?: LegalEntitySummary | null;
   cases?: ClientCase[];
+  contracts?: Contract[];
+}
+
+export interface ClientInput {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  address: string;
+  notes: string;
+  isActive: boolean;
+  legalEntityId?: number | null;
 }
 
 export interface ClientCase {
@@ -112,16 +182,53 @@ export interface ActResponsible {
   fullName: string;
 }
 
+export interface ContractClient {
+  id: number;
+  name: string;
+  company?: string | null;
+}
+
+export interface Contract {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  description?: string | null;
+  amount?: number | null;
+  validUntil?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  clients: ContractClient[];
+}
+
+export interface ContractInput {
+  number: string;
+  title?: string | null;
+  date: string;
+  description?: string | null;
+  amount?: number | null;
+  validUntil?: string | null;
+  clientIds: number[];
+}
+
 export interface Payment {
   id: number;
   date: string;
+  plannedDate: string;
   amount: number;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   description: string;
   isPaid: boolean;
   paidDate?: string;
+  lastPaymentDate?: string | null;
   notes: string;
+  systemNotes: string;
+  rescheduleCount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  hasPartialPayment: boolean;
+  delayDays?: number | null;
   createdAt: string;
   clientId?: number | null;
   clientCaseId?: number | null;
@@ -139,6 +246,77 @@ export interface Payment {
   accountDate?: string | null;
 }
 
+export type PaymentPayload = Omit<
+  Payment,
+  | 'id'
+  | 'createdAt'
+  | 'client'
+  | 'clientCase'
+  | 'dealType'
+  | 'incomeType'
+  | 'paymentSource'
+  | 'paymentStatusEntity'
+  | 'outstandingAmount'
+  | 'hasPartialPayment'
+  | 'delayDays'
+>;
+
+export interface Invoice {
+  id: number;
+  number: string;
+  date: string;
+  dueDate?: string | null;
+  amount: number;
+  status: PaymentStatus;
+  isPaid: boolean;
+  paidDate?: string | null;
+  clientId?: number | null;
+  clientName?: string | null;
+  clientCompany?: string | null;
+  clientCaseId?: number | null;
+  clientCaseTitle?: string | null;
+  description?: string | null;
+  actReference?: string | null;
+  actId?: number | null;
+  actNumber?: string | null;
+  actTitle?: string | null;
+  actStatus?: ActStatus | null;
+  responsibleId?: number | null;
+  responsibleName?: string | null;
+  counterpartyInn?: string | null;
+  paymentStatusName?: string | null;
+  createdAt: string;
+}
+
+export interface InvoiceInput {
+  number: string;
+  date: string;
+  dueDate?: string | null;
+  amount: number;
+  status: PaymentStatus;
+  clientId: number;
+  clientCaseId?: number | null;
+  description?: string | null;
+  actReference?: string | null;
+  paymentSourceId?: number | null;
+  incomeTypeId?: number | null;
+  dealTypeId?: number | null;
+  paymentStatusEntityId?: number | null;
+  paidDate?: string | null;
+}
+
+export interface InvoiceSummaryBucket {
+  amount: number;
+  count: number;
+}
+
+export interface InvoiceSummary {
+  total: InvoiceSummaryBucket;
+  pending: InvoiceSummaryBucket;
+  paid: InvoiceSummaryBucket;
+  overdue: InvoiceSummaryBucket;
+}
+
 export type AccountSuggestion = {
   account: string;
   accountDate: string | null;
@@ -153,7 +331,11 @@ export interface ClientStats {
   totalPayments: number;
   paidPayments: number;
   pendingPayments: number;
+  overduePayments: number;
   lastPaymentDate?: string;
+  outstandingIncome: number;
+  outstandingExpenses: number;
+  outstandingTotal: number;
   recentPayments: Payment[];
 }
 
@@ -216,6 +398,7 @@ export type PeriodKey =
 export type SummaryBucket = {
   totalAmount: number;
   totalCount: number;
+  collectedAmount: number;
   completedAmount: number;
   completedCount: number;
   pendingAmount: number;
@@ -233,6 +416,7 @@ export type SummaryStats = {
   income: SummaryBucket;
   expense: SummaryBucket;
   netCompleted: number;
+  netCollected: number;
   netTotal: number;
   netRemaining: number;
 };

@@ -8,6 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.LegalEntities;
 using System.Text;
 using System.Text.Json.Serialization;
 
@@ -51,6 +52,8 @@ builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<DatabaseBackupService>();
 builder.Services.AddScoped<StatsSummaryService>();
+builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
+builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 
 // ================= CORS =================
 builder.Services.AddCors(options =>
@@ -98,18 +101,18 @@ builder.Services.AddAuthorization(opts =>
 });
 
 // ================= Hosting URLs (ENV > config > default) =================
-// 1) ENV - самый высокий приоритет
+// 1) ENV - Г±Г Г¬Г»Г© ГўГ»Г±Г®ГЄГЁГ© ГЇГ°ГЁГ®Г°ГЁГІГҐГІ
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
 
-// 2) config ("urls"/"Urls") - берём, если ENV не задан
+// 2) config ("urls"/"Urls") - ГЎГҐГ°ВёГ¬, ГҐГ±Г«ГЁ ENV Г­ГҐ Г§Г Г¤Г Г­
 var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
 
-// 3) дефолт — внутренний порт для проксирования через Nginx
+// 3) Г¤ГҐГґГ®Г«ГІ вЂ” ГўГ­ГіГІГ°ГҐГ­Г­ГЁГ© ГЇГ®Г°ГІ Г¤Г«Гї ГЇГ°Г®ГЄГ±ГЁГ°Г®ГўГ Г­ГЁГї Г·ГҐГ°ГҐГ§ Nginx
 var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
     ? urlsEnv
     : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5000");
 
-// Явно задаём адреса, чтобы переопределить возможные значения из appsettings
+// ГџГўГ­Г® Г§Г Г¤Г ВёГ¬ Г Г¤Г°ГҐГ±Г , Г·ГІГ®ГЎГ» ГЇГҐГ°ГҐГ®ГЇГ°ГҐГ¤ГҐГ«ГЁГІГј ГўГ®Г§Г¬Г®Г¦Г­Г»ГҐ Г§Г­Г Г·ГҐГ­ГЁГї ГЁГ§ appsettings
 builder.WebHost.UseUrls(effectiveUrls);
 
 var app = builder.Build();

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { authService, User, Role } from '../../services/authService';
+import { useState, useEffect, useCallback } from 'react';
+import { authService, User, Role, UpdateUserDto } from '../../services/authService';
 import { X } from 'lucide-react';
 
 interface UserModalProps {
@@ -31,8 +31,20 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const fetchRoles = useCallback(async () => {
+    try {
+      const data = await authService.getRoles();
+      setRoles(data);
+      if (data.length > 0 && !user) {
+        setRoleId(data.find((r) => r.name === 'user')?.id || data[0].id);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки ролей:', err);
+    }
+  }, [user]);
+
   useEffect(() => {
-    fetchRoles();
+    void fetchRoles();
     if (user) {
       setEmail(user.email);
       setFullName(user.fullName);
@@ -53,19 +65,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
       setRoleId(user.role.id);
       setIsActive(user.isActive);
     }
-  }, [user]);
-
-  const fetchRoles = async () => {
-    try {
-      const data = await authService.getRoles();
-      setRoles(data);
-      if (data.length > 0 && !user) {
-        setRoleId(data.find((r) => r.name === 'user')?.id || data[0].id);
-      }
-    } catch (err) {
-      console.error('Ошибка загрузки ролей:', err);
-    }
-  };
+  }, [user, fetchRoles]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +73,7 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
     setLoading(true);
 
     try {
-      const updateData: any = {
+      const updateData: UpdateUserDto = {
         fullName: fullName.trim() || undefined,
         firstName: firstName.trim() || undefined,
         lastName: lastName.trim() || undefined,

@@ -1,9 +1,11 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -48,7 +50,18 @@ public class PaymentsController : ControllerBase
             if (it is null) return BadRequest("Unknown IncomeTypeId");
             if (it.PaymentType != model.Type) return BadRequest("IncomeType.PaymentType mismatches payment.Type");
         }
-        model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+
+        var now = DateTime.UtcNow;
+        model.SystemNotes = model.SystemNotes ?? string.Empty;
+        model.RescheduleCount = Math.Max(0, model.RescheduleCount);
+        if (model.LastPaymentDate is null && model.PaidDate.HasValue)
+        {
+            model.LastPaymentDate = model.PaidDate.Value.Date;
+        }
+
+        PaymentDomainService.Normalize(model);
+        PaymentDomainService.ApplyStatusRules(model, now);
+
         _db.Payments.Add(model);
         await _db.SaveChangesAsync();
         return Created($"/api/payments/{model.Id}", model);
@@ -67,14 +80,32 @@ public class PaymentsController : ControllerBase
             if (it.PaymentType != model.Type) return BadRequest("IncomeType.PaymentType mismatches payment.Type");
         }
 
+        var now = DateTime.UtcNow;
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var actor = User.GetDisplayName();
+
+        var originalDueDate = e.Date.Date;
+        var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
+        var originalPaidAmount = e.PaidAmount;
+        var originalStatus = e.Status;
+        var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
+        var originalSystemNotes = e.SystemNotes ?? string.Empty;
+
+        if (e.PlannedDate == default)
+        {
+            e.PlannedDate = originalPlannedDate;
+        }
+
         e.Date = model.Date;
+        if (model.PlannedDate != default)
+        {
+            e.PlannedDate = model.PlannedDate;
+        }
         e.Amount = model.Amount;
         e.Type = model.Type;
         e.Status = model.Status;
-        e.Description = model.Description;
-        e.IsPaid = model.IsPaid;
-        e.PaidDate = model.PaidDate;
-        e.Notes = model.Notes;
+        e.Description = model.Description ?? string.Empty;
+        e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
         e.ClientCaseId = model.ClientCaseId;
         e.DealTypeId = model.DealTypeId;
@@ -83,6 +114,70 @@ public class PaymentsController : ControllerBase
         e.PaymentStatusId = model.PaymentStatusId;
         e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         e.AccountDate = model.AccountDate;
+        e.PaidDate = model.PaidDate;
+        e.PaidAmount = model.PaidAmount;
+        e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
+        e.SystemNotes = originalSystemNotes;
+
+        PaymentDomainService.Normalize(e);
+
+        if (e.LastPaymentDate is null && e.PaidAmount > 0m)
+        {
+            e.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
+        }
+
+        PaymentDomainService.ApplyStatusRules(e, now);
+
+        var rescheduleCount = originalRescheduleCount;
+        var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
+        if (plannedDateChanged)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        var userChangedDueDate = model.Date.Date != originalDueDate;
+        if (userChangedDueDate)
+        {
+            rescheduleCount++;
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+        else if (originalDueDate != e.Date.Date)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
+                now,
+                actor);
+        }
+
+        if (originalStatus != e.Status)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
+                now,
+                actor);
+        }
+
+        e.RescheduleCount = rescheduleCount;
+
         await _db.SaveChangesAsync();
         return Ok(e);
     }

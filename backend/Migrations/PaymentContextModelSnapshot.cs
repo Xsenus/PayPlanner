@@ -115,6 +115,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -140,6 +143,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_Clients_IsActive");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_Clients_LegalEntityId");
 
                     b.HasIndex("Name")
                         .HasDatabaseName("IX_Clients_Name");
@@ -190,6 +196,72 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_ClientCases_ClientId_Status");
 
                     b.ToTable("ClientCases");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
+                {
+                    b.Property<int>("ContractId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ContractId", "ClientId");
+
+                    b.HasIndex("ClientId")
+                        .HasDatabaseName("IX_ClientContracts_ClientId");
+
+                    b.ToTable("ClientContracts", (string)null);
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal?>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ValidUntil")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_Contracts_CreatedAt");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_Contracts_Date");
+
+                    b.HasIndex("Number")
+                        .HasDatabaseName("IX_Contracts_Number");
+
+                    b.ToTable("Contracts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
@@ -285,6 +357,75 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("IncomeTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Director")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FullName")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Inn")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kpp")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Ogrn")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ShortName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Inn")
+                        .HasDatabaseName("IX_LegalEntities_Inn");
+
+                    b.HasIndex("Kpp")
+                        .HasDatabaseName("IX_LegalEntities_Kpp");
+
+                    b.HasIndex("ShortName")
+                        .HasDatabaseName("IX_LegalEntities_ShortName");
+
+                    b.ToTable("LegalEntities");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
                 {
                     b.Property<int>("Id")
@@ -311,7 +452,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("Date")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("date");
 
                     b.Property<int?>("DealTypeId")
                         .HasColumnType("INTEGER");
@@ -327,13 +468,19 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsPaid")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("LastPaymentDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("PaidAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTime?>("PaidDate")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("date");
 
                     b.Property<int?>("PaymentSourceId")
                         .HasColumnType("INTEGER");
@@ -341,8 +488,21 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("PaymentStatusId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime>("PlannedDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("RescheduleCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Status")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SystemNotes")
+                        .IsRequired()
+                        .HasMaxLength(4000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Type")
@@ -369,11 +529,17 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
 
+                    b.HasIndex("LastPaymentDate")
+                        .HasDatabaseName("IX_Payments_LastPaymentDate");
+
                     b.HasIndex("PaymentSourceId")
                         .HasDatabaseName("IX_Payments_PaymentSourceId");
 
                     b.HasIndex("PaymentStatusId")
                         .HasDatabaseName("IX_Payments_PaymentStatusId");
+
+                    b.HasIndex("PlannedDate")
+                        .HasDatabaseName("IX_Payments_PlannedDate");
 
                     b.HasIndex("Account", "AccountDate")
                         .HasDatabaseName("IX_Payments_Account_AccountDate");
@@ -510,6 +676,59 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_Roles_Name");
 
                     b.ToTable("Roles");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.RolePermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanCreate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("CanDelete")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("CanEdit")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("CanExport")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("CanView")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("CanViewAnalytics")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Section")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId", "Section")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RolePermissions_Role_Section");
+
+                    b.ToTable("RolePermissions");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
@@ -667,6 +886,16 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Responsible");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("Clients")
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("LegalEntity");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -676,6 +905,25 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany("ClientContracts")
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("ClientContracts")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("Contract");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
@@ -723,6 +971,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("PaymentStatusEntity");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.RolePermission", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Role", "Role")
+                        .WithMany("Permissions")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "ApprovedBy")
@@ -747,12 +1006,19 @@ namespace PayPlanner.Api.Migrations
 
                     b.Navigation("Cases");
 
+                    b.Navigation("ClientContracts");
+
                     b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
+                {
+                    b.Navigation("ClientContracts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
@@ -763,6 +1029,11 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
                 {
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
+                {
+                    b.Navigation("Clients");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentSource", b =>
@@ -777,6 +1048,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.Role", b =>
                 {
+                    b.Navigation("Permissions");
+
                     b.Navigation("Users");
                 });
 

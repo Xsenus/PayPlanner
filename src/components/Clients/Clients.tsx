@@ -3,6 +3,7 @@ import {
   Users,
   Plus,
   Building,
+  Building2,
   Mail,
   Phone,
   Eye,
@@ -13,14 +14,18 @@ import {
   X,
   LayoutGrid,
   List,
+  Ban,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
-import type { Client, ClientCase } from '../../types';
+import type { Client, ClientCase, ClientInput } from '../../types';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
@@ -82,13 +87,27 @@ function matchesClient(c: Client, q: string): boolean {
   const email = (c.email ?? '').toLowerCase();
   const phone = (c.phone ?? '').toLowerCase();
   const phoneDigits = (c.phone ?? '').replace(/\D/g, '');
+  const legal = c.legalEntity;
+  const legalShort = (legal?.shortName ?? '').toLowerCase();
+  const legalFull = (legal?.fullName ?? '').toLowerCase();
+  const legalInn = (legal?.inn ?? '').toLowerCase();
+  const legalOgrn = (legal?.ogrn ?? '').toLowerCase();
+  const legalKpp = (legal?.kpp ?? '').toLowerCase();
+  const legalDigits = [legal?.inn ?? '', legal?.ogrn ?? '', legal?.kpp ?? '']
+    .map((value) => value.replace(/\D/g, ''))
+    .join(' ');
 
   return (
     name.includes(ql) ||
     company.includes(ql) ||
     email.includes(ql) ||
     phone.includes(ql) ||
-    (!!qDigits && phoneDigits.includes(qDigits))
+    legalShort.includes(ql) ||
+    legalFull.includes(ql) ||
+    legalInn.includes(ql) ||
+    legalOgrn.includes(ql) ||
+    legalKpp.includes(ql) ||
+    (!!qDigits && (phoneDigits.includes(qDigits) || legalDigits.includes(qDigits)))
   );
 }
 
@@ -175,7 +194,15 @@ function highlightPhone(phone: string, q: string): ReactNode {
 export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
+  const { legalEntities, loading: legalEntitiesLoading } = useLegalEntities();
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const clientPermissions = permissions.clients;
+  const canViewClients = clientPermissions.canView;
+  const canCreateClients = clientPermissions.canCreate;
+  const canEditClients = clientPermissions.canEdit;
+  const canDeleteClients = clientPermissions.canDelete;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -234,6 +261,24 @@ export function Clients() {
       return next;
     });
 
+  const showPermissionWarning = (message: string) => {
+    window.alert(message || 'Недостаточно прав для выполнения действия.');
+  };
+
+  if (!canViewClients) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white px-6 py-10 text-center shadow-sm">
+          <Ban className="mx-auto h-12 w-12 text-red-500" />
+          <h1 className="mt-4 text-2xl font-semibold text-red-700">Доступ к клиентам ограничен</h1>
+          <p className="mt-2 text-sm text-red-600">
+            Обратитесь к администратору, чтобы получить права на просмотр и управление базой клиентов.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (selectedClientId) {
     return (
       <ClientDetail
@@ -244,7 +289,7 @@ export function Clients() {
     );
   }
 
-  if (loading) {
+  if (loading || legalEntitiesLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-gray-500">{t('loading')}</div>
@@ -253,11 +298,19 @@ export function Clients() {
   }
 
   const handleAddClient = () => {
+    if (!canCreateClients) {
+      showPermissionWarning('Недостаточно прав для добавления клиентов.');
+      return;
+    }
     setEditingClient(null);
     setIsModalOpen(true);
   };
 
   const handleEditClient = (client: Client) => {
+    if (!canEditClients) {
+      showPermissionWarning('Недостаточно прав для редактирования клиентов.');
+      return;
+    }
     setEditingClient(client);
     setIsModalOpen(true);
   };
@@ -267,15 +320,27 @@ export function Clients() {
     setEditingClient(null);
   };
 
-  const handleSubmitClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
+  const handleSubmitClient = async (clientData: ClientInput) => {
     if (editingClient) {
+      if (!canEditClients) {
+        showPermissionWarning('Недостаточно прав для редактирования клиентов.');
+        return;
+      }
       await updateClient(editingClient.id, clientData);
     } else {
+      if (!canCreateClients) {
+        showPermissionWarning('Недостаточно прав для добавления клиентов.');
+        return;
+      }
       await createClient(clientData);
     }
   };
 
   const handleDeleteClient = async (id: number) => {
+    if (!canDeleteClients) {
+      showPermissionWarning('Недостаточно прав для удаления клиентов.');
+      return;
+    }
     setEditingClient(null);
     setIsModalOpen(false);
 
@@ -290,6 +355,10 @@ export function Clients() {
   };
 
   const openAddCase = (clientId: number) => {
+    if (!canCreateClients) {
+      showPermissionWarning('Недостаточно прав для добавления дел.');
+      return;
+    }
     setCaseClientId(clientId);
     setEditingCase(null);
     setCaseMode('create');
@@ -297,6 +366,10 @@ export function Clients() {
   };
 
   const openEditCase = (clientId: number, clientCase: ClientCase) => {
+    if (!canEditClients) {
+      showPermissionWarning('Недостаточно прав для редактирования дел.');
+      return;
+    }
     setCaseClientId(clientId);
     setEditingCase(clientCase);
     setCaseMode('edit');
@@ -317,6 +390,10 @@ export function Clients() {
     };
 
     if (caseMode === 'edit' && editingCase) {
+      if (!canEditClients) {
+        showPermissionWarning('Недостаточно прав для редактирования дел.');
+        return;
+      }
       const updated = await apiService.updateCase(editingCase.id, base);
       setClients((prev) =>
         prev.map((c) =>
@@ -326,6 +403,10 @@ export function Clients() {
         ),
       );
     } else {
+      if (!canCreateClients) {
+        showPermissionWarning('Недостаточно прав для добавления дел.');
+        return;
+      }
       const created = await apiService.createCase(base);
       setClients((prev) =>
         prev.map((c) =>
@@ -340,6 +421,10 @@ export function Clients() {
 
   const deleteCase = async (): Promise<void> => {
     if (!editingCase || !caseClientId) return;
+    if (!canDeleteClients) {
+      showPermissionWarning('Недостаточно прав для удаления дел.');
+      return;
+    }
     await apiService.deleteCase(editingCase.id);
 
     setClients((prev) =>
@@ -421,13 +506,15 @@ export function Clients() {
                   <List size={18} />
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={handleAddClient}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
-                <Plus size={20} />
-                {t('addClient')}
-              </button>
+              {canCreateClients && (
+                <button
+                  type="button"
+                  onClick={handleAddClient}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                  <Plus size={20} />
+                  {t('addClient')}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -437,12 +524,18 @@ export function Clients() {
             <Users size={48} className="mx-auto mb-4 text-gray-300" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">{t('noClientsYet')}</h3>
             <p className="text-gray-500 mb-4">{t('getStartedByAdding')}</p>
-            <button
-              type="button"
-              onClick={handleAddClient}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-              {t('addClient')}
-            </button>
+            {canCreateClients ? (
+              <button
+                type="button"
+                onClick={handleAddClient}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                {t('addClient')}
+              </button>
+            ) : (
+              <p className="text-sm text-gray-500">
+                У вас нет прав для добавления клиентов.
+              </p>
+            )}
           </div>
         ) : sortedClients.length === 0 ? (
           <div className="text-center py-12">
@@ -471,6 +564,9 @@ export function Clients() {
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       Клиент
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      {t('legalEntity') || 'Юр. лицо'}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       Контакты
@@ -515,6 +611,30 @@ export function Clients() {
                               )}
                             </div>
                           </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {client.legalEntity ? (
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-2 text-gray-700">
+                                <Building2 size={14} className="text-blue-500" />
+                                <span className="truncate">
+                                  {highlight(client.legalEntity.shortName ?? '', query)}
+                                </span>
+                              </div>
+                              {client.legalEntity.inn && (
+                                <div className="text-xs text-gray-500">
+                                  ИНН: {highlight(client.legalEntity.inn ?? '', query)}
+                                </div>
+                              )}
+                              {client.legalEntity.ogrn && (
+                                <div className="text-xs text-gray-500">
+                                  ОГРН: {highlight(client.legalEntity.ogrn ?? '', query)}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">{t('legalEntityNotAssigned') || 'Не указано'}</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm space-y-1">
@@ -568,20 +688,24 @@ export function Clients() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => openAddCase(client.id)}
-                              className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                              title="Добавить дело">
-                              <PlusCircle size={16} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleEditClient(client)}
-                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title={t('edit')}>
-                              <Edit size={16} />
-                            </button>
+                            {canCreateClients && (
+                              <button
+                                type="button"
+                                onClick={() => openAddCase(client.id)}
+                                className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                title="Добавить дело">
+                                <PlusCircle size={16} />
+                              </button>
+                            )}
+                            {canEditClients && (
+                              <button
+                                type="button"
+                                onClick={() => handleEditClient(client)}
+                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title={t('edit')}>
+                                <Edit size={16} />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setSelectedClientId(client.id)}
@@ -648,20 +772,24 @@ export function Clients() {
                       </div>
                     </div>
                     <div className="flex gap-1 self-end sm:self-auto shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openAddCase(client.id)}
-                        className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                        title="Добавить дело">
-                        <PlusCircle size={16} />{' '}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleEditClient(client)}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title={t('edit')}>
-                        <Edit size={16} />
-                      </button>
+                      {canCreateClients && (
+                        <button
+                          type="button"
+                          onClick={() => openAddCase(client.id)}
+                          className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          title="Добавить дело">
+                          <PlusCircle size={16} />{' '}
+                        </button>
+                      )}
+                      {canEditClients && (
+                        <button
+                          type="button"
+                          onClick={() => handleEditClient(client)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title={t('edit')}>
+                          <Edit size={16} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setSelectedClientId(client.id)}
@@ -671,24 +799,32 @@ export function Clients() {
                       </button>
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0 flex flex-col">
-                    {client.email && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Mail size={14} />
-                        <span className="truncate">{highlight(client.email ?? '', query)}</span>
-                      </div>
-                    )}
-                    {client.phone && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Phone size={14} />
-                        <span className="truncate">
-                          {highlightPhone(client.phone ?? '', query)}
-                        </span>
-                      </div>
-                    )}
-                    {client.address && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Building size={14} />
+                    <div className="flex-1 min-h-0 flex flex-col gap-1">
+                      {client.email && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Mail size={14} />
+                          <span className="truncate">{highlight(client.email ?? '', query)}</span>
+                        </div>
+                      )}
+                      {client.phone && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Phone size={14} />
+                          <span className="truncate">
+                            {highlightPhone(client.phone ?? '', query)}
+                          </span>
+                        </div>
+                      )}
+                      {client.legalEntity && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Building2 size={14} className="text-blue-500" />
+                          <span className="truncate">
+                            {highlight(client.legalEntity.shortName ?? '', query)}
+                          </span>
+                        </div>
+                      )}
+                      {client.address && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Building size={14} />
                         <span className="truncate">{client.address}</span>
                       </div>
                     )}
@@ -751,13 +887,15 @@ export function Clients() {
                                 )}`}>
                                 {caseStatusLabel(c.status)}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => openEditCase(client.id, c)}
-                                className="ml-1 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                title="Редактировать дело">
-                                <Edit size={14} />
-                              </button>
+                              {canEditClients && (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditCase(client.id, c)}
+                                  className="ml-1 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                  title="Редактировать дело">
+                                  <Edit size={14} />
+                                </button>
+                              )}
                             </div>
                           </li>
                         ))}
@@ -803,6 +941,7 @@ export function Clients() {
           onSubmit={handleSubmitClient}
           onDelete={handleDeleteClient}
           client={editingClient ?? undefined}
+          legalEntities={legalEntities}
         />
 
         {caseModalOpen && (

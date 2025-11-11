@@ -42,6 +42,18 @@ type ActsSortKey =
   | 'responsible'
   | 'createdAt';
 
+type InvoicesSortKey =
+  | 'date'
+  | 'number'
+  | 'amount'
+  | 'dueDate'
+  | 'status'
+  | 'client'
+  | 'responsible'
+  | 'createdAt';
+
+type ContractsSortKey = 'date' | 'number' | 'amount' | 'createdAt';
+
 function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -136,6 +148,111 @@ export class ApiService {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
   }
 
+  // ===== Contracts =====
+  async getContracts(params?: {
+    from?: string;
+    to?: string;
+    clientId?: number;
+    search?: string;
+    sortBy?: ContractsSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Contract>>(`/contracts${q}`);
+  }
+
+  async getContract(id: number) {
+    return this.request<Contract>(`/contracts/${id}`);
+  }
+
+  async createContract(payload: ContractInput) {
+    return this.request<Contract>('/contracts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateContract(id: number, payload: ContractInput) {
+    return this.request<Contract>(`/contracts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteContract(id: number) {
+    return this.request<void>(`/contracts/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Invoices =====
+  async getInvoices(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+    sortBy?: InvoicesSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Invoice>>(`/invoices${q}`);
+  }
+
+  async getInvoicesSummary(params?: {
+    from?: string;
+    to?: string;
+    status?: PaymentStatus;
+    clientId?: number;
+    responsibleId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<InvoiceSummary>(`/invoices/summary${q}`);
+  }
+
+  async createInvoice(payload: InvoiceInput) {
+    return this.request<Invoice>('/invoices', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateInvoice(id: number, payload: InvoiceInput) {
+    return this.request<Invoice>(`/invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteInvoice(id: number) {
+    return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Role permissions =====
+  async getRolePermissions(roleId: number) {
+    return this.request<RolePermissions>(`/role-permissions/${roleId}`);
+  }
+
+  async updateRolePermissions(roleId: number, permissions: RolePermissions) {
+    return this.request<void>(`/role-permissions/${roleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(permissions),
+    });
+  }
+
+  async resetRolePermissions(roleId: number) {
+    return this.request<void>(`/role-permissions/${roleId}`, { method: 'DELETE' });
+  }
+
   // ===== Payments (back-compat + расширенные варианты) =====
 
   // Перегрузки — чтобы не ломать старые вызовы
@@ -171,11 +288,11 @@ export class ApiService {
     return this.request<Payment>(`/payments/${id}`);
   }
 
-  async createPayment(payment: Omit<Payment, 'id' | 'createdAt'>) {
+  async createPayment(payment: PaymentPayload) {
     return this.request<Payment>('/payments', { method: 'POST', body: JSON.stringify(payment) });
   }
 
-  async updatePayment(id: number, payment: Omit<Payment, 'id' | 'createdAt'>) {
+  async updatePayment(id: number, payment: PaymentPayload) {
     return this.request<Payment>(`/payments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payment),
@@ -236,16 +353,55 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
-  async createClient(client: Omit<Client, 'id' | 'createdAt'>) {
+  async createClient(client: ClientInput) {
     return this.request<Client>('/clients', { method: 'POST', body: JSON.stringify(client) });
   }
 
-  async updateClient(id: number, client: Omit<Client, 'id' | 'createdAt'>) {
+  async updateClient(id: number, client: ClientInput) {
     return this.request<Client>(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(client) });
   }
 
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Legal entities =====
+  async getLegalEntities(params?: { search?: string }) {
+    const q = buildQuery({ search: params?.search });
+    return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
+  }
+
+  async getLegalEntity(id: number) {
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`);
+  }
+
+  async createLegalEntity(payload: LegalEntityInput) {
+    return this.request<LegalEntityDetail>('/legal-entities', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateLegalEntity(id: number, payload: LegalEntityInput) {
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteLegalEntity(id: number) {
+    return this.request<void>(`/legal-entities/${id}`, { method: 'DELETE' });
+  }
+
+  async suggestLegalEntities(payload: {
+    query?: string;
+    inn?: string;
+    limit?: number;
+  }) {
+    return this.request<LegalEntitySuggestion[]>(`/legal-entities/suggest`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)
@@ -254,6 +410,7 @@ export class ApiService {
     isActive?: boolean;
     sortBy?: 'name' | 'createdAt';
     sortDir?: SortDir;
+    limit?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<Client[]>(`/v1/clients${q}`);
@@ -602,8 +759,20 @@ import type {
   ActResponsible,
   ActStatus,
   ActsSummary,
+  Contract,
+  ContractInput,
   Payment,
+  PaymentPayload,
+  Invoice,
+  InvoiceInput,
+  InvoiceSummary,
+  PaymentStatus,
   Client,
+  ClientInput,
+  LegalEntityDetail,
+  LegalEntityInput,
+  LegalEntitySuggestion,
+  LegalEntitySummary,
   InstallmentRequest,
   ClientStats,
   DealType,
@@ -618,3 +787,4 @@ import type {
   SummaryStatus,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
+import type { RolePermissions } from '../types/permissions';

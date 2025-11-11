@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Payment } from '../types';
+import type { Payment, PaymentPayload } from '../types';
 
 type UsePaymentsOptions = {
   pollInterval?: number;
@@ -13,7 +13,9 @@ type Mode = 'initial' | 'background';
 function signature(arr: Payment[]): string {
   if (!arr?.length) return 'empty';
   return arr
-    .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}:${p.date}`)
+    .map((p) =>
+      `${p.id}:${p.amount}:${p.paidAmount}:${p.outstandingAmount}:${p.status}:${p.type}:${p.date}:${p.plannedDate}`,
+    )
     .sort()
     .join('|');
 }
@@ -117,13 +119,9 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
     await fetchOnce('background');
   }, [fetchOnce]);
 
-  const createPayment = useCallback(
-    async (p: Omit<Payment, 'id' | 'createdAt'>) => apiService.createPayment(p),
-    [],
-  );
+  const createPayment = useCallback(async (p: PaymentPayload) => apiService.createPayment(p), []);
   const updatePayment = useCallback(
-    async (payload: { id: number } & Omit<Payment, 'id' | 'createdAt'>) =>
-      apiService.updatePayment(payload.id, payload),
+    async (payload: { id: number } & PaymentPayload) => apiService.updatePayment(payload.id, payload),
     [],
   );
   const deletePayment = useCallback(async (id: number) => apiService.deletePayment(id), []);

@@ -140,7 +140,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         });
         setSummary(response);
         hasSummaryLoadedRef.current = true;
-      } catch (err) {
+      } catch {
         if (!hasSummaryLoadedRef.current) {
           setSummary(null);
         }
