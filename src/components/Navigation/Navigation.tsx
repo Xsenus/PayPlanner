@@ -14,6 +14,7 @@ import {
   Building2,
   FileCheck2,
   FileSignature,
+  Eye,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -111,16 +112,17 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [t, permissions]);
 
   // Админские вкладки добавляем отдельно
-  const adminTabs = useMemo(
-    () =>
-      isAdmin()
-        ? ([
-            { id: 'users' as Tab, label: 'Пользователи', icon: UserCog },
-            { id: 'roles' as Tab, label: 'Роли', icon: Shield },
-          ] as const)
-        : ([] as const),
-    [isAdmin],
-  );
+  const adminTabs = useMemo(() => {
+    if (!isAdmin()) {
+      return [] as Array<{ id: Tab; label: string; icon: typeof Calendar }>;
+    }
+
+    return [
+      { id: 'users' as Tab, label: 'Пользователи', icon: UserCog },
+      { id: 'roles' as Tab, label: 'Роли', icon: Shield },
+      { id: 'userActivity' as Tab, label: 'Контроль пользователей', icon: Eye },
+    ];
+  }, [isAdmin]);
 
   const tabs = useMemo(() => [...baseTabs, ...adminTabs], [baseTabs, adminTabs]);
 

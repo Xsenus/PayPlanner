@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { authService, type User } from '../services/authService';
+import { apiService } from '../services/api';
+import type { UserActivityStatus } from '../types/userActivity';
 
 interface AuthContextType {
   user: User | null;
@@ -23,6 +25,22 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const logAuthEvent = (action: string, description: string, status: UserActivityStatus) => {
+    void apiService
+      .logUserActivity({
+        category: 'auth',
+        action,
+        section: 'auth',
+        description,
+        status,
+      })
+      .catch((error) => {
+        if (import.meta.env.DEV) {
+          console.warn('Не удалось зафиксировать событие авторизации', error);
+        }
+      });
+  };
 
   const fetchUser = async () => {
     try {
@@ -55,9 +73,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const me = await authService.getCurrentUser();
       setUser(me);
     }
+
+    logAuthEvent('login', `Вход пользователя ${resp.user?.email ?? email}`, 'Success');
   };
 
   const signOut = async () => {
+    logAuthEvent('logout', `Выход пользователя ${user?.email ?? 'неизвестен'}`, 'Info');
     authService.logout();
     setUser(null);
   };

@@ -758,6 +758,46 @@ export class ApiService {
     const q = buildQuery({ caseId, ...opts });
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
   }
+
+  async getUserActivityLogs(params?: {
+    page?: number;
+    pageSize?: number;
+    from?: string;
+    to?: string;
+    userId?: number;
+    category?: string;
+    action?: string;
+    section?: string;
+    httpMethod?: string;
+    status?: UserActivityStatus;
+    search?: string;
+  }) {
+    const q = buildQuery({
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 50,
+      from: params?.from,
+      to: params?.to,
+      userId: params?.userId,
+      category: params?.category,
+      action: params?.action,
+      section: params?.section,
+      httpMethod: params?.httpMethod,
+      status: params?.status,
+      search: params?.search,
+    });
+    return this.request<UserActivityLogResponse>(`/user-activity${q}`);
+  }
+
+  async getUserActivityFilters() {
+    return this.request<UserActivityFiltersResponse>('/user-activity/filters');
+  }
+
+  async logUserActivity(payload: CreateUserActivityInput) {
+    return this.request<UserActivityLogItem>('/user-activity', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const apiService = new ApiService();
@@ -799,3 +839,4 @@ import type {
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';
+import type { CreateUserActivityInput, UserActivityFiltersResponse, UserActivityLogItem, UserActivityLogResponse, UserActivityStatus } from '../types/userActivity';
