@@ -12,18 +12,36 @@ import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
+import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import type { Tab } from './types/tabs';
 import { useRolePermissions } from './hooks/useRolePermissions';
+import { useActivityLogger } from './hooks/useActivityLogger';
 
 type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
   const { user, loading } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const logActivity = useActivityLogger();
+  const tabNames: Record<Tab, string> = useMemo(() => ({
+    calendar: 'Календарь',
+    reports: 'Отчёты',
+    calculator: 'Калькулятор',
+    legalEntities: 'Юр. лица',
+    clients: 'Клиенты',
+    clientDetail: 'Карточка клиента',
+    accounts: 'Счета',
+    acts: 'Акты',
+    contracts: 'Договоры',
+    users: 'Пользователи',
+    roles: 'Роли',
+    dictionaries: 'Справочники',
+    userActivity: 'Пользовательский контроль',
+  }), []);
 
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -37,6 +55,18 @@ function AppContent() {
     setSelectedClientId(clientId);
     setInitialCaseId(typeof caseId === 'number' ? caseId : 'all');
     setActiveTab('clientDetail');
+    logActivity({
+      category: 'clients',
+      action: 'open_client',
+      section: 'clientDetail',
+      objectType: 'Client',
+      objectId: String(clientId),
+      description:
+        typeof caseId === 'number'
+          ? `Открыта карточка клиента ${clientId}, дело ${caseId}`
+          : `Открыта карточка клиента ${clientId}`,
+      status: 'Info',
+    });
   };
 
   const hardSignOut = () => {
@@ -94,6 +124,7 @@ function AppContent() {
           return permissions.dictionaries.canView;
         case 'users':
         case 'roles':
+        case 'userActivity':
           return isAdminRole;
         default:
           return true;
@@ -101,6 +132,20 @@ function AppContent() {
     },
     [permissions, isAdminRole],
   );
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    logActivity({
+      category: 'navigation',
+      action: 'open_tab',
+      section: activeTab,
+      description: `Открыт раздел: ${tabNames[activeTab] ?? activeTab}`,
+      status: 'Info',
+    });
+  }, [activeTab, logActivity, tabNames, user]);
 
   useEffect(() => {
     if (canViewTab(activeTab)) {
@@ -211,6 +256,13 @@ function AppContent() {
             onBack={() => {
               setActiveTab('clients');
               setSelectedClientId(null);
+              logActivity({
+                category: 'clients',
+                action: 'back_to_list',
+                section: 'clients',
+                description: 'Возврат к списку клиентов',
+                status: 'Info',
+              });
             }}
           />
         );
@@ -234,6 +286,8 @@ function AppContent() {
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'roles':
         return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
+      case 'userActivity':
+        return isAdminRole ? <UserActivity /> : renderNoAccess('Нужны права администратора.');
       case 'dictionaries':
         return permissions.dictionaries.canView
           ? <Dictionaries />
