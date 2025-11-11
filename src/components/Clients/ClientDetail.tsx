@@ -190,6 +190,20 @@ function toStatsStatusFilter(
   }
 }
 
+function toRuPaymentStatus(status?: string, fallback: string = '—'): string {
+  if (!status) return fallback;
+  const normalized = status.toLowerCase();
+  if (normalized.includes('overdue') || normalized.includes('проср')) return 'Просрочено';
+  if (normalized.includes('complete') || normalized.includes('оплач')) return 'Оплачено';
+  if (normalized.includes('process')) return 'В обработке';
+  if (normalized.includes('cancel')) return 'Отменено';
+  if (normalized.includes('pending') || normalized.includes('ожид')) return 'Ожидается';
+  if (normalized.includes('draft')) return 'Черновик';
+  if (normalized.includes('schedule')) return 'Запланировано';
+  if (normalized.includes('fail') || normalized.includes('error')) return 'Ошибка';
+  return fallback;
+}
+
 const MIN_DATE = '1900-01-01';
 const MAX_DATE = '2100-12-31';
 
@@ -1283,90 +1297,228 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   <p className="text-gray-500">Нет платежей по выбранному фильтру</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {visiblePayments.map((payment) => (
-                    <div
-                      key={payment.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="mt-0.5">
-                          {payment.type === 'Income' ? (
-                            <TrendingUp size={20} className="text-emerald-600" />
-                          ) : (
-                            <TrendingDown size={20} className="text-red-600" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p
-                            className="font-medium text-gray-900"
-                            title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
-                            {formatCurrencySmart(payment.amount).full}
-                          </p>
-                          {payment.description && (
-                            <p className="text-sm text-gray-500 truncate max-w-[45vw] sm:max-w-none">
-                              {payment.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="grid grid-rows-2 content-center gap-1 text-right min-w-[160px]">
-                        <div className="flex items-center justify-end gap-2">
-                          <p className="text-sm font-medium text-gray-900 leading-none">
-                            {toRuDate(payment.date)}
-                          </p>
-                          {clientPermissions.canEdit && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-blue-50 text-blue-600"
-                              onClick={() => openEditPayment(payment)}
-                              title="Редактировать"
-                              aria-label="Редактировать">
-                              <Edit size={16} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          {(() => {
-                            const s = normalizeStatus(payment.status);
-                            if (s === 'overdue') {
-                              return (
-                                <>
-                                  <AlertTriangle size={14} className="text-purple-700" />
-                                  <span className="text-xs text-purple-700 leading-none">
-                                    Просрочено
-                                  </span>
-                                </>
-                              );
-                            }
-                            if (s === 'completed') {
-                              return (
-                                <>
-                                  <CheckCircle size={14} className="text-emerald-600" />
-                                  <span className="text-xs text-emerald-600 leading-none">
-                                    Выполнено
-                                  </span>
-                                </>
-                              );
-                            }
-                            return (
-                              <>
-                                <Clock size={14} className="text-amber-600" />
-                                <span className="text-xs text-amber-600 leading-none">Ожидается</span>
-                              </>
-                            );
-                          })()}
-                          {clientPermissions.canDelete && (
-                            <button
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-red-50 text-red-600"
-                              onClick={() => removePayment(payment.id)}
-                              title="Удалить"
-                              aria-label="Удалить">
-                              <Trash2 size={16} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <colgroup>
+                      <col className="w-48" />
+                      <col className="w-56" />
+                      <col className="w-60" />
+                      <col className="w-56" />
+                      <col className="w-[18rem]" />
+                      <col className="w-56" />
+                      {clientPermissions.canEdit || clientPermissions.canDelete ? <col className="w-36" /> : null}
+                    </colgroup>
+                    <thead className="bg-slate-50">
+                      <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th scope="col" className="px-4 py-3">Период</th>
+                        <th scope="col" className="px-4 py-3">Сумма и тип</th>
+                        <th scope="col" className="px-4 py-3">Категория / источник</th>
+                        <th scope="col" className="px-4 py-3">Дело и контакт</th>
+                        <th scope="col" className="px-4 py-3">Документы и комментарии</th>
+                        <th scope="col" className="px-4 py-3">Статус и прогресс</th>
+                        {(clientPermissions.canEdit || clientPermissions.canDelete) && (
+                          <th scope="col" className="px-4 py-3 text-right">Действия</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 text-slate-700">
+                      {visiblePayments.map((payment) => {
+                        const status = normalizeStatus(payment.status);
+                        const statusLabel = toRuPaymentStatus(
+                          payment.paymentStatusEntity?.name ?? payment.status,
+                          payment.paymentStatusEntity?.name || payment.status || '—',
+                        );
+                        const statusBadgeClass =
+                          status === 'completed'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            : status === 'overdue'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-100'
+                              : 'bg-amber-50 text-amber-700 border border-amber-100';
+                        const StatusIcon =
+                          status === 'completed'
+                            ? CheckCircle
+                            : status === 'overdue'
+                              ? AlertTriangle
+                              : Clock;
+                        const directionLabel =
+                          payment.dealType?.name ||
+                          payment.incomeType?.name ||
+                          payment.paymentSource?.name ||
+                          '—';
+                        const secondaryDirections = [
+                          payment.dealType?.name,
+                          payment.incomeType?.name,
+                          payment.paymentSource?.name,
+                        ]
+                          .filter((item): item is string => Boolean(item && item !== directionLabel))
+                          .filter((value, index, self) => self.indexOf(value) === index);
+                        const DirectionIcon = payment.type === 'Income' ? TrendingUp : TrendingDown;
+                        const hasProgress = payment.hasPartialPayment && payment.paidAmount > 0;
+                        const paidProgress = payment.amount > 0 ? Math.min(payment.paidAmount / payment.amount, 1) : 0;
+
+                        return (
+                          <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">
+                            <td className="px-4 py-4 text-slate-600">
+                              <div className="font-medium text-slate-900">{toRuDate(payment.date)}</div>
+                              {payment.plannedDate && payment.plannedDate !== payment.date ? (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  План: {toRuDate(payment.plannedDate)}
+                                </div>
+                              ) : null}
+                              {payment.paidDate ? (
+                                <div className="mt-1 text-xs text-emerald-600">
+                                  Оплачен: {toRuDate(payment.paidDate)}
+                                </div>
+                              ) : null}
+                              <div className="mt-2 text-xs text-slate-400">
+                                Создан: {toRuDate(payment.createdAt)}
+                              </div>
+                              {payment.rescheduleCount > 0 ? (
+                                <div className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                  <RotateCcw size={12} className="mr-1" /> Переносов: {payment.rescheduleCount}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div
+                                className={`flex items-center gap-2 text-sm font-semibold ${
+                                  payment.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'
+                                }`}
+                                title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
+                                <DirectionIcon size={18} />
+                                {formatCurrencySmart(payment.amount).full}
+                              </div>
+                              <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                {payment.type === 'Income' ? 'Поступление' : 'Списание'}
+                              </div>
+                              {payment.outstandingAmount > 0 ? (
+                                <div className="mt-2 text-xs text-rose-600">
+                                  Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
+                                </div>
+                              ) : null}
+                              {payment.hasPartialPayment && payment.paidAmount > 0 ? (
+                                <div className="mt-2">
+                                  <div className="flex items-center justify-between text-xs text-slate-500">
+                                    <span>Оплачено</span>
+                                    <span className="font-medium text-slate-700">
+                                      {formatCurrencySmart(payment.paidAmount).full}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 h-1.5 w-full rounded-full bg-slate-200">
+                                    <div
+                                      className={`h-full rounded-full ${
+                                        payment.type === 'Income' ? 'bg-emerald-500' : 'bg-rose-500'
+                                      }`}
+                                      style={{ width: `${Math.max(0, Math.min(100, paidProgress * 100))}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="font-medium text-slate-900">{directionLabel}</div>
+                              {secondaryDirections.length ? (
+                                <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+                                  {secondaryDirections.map((label) => (
+                                    <li key={label}>{label}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {payment.account ? (
+                                <div className="mt-2 text-xs text-slate-500">Счёт: {payment.account}</div>
+                              ) : null}
+                              {payment.accountDate ? (
+                                <div className="text-xs text-slate-400">
+                                  Дата счёта: {toRuDate(payment.accountDate)}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-4">
+                              {payment.clientCase?.title ? (
+                                <div className="font-medium text-slate-900">{payment.clientCase.title}</div>
+                              ) : (
+                                <div className="text-xs text-slate-400">Дело не указано</div>
+                              )}
+                              {payment.client?.name ? (
+                                <div className="mt-1 text-xs text-slate-500">{payment.client.name}</div>
+                              ) : null}
+                              {payment.clientCase?.status ? (
+                                <div className="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+                                  {caseStatusLabel(payment.clientCase.status)}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-4">
+                              {payment.description ? (
+                                <div className="text-slate-800">{payment.description}</div>
+                              ) : (
+                                <div className="text-xs text-slate-400">Без описания</div>
+                              )}
+                              {payment.notes ? (
+                                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={payment.notes}>
+                                  <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
+                                </div>
+                              ) : null}
+                              {payment.systemNotes ? (
+                                <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={payment.systemNotes}>
+                                  <span className="font-medium text-slate-600">Системно:</span> {payment.systemNotes}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div
+                                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}
+                              >
+                                <StatusIcon size={14} />
+                                <span className="leading-none">{statusLabel}</span>
+                              </div>
+                              {payment.delayDays ? (
+                                <div className="mt-2 inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                                  <AlertTriangle size={12} className="mr-1" /> Просрочка: {payment.delayDays} дн.
+                                </div>
+                              ) : null}
+                              {payment.lastPaymentDate ? (
+                                <div className="mt-2 text-xs text-slate-500">
+                                  Последний платёж: {toRuDate(payment.lastPaymentDate)}
+                                </div>
+                              ) : null}
+                              {payment.hasPartialPayment && !hasProgress ? (
+                                <div className="mt-2 text-xs text-slate-500">Оплачено частично</div>
+                              ) : null}
+                            </td>
+                            {(clientPermissions.canEdit || clientPermissions.canDelete) && (
+                              <td className="px-4 py-4">
+                                <div className="flex items-center justify-end gap-2">
+                                  {clientPermissions.canEdit ? (
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
+                                      onClick={() => openEditPayment(payment)}
+                                      title="Редактировать"
+                                      aria-label="Редактировать"
+                                    >
+                                      <Edit size={16} />
+                                    </button>
+                                  ) : null}
+                                  {clientPermissions.canDelete ? (
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50"
+                                      onClick={() => removePayment(payment.id)}
+                                      title="Удалить"
+                                      aria-label="Удалить"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )
             ) : activeSection === 'accounts' ? (

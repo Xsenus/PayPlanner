@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   WalletCards,
+  Building2,
   FileCheck2,
   FileSignature,
 } from 'lucide-react';
@@ -88,6 +89,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       { id: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar, allowed: permissions.calendar.canView },
       { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart, allowed: permissions.reports.canView },
       { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator, allowed: permissions.calculator.canView },
+      { id: 'legalEntities' as Tab, label: t('legalEntities') ?? 'Юр. лица', icon: Building2, allowed: permissions.legalEntities.canView },
       { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users, allowed: permissions.clients.canView },
       { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards, allowed: permissions.accounts.canView },
       { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2, allowed: permissions.acts.canView },

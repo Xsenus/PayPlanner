@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
-import type { Client } from '../../types';
+import type { Client, ClientInput, LegalEntitySummary } from '../../types';
 
 interface ClientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<void>;
+  onSubmit: (client: ClientInput) => Promise<void>;
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
+  legalEntities: LegalEntitySummary[];
 }
 
-export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: ClientModalProps) {
+export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legalEntities }: ClientModalProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -23,8 +24,22 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
     company: '',
     address: '',
     notes: '',
+    legalEntityId: '',
     isActive: true,
   });
+
+  const sortedLegalEntities = useMemo(
+    () =>
+      [...legalEntities].sort((a, b) =>
+        a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' }),
+      ),
+    [legalEntities],
+  );
+
+  const selectedLegalEntity = useMemo(() => {
+    if (!formData.legalEntityId) return null;
+    return sortedLegalEntities.find((entity) => entity.id === Number(formData.legalEntityId)) ?? null;
+  }, [formData.legalEntityId, sortedLegalEntities]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -44,6 +59,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
         company: client.company || '',
         address: client.address || '',
         notes: client.notes || '',
+        legalEntityId: client.legalEntityId ? String(client.legalEntityId) : '',
         isActive: client.isActive,
       });
     } else {
@@ -54,6 +70,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
         company: '',
         address: '',
         notes: '',
+        legalEntityId: '',
         isActive: true,
       });
     }
@@ -64,7 +81,17 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
     e.stopPropagation();
     setLoading(true);
     try {
-      await onSubmit(formData);
+      const payload: ClientInput = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        company: formData.company.trim(),
+        address: formData.address.trim(),
+        notes: formData.notes.trim(),
+        isActive: formData.isActive,
+        legalEntityId: formData.legalEntityId ? Number(formData.legalEntityId) : null,
+      };
+      await onSubmit(payload);
       onClose();
     } catch (error) {
       console.error('Failed to save client:', error);
@@ -73,8 +100,14 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  ) => {
     const { name, value } = e.target;
+    if (name === 'legalEntityId') {
+      setFormData((prev) => ({ ...prev, legalEntityId: value }));
+      return;
+    }
     const el = e.target as HTMLInputElement;
     setFormData((prev) => ({
       ...prev,
@@ -166,6 +199,44 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client }: Cli
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('legalEntity') || 'Юридическое лицо'}
+              </label>
+              <select
+                name="legalEntityId"
+                value={formData.legalEntityId}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="">
+                  {t('legalEntityNotSelected') || 'Без юридического лица'}
+                </option>
+                {sortedLegalEntities.map((entity) => (
+                  <option key={entity.id} value={entity.id}>
+                    {entity.shortName}
+                    {entity.inn ? ` · ${entity.inn}` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedLegalEntity && (
+                <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
+                  {selectedLegalEntity.fullName && (
+                    <p className="font-medium text-gray-700">{selectedLegalEntity.fullName}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                    {selectedLegalEntity.inn && <span>ИНН: {selectedLegalEntity.inn}</span>}
+                    {selectedLegalEntity.kpp && <span>КПП: {selectedLegalEntity.kpp}</span>}
+                    {selectedLegalEntity.ogrn && <span>ОГРН: {selectedLegalEntity.ogrn}</span>}
+                  </div>
+                  {selectedLegalEntity.address && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      {t('legalEntityAddress') || 'Адрес'}: {selectedLegalEntity.address}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

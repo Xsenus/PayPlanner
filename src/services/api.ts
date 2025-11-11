@@ -353,16 +353,55 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
-  async createClient(client: Omit<Client, 'id' | 'createdAt'>) {
+  async createClient(client: ClientInput) {
     return this.request<Client>('/clients', { method: 'POST', body: JSON.stringify(client) });
   }
 
-  async updateClient(id: number, client: Omit<Client, 'id' | 'createdAt'>) {
+  async updateClient(id: number, client: ClientInput) {
     return this.request<Client>(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(client) });
   }
 
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Legal entities =====
+  async getLegalEntities(params?: { search?: string }) {
+    const q = buildQuery({ search: params?.search });
+    return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
+  }
+
+  async getLegalEntity(id: number) {
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`);
+  }
+
+  async createLegalEntity(payload: LegalEntityInput) {
+    return this.request<LegalEntityDetail>('/legal-entities', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateLegalEntity(id: number, payload: LegalEntityInput) {
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteLegalEntity(id: number) {
+    return this.request<void>(`/legal-entities/${id}`, { method: 'DELETE' });
+  }
+
+  async suggestLegalEntities(payload: {
+    query?: string;
+    inn?: string;
+    limit?: number;
+  }) {
+    return this.request<LegalEntitySuggestion[]>(`/legal-entities/suggest`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)
@@ -729,6 +768,11 @@ import type {
   InvoiceSummary,
   PaymentStatus,
   Client,
+  ClientInput,
+  LegalEntityDetail,
+  LegalEntityInput,
+  LegalEntitySuggestion,
+  LegalEntitySummary,
   InstallmentRequest,
   ClientStats,
   DealType,

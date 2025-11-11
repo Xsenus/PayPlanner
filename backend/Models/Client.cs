@@ -23,6 +23,10 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public string Company { get; set; } = string.Empty;
 
+        public int? LegalEntityId { get; set; }
+
+        public LegalEntity? LegalEntity { get; set; }
+
         /// <summary>
         /// Дата и время создания записи (UTC).
         /// </summary>

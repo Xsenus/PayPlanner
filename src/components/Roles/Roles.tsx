@@ -12,6 +12,7 @@ const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = 
   reports: 'Отчёты',
   calculator: 'Калькулятор',
   clients: 'Клиенты',
+  legalEntities: 'Юр. лица',
   accounts: 'Счета',
   acts: 'Акты',
   contracts: 'Договоры',
