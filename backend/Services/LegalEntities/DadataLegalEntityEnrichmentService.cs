@@ -30,7 +30,18 @@ public class DadataLegalEntityEnrichmentService : ILegalEntityEnrichmentService
         _options = options.Value;
         if (!string.IsNullOrWhiteSpace(_options.BaseUrl))
         {
-            _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/'));
+            var baseUrl = _options.BaseUrl.Trim();
+            if (!baseUrl.EndsWith('/', StringComparison.Ordinal))
+            {
+                baseUrl += "/";
+            }
+
+            _httpClient.BaseAddress = new Uri(baseUrl);
+        }
+
+        if (!_httpClient.DefaultRequestHeaders.Accept.Any(h => h.MediaType == "application/json"))
+        {
+            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         }
     }
 
