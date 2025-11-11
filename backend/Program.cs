@@ -51,8 +51,9 @@ var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source
 var normalizedCs = NormalizeSqliteConnection(rawCs);
 void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
 
-builder.Services.AddDbContext<PaymentContext>(ConfigureSqlite);
 builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
+builder.Services.AddScoped<PaymentContext>(sp =>
+    sp.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext());
 
 builder.Services.AddHttpContextAccessor();
 
