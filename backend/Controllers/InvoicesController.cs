@@ -391,6 +391,18 @@ public class InvoicesController : ControllerBase
         ClientId = x.Payment.ClientId,
         ClientName = x.Payment.Client != null ? x.Payment.Client.Name : null,
         ClientCompany = x.Payment.Client != null ? x.Payment.Client.Company : null,
+        ClientStatusId = x.Payment.Client != null ? x.Payment.Client.ClientStatusId : null,
+        ClientStatus = x.Payment.Client != null && x.Payment.Client.ClientStatus != null
+            ? new ClientStatusDto
+            {
+                Id = x.Payment.Client.ClientStatus.Id,
+                Name = x.Payment.Client.ClientStatus.Name,
+                Description = x.Payment.Client.ClientStatus.Description,
+                ColorHex = x.Payment.Client.ClientStatus.ColorHex,
+                IsActive = x.Payment.Client.ClientStatus.IsActive,
+                CreatedAt = x.Payment.Client.ClientStatus.CreatedAt,
+            }
+            : null,
         ClientCaseId = x.Payment.ClientCaseId,
         ClientCaseTitle = x.Payment.ClientCase != null ? x.Payment.ClientCase.Title : null,
         Description = x.Payment.Description,

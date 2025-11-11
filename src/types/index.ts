@@ -68,6 +68,8 @@ export interface Client {
   isActive: boolean;
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
+  clientStatusId?: number | null;
+  clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
   contracts?: Contract[];
 }
@@ -81,6 +83,7 @@ export interface ClientInput {
   notes: string;
   isActive: boolean;
   legalEntityId?: number | null;
+  clientStatusId?: number | null;
 }
 
 export interface ClientCase {
@@ -113,6 +116,15 @@ export interface IncomeType {
 }
 
 export interface PaymentSource {
+  id: number;
+  name: string;
+  description: string;
+  colorHex: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface ClientStatus {
   id: number;
   name: string;
   description: string;
@@ -186,6 +198,8 @@ export interface ContractClient {
   id: number;
   name: string;
   company?: string | null;
+  clientStatusId?: number | null;
+  clientStatus?: ClientStatus | null;
 }
 
 export interface Contract {
@@ -273,6 +287,8 @@ export interface Invoice {
   clientId?: number | null;
   clientName?: string | null;
   clientCompany?: string | null;
+  clientStatusId?: number | null;
+  clientStatus?: ClientStatus | null;
   clientCaseId?: number | null;
   clientCaseTitle?: string | null;
   description?: string | null;

@@ -6,6 +6,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type FormState = {
   number: string;
@@ -119,6 +120,11 @@ export function InvoiceModal({
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
 
   const debouncedActSearch = useDebouncedValue(actSearch.trim(), 300);
+
+  const selectedClient = useMemo(
+    () => clients.find((client) => String(client.id) === form.clientId) ?? null,
+    [clients, form.clientId],
+  );
 
   useEffect(() => {
     if (open) {
@@ -350,6 +356,7 @@ export function InvoiceModal({
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
+                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
                   </option>
                 ))}
               </select>
@@ -358,6 +365,14 @@ export function InvoiceModal({
               )}
               {lookupsError && (
                 <span className="text-xs text-rose-600">{lookupsError}</span>
+              )}
+              {selectedClient?.clientStatus && (
+                <div className="mt-2 space-y-1">
+                  <ClientStatusBadge status={selectedClient.clientStatus} />
+                  {selectedClient.clientStatus.description && (
+                    <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
+                  )}
+                </div>
               )}
             </label>
           </div>

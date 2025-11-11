@@ -63,6 +63,8 @@ import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
 import { ClientModal } from './ClientModal';
+import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { ClientStatusBadge } from './ClientStatusBadge';
 
 interface ClientDetailProps {
   clientId: number;
@@ -223,6 +225,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const actPermissions = permissions.acts;
   const contractPermissions = permissions.contracts;
   const { legalEntities } = useLegalEntities();
+  const { statuses: clientStatuses } = useClientStatuses();
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) => permissions[SECTION_PERMISSION_MAP[section]],
     [permissions],
@@ -1213,8 +1216,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           >
             <ArrowLeft size={24} />
           </button>
-          <h1 className="flex-1 min-w-0 text-2xl font-bold text-gray-900" title={clientName}>
-            {clientName}
+          <h1
+            className="flex-1 min-w-0 text-2xl font-bold text-gray-900 flex flex-wrap items-center gap-3"
+            title={clientName}>
+            <span className="truncate">{clientName}</span>
+            <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {clientPermissions.canEdit && (
@@ -2519,6 +2525,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           onSubmit={handleUpdateClient}
           client={clientData ?? undefined}
           legalEntities={legalEntities}
+          clientStatuses={clientStatuses}
         />
 
         {error && (

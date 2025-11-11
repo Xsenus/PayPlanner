@@ -15,6 +15,8 @@ public class InvoiceDto
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
     public string? ClientCompany { get; set; }
+    public int? ClientStatusId { get; set; }
+    public ClientStatusDto? ClientStatus { get; set; }
     public int? ClientCaseId { get; set; }
     public string? ClientCaseTitle { get; set; }
     public string? Description { get; set; }

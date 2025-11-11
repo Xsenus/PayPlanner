@@ -7,6 +7,7 @@ import { apiService } from '../../services/api';
 import type { Payment, PaymentStatus, ClientCase, PaymentPayload } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
@@ -90,6 +91,10 @@ export function PaymentModal({
       .filter(Boolean)
       .map((line) => (line.startsWith('• ') ? line.slice(2) : line));
   }, [formData.systemNotes]);
+  const selectedClient = useMemo(
+    () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
+    [clients, formData.clientId],
+  );
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -750,7 +755,12 @@ export function PaymentModal({
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('client')}</label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-gray-700">{t('client')}</label>
+                {selectedClient?.clientStatus ? (
+                  <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
+                ) : null}
+              </div>
               <select
                 name="clientId"
                 value={formData.clientId}
@@ -759,7 +769,8 @@ export function PaymentModal({
                 <option value="">{t('selectClient')}</option>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
-                    {client.name} {client.company ? `— ${client.company}` : ''}
+                    {client.name}
+                    {client.company ? ` — ${client.company}` : ''}
                   </option>
                 ))}
               </select>
