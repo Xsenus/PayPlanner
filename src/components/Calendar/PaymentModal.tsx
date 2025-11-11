@@ -755,7 +755,12 @@ export function PaymentModal({
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('client')}</label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-gray-700">{t('client')}</label>
+                {selectedClient?.clientStatus ? (
+                  <ClientStatusBadge status={selectedClient.clientStatus} />
+                ) : null}
+              </div>
               <select
                 name="clientId"
                 value={formData.clientId}
@@ -765,16 +770,10 @@ export function PaymentModal({
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
-                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
                     {client.company ? ` — ${client.company}` : ''}
                   </option>
                 ))}
               </select>
-              {selectedClient?.clientStatus ? (
-                <div className="mt-2">
-                  <ClientStatusBadge status={selectedClient.clientStatus} />
-                </div>
-              ) : null}
             </div>
 
             <div>

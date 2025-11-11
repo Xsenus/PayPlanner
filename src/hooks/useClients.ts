@@ -7,12 +7,56 @@ import type {
   LegalEntitySummary,
   ClientInput,
   ClientStatus,
+  Contract,
 } from '../types';
 
 function isClient(x: unknown): x is Client {
   if (typeof x !== 'object' || x === null) return false;
   const o = x as Record<string, unknown>;
   return typeof o.id === 'number' && typeof o.createdAt === 'string';
+}
+
+function normalizeClient(raw: Client, previous?: Client): Client {
+  const source = raw as Client & Record<string, unknown>;
+
+  const legalEntityId = source.legalEntityId ?? null;
+  const hasLegalEntity = Object.prototype.hasOwnProperty.call(source, 'legalEntity');
+  const legalEntity = hasLegalEntity
+    ? ((source.legalEntity as LegalEntitySummary | null | undefined) ?? null)
+    : previous?.legalEntity ?? null;
+
+  const clientStatusId = source.clientStatusId ?? null;
+  const hasClientStatus = Object.prototype.hasOwnProperty.call(source, 'clientStatus');
+  const clientStatus = hasClientStatus
+    ? ((source.clientStatus as ClientStatus | null | undefined) ?? null)
+    : clientStatusId
+      ? previous?.clientStatus ?? null
+      : null;
+
+  const hasCases = Object.prototype.hasOwnProperty.call(source, 'cases');
+  const cases = hasCases
+    ? Array.isArray(source.cases)
+      ? (source.cases as ClientCase[])
+      : []
+    : previous?.cases ?? [];
+
+  const hasContracts = Object.prototype.hasOwnProperty.call(source, 'contracts');
+  const contracts = hasContracts
+    ? Array.isArray(source.contracts)
+      ? (source.contracts as Contract[])
+      : []
+    : previous?.contracts ?? [];
+
+  return {
+    ...previous,
+    ...raw,
+    legalEntityId,
+    legalEntity,
+    clientStatusId,
+    clientStatus,
+    cases,
+    contracts,
+  };
 }
 
 export function useClients() {
@@ -26,14 +70,7 @@ export function useClients() {
       setError(null);
 
       const base = await apiService.getClients();
-      const normalized: Client[] = (base as Client[]).map((c) => ({
-        ...c,
-        legalEntityId: c.legalEntityId ?? null,
-        legalEntity: (c.legalEntity as LegalEntitySummary | null) ?? null,
-        clientStatusId: c.clientStatusId ?? null,
-        clientStatus: (c.clientStatus as ClientStatus | null) ?? null,
-        cases: (c.cases ?? []) as ClientCase[],
-      }));
+      const normalized = (base as Client[]).map((c) => normalizeClient(c));
 
       setClients(normalized);
     } catch (err) {
@@ -51,17 +88,7 @@ export function useClients() {
     try {
       const created = await apiService.createClient(client);
       if (isClient(created)) {
-        setClients((prev) => [
-          {
-            ...created,
-            legalEntityId: created.legalEntityId ?? null,
-            legalEntity: (created.legalEntity as LegalEntitySummary | null) ?? null,
-            clientStatusId: created.clientStatusId ?? null,
-            clientStatus: (created.clientStatus as ClientStatus | null) ?? null,
-            cases: (created.cases ?? []) as ClientCase[],
-          },
-          ...prev,
-        ]);
+        setClients((prev) => [normalizeClient(created), ...prev]);
       } else {
         await fetchClients();
       }
@@ -76,18 +103,7 @@ export function useClients() {
       const updated = await apiService.updateClient(id, patch);
       if (isClient(updated)) {
         setClients((prev) =>
-          prev.map((c) =>
-            c.id === id
-              ? {
-                  ...updated,
-                  legalEntityId: updated.legalEntityId ?? null,
-                  legalEntity: (updated.legalEntity as LegalEntitySummary | null) ?? null,
-                  clientStatusId: updated.clientStatusId ?? null,
-                  clientStatus: (updated.clientStatus as ClientStatus | null) ?? null,
-                  cases: (updated.cases ?? c.cases ?? []) as ClientCase[],
-                }
-              : c,
-          ),
+          prev.map((c) => (c.id === id ? normalizeClient(updated, c) : c)),
         );
       } else {
         await fetchClients();
