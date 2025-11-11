@@ -31,6 +31,10 @@ public class DictionariesReadController : ControllerBase
     public async Task<IActionResult> PaymentSources(CancellationToken ct)
         => Ok(await _db.PaymentSources.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
 
+    [HttpGet("client-statuses")]
+    public async Task<IActionResult> ClientStatuses(CancellationToken ct)
+        => Ok(await _db.ClientStatuses.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
+
     [HttpGet("payment-statuses")]
     public async Task<IActionResult> PaymentStatuses(CancellationToken ct)
         => Ok(await _db.PaymentStatuses.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));

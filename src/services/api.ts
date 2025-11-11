@@ -9,7 +9,12 @@ function getAuthToken(): string | null {
   );
 }
 
-export type DictKind = 'deal-types' | 'income-types' | 'payment-sources' | 'payment-statuses';
+export type DictKind =
+  | 'deal-types'
+  | 'income-types'
+  | 'payment-sources'
+  | 'client-statuses'
+  | 'payment-statuses';
 
 export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? DealType
@@ -17,6 +22,8 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? IncomeType
   : K extends 'payment-sources'
   ? PaymentSource
+  : K extends 'client-statuses'
+  ? ClientStatus
   : PaymentStatusEntity;
 
 function pathForKind(kind: DictKind): string {
@@ -529,6 +536,9 @@ export class ApiService {
   async getPaymentSources() {
     return this.getDict('payment-sources');
   }
+  async getClientStatuses() {
+    return this.getDict('client-statuses');
+  }
   async getPaymentStatuses() {
     return this.getDict('payment-statuses');
   }
@@ -779,6 +789,7 @@ import type {
   IncomeType,
   PaymentSource,
   PaymentStatusEntity,
+  ClientStatus,
   MonthlyStats,
   ClientCase,
   AccountSuggestion,

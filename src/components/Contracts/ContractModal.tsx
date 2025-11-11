@@ -5,6 +5,7 @@ import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 interface ContractModalProps {
   open: boolean;
@@ -104,6 +105,8 @@ export function ContractModal({
           id: client.id,
           name: client.name,
           company: client.company,
+          clientStatusId: client.clientStatusId ?? null,
+          clientStatus: client.clientStatus ?? null,
         }));
         setClientOptions(mapped);
         setClientOptionsError(null);
@@ -304,9 +307,12 @@ export function ContractModal({
                     key={client.id}
                     className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"
                   >
-                    <span>
-                      {client.name}
-                      {client.company ? ` · ${client.company}` : ''}
+                    <span className="flex flex-col items-start gap-1 sm:flex-row sm:items-center">
+                      <span>
+                        {client.name}
+                        {client.company ? ` · ${client.company}` : ''}
+                      </span>
+                      <ClientStatusBadge status={client.clientStatus} />
                     </span>
                     <button
                       type="button"
@@ -343,6 +349,11 @@ export function ContractModal({
                             <span className="font-medium text-slate-700">{client.name}</span>
                             {client.company && (
                               <span className="text-xs text-slate-500">{client.company}</span>
+                            )}
+                            {client.clientStatus?.name && (
+                              <span className="mt-1">
+                                <ClientStatusBadge status={client.clientStatus} />
+                              </span>
                             )}
                           </span>
                           <span className="text-xs font-semibold uppercase tracking-wide text-emerald-600">

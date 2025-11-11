@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import type { Client, ClientStats, ClientCase, LegalEntitySummary, ClientInput } from '../types';
+import type {
+  Client,
+  ClientStats,
+  ClientCase,
+  LegalEntitySummary,
+  ClientInput,
+  ClientStatus,
+} from '../types';
 
 function isClient(x: unknown): x is Client {
   if (typeof x !== 'object' || x === null) return false;
@@ -23,6 +30,8 @@ export function useClients() {
         ...c,
         legalEntityId: c.legalEntityId ?? null,
         legalEntity: (c.legalEntity as LegalEntitySummary | null) ?? null,
+        clientStatusId: c.clientStatusId ?? null,
+        clientStatus: (c.clientStatus as ClientStatus | null) ?? null,
         cases: (c.cases ?? []) as ClientCase[],
       }));
 
@@ -47,6 +56,8 @@ export function useClients() {
             ...created,
             legalEntityId: created.legalEntityId ?? null,
             legalEntity: (created.legalEntity as LegalEntitySummary | null) ?? null,
+            clientStatusId: created.clientStatusId ?? null,
+            clientStatus: (created.clientStatus as ClientStatus | null) ?? null,
             cases: (created.cases ?? []) as ClientCase[],
           },
           ...prev,
@@ -71,6 +82,8 @@ export function useClients() {
                   ...updated,
                   legalEntityId: updated.legalEntityId ?? null,
                   legalEntity: (updated.legalEntity as LegalEntitySummary | null) ?? null,
+                  clientStatusId: updated.clientStatusId ?? null,
+                  clientStatus: (updated.clientStatus as ClientStatus | null) ?? null,
                   cases: (updated.cases ?? c.cases ?? []) as ClientCase[],
                 }
               : c,

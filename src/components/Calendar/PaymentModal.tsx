@@ -7,6 +7,7 @@ import { apiService } from '../../services/api';
 import type { Payment, PaymentStatus, ClientCase, PaymentPayload } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
@@ -90,6 +91,10 @@ export function PaymentModal({
       .filter(Boolean)
       .map((line) => (line.startsWith('• ') ? line.slice(2) : line));
   }, [formData.systemNotes]);
+  const selectedClient = useMemo(
+    () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
+    [clients, formData.clientId],
+  );
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -759,10 +764,17 @@ export function PaymentModal({
                 <option value="">{t('selectClient')}</option>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
-                    {client.name} {client.company ? `— ${client.company}` : ''}
+                    {client.name}
+                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                    {client.company ? ` — ${client.company}` : ''}
                   </option>
                 ))}
               </select>
+              {selectedClient?.clientStatus ? (
+                <div className="mt-2">
+                  <ClientStatusBadge status={selectedClient.clientStatus} />
+                </div>
+              ) : null}
             </div>
 
             <div>

@@ -19,6 +19,7 @@ import { apiService } from '../../services/api';
 import type { Client, Contract, ContractInput } from '../../types';
 import { toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { ContractModal } from './ContractModal';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type SortState = {
   key: ContractsSortKey;
@@ -117,7 +118,12 @@ export function Contracts() {
         sortBy: 'name',
         sortDir: 'asc',
       });
-      setClients(data ?? []);
+      const normalized = (data ?? []).map((client) => ({
+        ...client,
+        clientStatusId: client.clientStatusId ?? null,
+        clientStatus: client.clientStatus ?? null,
+      }));
+      setClients(normalized);
       setClientsError(null);
     } catch (err) {
       setClientsError(
@@ -131,6 +137,11 @@ export function Contracts() {
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
+
+  const selectedFilterClient = useMemo(() => {
+    if (clientFilter === 'all') return null;
+    return clients.find((client) => String(client.id) === clientFilter) ?? null;
+  }, [clientFilter, clients]);
 
   const openCreateModal = () => {
     if (!canCreate) return;
@@ -285,9 +296,14 @@ export function Contracts() {
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
+                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                    {client.company ? ` — ${client.company}` : ''}
                   </option>
                 ))}
               </select>
+              {selectedFilterClient?.clientStatus ? (
+                <ClientStatusBadge status={selectedFilterClient.clientStatus} className="mt-1 inline-flex" />
+              ) : null}
               {clientsError && (
                 <span className="text-xs text-rose-600">{clientsError}</span>
               )}
@@ -424,7 +440,13 @@ export function Contracts() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
                         {contract.clients && contract.clients.length > 0
-                          ? contract.clients.map((client) => client.name).join(', ')
+                          ? contract.clients
+                              .map((client) =>
+                                client.clientStatus?.name
+                                  ? `${client.name} (${client.clientStatus.name})`
+                                  : client.name
+                              )
+                              .join(', ')
                           : '—'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
