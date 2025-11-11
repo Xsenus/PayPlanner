@@ -757,11 +757,16 @@ export function PaymentModal({
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                 <option value="">{t('selectClient')}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name} {client.company ? `— ${client.company}` : ''}
-                  </option>
-                ))}
+                {clients.map((client) => {
+                  const statusName = client.clientStatus?.name;
+                  const companyPart = client.company ? ` — ${client.company}` : '';
+                  const statusPart = statusName ? ` · ${statusName}` : '';
+                  return (
+                    <option key={client.id} value={client.id}>
+                      {`${client.name}${statusPart}${companyPart}`}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

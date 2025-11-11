@@ -20,12 +20,14 @@ import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
-import type { Client, ClientCase, ClientInput } from '../../types';
+import type { Client, ClientCase, ClientInput, ClientStatus } from '../../types';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useDictionaries } from '../../hooks/useDictionaries';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
@@ -87,6 +89,7 @@ function matchesClient(c: Client, q: string): boolean {
   const email = (c.email ?? '').toLowerCase();
   const phone = (c.phone ?? '').toLowerCase();
   const phoneDigits = (c.phone ?? '').replace(/\D/g, '');
+  const statusName = (c.clientStatus?.name ?? '').toLowerCase();
   const legal = c.legalEntity;
   const legalShort = (legal?.shortName ?? '').toLowerCase();
   const legalFull = (legal?.fullName ?? '').toLowerCase();
@@ -102,6 +105,7 @@ function matchesClient(c: Client, q: string): boolean {
     company.includes(ql) ||
     email.includes(ql) ||
     phone.includes(ql) ||
+    statusName.includes(ql) ||
     legalShort.includes(ql) ||
     legalFull.includes(ql) ||
     legalInn.includes(ql) ||
@@ -195,6 +199,7 @@ export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
   const { legalEntities, loading: legalEntitiesLoading } = useLegalEntities();
+  const { clientStatuses } = useDictionaries();
   const { t } = useTranslation();
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
@@ -233,6 +238,14 @@ export function Clients() {
     () => [...filteredClients].sort((a, b) => Number(b.isActive) - Number(a.isActive)),
     [filteredClients],
   );
+
+  const clientStatusById = useMemo(() => {
+    const map = new Map<number, ClientStatus>();
+    for (const status of clientStatuses) {
+      map.set(status.id, status);
+    }
+    return map;
+  }, [clientStatuses]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -588,6 +601,11 @@ export function Clients() {
                       acc[key] = (acc[key] ?? 0) + 1;
                       return acc;
                     }, {});
+                    const status =
+                      client.clientStatus ??
+                      (client.clientStatusId
+                        ? clientStatusById.get(client.clientStatusId) ?? null
+                        : null);
 
                     return (
                       <tr
@@ -604,6 +622,16 @@ export function Clients() {
                               <div className="font-medium text-gray-900">
                                 {highlight(client.name ?? '', query)}
                               </div>
+                              {status ? (
+                                <div className="mt-1">
+                                  <span
+                                    className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                                    style={buildStatusBadgeStyle(status.colorHex)}
+                                  >
+                                    {highlight(status.name ?? '', query)}
+                                  </span>
+                                </div>
+                              ) : null}
                               {client.company && (
                                 <div className="text-sm text-gray-500">
                                   {highlight(client.company ?? '', query)}
@@ -751,6 +779,11 @@ export function Clients() {
                 : sortedByStatusThenDate.slice(0, 3);
 
               const hiddenCount = Math.max(0, sortedByStatusThenDate.length - visibleCases.length);
+              const status =
+                client.clientStatus ??
+                (client.clientStatusId
+                  ? clientStatusById.get(client.clientStatusId) ?? null
+                  : null);
 
               return (
                 <div
@@ -766,6 +799,16 @@ export function Clients() {
                         <h3 className="font-semibold text-gray-900 block max-w-full truncate">
                           {highlight(client.name ?? '', query)}
                         </h3>
+                        {status ? (
+                          <div className="mt-1">
+                            <span
+                              className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                              style={buildStatusBadgeStyle(status.colorHex)}
+                            >
+                              {highlight(status.name ?? '', query)}
+                            </span>
+                          </div>
+                        ) : null}
                         <p className="text-sm text-gray-500 block max-w-full truncate">
                           {highlight(client.company ?? '', query)}
                         </p>

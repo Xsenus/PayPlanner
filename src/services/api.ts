@@ -9,7 +9,12 @@ function getAuthToken(): string | null {
   );
 }
 
-export type DictKind = 'deal-types' | 'income-types' | 'payment-sources' | 'payment-statuses';
+export type DictKind =
+  | 'deal-types'
+  | 'income-types'
+  | 'payment-sources'
+  | 'payment-statuses'
+  | 'client-statuses';
 
 export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? DealType
@@ -17,7 +22,9 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? IncomeType
   : K extends 'payment-sources'
   ? PaymentSource
-  : PaymentStatusEntity;
+  : K extends 'payment-statuses'
+  ? PaymentStatusEntity
+  : ClientStatus;
 
 function pathForKind(kind: DictKind): string {
   return `/dictionaries/${kind}`;
@@ -785,6 +792,7 @@ import type {
   SummaryStats,
   PeriodKey,
   SummaryStatus,
+  ClientStatus,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';

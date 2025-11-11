@@ -156,4 +156,43 @@ public class DictionariesAdminController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(new { e.Id, e.IsActive });
     }
+
+    // ClientStatus
+    [HttpPost("client-statuses")]
+    public async Task<IActionResult> CreateClientStatus([FromBody] ClientStatus m)
+    {
+        _db.ClientStatuses.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/client-statuses/{m.Id}", m);
+    }
+
+    [HttpPut("client-statuses/{id:int}")]
+    public async Task<IActionResult> UpdateClientStatus(int id, [FromBody] ClientStatus m)
+    {
+        var e = await _db.ClientStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+
+    [HttpDelete("client-statuses/{id:int}")]
+    public async Task<IActionResult> DeleteClientStatus(int id)
+    {
+        var e = await _db.ClientStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+        _db.ClientStatuses.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("client-statuses/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleClientStatus(int id)
+    {
+        var e = await _db.ClientStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
 }

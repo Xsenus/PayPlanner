@@ -39,4 +39,10 @@ public class ContractClientDto
     public string Name { get; set; } = string.Empty;
 
     public string? Company { get; set; }
+
+    public int? ClientStatusId { get; set; }
+
+    public string? ClientStatusName { get; set; }
+
+    public string? ClientStatusColorHex { get; set; }
 }

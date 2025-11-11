@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Payment } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 
 interface PaymentsTableProps {
   payments: Payment[];
@@ -156,6 +157,14 @@ export function PaymentsTable({
                             }
                           }}>
                           <span className="font-medium text-left block">{payment.client.name}</span>
+                          {payment.client.clientStatus?.name ? (
+                            <span
+                              className="mt-0.5 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                              style={buildStatusBadgeStyle(payment.client.clientStatus?.colorHex ?? undefined)}
+                            >
+                              {payment.client.clientStatus?.name}
+                            </span>
+                          ) : null}
                           {payment.clientCase?.title ? (
                             <span className="text-xs text-gray-500 truncate block">
                               {payment.clientCase.title}

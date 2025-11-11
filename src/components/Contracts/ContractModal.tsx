@@ -3,6 +3,7 @@ import { Loader2, Search, X } from 'lucide-react';
 import type { Contract, ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 
@@ -104,6 +105,9 @@ export function ContractModal({
           id: client.id,
           name: client.name,
           company: client.company,
+          clientStatusId: client.clientStatusId ?? null,
+          clientStatusName: client.clientStatus?.name ?? null,
+          clientStatusColorHex: client.clientStatus?.colorHex ?? null,
         }));
         setClientOptions(mapped);
         setClientOptionsError(null);
@@ -304,9 +308,19 @@ export function ContractModal({
                     key={client.id}
                     className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"
                   >
-                    <span>
-                      {client.name}
-                      {client.company ? ` · ${client.company}` : ''}
+                    <span className="flex flex-col text-left">
+                      <span>
+                        {client.name}
+                        {client.company ? ` · ${client.company}` : ''}
+                      </span>
+                      {client.clientStatusName ? (
+                        <span
+                          className="mt-0.5 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                          style={buildStatusBadgeStyle(client.clientStatusColorHex ?? undefined)}
+                        >
+                          {client.clientStatusName}
+                        </span>
+                      ) : null}
                     </span>
                     <button
                       type="button"
@@ -339,8 +353,16 @@ export function ContractModal({
                           onClick={() => handleAddClient(client)}
                           className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-emerald-50"
                         >
-                          <span className="flex flex-col">
+                          <span className="flex flex-col gap-0.5">
                             <span className="font-medium text-slate-700">{client.name}</span>
+                            {client.clientStatusName ? (
+                              <span
+                                className="inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                                style={buildStatusBadgeStyle(client.clientStatusColorHex ?? undefined)}
+                              >
+                                {client.clientStatusName}
+                              </span>
+                            ) : null}
                             {client.company && (
                               <span className="text-xs text-slate-500">{client.company}</span>
                             )}

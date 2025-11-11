@@ -56,6 +56,15 @@ export interface LegalEntityInput {
   clientIds: number[];
 }
 
+export interface ClientStatus {
+  id: number;
+  name: string;
+  description: string;
+  colorHex: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface Client {
   id: number;
   name: string;
@@ -68,6 +77,8 @@ export interface Client {
   isActive: boolean;
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
+  clientStatusId?: number | null;
+  clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
   contracts?: Contract[];
 }
@@ -81,6 +92,7 @@ export interface ClientInput {
   notes: string;
   isActive: boolean;
   legalEntityId?: number | null;
+  clientStatusId?: number | null;
 }
 
 export interface ClientCase {
@@ -186,6 +198,9 @@ export interface ContractClient {
   id: number;
   name: string;
   company?: string | null;
+  clientStatusId?: number | null;
+  clientStatusName?: string | null;
+  clientStatusColorHex?: string | null;
 }
 
 export interface Contract {

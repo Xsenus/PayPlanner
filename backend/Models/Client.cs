@@ -23,6 +23,16 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public string Company { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Внешний ключ на статус клиента.
+        /// </summary>
+        public int? ClientStatusId { get; set; }
+
+        /// <summary>
+        /// Навигация на статус клиента.
+        /// </summary>
+        public ClientStatus? ClientStatus { get; set; }
+
         public int? LegalEntityId { get; set; }
 
         public LegalEntity? LegalEntity { get; set; }

@@ -19,6 +19,7 @@ public class ClientsController : ControllerBase
         => Ok(await _db.Clients
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
+            .Include(c => c.ClientStatus)
             .AsNoTracking()
             .OrderBy(c => c.Name)
             .ToListAsync(ct));
@@ -29,6 +30,7 @@ public class ClientsController : ControllerBase
         var client = await _db.Clients
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
+            .Include(c => c.ClientStatus)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null ? NotFound() : Ok(client);
@@ -96,6 +98,15 @@ public class ClientsController : ControllerBase
             }
         }
 
+        if (model.ClientStatusId.HasValue)
+        {
+            var statusExists = await _db.ClientStatuses.AsNoTracking().AnyAsync(cs => cs.Id == model.ClientStatusId.Value);
+            if (!statusExists)
+            {
+                return BadRequest($"Статус клиента #{model.ClientStatusId.Value} не найден");
+            }
+        }
+
         var entity = new Client
         {
             Name = model.Name,
@@ -106,11 +117,13 @@ public class ClientsController : ControllerBase
             Notes = model.Notes,
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
+            ClientStatusId = model.ClientStatusId,
         };
 
         _db.Clients.Add(entity);
         await _db.SaveChangesAsync();
         await _db.Entry(entity).Reference(c => c.LegalEntity).LoadAsync();
+        await _db.Entry(entity).Reference(c => c.ClientStatus).LoadAsync();
         return Created($"/api/clients/{entity.Id}", entity);
     }
 
@@ -127,6 +140,14 @@ public class ClientsController : ControllerBase
                 return BadRequest($"Юридическое лицо #{model.LegalEntityId.Value} не найдено");
             }
         }
+        if (model.ClientStatusId.HasValue)
+        {
+            var statusExists = await _db.ClientStatuses.AsNoTracking().AnyAsync(cs => cs.Id == model.ClientStatusId.Value);
+            if (!statusExists)
+            {
+                return BadRequest($"Статус клиента #{model.ClientStatusId.Value} не найден");
+            }
+        }
         e.Name = model.Name;
         e.Email = model.Email;
         e.Phone = model.Phone;
@@ -135,8 +156,10 @@ public class ClientsController : ControllerBase
         e.Notes = model.Notes;
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
+        e.ClientStatusId = model.ClientStatusId;
         await _db.SaveChangesAsync();
         await _db.Entry(e).Reference(c => c.LegalEntity).LoadAsync();
+        await _db.Entry(e).Reference(c => c.ClientStatus).LoadAsync();
         return Ok(e);
     }
 

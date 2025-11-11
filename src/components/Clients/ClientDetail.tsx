@@ -35,6 +35,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useDictionaries } from '../../hooks/useDictionaries';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
   Act,
@@ -44,6 +45,7 @@ import type {
   Client,
   ClientCase,
   ClientInput,
+  ClientStatus,
   Contract,
   ContractClient,
   ContractInput,
@@ -63,6 +65,7 @@ import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
 import { ClientModal } from './ClientModal';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 
 interface ClientDetailProps {
   clientId: number;
@@ -223,6 +226,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const actPermissions = permissions.acts;
   const contractPermissions = permissions.contracts;
   const { legalEntities } = useLegalEntities();
+  const { clientStatuses } = useDictionaries();
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) => permissions[SECTION_PERMISSION_MAP[section]],
     [permissions],
@@ -236,6 +240,22 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
   const cases = useMemo(() => casesLocal ?? serverCases, [casesLocal, serverCases]);
+
+  const clientStatusById = useMemo(() => {
+    const map = new Map<number, ClientStatus>();
+    for (const status of clientStatuses) {
+      map.set(status.id, status);
+    }
+    return map;
+  }, [clientStatuses]);
+
+  const resolvedClientStatus = useMemo(() => {
+    if (clientData?.clientStatus) return clientData.clientStatus;
+    if (clientData?.clientStatusId) {
+      return clientStatusById.get(clientData.clientStatusId) ?? null;
+    }
+    return null;
+  }, [clientData, clientStatusById]);
 
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
@@ -1213,9 +1233,19 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           >
             <ArrowLeft size={24} />
           </button>
-          <h1 className="flex-1 min-w-0 text-2xl font-bold text-gray-900" title={clientName}>
-            {clientName}
-          </h1>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1 className="truncate text-2xl font-bold text-gray-900" title={clientName}>
+              {clientName}
+            </h1>
+            {resolvedClientStatus ? (
+              <span
+                className="inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+                style={buildStatusBadgeStyle(resolvedClientStatus.colorHex)}
+              >
+                {resolvedClientStatus.name}
+              </span>
+            ) : null}
+          </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {clientPermissions.canEdit && (
               <button
@@ -2519,6 +2549,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           onSubmit={handleUpdateClient}
           client={clientData ?? undefined}
           legalEntities={legalEntities}
+          clientStatuses={clientStatuses}
         />
 
         {error && (

@@ -75,6 +75,9 @@ public class LegalEntitiesController : ControllerBase
                     Phone = c.Phone,
                     Email = c.Email,
                     IsActive = c.IsActive,
+                    ClientStatusId = c.ClientStatusId,
+                    ClientStatusName = c.ClientStatus != null ? c.ClientStatus.Name : null,
+                    ClientStatusColorHex = c.ClientStatus != null ? c.ClientStatus.ColorHex : null,
                 })
                 .ToList(),
         };
@@ -212,14 +215,21 @@ public class LegalEntitiesController : ControllerBase
             await _db.SaveChangesAsync(ct);
         }
 
-        await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
+        await _db.Entry(entity)
+            .Collection(le => le.Clients)
+            .Query()
+            .Include(c => c.ClientStatus)
+            .LoadAsync(ct);
         return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity));
     }
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var entity = await _db.LegalEntities.Include(le => le.Clients).FirstOrDefaultAsync(le => le.Id == id, ct);
+        var entity = await _db.LegalEntities
+            .Include(le => le.Clients)
+                .ThenInclude(c => c.ClientStatus)
+            .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
@@ -277,6 +287,7 @@ public class LegalEntitiesController : ControllerBase
     {
         var query = _db.LegalEntities
             .Include(le => le.Clients)
+                .ThenInclude(c => c.ClientStatus)
             .AsNoTracking()
             .AsQueryable();
 
@@ -318,6 +329,9 @@ public class LegalEntitiesController : ControllerBase
                         Phone = c.Phone,
                         Email = c.Email,
                         IsActive = c.IsActive,
+                        ClientStatusId = c.ClientStatusId,
+                        ClientStatusName = c.ClientStatus != null ? c.ClientStatus.Name : null,
+                        ClientStatusColorHex = c.ClientStatus != null ? c.ClientStatus.ColorHex : null,
                     })
                     .ToList(),
             })
@@ -331,6 +345,7 @@ public class LegalEntitiesController : ControllerBase
     {
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
+                .ThenInclude(c => c.ClientStatus)
             .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 

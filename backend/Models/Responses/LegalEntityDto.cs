@@ -10,6 +10,9 @@ public class LegalEntityClientDto
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public bool IsActive { get; set; }
+    public int? ClientStatusId { get; set; }
+    public string? ClientStatusName { get; set; }
+    public string? ClientStatusColorHex { get; set; }
 }
 
 public class LegalEntityListItemDto

@@ -299,6 +299,8 @@ export const ru = {
   phone: 'Телефон',
   company: 'Компания',
   address: 'Адрес',
+  clientStatus: 'Статус клиента',
+  clientStatusNotSelected: 'Без статуса',
   activeClient: 'Активный клиент',
   totalIncome: 'Общий доход',
   totalExpenses: 'Общие расходы',

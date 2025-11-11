@@ -1,5 +1,6 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import type { Payment } from '../../types';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 import type React from 'react';
 
 interface PaymentCardProps {
@@ -45,18 +46,28 @@ export function PaymentCard({
 
       {payment.client && (
         <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
-          <button
-            type="button"
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.stopPropagation();
-              onClientClick?.(
-                payment.clientId ?? -1,
-                payment.clientCaseId ? payment.clientCaseId : undefined,
-              );
-            }}
-            className="text-blue-600 hover:underline">
-            {payment.client.name}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                onClientClick?.(
+                  payment.clientId ?? -1,
+                  payment.clientCaseId ? payment.clientCaseId : undefined,
+                );
+              }}
+              className="text-blue-600 hover:underline">
+              {payment.client.name}
+            </button>
+            {payment.client.clientStatus?.name ? (
+              <span
+                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+                style={buildStatusBadgeStyle(payment.client.clientStatus?.colorHex ?? undefined)}
+              >
+                {payment.client.clientStatus?.name}
+              </span>
+            ) : null}
+          </div>
         </div>
       )}
     </div>

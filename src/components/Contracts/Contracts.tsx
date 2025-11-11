@@ -424,7 +424,13 @@ export function Contracts() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
                         {contract.clients && contract.clients.length > 0
-                          ? contract.clients.map((client) => client.name).join(', ')
+                          ? contract.clients
+                              .map((client) =>
+                                client.clientStatusName
+                                  ? `${client.name} (${client.clientStatusName})`
+                                  : client.name,
+                              )
+                              .join(', ')
                           : '—'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">

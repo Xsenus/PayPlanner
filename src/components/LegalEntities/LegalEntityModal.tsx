@@ -18,6 +18,7 @@ import type {
   LegalEntityInput,
   LegalEntitySuggestion,
 } from '../../types';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -522,6 +523,14 @@ export function LegalEntityModal({
                           <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
                             <Users size={16} className="text-blue-500" />
                             <span>{client.name}</span>
+                            {client.clientStatus?.name ? (
+                              <span
+                                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                                style={buildStatusBadgeStyle(client.clientStatus?.colorHex ?? undefined)}
+                              >
+                                {client.clientStatus?.name}
+                              </span>
+                            ) : null}
                             {!client.isActive && (
                               <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
                                 {t('inactive') || 'неактивен'}

@@ -25,7 +25,9 @@ public class ClientsV1Controller : ControllerBase
         [FromQuery] int? limit,
         CancellationToken ct)
     {
-        var q = _db.Clients.AsQueryable()
+        var q = _db.Clients
+            .Include(c => c.ClientStatus)
+            .AsQueryable()
             .ApplyClientFilters(search, isActive)
             .ApplyClientSort(sortBy, sortDir);
 
@@ -42,6 +44,7 @@ public class ClientsV1Controller : ControllerBase
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var client = await _db.Clients
+            .Include(c => c.ClientStatus)
             .Include(c => c.Cases)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);

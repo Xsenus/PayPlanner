@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using System;
 using System.Data;
 using System.Data.Common;
 
@@ -139,6 +140,29 @@ namespace PayPlanner.Api.Services
                     new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",           ColorHex = "#EF4444" }
                 };
                 context.PaymentStatuses.AddRange(paymentStatuses);
+                await context.SaveChangesAsync();
+            }
+
+            var defaultClientStatuses = new[]
+            {
+                new ClientStatus { Name = "КЛИЕНТ", Description = "Основной клиент компании", ColorHex = "#2563EB" },
+                new ClientStatus { Name = "ПОСТАВЩИК", Description = "Контрагент-поставщик", ColorHex = "#0EA5E9" },
+                new ClientStatus { Name = "КРЕДИТОР", Description = "Контрагент-кредитор", ColorHex = "#DC2626" },
+            };
+
+            var existingStatusNames = await context.ClientStatuses
+                .AsNoTracking()
+                .Select(status => status.Name)
+                .ToListAsync();
+
+            var missingClientStatuses = defaultClientStatuses
+                .Where(status => !existingStatusNames
+                    .Any(existing => string.Equals(existing, status.Name, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            if (missingClientStatuses.Count > 0)
+            {
+                context.ClientStatuses.AddRange(missingClientStatuses);
                 await context.SaveChangesAsync();
             }
         }

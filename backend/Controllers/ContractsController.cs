@@ -209,7 +209,8 @@ public class ContractsController : ControllerBase
         => _db.Contracts
             .AsNoTracking()
             .Include(c => c.ClientContracts)
-            .ThenInclude(cc => cc.Client);
+            .ThenInclude(cc => cc.Client)
+            .ThenInclude(client => client!.ClientStatus);
 
     private static IQueryable<Contract> ApplyFilters(
         IQueryable<Contract> query,
@@ -282,6 +283,9 @@ public class ContractsController : ControllerBase
                 Id = link.ClientId,
                 Name = link.Client!.Name,
                 Company = link.Client!.Company,
+                ClientStatusId = link.Client!.ClientStatusId,
+                ClientStatusName = link.Client!.ClientStatus != null ? link.Client!.ClientStatus.Name : null,
+                ClientStatusColorHex = link.Client!.ClientStatus != null ? link.Client!.ClientStatus.ColorHex : null,
             })
             .OrderBy(c => c.Name)
             .ToList()

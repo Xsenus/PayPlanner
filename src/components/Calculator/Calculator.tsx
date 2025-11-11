@@ -437,11 +437,16 @@ export function Calculator() {
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                       <option value="">{t('selectClient')}</option>
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} {c.company ? `— ${c.company}` : ''}
-                        </option>
-                      ))}
+                      {clients.map((c) => {
+                        const statusName = c.clientStatus?.name;
+                        const companyPart = c.company ? ` — ${c.company}` : '';
+                        const statusPart = statusName ? ` · ${statusName}` : '';
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {`${c.name}${statusPart}${companyPart}`}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

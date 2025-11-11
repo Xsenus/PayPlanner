@@ -254,11 +254,16 @@ export function ActModal({
                 onChange={handleChange('clientId')}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
                 <option value="">{t('selectClient') ?? 'Выберите клиента'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
+                {clients.map((client) => {
+                  const statusName = client.clientStatus?.name;
+                  const companyPart = client.company ? ` — ${client.company}` : '';
+                  const statusPart = statusName ? ` · ${statusName}` : '';
+                  return (
+                    <option key={client.id} value={client.id}>
+                      {`${client.name}${statusPart}${companyPart}`}
+                    </option>
+                  );
+                })}
               </select>
             </label>
 

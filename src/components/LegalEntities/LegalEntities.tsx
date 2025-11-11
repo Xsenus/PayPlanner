@@ -23,6 +23,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from './LegalEntityModal';
+import { buildStatusBadgeStyle } from '../../utils/styleUtils';
 
 function matches(entity: LegalEntitySummary, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -310,8 +311,19 @@ export function LegalEntities() {
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1 text-xs text-gray-500">
                   {(entity.clients ?? []).slice(0, 4).map((client) => (
-                    <span key={client.id} className="rounded-full bg-white px-2 py-0.5 shadow">
-                      {client.name}
+                    <span
+                      key={client.id}
+                      className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 shadow"
+                    >
+                      <span>{client.name}</span>
+                      {client.clientStatusName ? (
+                        <span
+                          className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+                          style={buildStatusBadgeStyle(client.clientStatusColorHex ?? undefined)}
+                        >
+                          {client.clientStatusName}
+                        </span>
+                      ) : null}
                     </span>
                   ))}
                   {(entity.clients?.length ?? 0) > 4 && (
@@ -425,8 +437,19 @@ export function LegalEntities() {
                   <td className="px-6 py-4">
                     <div className="flex flex-wrap gap-1 text-xs text-gray-600">
                       {(entity.clients ?? []).slice(0, 5).map((client) => (
-                        <span key={client.id} className="rounded-full bg-gray-100 px-2 py-0.5">
-                          {client.name}
+                        <span
+                          key={client.id}
+                          className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5"
+                        >
+                          <span>{client.name}</span>
+                          {client.clientStatusName ? (
+                            <span
+                              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+                              style={buildStatusBadgeStyle(client.clientStatusColorHex ?? undefined)}
+                            >
+                              {client.clientStatusName}
+                            </span>
+                          ) : null}
                         </span>
                       ))}
                       {(entity.clients?.length ?? 0) > 5 && (
