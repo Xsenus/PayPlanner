@@ -52,6 +52,8 @@ type InvoicesSortKey =
   | 'responsible'
   | 'createdAt';
 
+type ContractsSortKey = 'date' | 'number' | 'amount' | 'createdAt';
+
 function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -144,6 +146,47 @@ export class ApiService {
 
   async deleteAct(id: number) {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== Contracts =====
+  async getContracts(params?: {
+    from?: string;
+    to?: string;
+    clientId?: number;
+    search?: string;
+    sortBy?: ContractsSortKey;
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Contract>>(`/contracts${q}`);
+  }
+
+  async getContract(id: number) {
+    return this.request<Contract>(`/contracts/${id}`);
+  }
+
+  async createContract(payload: ContractInput) {
+    return this.request<Contract>('/contracts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateContract(id: number, payload: ContractInput) {
+    return this.request<Contract>(`/contracts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteContract(id: number) {
+    return this.request<void>(`/contracts/${id}`, { method: 'DELETE' });
   }
 
   // ===== Invoices =====
@@ -367,6 +410,7 @@ export class ApiService {
     isActive?: boolean;
     sortBy?: 'name' | 'createdAt';
     sortDir?: SortDir;
+    limit?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<Client[]>(`/v1/clients${q}`);
@@ -715,6 +759,8 @@ import type {
   ActResponsible,
   ActStatus,
   ActsSummary,
+  Contract,
+  ContractInput,
   Payment,
   PaymentPayload,
   Invoice,

@@ -1,3 +1,4 @@
+using System;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,11 +22,18 @@ public class ClientsV1Controller : ControllerBase
         [FromQuery] bool? isActive,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] int? limit,
         CancellationToken ct)
     {
         var q = _db.Clients.AsQueryable()
             .ApplyClientFilters(search, isActive)
             .ApplyClientSort(sortBy, sortDir);
+
+        if (limit.HasValue && limit.Value > 0)
+        {
+            var size = Math.Min(limit.Value, 200);
+            q = q.Take(size);
+        }
 
         return Ok(await q.AsNoTracking().ToListAsync(ct));
     }

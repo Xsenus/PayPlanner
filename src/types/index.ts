@@ -69,6 +69,7 @@ export interface Client {
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
   cases?: ClientCase[];
+  contracts?: Contract[];
 }
 
 export interface ClientInput {
@@ -179,6 +180,35 @@ export interface ActsSummary {
 export interface ActResponsible {
   id: number;
   fullName: string;
+}
+
+export interface ContractClient {
+  id: number;
+  name: string;
+  company?: string | null;
+}
+
+export interface Contract {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  description?: string | null;
+  amount?: number | null;
+  validUntil?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  clients: ContractClient[];
+}
+
+export interface ContractInput {
+  number: string;
+  title?: string | null;
+  date: string;
+  description?: string | null;
+  amount?: number | null;
+  validUntil?: string | null;
+  clientIds: number[];
 }
 
 export interface Payment {
