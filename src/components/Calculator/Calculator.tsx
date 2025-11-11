@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Calculator as CalcIcon, Save, Loader2, Info, AlertTriangle } from 'lucide-react';
+import { Calculator as CalcIcon, Save, Loader2, Info, AlertTriangle, X } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { InstallmentRequest, InstallmentResponse, ClientCase } from '../../types';
 import { toDateInputValue, fromInputToApiDate } from '../../utils/dateUtils';
+import { consumeInstallmentDraft } from '../../utils/installmentBridge';
+import { formatCurrencySmart } from '../../utils/formatters';
 
 type AccountOption = { account: string; accountDate?: string | null };
 
@@ -60,12 +62,16 @@ export function Calculator() {
     annualRate: 5.5,
     months: 60,
     startDate: new Date().toISOString().split('T')[0],
+    roundingMode: 'none',
+    roundingStep: 100,
   });
 
   const [editableResults, setEditableResults] = useState<InstallmentResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingPayments, setSavingPayments] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
 
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [cases, setCases] = useState<ClientCase[]>([]);
@@ -86,6 +92,46 @@ export function Calculator() {
       el.readOnly = false;
     });
   }
+
+  useEffect(() => {
+    const draft = consumeInstallmentDraft();
+    if (!draft) return;
+
+    setFormData((prev) => {
+      const next = { ...prev };
+      if (typeof draft.total === 'number' && Number.isFinite(draft.total)) {
+        next.total = draft.total;
+      }
+      if (draft.startDate) {
+        next.startDate = draft.startDate;
+      }
+      if (draft.roundingMode === 'down' || draft.roundingMode === 'up' || draft.roundingMode === 'none') {
+        next.roundingMode = draft.roundingMode;
+      }
+      if (typeof draft.roundingStep === 'number' && draft.roundingStep > 0) {
+        next.roundingStep = draft.roundingStep;
+      }
+      return next;
+    });
+
+    if (draft.clientId) {
+      setSelectedClientId(String(draft.clientId));
+    }
+
+    if (draft.clientName) {
+      setPrefillNotice(
+        `${t('calculatorPrefillFromInvoice') ?? 'Данные из счёта'}${
+          draft.invoiceNumber ? ` №${draft.invoiceNumber}` : ''
+        } — ${draft.clientName}`,
+      );
+    } else {
+      setPrefillNotice(
+        `${t('calculatorPrefillFromInvoice') ?? 'Данные из счёта'}${
+          draft.invoiceNumber ? ` №${draft.invoiceNumber}` : ''
+        }`,
+      );
+    }
+  }, [t]);
 
   useEffect(() => {
     let ignore = false;
@@ -162,12 +208,34 @@ export function Calculator() {
 
   const handleNumber = (v: string) => (v === '' ? '' : Number.isNaN(Number(v)) ? 0 : parseFloat(v));
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: name === 'startDate' ? value : (handleNumber(value) as number),
-    }));
+    setFormData((prev) => {
+      if (name === 'startDate') {
+        return { ...prev, startDate: value };
+      }
+
+      if (name === 'roundingMode') {
+        return { ...prev, roundingMode: value as InstallmentRequest['roundingMode'] };
+      }
+
+      if (name === 'roundingStep') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return { ...prev, roundingStep: null };
+        }
+        const parsed = Number.parseFloat(trimmed);
+        return {
+          ...prev,
+          roundingStep: Number.isNaN(parsed) ? prev.roundingStep ?? null : parsed,
+        };
+      }
+
+      return {
+        ...prev,
+        [name]: handleNumber(value) as number,
+      };
+    });
   };
 
   const handleCalculate = async (e?: React.FormEvent) => {
@@ -175,7 +243,26 @@ export function Calculator() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await apiService.calculateInstallment(formData);
+      const roundingMode = formData.roundingMode ?? 'none';
+      const roundingStepValue =
+        typeof formData.roundingStep === 'number' && Number.isFinite(formData.roundingStep)
+          ? formData.roundingStep
+          : null;
+
+      const payload: InstallmentRequest = {
+        total: Number(formData.total) || 0,
+        downPayment: Number(formData.downPayment) || 0,
+        annualRate: Number(formData.annualRate) || 0,
+        months: Number(formData.months) || 0,
+        startDate: formData.startDate,
+        roundingMode,
+        roundingStep:
+          roundingMode === 'none' || !roundingStepValue || roundingStepValue <= 0
+            ? undefined
+            : roundingStepValue,
+      };
+
+      const resp = await apiService.calculateInstallment(payload);
       setEditableResults(JSON.parse(JSON.stringify(resp)) as InstallmentResponse);
     } catch {
       setError(t('apiUnavailable'));
@@ -243,12 +330,20 @@ export function Calculator() {
     }
   };
 
+  const roundingMode = formData.roundingMode ?? 'none';
+  const roundingStepValue =
+    typeof formData.roundingStep === 'number' && Number.isFinite(formData.roundingStep)
+      ? formData.roundingStep
+      : 0;
+  const roundingEnabled = roundingMode !== 'none' && roundingStepValue > 0;
+
   const formIsValid =
     formData.total > 0 &&
     formData.months >= 1 &&
     formData.annualRate >= 0 &&
     formData.downPayment >= 0 &&
-    formData.downPayment <= formData.total;
+    formData.downPayment <= formData.total &&
+    (!roundingEnabled || roundingStepValue > 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -265,6 +360,23 @@ export function Calculator() {
       </header>
 
       <main className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
+        {prefillNotice && (
+          <div className="mb-4 sm:mb-5">
+            <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="flex-1 text-sm leading-snug">{prefillNotice}</div>
+              <button
+                type="button"
+                onClick={() => setPrefillNotice(null)}
+                className="rounded-full p-1 text-blue-700 transition-colors hover:bg-blue-100"
+                aria-label={t('close') ?? 'Закрыть'}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <section className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100">
           <form onSubmit={handleCalculate} className="space-y-5" aria-describedby="calc-help">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -355,6 +467,40 @@ export function Calculator() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('roundingModeLabel') ?? 'Округление платежей'}
+                </label>
+                <select
+                  name="roundingMode"
+                  value={roundingMode}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="none">{t('roundingNone') ?? 'Без округления'}</option>
+                  <option value="down">{t('roundingDown') ?? 'В меньшую сторону'}</option>
+                  <option value="up">{t('roundingUp') ?? 'В большую сторону'}</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('roundingStepLabel') ?? 'Шаг округления (₽)'}
+                </label>
+                <input
+                  type="number"
+                  name="roundingStep"
+                  value={formData.roundingStep ?? ''}
+                  onChange={handleChange}
+                  min={0}
+                  step="1"
+                  disabled={roundingMode === 'none'}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                  aria-label={t('roundingStepLabel') ?? 'Шаг округления'}
+                />
+                <p className="mt-1 text-xs text-gray-500">{t('roundingHint') ?? 'Например, 100 — округление до сотен.'}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   {t('startDate')}
                 </label>
                 <input
@@ -422,6 +568,75 @@ export function Calculator() {
               </div>
             ) : (
               <div className="space-y-6">
+                {(() => {
+                  const loanAmount =
+                    editableResults.loanAmount ??
+                    Math.max(0, Number(formData.total) - Number(formData.downPayment));
+                  const baseMonthlyPayment =
+                    editableResults.baseMonthlyPayment ??
+                    (editableResults.items.length > 0 ? editableResults.items[0].payment : 0);
+                  const roundedMonthlyPayment = editableResults.roundedMonthlyPayment ?? null;
+                  const appliedRoundingMode =
+                    (editableResults.roundingMode ?? roundingMode) as 'none' | 'down' | 'up';
+                  const appliedRoundingStep =
+                    typeof editableResults.roundingStep === 'number' && editableResults.roundingStep > 0
+                      ? editableResults.roundingStep
+                      : roundingEnabled
+                      ? roundingStepValue
+                      : null;
+
+                  const roundingLabels: Record<'none' | 'down' | 'up', string> = {
+                    none: t('roundingNone') ?? 'Без округления',
+                    down: t('roundingDown') ?? 'В меньшую сторону',
+                    up: t('roundingUp') ?? 'В большую сторону',
+                  };
+
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm text-gray-500">{t('loanPrincipal') ?? 'Сумма после аванса'}</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {formatCurrencySmart(loanAmount, { alwaysCents: true }).full}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm text-gray-500">{t('totalPayable') ?? 'К доплате'}</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {formatCurrencySmart(editableResults.toPay, { alwaysCents: true }).full}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm text-gray-500">{t('totalInterest') ?? 'Общий процент'}</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {formatCurrencySmart(editableResults.overpay, { alwaysCents: true }).full}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm text-gray-500">{t('monthlyPayment') ?? 'Ежемесячный платёж'}</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {formatCurrencySmart(baseMonthlyPayment, { alwaysCents: true }).full}
+                        </div>
+                        {roundedMonthlyPayment !== null && appliedRoundingMode !== 'none' && (
+                          <div className="mt-2 text-xs text-gray-600">
+                            <span className="font-medium text-gray-700">{t('roundedPaymentLabel') ?? 'С округлением'}:</span>{' '}
+                            <span className="font-semibold text-blue-600">
+                              {formatCurrencySmart(roundedMonthlyPayment, { alwaysCents: true }).full}
+                            </span>
+                            {appliedRoundingStep ? (
+                              <span className="text-gray-500">
+                                {' '}
+                                {`(${roundingLabels[appliedRoundingMode]} · ${t('roundingStepShort') ?? 'шаг'} ${formatCurrencySmart(appliedRoundingStep, { alwaysCents: true }).full})`}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500"> {roundingLabels[appliedRoundingMode]}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">

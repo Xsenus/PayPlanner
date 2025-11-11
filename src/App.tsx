@@ -19,6 +19,7 @@ import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import type { Tab } from './types/tabs';
 import { useRolePermissions } from './hooks/useRolePermissions';
+import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 type AuthView = 'login' | 'register' | 'awaiting';
@@ -174,6 +175,14 @@ function AppContent() {
     [],
   );
 
+  const handleTabChange = useCallback(
+    (tab: Tab) => {
+      if (!canViewTab(tab)) return;
+      setActiveTab(tab);
+    },
+    [canViewTab],
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -300,16 +309,12 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation
-        activeTab={activeTab}
-        onTabChange={(tab: Tab) => {
-          if (!canViewTab(tab)) return;
-          setActiveTab(tab);
-        }}
-      />
-      {renderContent()}
-    </div>
+    <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
+        {renderContent()}
+      </div>
+    </TabProvider>
   );
 }
 

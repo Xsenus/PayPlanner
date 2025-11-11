@@ -1,23 +1,26 @@
+using PayPlanner.Api.Models;
+
 namespace PayPlanner.Api.Models.Responses
 {
     /// <summary>
-    /// <para>Результат расчёта: переплата, итог к оплате и построчный график.</para>
+    /// РћС‚РІРµС‚ СЃРµСЂРІРёСЃР° СЂР°СЃС‡С‘С‚Р° СЂР°СЃСЃСЂРѕС‡РєРё.
     /// </summary>
     public class InstallmentResponse
     {
-        /// <summary>
-        /// <para>Элементы графика по месяцам.</para>
-        /// </summary>
         public List<InstallmentItem> Items { get; set; } = new();
 
-        /// <summary>
-        /// <para>Суммарная переплата (сумма всех платежей минус тело кредита).</para>
-        /// </summary>
         public decimal Overpay { get; set; }
 
-        /// <summary>
-        /// <para>Итого к оплате (включая первоначальный взнос).</para>
-        /// </summary>
         public decimal ToPay { get; set; }
+
+        public decimal LoanAmount { get; set; }
+
+        public decimal BaseMonthlyPayment { get; set; }
+
+        public decimal? RoundedMonthlyPayment { get; set; }
+
+        public InstallmentRoundingMode RoundingMode { get; set; }
+
+        public decimal? RoundingStep { get; set; }
     }
 }
