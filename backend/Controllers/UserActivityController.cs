@@ -12,7 +12,7 @@ using PayPlanner.Api.Services.UserActivity;
 namespace PayPlanner.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/user-activity")]
 [Authorize]
 public class UserActivityController : ControllerBase
 {

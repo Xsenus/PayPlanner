@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Linq;
+using System.Threading;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
@@ -15,16 +17,18 @@ public class UserActivityService : IUserActivityService
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly PaymentContext _context;
+    private static readonly SemaphoreSlim WriteLock = new(1, 1);
+
+    private readonly IDbContextFactory<PaymentContext> _contextFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<UserActivityService> _logger;
 
     public UserActivityService(
-        PaymentContext context,
+        IDbContextFactory<PaymentContext> contextFactory,
         IHttpContextAccessor httpContextAccessor,
         ILogger<UserActivityService> logger)
     {
-        _context = context;
+        _contextFactory = contextFactory;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
@@ -91,8 +95,24 @@ public class UserActivityService : IUserActivityService
                 CreatedAt = entry.CreatedAtUtc ?? DateTime.UtcNow
             };
 
-            _context.UserActivityLogs.Add(log);
-            await _context.SaveChangesAsync(cancellationToken);
+            var lockTaken = false;
+            try
+            {
+                await WriteLock.WaitAsync(cancellationToken);
+                lockTaken = true;
+
+                await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+                context.UserActivityLogs.Add(log);
+                await context.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    WriteLock.Release();
+                }
+            }
+
             return log;
         }
         catch (Exception ex)

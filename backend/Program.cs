@@ -34,14 +34,25 @@ builder.Services.AddSwaggerGen();
 // ================= DbContext (SQLite) =================
 static string NormalizeSqliteConnection(string raw)
 {
-    var b = new SqliteConnectionStringBuilder(raw);
+    var b = new SqliteConnectionStringBuilder(raw)
+    {
+        BusyTimeout = TimeSpan.FromSeconds(5),
+        DefaultTimeout = 30
+    };
+
     if (!Path.IsPathRooted(b.DataSource))
+    {
         b.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, b.DataSource));
+    }
+
     return b.ToString();
 }
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
-builder.Services.AddDbContext<PaymentContext>(options => options.UseSqlite(normalizedCs));
+void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
+
+builder.Services.AddDbContext<PaymentContext>(ConfigureSqlite);
+builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
 
 builder.Services.AddHttpContextAccessor();
 
