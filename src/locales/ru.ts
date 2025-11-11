@@ -52,6 +52,8 @@ export const ru = {
   reports: 'Отчёты',
   calculator: 'Калькулятор',
   clients: 'Клиенты',
+  clientStatus: 'Статус клиента',
+  clientStatusNotSelected: 'Без статуса',
   legalEntities: 'Юридические лица',
   accounts: 'Счета',
   invoicesTitle: 'Исходящие счета',

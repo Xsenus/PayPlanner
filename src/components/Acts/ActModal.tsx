@@ -3,6 +3,7 @@ import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../typ
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { Loader2, X } from 'lucide-react';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 interface ActModalProps {
   open: boolean;
@@ -118,6 +119,10 @@ export function ActModal({
             : t('actStatusTerminated') ?? 'Расторгнуто',
       })),
     [t],
+  );
+  const selectedClient = useMemo(
+    () => clients.find((client) => String(client.id) === String(form.clientId)) ?? null,
+    [clients, form.clientId],
   );
 
   const handleChange = (field: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -257,9 +262,16 @@ export function ActModal({
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
+                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                    {client.company ? ` — ${client.company}` : ''}
                   </option>
                 ))}
               </select>
+              {selectedClient?.clientStatus ? (
+                <div className="mt-1">
+                  <ClientStatusBadge status={selectedClient.clientStatus} />
+                </div>
+              ) : null}
             </label>
 
             <label className="flex flex-col gap-1 text-sm">

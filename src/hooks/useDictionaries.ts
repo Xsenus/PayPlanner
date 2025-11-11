@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import type { DealType, IncomeType, PaymentSource, PaymentStatusEntity } from '../types';
+import type { ClientStatus, DealType, IncomeType, PaymentSource, PaymentStatusEntity } from '../types';
 
 const DICTS_CHANGED = 'dicts:changed';
 
@@ -9,6 +9,7 @@ export function useDictionaries() {
   const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
   const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<PaymentStatusEntity[]>([]);
+  const [clientStatuses, setClientStatuses] = useState<ClientStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,12 +17,13 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, statuses] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, statuses, clientStatusesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
         apiService.getDict('payment-sources'),
         apiService.getDict('payment-statuses'),
+        apiService.getDict('client-statuses'),
       ]);
 
       setDealTypes(deal ?? []);
@@ -33,6 +35,7 @@ export function useDictionaries() {
 
       setPaymentSources(sources ?? []);
       setPaymentStatuses(statuses ?? []);
+      setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
     } finally {
@@ -55,6 +58,7 @@ export function useDictionaries() {
     incomeTypes,
     paymentSources,
     paymentStatuses,
+    clientStatuses,
     loading,
     error,
     refresh,

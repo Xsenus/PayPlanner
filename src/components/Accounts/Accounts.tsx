@@ -21,6 +21,7 @@ import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type SortState = { key: InvoicesSortKey; direction: 'asc' | 'desc' };
 
@@ -438,10 +439,15 @@ export function Accounts() {
                         <td className="px-4 py-3 font-medium text-gray-900">{formatDate(invoice.date)}</td>
                         <td className="px-4 py-3 text-gray-900">{invoice.number}</td>
                         <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{invoice.clientName ?? '—'}</div>
-                          {invoice.clientCompany && (
-                            <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-gray-900">{invoice.clientName ?? '—'}</span>
+                              <ClientStatusBadge status={invoice.clientStatus} />
+                            </div>
+                            {invoice.clientCompany && (
+                              <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <span className="font-semibold text-gray-900">

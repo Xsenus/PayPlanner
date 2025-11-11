@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
-import type { Client, ClientInput, LegalEntitySummary } from '../../types';
+import type { Client, ClientInput, LegalEntitySummary, ClientStatus } from '../../types';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -11,9 +11,18 @@ interface ClientModalProps {
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
   legalEntities: LegalEntitySummary[];
+  clientStatuses: ClientStatus[];
 }
 
-export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legalEntities }: ClientModalProps) {
+export function ClientModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  onDelete,
+  client,
+  legalEntities,
+  clientStatuses,
+}: ClientModalProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -26,6 +35,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
     notes: '',
     legalEntityId: '',
     isActive: true,
+    clientStatusId: '',
   });
 
   const sortedLegalEntities = useMemo(
@@ -40,6 +50,21 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
     if (!formData.legalEntityId) return null;
     return sortedLegalEntities.find((entity) => entity.id === Number(formData.legalEntityId)) ?? null;
   }, [formData.legalEntityId, sortedLegalEntities]);
+
+  const sortedClientStatuses = useMemo(
+    () =>
+      [...clientStatuses].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      ),
+    [clientStatuses],
+  );
+
+  const selectedClientStatus = useMemo(() => {
+    if (!formData.clientStatusId) return null;
+    return (
+      sortedClientStatuses.find((status) => status.id === Number(formData.clientStatusId)) ?? null
+    );
+  }, [formData.clientStatusId, sortedClientStatuses]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,6 +86,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
         notes: client.notes || '',
         legalEntityId: client.legalEntityId ? String(client.legalEntityId) : '',
         isActive: client.isActive,
+        clientStatusId: client.clientStatusId ? String(client.clientStatusId) : '',
       });
     } else {
       setFormData({
@@ -72,6 +98,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
         notes: '',
         legalEntityId: '',
         isActive: true,
+        clientStatusId: '',
       });
     }
   }, [client]);
@@ -90,6 +117,7 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
         notes: formData.notes.trim(),
         isActive: formData.isActive,
         legalEntityId: formData.legalEntityId ? Number(formData.legalEntityId) : null,
+        clientStatusId: formData.clientStatusId ? Number(formData.clientStatusId) : null,
       };
       await onSubmit(payload);
       onClose();
@@ -106,6 +134,10 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
     const { name, value } = e.target;
     if (name === 'legalEntityId') {
       setFormData((prev) => ({ ...prev, legalEntityId: value }));
+      return;
+    }
+    if (name === 'clientStatusId') {
+      setFormData((prev) => ({ ...prev, clientStatusId: value }));
       return;
     }
     const el = e.target as HTMLInputElement;
@@ -199,6 +231,27 @@ export function ClientModal({ isOpen, onClose, onSubmit, onDelete, client, legal
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('clientStatus') || 'Статус клиента'}
+              </label>
+              <select
+                name="clientStatusId"
+                value={formData.clientStatusId}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                {sortedClientStatuses.map((status) => (
+                  <option key={status.id} value={status.id}>
+                    {status.name}
+                  </option>
+                ))}
+              </select>
+              {selectedClientStatus?.description && (
+                <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>
+              )}
             </div>
 
             <div>
