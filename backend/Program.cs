@@ -36,9 +36,12 @@ static string NormalizeSqliteConnection(string raw)
 {
     var b = new SqliteConnectionStringBuilder(raw)
     {
-        BusyTimeout = TimeSpan.FromSeconds(5),
         DefaultTimeout = 30
     };
+
+    // Microsoft.Data.Sqlite не предоставляет строго типизированного свойства BusyTimeout,
+    // поэтому задаём его вручную через индексатор строки подключения.
+    b["BusyTimeout"] = (int)TimeSpan.FromSeconds(5).TotalMilliseconds;
 
     if (!Path.IsPathRooted(b.DataSource))
     {
