@@ -83,7 +83,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Contracts_Number");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Contracts_Date");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Contracts_CreatedAt");
-            
+        });
+
         // ------------------ LegalEntity ------------------
         modelBuilder.Entity<LegalEntity>(entity =>
         {
@@ -129,43 +130,43 @@ public class PaymentContext : DbContext
             entity.Property(p => p.PaidDate).HasColumnType("date");
             entity.Property(p => p.PaidAmount).HasColumnType("decimal(18,2)");
 
-            // Ñâÿçü ñ êëèåíòîì
+            // Связь с клиентом
             entity.HasOne(e => e.Client)
                   .WithMany(c => c.Payments)
                   .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Ñâÿçü ñ äåëîì êëèåíòà
+            // Связь с делом клиента
             entity.HasOne(e => e.ClientCase)
                   .WithMany(cc => cc.Payments)
                   .HasForeignKey(e => e.ClientCaseId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Ñâÿçü ñ òèïîì ñäåëêè
+            // Связь с типом сделки
             entity.HasOne(e => e.DealType)
                   .WithMany(d => d.Payments)
                   .HasForeignKey(e => e.DealTypeId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Ñâÿçü ñ òèïîì äîõîäà
+            // Связь с типом дохода
             entity.HasOne(e => e.IncomeType)
                   .WithMany(i => i.Payments)
                   .HasForeignKey(e => e.IncomeTypeId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Ñâÿçü ñ èñòî÷íèêîì ïëàòåæà
+            // Связь с источником платежа
             entity.HasOne(e => e.PaymentSource)
                   .WithMany(p => p.Payments)
                   .HasForeignKey(e => e.PaymentSourceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // Ñâÿçü ñî ñòàòóñîì ïëàòåæà
+            // Связь со статусом платежа
             entity.HasOne(e => e.PaymentStatusEntity)
                   .WithMany(s => s.Payments)
                   .HasForeignKey(e => e.PaymentStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- Èíäåêñû Account
+            // ---- Индексы Account
             entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
             entity.HasIndex(e => new { e.Account, e.AccountDate }).HasDatabaseName("IX_Payments_Account_AccountDate");
@@ -202,7 +203,7 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.LegalEntityId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_Clients_IsActive");
@@ -218,13 +219,13 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(1000);
 
-            // Ñâÿçü ñ êëèåíòîì
+            // Связь с клиентом
             entity.HasOne(cc => cc.Client)
                   .WithMany(c => c.Cases)
                   .HasForeignKey(cc => cc.ClientId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCases_Status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCases_CreatedAt");
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_ClientId_CreatedAt");
@@ -252,7 +253,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ColorHex).HasMaxLength(7);
             entity.Property(e => e.PaymentType).HasConversion<int>().IsRequired().HasDefaultValue(PaymentType.Income);
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_IncomeTypes_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_IncomeTypes_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_IncomeTypes_IsActive_Name");
@@ -268,7 +269,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentSources_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentSources_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentSources_IsActive_Name");
@@ -282,7 +283,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentStatuses_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentStatuses_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentStatuses_IsActive_Name");
@@ -295,7 +296,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
 
-            // ---- Èíäåêñû ----
+            // ---- Индексы ----
             entity.HasIndex(e => e.Name)
                   .IsUnique()
                   .HasDatabaseName("IX_Roles_Name");
@@ -336,7 +337,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.PasswordHash).IsRequired();
             entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
 
-            // --- äîïîëíèòåëüíûå ïîëÿ ïðîôèëÿ ---
+            // --- Дополнительные поля профиля ---
             entity.Property(e => e.FirstName).HasMaxLength(100);
             entity.Property(e => e.LastName).HasMaxLength(100);
             entity.Property(e => e.MiddleName).HasMaxLength(100);
@@ -350,17 +351,17 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Messenger).HasMaxLength(100);
             entity.Property(e => e.Viber).HasMaxLength(100);
 
-            // --- äàòû êàê date ---
+            // --- Даты как date ---
             entity.Property(e => e.DateOfBirth).HasColumnType("date");
             entity.Property(e => e.EmploymentStartDate).HasColumnType("date");
             entity.Property(e => e.EmploymentEndDate).HasColumnType("date");
 
-            // --- ôëàãè/äåôîëòû ---
+            // --- Флаги и значения по умолчанию ---
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.IsApproved).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-            // --- ñâÿçè ---
+            // --- Связи ---
             entity.HasOne(e => e.Role)
                   .WithMany(r => r.Users)
                   .HasForeignKey(e => e.RoleId)
@@ -371,7 +372,7 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ApprovedByUserId)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            // --- èíäåêñû ---
+            // --- Индексы ---
             entity.HasIndex(e => e.Email)
                   .IsUnique()
                   .HasDatabaseName("IX_Users_Email");
@@ -386,7 +387,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
                   .HasDatabaseName("idx_users_employment_range");
 
-            // --- ïðîâåðêè öåëîñòíîñòè ---
+            // --- Проверки целостности ---
             entity.ToTable(tb =>
             {
                 tb.HasCheckConstraint("CK_Users_Employment_Range",
