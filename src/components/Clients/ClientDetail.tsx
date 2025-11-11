@@ -13,7 +13,6 @@ import {
   Plus,
   Edit,
   Trash2,
-  PlusCircle,
   RotateCcw,
   Search,
   WalletCards,
@@ -29,11 +28,13 @@ import { useClientCases } from '../../hooks/useClientCases';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
+import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
   Act,
@@ -42,6 +43,10 @@ import type {
   ActStatus,
   Client,
   ClientCase,
+  ClientInput,
+  Contract,
+  ContractClient,
+  ContractInput,
   Invoice,
   InvoiceInput,
   Payment,
@@ -56,6 +61,10 @@ import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
+import { ContractModal } from '../Contracts/ContractModal';
+import { ClientModal } from './ClientModal';
+import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { ClientStatusBadge } from './ClientStatusBadge';
 
 interface ClientDetailProps {
   clientId: number;
@@ -106,8 +115,8 @@ const SECTION_META: Record<
   acts: {
     label: 'Акты',
     actionLabel: 'Добавить акт',
-    placeholderTitle: 'Акты клиента',
-    placeholderDescription: 'Управление актами будет доступно после доработки раздела.',
+    placeholderTitle: 'Документы клиента',
+    placeholderDescription: 'Управление документами будет доступно после доработки раздела.',
     icon: FileCheck2,
   },
   contracts: {
@@ -214,11 +223,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
+  const contractPermissions = permissions.contracts;
+  const { legalEntities } = useLegalEntities();
+  const { statuses: clientStatuses } = useClientStatuses();
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) => permissions[SECTION_PERMISSION_MAP[section]],
     [permissions],
   );
   const [clientName, setClientName] = useState<string>('...');
+  const [clientData, setClientData] = useState<Client | null>(null);
+  const [clientModalOpen, setClientModalOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
 
   const { cases: serverCases } = useClientCases(clientId);
@@ -275,6 +289,17 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [invoicePage, setInvoicePage] = useState(1);
   const invoicePageSize = 15;
 
+  const [contractFrom, setContractFrom] = useState<string>(startOfYear);
+  const [contractTo, setContractTo] = useState<string>(todayYMD);
+  const [contractSearch, setContractSearch] = useState('');
+  const debouncedContractSearch = useDebouncedValue(contractSearch.trim(), 400);
+  const [contractSort, setContractSort] = useState<{ key: ContractsSortKey; direction: 'asc' | 'desc' }>({
+    key: 'date',
+    direction: 'desc',
+  });
+  const [contractPage, setContractPage] = useState(1);
+  const contractPageSize = 10;
+
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceModalMode, setInvoiceModalMode] = useState<'create' | 'edit'>('create');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -283,6 +308,13 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [invoiceClients, setInvoiceClients] = useState<Client[]>([]);
   const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
   const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(null);
+
+  const [contractModalOpen, setContractModalOpen] = useState(false);
+  const [contractModalMode, setContractModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
+  const [contractSubmitting, setContractSubmitting] = useState(false);
+  const [contractModalError, setContractModalError] = useState<string | null>(null);
+  const [contractActionError, setContractActionError] = useState<string | null>(null);
 
   const {
     acts: clientActs,
@@ -357,6 +389,36 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     Processing: t('processingStatus') ?? 'В обработке',
     Cancelled: t('cancelledStatus') ?? 'Отменено',
   };
+
+  const {
+    contracts: clientContracts,
+    loading: contractsLoading,
+    refreshing: contractsRefreshing,
+    error: contractsError,
+    pagination: contractsPagination,
+    refresh: refreshContracts,
+    createContract,
+    updateContract,
+    deleteContract,
+  } = useContracts({
+    from: contractFrom || undefined,
+    to: contractTo || undefined,
+    search: debouncedContractSearch || undefined,
+    clientId,
+    sortBy: contractSort.key,
+    sortDir: contractSort.direction,
+    page: contractPage,
+    pageSize: contractPageSize,
+  });
+
+  useEffect(() => {
+    setContractPage(1);
+  }, [contractFrom, contractTo, debouncedContractSearch, clientId]);
+
+  const contractTotalPages = useMemo(() => {
+    if (!contractsPagination.pageSize) return 1;
+    return Math.max(1, Math.ceil((contractsPagination.total ?? 0) / contractsPagination.pageSize));
+  }, [contractsPagination.pageSize, contractsPagination.total]);
 
   const invoiceStatusClasses: Record<PaymentStatus, string> = {
     Pending: 'bg-amber-100 text-amber-700 border border-amber-200',
@@ -463,6 +525,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setInvoiceSearch('');
   };
 
+  const resetContractFilters = () => {
+    setContractFrom(startOfYear);
+    setContractTo(todayYMD);
+    setContractSearch('');
+  };
+
   const handleInvoiceSort = (key: InvoicesSortKey) => {
     setInvoiceSort((prev) => {
       if (prev.key === key) {
@@ -473,17 +541,148 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setInvoicePage(1);
   };
 
+  const handleContractSort = (key: ContractsSortKey) => {
+    setContractSort((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: key === 'date' || key === 'createdAt' ? 'desc' : 'asc' };
+    });
+    setContractPage(1);
+  };
+
+  const openClientEdit = () => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования клиента.');
+      return;
+    }
+    if (!clientData) {
+      void apiService
+        .getClient(clientId)
+        .then((client) => {
+          setClientData(client);
+          setClientName(client.name ?? `Client #${clientId}`);
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }
+    setClientModalOpen(true);
+  };
+
+  const handleUpdateClient = async (payload: ClientInput) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования клиента.');
+      throw new Error('Недостаточно прав для редактирования клиента.');
+    }
+    try {
+      const updated = await apiService.updateClient(clientId, payload);
+      setClientData(updated);
+      setClientName(updated.name ?? `Client #${clientId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось обновить клиента';
+      window.alert(message);
+      throw err instanceof Error ? err : new Error(message);
+    }
+  };
+
+  const openContractCreate = () => {
+    if (!contractPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления договоров.');
+      return;
+    }
+    setSelectedContract(null);
+    setContractModalMode('create');
+    setContractModalError(null);
+    setContractActionError(null);
+    setContractModalOpen(true);
+  };
+
+  const openContractEdit = (contract: Contract) => {
+    if (!contractPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования договоров.');
+      return;
+    }
+    setSelectedContract(contract);
+    setContractModalMode('edit');
+    setContractModalError(null);
+    setContractActionError(null);
+    setContractModalOpen(true);
+  };
+
+  const closeContractModal = () => {
+    setContractModalOpen(false);
+    setSelectedContract(null);
+    setContractModalError(null);
+  };
+
+  const submitContract = async (payload: ContractInput) => {
+    const isEdit = contractModalMode === 'edit' && selectedContract;
+    if (isEdit && !contractPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования договоров.');
+      return;
+    }
+    if (!isEdit && !contractPermissions.canCreate) {
+      showPermissionWarning('Недостаточно прав для добавления договоров.');
+      return;
+    }
+    const normalizedPayload: ContractInput = {
+      ...payload,
+      clientIds: payload.clientIds.includes(clientId)
+        ? payload.clientIds
+        : [...payload.clientIds, clientId],
+    };
+    setContractSubmitting(true);
+    setContractModalError(null);
+    try {
+      if (isEdit && selectedContract) {
+        await updateContract(selectedContract.id, normalizedPayload);
+      } else {
+        await createContract(normalizedPayload);
+      }
+      closeContractModal();
+    } catch (err) {
+      setContractModalError(err instanceof Error ? err.message : 'Не удалось сохранить договор');
+    } finally {
+      setContractSubmitting(false);
+    }
+  };
+
+  const removeContract = async (contract: Contract) => {
+    if (!contractPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления договоров.');
+      return;
+    }
+    const template = t('contractDeleteConfirm') ?? 'Удалить договор «{{number}}»?';
+    const confirmMessage = template.replace(
+      '{{number}}',
+      contract.number || contract.title || String(contract.id),
+    );
+    if (!window.confirm(confirmMessage)) return;
+    setContractActionError(null);
+    try {
+      await deleteContract(contract.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось удалить договор';
+      setContractActionError(message);
+    }
+  };
+
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<'create' | 'edit'>('create');
 
   const visibleSections = useMemo(
-    () => SECTION_ORDER.filter((section) => sectionPermissions(section).canView),
+    () =>
+      SECTION_ORDER.filter(
+        (section) => section !== 'settlement' && sectionPermissions(section).canView,
+      ),
     [sectionPermissions],
   );
 
   const [activeSection, setActiveSection] = useState<ClientDetailSection>(() => {
     const firstAllowed = SECTION_ORDER.find((section) => {
+      if (section === 'settlement') return false;
       try {
         return sectionPermissions(section).canView;
       } catch {
@@ -494,8 +693,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   });
 
   useEffect(() => {
-    if (!sectionPermissions(activeSection).canView) {
-      const fallback = SECTION_ORDER.find((section) => sectionPermissions(section).canView);
+    if (activeSection === 'settlement' || !sectionPermissions(activeSection).canView) {
+      const fallback = SECTION_ORDER.find(
+        (section) => section !== 'settlement' && sectionPermissions(section).canView,
+      );
       if (fallback) setActiveSection(fallback);
     }
   }, [activeSection, sectionPermissions]);
@@ -512,10 +713,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     apiService
       .getClient(clientId)
       .then((c) => {
-        if (alive) setClientName(c.name ?? `Client #${clientId}`);
+        if (!alive) return;
+        setClientName(c.name ?? `Client #${clientId}`);
+        setClientData(c);
       })
       .catch(() => {
-        if (alive) setClientName(`Client #${clientId}`);
+        if (!alive) return;
+        setClientName(`Client #${clientId}`);
+        setClientData(null);
       });
     return () => {
       alive = false;
@@ -655,6 +860,21 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return invoiceClients;
   }, [invoiceClients, clientId, clientName]);
 
+  const contractDefaultClients = useMemo<ContractClient[]>(() => {
+    const normalizedName =
+      clientName && clientName !== '...'
+        ? clientName
+        : clientData?.name ?? `Клиент #${clientId}`;
+
+    return [
+      {
+        id: clientId,
+        name: normalizedName,
+        company: clientData?.company ?? undefined,
+      },
+    ];
+  }, [clientId, clientName, clientData?.name, clientData?.company]);
+
   const actSummaryBuckets = useMemo(
     () =>
       actsSummary ?? {
@@ -710,6 +930,9 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     if (!size) return 1;
     return Math.max(1, Math.ceil((actsPagination.total ?? 0) / size));
   }, [actsPagination.pageSize, actsPagination.total, actPageSize]);
+
+  const editClientLabel = t('editClient') ?? 'Изменить клиента';
+  const addCaseLabel = t('addCase') ?? 'Добавить дело';
 
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
@@ -984,28 +1207,103 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-6">
-        <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
-          <div className="flex items-center gap-2 w-full">
-            <button
-              onClick={onBack}
-              className="order-1 p-1 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
-              title="Назад"
-              aria-label="Назад">
-              <ArrowLeft size={24} />
-            </button>
-            <h1
-              className="order-2 sm:order-3 flex-1 min-w-0 text-2xl font-bold text-gray-900"
-              title={clientName}>
-              {clientName}
-            </h1>
+        <div className="mb-6 flex flex-wrap items-center gap-3">
+          <button
+            onClick={onBack}
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+            title="Назад"
+            aria-label="Назад"
+          >
+            <ArrowLeft size={24} />
+          </button>
+          <h1
+            className="flex-1 min-w-0 text-2xl font-bold text-gray-900 flex flex-wrap items-center gap-3"
+            title={clientName}>
+            <span className="truncate">{clientName}</span>
+            <ClientStatusBadge status={clientData?.clientStatus} />
+          </h1>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {clientPermissions.canEdit && (
+              <button
+                type="button"
+                onClick={openClientEdit}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-600 shadow-sm transition-colors hover:bg-emerald-50"
+                title={editClientLabel}
+                aria-label={editClientLabel}
+              >
+                <Edit className="h-5 w-5" />
+              </button>
+            )}
             {clientPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openAddCase}
-                title="Добавить дело"
-                aria-label="Добавить дело"
-                className="order-3 sm:order-2 ml-auto sm:ml-2 w-12 h-12 inline-flex items-center justify-center rounded-lg border border-dashed border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 transition-colors shrink-0">
-                <PlusCircle size={24} />
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
+                title={addCaseLabel}
+                aria-label={addCaseLabel}
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {visibleSections.map((section) => {
+              const meta = SECTION_META[section];
+              const isActive = activeSection === section;
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  onClick={() => setActiveSection(section)}
+                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                    isActive
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {meta.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {clientPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddPayment}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+              >
+                <Plus size={16} /> {SECTION_META.payments.actionLabel}
+              </button>
+            )}
+            {accountPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openInvoiceCreate}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+              >
+                <Plus size={16} /> {SECTION_META.accounts.actionLabel}
+              </button>
+            )}
+            {actPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddAct}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+              >
+                <Plus size={16} /> {SECTION_META.acts.actionLabel}
+              </button>
+            )}
+            {contractPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openContractCreate}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+              >
+                <Plus size={16} /> {SECTION_META.contracts.actionLabel}
               </button>
             )}
           </div>
@@ -1048,13 +1346,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   </select>
                 </div>
 
-                <div className="w-full sm:w-auto sm:ml-auto order-last sm:order-none">
-                  <button
-                    onClick={openAddPayment}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700">
-                    <Plus size={16} /> {SECTION_META.payments.actionLabel}
-                  </button>
-                </div>
               </div>
 
               <div className="px-6 pb-6 pt-0">
@@ -1208,68 +1499,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 >
                   {t('invoiceFiltersReset') ?? 'Сбросить'}
                 </button>
-                {accountPermissions.canCreate && (
-                  <button
-                    type="button"
-                    onClick={openInvoiceCreate}
-                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-                  >
-                    <Plus className="h-4 w-4" /> {t('invoiceAdd') ?? 'Добавить счёт'}
-                  </button>
-                )}
               </div>
             </div>
           </>
         ) : null}
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-          <div className="flex flex-wrap gap-2">
-            {visibleSections.map((section) => {
-              const meta = SECTION_META[section];
-              const isActive = activeSection === section;
-              return (
-                <button
-                  key={section}
-                  type="button"
-                  onClick={() => setActiveSection(section)}
-                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                    isActive
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                  }`}>
-                  {meta.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
-            {activeSection === 'payments' && clientPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddPayment}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
-                <Plus size={16} /> {SECTION_META.payments.actionLabel}
-              </button>
-            )}
-            {activeSection === 'accounts' && accountPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openInvoiceCreate}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-                <Plus size={16} /> {SECTION_META.accounts.actionLabel}
-              </button>
-            )}
-            {activeSection === 'acts' && actPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddAct}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-                <Plus size={16} /> {SECTION_META.acts.actionLabel}
-              </button>
-            )}
-          </div>
-        </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-6 border-b border-gray-100">
@@ -1674,10 +1907,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {t('acts') ?? SECTION_META.acts.label}
+                      {t('actSectionTitle') ?? 'Сводка и список'}
                     </h3>
                     <p className="text-sm text-gray-500">
-                      {t('actSectionDescription') ?? SECTION_META.acts.placeholderDescription}
+                      {t('actSectionDescription') ?? 'Отслеживайте статусы и суммы по документам клиента.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1689,12 +1922,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                       className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
                       <RotateCcw className={actsRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
                       {t('invoiceRefresh') ?? t('actFiltersApply') ?? 'Обновить'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openAddAct}
-                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
-                      <Plus size={16} /> {t('addAct') ?? SECTION_META.acts.actionLabel}
                     </button>
                   </div>
                 </div>
@@ -1716,7 +1943,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                           <Icon className="h-10 w-10 opacity-80" />
                         </div>
                         <p className="mt-4 text-xs text-gray-500">
-                          {(t('actsSummaryCount') ?? 'Количество актов')}: {card.bucket.count}
+                          {(t('actsSummaryCount') ?? 'Количество')}: {card.bucket.count}
                         </p>
                       </div>
                     );
@@ -1828,7 +2055,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                         ) : clientActs.length === 0 ? (
                           <tr>
                             <td colSpan={8} className="py-10 text-center text-gray-500">
-                              {actsError ?? t('actsEmpty') ?? 'Акты не найдены'}
+                              {actsError ?? t('actsEmpty') ?? 'Документы не найдены'}
                             </td>
                           </tr>
                         ) : (
@@ -1938,6 +2165,262 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   )}
                 </div>
               </>
+            ) : activeSection === 'contracts' ? (
+              <>
+                <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <CalendarRange className="h-4 w-4 text-gray-500" />
+                    <input
+                      type="date"
+                      value={contractFrom}
+                      onChange={(event) => setContractFrom(event.target.value)}
+                      className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    />
+                    <span className="text-gray-500">—</span>
+                    <input
+                      type="date"
+                      value={contractTo}
+                      onChange={(event) => setContractTo(event.target.value)}
+                      className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    />
+                  </div>
+                  <div className="relative flex-1 min-w-[220px]">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="search"
+                      value={contractSearch}
+                      onChange={(event) => setContractSearch(event.target.value)}
+                      placeholder={
+                        t('contractsSearchPlaceholder') ??
+                        'Поиск по номеру, названию или описанию договора'
+                      }
+                      className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => refreshContracts()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      <RotateCcw className={contractsRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      {t('invoiceRefresh') ?? 'Обновить'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetContractFilters}
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                    >
+                      {t('invoiceFiltersReset') ?? 'Сбросить'}
+                    </button>
+                  </div>
+                </div>
+
+                {contractActionError ? (
+                  <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {contractActionError}
+                  </div>
+                ) : null}
+
+                {contractsError ? (
+                  <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {(t('contractsLoadError') ?? 'Не удалось загрузить договоры') + ': '}
+                    {contractsError}
+                  </div>
+                ) : null}
+
+                {contractsLoading ? (
+                  <div className="py-10 text-center text-gray-500">
+                    <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+                    {t('loading') ?? 'Загрузка...'}
+                  </div>
+                ) : clientContracts.length === 0 ? (
+                  <div className="py-10 text-center text-gray-500">
+                    <div className="text-lg font-semibold text-gray-900">
+                      {t('contractsEmptyTitle') ?? 'Договоры отсутствуют'}
+                    </div>
+                    <div className="mt-2 text-sm text-gray-500">
+                      {t('contractsEmptyDescription') ??
+                        'Создайте первый договор, чтобы отслеживать обязательства и сроки.'}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            <th scope="col" className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => handleContractSort('number')}
+                                className="flex items-center gap-1"
+                              >
+                                {t('contractNumber') ?? 'Номер договора'}
+                                <span className="text-gray-400">
+                                  {contractSort.key === 'number'
+                                    ? contractSort.direction === 'asc'
+                                      ? '▲'
+                                      : '▼'
+                                    : ''}
+                                </span>
+                              </button>
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => handleContractSort('date')}
+                                className="flex items-center gap-1"
+                              >
+                                {t('contractDate') ?? 'Дата договора'}
+                                <span className="text-gray-400">
+                                  {contractSort.key === 'date'
+                                    ? contractSort.direction === 'asc'
+                                      ? '▲'
+                                      : '▼'
+                                    : ''}
+                                </span>
+                              </button>
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              {t('contractClients') ?? 'Клиенты'}
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => handleContractSort('amount')}
+                                className="flex items-center gap-1"
+                              >
+                                {t('contractAmount') ?? 'Сумма договора'}
+                                <span className="text-gray-400">
+                                  {contractSort.key === 'amount'
+                                    ? contractSort.direction === 'asc'
+                                      ? '▲'
+                                      : '▼'
+                                    : ''}
+                                </span>
+                              </button>
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              {t('contractValidUntil') ?? 'Действует до'}
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => handleContractSort('createdAt')}
+                                className="flex items-center gap-1"
+                              >
+                                {t('contractCreatedAt') ?? 'Создано'}
+                                <span className="text-gray-400">
+                                  {contractSort.key === 'createdAt'
+                                    ? contractSort.direction === 'asc'
+                                      ? '▲'
+                                      : '▼'
+                                    : ''}
+                                </span>
+                              </button>
+                            </th>
+                            {(contractPermissions.canEdit || contractPermissions.canDelete) && (
+                              <th scope="col" className="px-4 py-3">
+                                {t('actions') ?? 'Действия'}
+                              </th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-gray-700">
+                          {clientContracts.map((contract) => (
+                            <tr key={contract.id} className="hover:bg-gray-50/80">
+                              <td className="px-4 py-3 font-medium text-gray-900">№{contract.number}</td>
+                              <td className="px-4 py-3 text-gray-900">{toRuDate(contract.date)}</td>
+                              <td className="px-4 py-3">
+                                {contract.clients.length === 0 ? (
+                                  <span className="text-xs text-gray-500">
+                                    {t('contractClientsRequired') ?? 'Клиенты не указаны'}
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1">
+                                    {contract.clients.map((client) => (
+                                      <span
+                                        key={client.id}
+                                        className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700"
+                                      >
+                                        {client.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-gray-900">
+                                {contract.amount !== null && contract.amount !== undefined
+                                  ? formatCurrencySmart(contract.amount).full
+                                  : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-gray-900">
+                                {contract.validUntil ? toRuDate(contract.validUntil) : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-gray-900">{toRuDate(contract.createdAt)}</td>
+                              {(contractPermissions.canEdit || contractPermissions.canDelete) && (
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    {contractPermissions.canEdit && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openContractEdit(contract)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                        title={t('edit') ?? 'Редактировать'}
+                                        aria-label={t('edit') ?? 'Редактировать'}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    {contractPermissions.canDelete && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeContract(contract)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                        title={t('delete') ?? 'Удалить'}
+                                        aria-label={t('delete') ?? 'Удалить'}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                      <div>
+                        {(t('recordsFound') ?? 'Найдено записей')}: {contractsPagination.total ?? clientContracts.length}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setContractPage((value) => Math.max(1, value - 1))}
+                          disabled={contractPage <= 1}
+                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t('previous') ?? 'Назад'}
+                        </button>
+                        <span>
+                          {(contractsPagination.page ?? contractPage)} / {contractTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setContractPage((value) => Math.min(contractTotalPages, value + 1))}
+                          disabled={contractPage >= contractTotalPages}
+                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t('next') ?? 'Вперёд'}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
             ) : (
               (() => {
                 const meta = SECTION_META[activeSection];
@@ -1988,6 +2471,17 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           defaultClientId={clientId}
         />
 
+        <ContractModal
+          open={contractModalOpen}
+          mode={contractModalMode}
+          contract={selectedContract}
+          onClose={closeContractModal}
+          onSubmit={submitContract}
+          submitting={contractSubmitting}
+          errorMessage={contractModalError}
+          defaultClients={contractDefaultClients}
+        />
+
         <PaymentModal
           key={payModalOpen ? (editingPayment ? `edit-${editingPayment.id}` : 'new') : 'closed'}
           isOpen={payModalOpen}
@@ -2024,6 +2518,15 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             onDelete={caseMode === 'edit' && clientPermissions.canDelete ? deleteCase : undefined}
           />
         )}
+
+        <ClientModal
+          isOpen={clientModalOpen}
+          onClose={() => setClientModalOpen(false)}
+          onSubmit={handleUpdateClient}
+          client={clientData ?? undefined}
+          legalEntities={legalEntities}
+          clientStatuses={clientStatuses}
+        />
 
         {error && (
           <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">

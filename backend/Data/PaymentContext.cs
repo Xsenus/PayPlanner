@@ -203,6 +203,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.LegalEntityId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ClientStatus)
+                  .WithMany(s => s.Clients)
+                  .HasForeignKey(e => e.ClientStatusId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
@@ -210,6 +215,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Clients_CreatedAt");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Clients_IsActive_Name");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Clients_LegalEntityId");
+            entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_Clients_ClientStatusId");
         });
 
         // ------------------ ClientCase ------------------
@@ -273,6 +279,20 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentSources_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentSources_Name");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentSources_IsActive_Name");
+        });
+
+        // ------------------ ClientStatusEntity ------------------
+        modelBuilder.Entity<ClientStatusEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.ColorHex).HasMaxLength(7);
+
+            // ---- Индексы ----
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ClientStatuses_IsActive");
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_ClientStatuses_Name");
+            entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_ClientStatuses_IsActive_Name");
         });
 
         // ------------------ PaymentStatusEntity ------------------
@@ -445,6 +465,11 @@ public class PaymentContext : DbContext
     /// Источники платежей.
     /// </summary>
     public DbSet<PaymentSource> PaymentSources { get; set; }
+
+    /// <summary>
+    /// Статусы клиентов.
+    /// </summary>
+    public DbSet<ClientStatusEntity> ClientStatuses { get; set; }
 
     /// <summary>
     /// Статусы платежей.

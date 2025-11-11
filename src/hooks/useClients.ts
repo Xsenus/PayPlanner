@@ -1,6 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import type { Client, ClientStats, ClientCase, LegalEntitySummary, ClientInput } from '../types';
+import type {
+  Client,
+  ClientStats,
+  ClientCase,
+  LegalEntitySummary,
+  ClientInput,
+  ClientStatus,
+} from '../types';
+
+function normalizeClient(client: Client): Client {
+  return {
+    ...client,
+    legalEntityId: client.legalEntityId ?? null,
+    legalEntity: (client.legalEntity as LegalEntitySummary | null) ?? null,
+    clientStatusId: client.clientStatusId ?? null,
+    clientStatus: (client.clientStatus as ClientStatus | null) ?? null,
+    cases: Array.isArray(client.cases) ? (client.cases as ClientCase[]) : [],
+    contracts: Array.isArray(client.contracts) ? client.contracts : [],
+  };
+}
 
 function isClient(x: unknown): x is Client {
   if (typeof x !== 'object' || x === null) return false;
@@ -19,12 +38,7 @@ export function useClients() {
       setError(null);
 
       const base = await apiService.getClients();
-      const normalized: Client[] = (base as Client[]).map((c) => ({
-        ...c,
-        legalEntityId: c.legalEntityId ?? null,
-        legalEntity: (c.legalEntity as LegalEntitySummary | null) ?? null,
-        cases: (c.cases ?? []) as ClientCase[],
-      }));
+      const normalized = (base as Client[]).map((c) => normalizeClient(c));
 
       setClients(normalized);
     } catch (err) {
@@ -42,15 +56,8 @@ export function useClients() {
     try {
       const created = await apiService.createClient(client);
       if (isClient(created)) {
-        setClients((prev) => [
-          {
-            ...created,
-            legalEntityId: created.legalEntityId ?? null,
-            legalEntity: (created.legalEntity as LegalEntitySummary | null) ?? null,
-            cases: (created.cases ?? []) as ClientCase[],
-          },
-          ...prev,
-        ]);
+        const normalized = normalizeClient(created);
+        setClients((prev) => [normalized, ...prev]);
       } else {
         await fetchClients();
       }
@@ -64,18 +71,29 @@ export function useClients() {
     try {
       const updated = await apiService.updateClient(id, patch);
       if (isClient(updated)) {
+        const normalized = normalizeClient(updated);
         setClients((prev) =>
           prev.map((c) =>
             c.id === id
               ? {
-                  ...updated,
-                  legalEntityId: updated.legalEntityId ?? null,
-                  legalEntity: (updated.legalEntity as LegalEntitySummary | null) ?? null,
-                  cases: (updated.cases ?? c.cases ?? []) as ClientCase[],
+                  ...c,
+                  ...normalized,
+                  legalEntity:
+                    normalized.legalEntity ?? (c.legalEntity as LegalEntitySummary | null) ?? null,
+                  clientStatus: normalized.clientStatus ?? (c.clientStatus as ClientStatus | null) ?? null,
+                  cases:
+                    normalized.cases.length === 0 && (c.cases?.length ?? 0) > 0
+                      ? (c.cases as ClientCase[])
+                      : normalized.cases,
+                  contracts:
+                    (normalized.contracts?.length ?? 0) === 0 && (c.contracts?.length ?? 0) > 0
+                      ? c.contracts
+                      : normalized.contracts,
                 }
               : c,
           ),
         );
+        void fetchClients();
       } else {
         await fetchClients();
       }

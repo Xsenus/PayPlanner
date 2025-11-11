@@ -28,6 +28,16 @@ namespace PayPlanner.Api.Models
         public LegalEntity? LegalEntity { get; set; }
 
         /// <summary>
+        /// Идентификатор статуса клиента.
+        /// </summary>
+        public int? ClientStatusId { get; set; }
+
+        /// <summary>
+        /// Статус клиента из справочника.
+        /// </summary>
+        public ClientStatusEntity? ClientStatus { get; set; }
+
+        /// <summary>
         /// Дата и время создания записи (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

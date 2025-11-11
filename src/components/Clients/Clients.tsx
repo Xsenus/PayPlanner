@@ -26,6 +26,8 @@ import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { ClientStatusBadge } from './ClientStatusBadge';
 
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
@@ -93,6 +95,7 @@ function matchesClient(c: Client, q: string): boolean {
   const legalInn = (legal?.inn ?? '').toLowerCase();
   const legalOgrn = (legal?.ogrn ?? '').toLowerCase();
   const legalKpp = (legal?.kpp ?? '').toLowerCase();
+  const statusName = (c.clientStatus?.name ?? '').toLowerCase();
   const legalDigits = [legal?.inn ?? '', legal?.ogrn ?? '', legal?.kpp ?? '']
     .map((value) => value.replace(/\D/g, ''))
     .join(' ');
@@ -102,6 +105,7 @@ function matchesClient(c: Client, q: string): boolean {
     company.includes(ql) ||
     email.includes(ql) ||
     phone.includes(ql) ||
+    statusName.includes(ql) ||
     legalShort.includes(ql) ||
     legalFull.includes(ql) ||
     legalInn.includes(ql) ||
@@ -195,6 +199,7 @@ export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
   const { legalEntities, loading: legalEntitiesLoading } = useLegalEntities();
+  const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
@@ -600,9 +605,12 @@ export function Clients() {
                             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
                               <Users size={20} className="text-blue-600" />
                             </div>
-                            <div>
-                              <div className="font-medium text-gray-900">
-                                {highlight(client.name ?? '', query)}
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium text-gray-900">
+                                  {highlight(client.name ?? '', query)}
+                                </span>
+                                <ClientStatusBadge status={client.clientStatus} />
                               </div>
                               {client.company && (
                                 <div className="text-sm text-gray-500">
@@ -763,12 +771,17 @@ export function Clients() {
                         <Users size={24} className="text-blue-600" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-gray-900 block max-w-full truncate">
-                          {highlight(client.name ?? '', query)}
-                        </h3>
-                        <p className="text-sm text-gray-500 block max-w-full truncate">
-                          {highlight(client.company ?? '', query)}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 block max-w-full truncate">
+                            {highlight(client.name ?? '', query)}
+                          </h3>
+                          <ClientStatusBadge status={client.clientStatus} />
+                        </div>
+                        {client.company && (
+                          <p className="text-sm text-gray-500 block max-w-full truncate">
+                            {highlight(client.company ?? '', query)}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-1 self-end sm:self-auto shrink-0">
@@ -942,6 +955,7 @@ export function Clients() {
           onDelete={handleDeleteClient}
           client={editingClient ?? undefined}
           legalEntities={legalEntities}
+          clientStatuses={clientStatuses}
         />
 
         {caseModalOpen && (

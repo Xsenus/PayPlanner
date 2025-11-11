@@ -141,6 +141,18 @@ namespace PayPlanner.Api.Services
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
             }
+
+            if (!await context.ClientStatuses.AnyAsync())
+            {
+                var clientStatuses = new[]
+                {
+                    new ClientStatusEntity { Name = "Клиент", Description = "Основной заказчик", ColorHex = "#2563EB" },
+                    new ClientStatusEntity { Name = "Поставщик", Description = "Поставщик услуг или товаров", ColorHex = "#7C3AED" },
+                    new ClientStatusEntity { Name = "Кредитор", Description = "Контрагент с кредитными обязательствами", ColorHex = "#DC2626" }
+                };
+                context.ClientStatuses.AddRange(clientStatuses);
+                await context.SaveChangesAsync();
+            }
         }
 
         private static async Task EnsureIncomeTypeSchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
