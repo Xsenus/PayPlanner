@@ -31,6 +31,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
   const inflightRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const sigRef = useRef<string>('init');
+  const fallbackTimerRef = useRef<number | null>(null);
 
   const paramsKey = JSON.stringify({
     from: from ?? '',
@@ -49,8 +50,22 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
       abortRef.current = ac;
 
       setError(null);
-      if (effectiveMode === 'initial') setLoadingInitial(true);
-      else setRefreshing(true);
+      if (fallbackTimerRef.current) {
+        window.clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+      if (effectiveMode === 'initial') {
+        setLoadingInitial(true);
+        fallbackTimerRef.current = window.setTimeout(() => {
+          fallbackTimerRef.current = null;
+          setLoadingInitial(false);
+          setRefreshing(false);
+          inflightRef.current = false;
+          setError((prev) => prev ?? 'Не удалось загрузить платежи. Проверьте подключение.');
+        }, 15000);
+      } else {
+        setRefreshing(true);
+      }
 
       try {
         const res = await apiService.getPayments({
@@ -74,6 +89,10 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
           setError(e instanceof Error ? e.message : 'Failed to fetch payments');
         }
       } finally {
+        if (fallbackTimerRef.current) {
+          window.clearTimeout(fallbackTimerRef.current);
+          fallbackTimerRef.current = null;
+        }
         if (!ac.signal.aborted) {
           if (effectiveMode === 'initial') setLoadingInitial(false);
           else setRefreshing(false);
@@ -93,6 +112,10 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
 
     return () => {
       abortRef.current?.abort();
+      if (fallbackTimerRef.current) {
+        window.clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
     };
   }, [fetchOnce, paramsKey]);
 

@@ -46,6 +46,10 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
       ...defaultRolePermissions.acts,
       ...(source.acts ?? {}),
     },
+    payments: {
+      ...defaultRolePermissions.payments,
+      ...(source.payments ?? {}),
+    },
     contracts: {
       ...defaultRolePermissions.contracts,
       ...(source.contracts ?? {}),
@@ -66,6 +70,7 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
     legalEntities: { ...perms.legalEntities },
     accounts: { ...perms.accounts },
     acts: { ...perms.acts },
+    payments: { ...perms.payments },
     contracts: { ...perms.contracts },
     dictionaries: { ...perms.dictionaries },
   };

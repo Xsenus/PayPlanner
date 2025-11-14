@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   BarChart,
@@ -15,6 +15,10 @@ import {
   FileCheck2,
   FileSignature,
   Eye,
+  ChevronDown,
+  ChevronRight,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -84,47 +88,177 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
   };
 
-  // Базовые вкладки доступны всем
-  const baseTabs = useMemo(() => {
-    const tabs = [
-      { id: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar, allowed: permissions.calendar.canView },
-      { id: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart, allowed: permissions.reports.canView },
-      { id: 'calculator' as Tab, label: t('calculator') ?? 'Калькулятор', icon: Calculator, allowed: permissions.calculator.canView },
-      { id: 'legalEntities' as Tab, label: t('legalEntities') ?? 'Юр. лица', icon: Building2, allowed: permissions.legalEntities.canView },
-      { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users, allowed: permissions.clients.canView },
-      { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards, allowed: permissions.accounts.canView },
-      { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2, allowed: permissions.acts.canView },
-      { id: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature, allowed: permissions.contracts.canView },
-      {
-        id: 'dictionaries' as Tab,
+  type SidebarChild = { id: Tab; label: string; icon: typeof Calendar };
+  type SidebarItem =
+    | { type: 'link'; id: string; tab: Tab; label: string; icon: typeof Calendar }
+    | { type: 'group'; id: string; tab: Tab; label: string; icon: typeof Calendar; children: SidebarChild[] };
+
+  const baseItems = useMemo(() => {
+    const items: SidebarItem[] = [];
+
+    if (permissions.calendar.canView) {
+      items.push({
+        type: 'link',
+        id: 'calendar',
+        tab: 'calendar',
+        label: t('calendar') ?? 'Календарь',
+        icon: Calendar,
+      });
+    }
+
+    if (permissions.reports.canView) {
+      items.push({
+        type: 'link',
+        id: 'reports',
+        tab: 'reports',
+        label: t('reports') ?? 'Отчёты',
+        icon: BarChart,
+      });
+    }
+
+    if (permissions.calculator.canView) {
+      items.push({
+        type: 'link',
+        id: 'calculator',
+        tab: 'calculator',
+        label: t('calculator') ?? 'Калькулятор',
+        icon: Calculator,
+      });
+    }
+
+    if (permissions.legalEntities.canView) {
+      items.push({
+        type: 'link',
+        id: 'legalEntities',
+        tab: 'legalEntities',
+        label: t('legalEntities') ?? 'Юр. лица',
+        icon: Building2,
+      });
+    }
+
+    if (permissions.clients.canView) {
+      items.push({
+        type: 'link',
+        id: 'clients',
+        tab: 'clients',
+        label: t('clients') ?? 'Клиенты',
+        icon: Users,
+      });
+    }
+
+    if (permissions.accounts.canView) {
+      items.push({
+        type: 'link',
+        id: 'accounts',
+        tab: 'accounts',
+        label: t('accounts') ?? 'Счета',
+        icon: WalletCards,
+      });
+    }
+
+    if (permissions.acts.canView) {
+      const paymentChildren: SidebarChild[] = [];
+      if (permissions.payments.canView) {
+        paymentChildren.push({
+          id: 'paymentsIncome',
+          label: t('paymentsIncomeTab') ?? 'Доходные платежи',
+          icon: TrendingUp,
+        });
+        paymentChildren.push({
+          id: 'paymentsExpense',
+          label: t('paymentsExpenseTab') ?? 'Расходные платежи',
+          icon: TrendingDown,
+        });
+      }
+
+      if (paymentChildren.length > 0) {
+        items.push({
+          type: 'group',
+          id: 'acts',
+          tab: 'acts',
+          label: t('acts') ?? 'Акты',
+          icon: FileCheck2,
+          children: paymentChildren,
+        });
+      } else {
+        items.push({
+          type: 'link',
+          id: 'acts',
+          tab: 'acts',
+          label: t('acts') ?? 'Акты',
+          icon: FileCheck2,
+        });
+      }
+    }
+
+    if (permissions.contracts.canView) {
+      items.push({
+        type: 'link',
+        id: 'contracts',
+        tab: 'contracts',
+        label: t('contracts') ?? 'Договоры',
+        icon: FileSignature,
+      });
+    }
+
+    if (permissions.dictionaries.canView) {
+      items.push({
+        type: 'link',
+        id: 'dictionaries',
+        tab: 'dictionaries',
         label: t('dictionaries') ?? 'Справочники',
         icon: Settings,
-        allowed: permissions.dictionaries.canView,
-      },
-    ] as Array<{ id: Tab; label: string; icon: typeof Calendar; allowed: boolean }>;
+      });
+    }
 
-    return tabs.reduce<Array<{ id: Tab; label: string; icon: typeof Calendar }>>((acc, tab) => {
-      if (tab.allowed) {
-        acc.push({ id: tab.id, label: tab.label, icon: tab.icon });
-      }
-      return acc;
-    }, []);
-  }, [t, permissions]);
+    return items;
+  }, [permissions, t]);
 
-  // Админские вкладки добавляем отдельно
-  const adminTabs = useMemo(() => {
+  const adminItems = useMemo(() => {
     if (!isAdmin()) {
-      return [] as Array<{ id: Tab; label: string; icon: typeof Calendar }>;
+      return [] as SidebarItem[];
     }
 
     return [
-      { id: 'users' as Tab, label: 'Пользователи', icon: UserCog },
-      { id: 'roles' as Tab, label: 'Роли', icon: Shield },
-      { id: 'userActivity' as Tab, label: 'Контроль пользователей', icon: Eye },
+      { type: 'link', id: 'users', tab: 'users', label: 'Пользователи', icon: UserCog },
+      { type: 'link', id: 'roles', tab: 'roles', label: 'Роли', icon: Shield },
+      { type: 'link', id: 'userActivity', tab: 'userActivity', label: 'Контроль пользователей', icon: Eye },
     ];
   }, [isAdmin]);
 
-  const tabs = useMemo(() => [...baseTabs, ...adminTabs], [baseTabs, adminTabs]);
+  const navItems = useMemo(() => [...baseItems, ...adminItems], [baseItems, adminItems]);
+
+  const GROUP_STATE_KEY = 'pp.sidebar_groups_v1';
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(GROUP_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch {
+      /** */
+    }
+    return { acts: true };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_STATE_KEY, JSON.stringify(expandedGroups));
+    } catch {
+      /** */
+    }
+  }, [expandedGroups]);
+
+  const handleToggleGroup = useCallback((groupId: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupId]: !(prev[groupId] ?? true),
+    }));
+  }, []);
 
   const sidebarWidthClass = collapsed ? 'w-20' : 'w-[17rem]';
 
@@ -196,21 +330,67 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
         <nav className="flex-1 overflow-y-auto py-4 px-2">
           <ul className="space-y-1.5">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
+            {navItems.map((item) => {
+              if (item.type === 'link') {
+                const Icon = item.icon;
+                const isActive = activeTab === item.tab;
+                return (
+                  <li key={item.id} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange(item.tab);
+                        setMobileOpen(false);
+                      }}
+                      aria-current={isActive ? 'page' : undefined}
+                      title={item.label}
+                      className={[
+                        'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
+                        collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
+                        isActive
+                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-900/30'
+                          : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
+                      ].join(' ')}>
+                      <Icon
+                        className={[
+                          'shrink-0 transition-transform group-hover:scale-110',
+                          collapsed ? 'h-6 w-6' : 'h-5 w-5',
+                        ].join(' ')}
+                      />
+                      {!collapsed && (
+                        <span className="truncate font-medium text-sm">{item.label}</span>
+                      )}
+                      {isActive && !collapsed && (
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
+                      )}
+                    </button>
+                  </li>
+                );
+              }
+
+              const Icon = item.icon;
+              const isActive =
+                activeTab === item.tab || item.children.some((child) => child.id === activeTab);
+              const isExpanded = expandedGroups[item.id] ?? true;
+              const hasChildren = item.children.length > 0;
+              const toggleLabel = isExpanded
+                ? t('sidebarHideSubmenu') ?? 'Скрыть подразделы'
+                : t('sidebarShowSubmenu') ?? 'Показать подразделы';
+
               return (
-                <li key={tab.id}>
+                <li key={item.id} className="relative">
                   <button
+                    type="button"
                     onClick={() => {
-                      onTabChange(tab.id);
+                      onTabChange(item.tab);
                       setMobileOpen(false);
                     }}
                     aria-current={isActive ? 'page' : undefined}
-                    title={tab.label}
+                    aria-expanded={isExpanded}
+                    title={item.label}
                     className={[
                       'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
-                      collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
+                      collapsed ? 'justify-center p-3' : hasChildren ? 'gap-3 pr-10 py-3 pl-4' : 'gap-3 px-4 py-3',
                       isActive
                         ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-900/30'
                         : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
@@ -222,12 +402,68 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       ].join(' ')}
                     />
                     {!collapsed && (
-                      <span className="truncate font-medium text-sm">{tab.label}</span>
+                      <span className="truncate font-medium text-sm">{item.label}</span>
                     )}
+                    {collapsed && hasChildren ? (
+                      <ChevronRight
+                        className={`absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-transform ${
+                          isExpanded ? 'rotate-90' : ''
+                        }`}
+                      />
+                    ) : null}
                     {isActive && !collapsed && (
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                     )}
                   </button>
+
+                  {!collapsed && hasChildren && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleToggleGroup(item.id);
+                      }}
+                      className={[
+                        'absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 transition-colors',
+                        isActive
+                          ? 'text-white/90 hover:bg-white/10'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-700/60',
+                      ].join(' ')}
+                      aria-label={toggleLabel}>
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${isExpanded ? '' : '-rotate-90'}`}
+                      />
+                    </button>
+                  )}
+
+                  {!collapsed && hasChildren && isExpanded ? (
+                    <ul className="mt-1 space-y-1.5 pl-8">
+                      {item.children.map((child) => {
+                        const ChildIcon = child.icon;
+                        const isChildActive = activeTab === child.id;
+                        return (
+                          <li key={child.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onTabChange(child.id);
+                                setMobileOpen(false);
+                              }}
+                              className={[
+                                'w-full flex items-center gap-3 rounded-lg transition-all duration-200 select-none',
+                                'pl-10 pr-4 py-2.5 text-sm font-medium',
+                                isChildActive
+                                  ? 'bg-slate-800/70 text-white shadow-inner shadow-slate-900/30'
+                                  : 'text-slate-300 hover:bg-slate-800/40 hover:text-white',
+                              ].join(' ')}>
+                              <ChildIcon className="h-4 w-4 shrink-0" />
+                              <span className="truncate">{child.label}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
                 </li>
               );
             })}
