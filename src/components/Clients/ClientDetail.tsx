@@ -360,6 +360,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     status: invoiceStatus === 'all' ? undefined : invoiceStatus,
     clientId,
     search: debouncedInvoiceSearch || undefined,
+    type: 'Income',
     sortBy: invoiceSort.key,
     sortDir: invoiceSort.direction,
     page: invoicePage,

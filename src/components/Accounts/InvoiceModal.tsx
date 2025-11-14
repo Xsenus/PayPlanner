@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
-import type { Act, ActStatus, Client, Invoice, InvoiceInput, PaymentStatus } from '../../types';
+import type { Act, ActStatus, Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -15,11 +15,13 @@ type FormState = {
   date: string;
   dueDate: string;
   amount: string;
+  type: PaymentKind;
   status: PaymentStatus;
   clientId: string;
   description: string;
   actReference: string;
   paidDate: string;
+  counterpartyName: string;
 };
 
 type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'status'>;
@@ -36,9 +38,14 @@ interface InvoiceModalProps {
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
+  defaultType?: PaymentKind;
 }
 
-function normalizeInvoiceToForm(invoice: Invoice | null, defaultClientId?: number): FormState {
+function normalizeInvoiceToForm(
+  invoice: Invoice | null,
+  defaultClientId?: number,
+  defaultType: PaymentKind = 'Income',
+): FormState {
   const today = formatLocalYMD(new Date());
   if (!invoice) {
     return {
@@ -46,11 +53,13 @@ function normalizeInvoiceToForm(invoice: Invoice | null, defaultClientId?: numbe
       date: today,
       dueDate: '',
       amount: '',
+      type: defaultType,
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
       description: '',
       actReference: '',
       paidDate: '',
+      counterpartyName: '',
     };
   }
 
@@ -59,11 +68,13 @@ function normalizeInvoiceToForm(invoice: Invoice | null, defaultClientId?: numbe
     date: toDateInputValue(invoice.date) || today,
     dueDate: toDateInputValue(invoice.dueDate) || '',
     amount: invoice.amount !== undefined && invoice.amount !== null ? String(invoice.amount) : '',
+    type: invoice.type ?? defaultType,
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
     description: invoice.description ?? '',
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
+    counterpartyName: invoice.counterpartyName ?? '',
   };
 }
 
@@ -95,10 +106,14 @@ export function InvoiceModal({
   lookupsLoading,
   lookupsError,
   defaultClientId,
+  defaultType = 'Income',
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { setActiveTab } = useTabNavigation();
-  const [form, setForm] = useState<FormState>(() => normalizeInvoiceToForm(invoice, defaultClientId));
+  const typeOptions: PaymentKind[] = ['Income', 'Expense'];
+  const [form, setForm] = useState<FormState>(() =>
+    normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   const initialAct = useMemo<ActOption | null>(() => {
@@ -129,9 +144,11 @@ export function InvoiceModal({
     [clients, form.clientId],
   );
 
+  const isIncome = form.type === 'Income';
+
   useEffect(() => {
     if (open) {
-      setForm(normalizeInvoiceToForm(invoice, defaultClientId));
+      setForm(normalizeInvoiceToForm(invoice, defaultClientId, defaultType));
       const nextInitial = invoice?.actId ? {
         id: invoice.actId,
         number: invoice.actNumber ?? invoice.number,
@@ -147,9 +164,13 @@ export function InvoiceModal({
       setActsError(null);
       setLocalError(null);
     }
-  }, [open, invoice, defaultClientId]);
+  }, [open, invoice, defaultClientId, defaultType]);
 
   const fetchActs = useCallback(async () => {
+    if (form.type !== 'Income') {
+      setActSuggestions([]);
+      return;
+    }
     if (debouncedActSearch.length < 2) {
       setActSuggestions([]);
       return;
@@ -184,7 +205,7 @@ export function InvoiceModal({
     } finally {
       setActsLoading(false);
     }
-  }, [debouncedActSearch, form.clientId]);
+  }, [debouncedActSearch, form.clientId, form.type]);
 
   useEffect(() => {
     if (!open) return;
@@ -197,6 +218,7 @@ export function InvoiceModal({
     setActDropdownOpen(false);
     setForm((prev) => ({
       ...prev,
+      type: 'Income',
       number: act.invoiceNumber ?? act.number ?? prev.number,
       date: toDateInputValue(act.date) || prev.date,
       dueDate: prev.dueDate || toDateInputValue(act.date),
@@ -207,6 +229,18 @@ export function InvoiceModal({
 
   const clearSelectedAct = () => {
     setActSearch('');
+  };
+
+  const handleTypeSelect = (nextType: PaymentKind) => {
+    setForm((prev) => ({
+      ...prev,
+      type: nextType,
+    }));
+
+    if (nextType === 'Expense') {
+      setActSearch('');
+      setActSuggestions([]);
+    }
   };
 
   const handleChange = (field: keyof FormState) => (
@@ -240,15 +274,19 @@ export function InvoiceModal({
       return;
     }
 
+    const counterparty = form.counterpartyName.trim();
+
     const payload: InvoiceInput = {
       number,
       date: fromInputToApiDate(form.date) ?? form.date,
       dueDate: form.dueDate ? fromInputToApiDate(form.dueDate) ?? form.dueDate : undefined,
       amount: parsedAmount,
+      type: form.type,
       status: form.status,
       clientId: Number(form.clientId),
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
+      counterpartyName: counterparty ? counterparty : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
     };
 
@@ -262,6 +300,7 @@ export function InvoiceModal({
   };
 
   const handleOpenInstallmentCalculator = () => {
+    if (form.type !== 'Income') return;
     const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
     const hasValidAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
     const clientIdNumber = form.clientId ? Number.parseInt(form.clientId, 10) : undefined;
@@ -290,9 +329,9 @@ export function InvoiceModal({
                 ? t('invoiceEdit') ?? 'Редактировать счёт'
                 : t('invoiceCreate') ?? 'Создать счёт'}
             </h2>
-            <p className="text-sm text-slate-500">
-              {t('invoiceModalSubtitle') ?? 'Укажите параметры исходящего счёта'}
-            </p>
+              <p className="text-sm text-slate-500">
+                {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
+              </p>
           </div>
           <button
             type="button"
@@ -306,6 +345,36 @@ export function InvoiceModal({
 
         <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1">
+                {typeOptions.map((option) => {
+                  const active = option === form.type;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => handleTypeSelect(option)}
+                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                        active
+                          ? 'bg-blue-600 text-white shadow'
+                          : 'bg-transparent text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      {option === 'Income'
+                        ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
+                        : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-500">
+                {isIncome
+                  ? t('invoiceTypeIncomeHint') ?? 'Используйте для выставления счётов клиентам.'
+                  : t('invoiceTypeExpenseHint') ?? 'Подходит для входящих счетов от поставщиков.'}
+              </p>
+            </div>
+
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
               <input
@@ -341,13 +410,15 @@ export function InvoiceModal({
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
                 {t('invoiceAmount') ?? 'Сумма'}
-                <button
-                  type="button"
-                  onClick={handleOpenInstallmentCalculator}
-                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                >
-                  {t('invoiceInstallmentButton') ?? 'Рассрочка'}
-                </button>
+                {isIncome && (
+                  <button
+                    type="button"
+                    onClick={handleOpenInstallmentCalculator}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                  >
+                    {t('invoiceInstallmentButton') ?? 'Рассрочка'}
+                  </button>
+                )}
               </span>
               <input
                 type="number"
@@ -404,6 +475,20 @@ export function InvoiceModal({
                 </div>
               )}
             </label>
+
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="font-medium text-slate-700">{t('invoiceCounterparty') ?? 'От кого счёт'}</span>
+              <input
+                type="text"
+                value={form.counterpartyName}
+                onChange={handleChange('counterpartyName')}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
+              />
+              <span className="text-xs text-slate-500">
+                {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
+              </span>
+            </label>
           </div>
 
           <label className="flex flex-col gap-1 text-sm">
@@ -416,65 +501,67 @@ export function InvoiceModal({
             />
           </label>
 
-          <div className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={actSearch}
-                onChange={(event) => {
-                  setActSearch(event.target.value);
-                  setActDropdownOpen(true);
-                }}
-                onFocus={() => setActDropdownOpen(true)}
-                onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
-                placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
-                className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-              {actSearch && (
-                <button
-                  type="button"
-                  onClick={clearSelectedAct}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                  aria-label={t('clear') ?? 'Очистить'}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
-                <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                  {actsLoading ? (
-                    <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
-                      <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
-                    </div>
-                  ) : actsError ? (
-                    <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
-                  ) : actSuggestions.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-slate-500">
-                      {t('nothingFound') ?? 'Ничего не найдено'}
-                    </div>
-                  ) : (
-                    actSuggestions.map((act) => (
-                      <button
-                        key={act.id}
-                        type="button"
-                        onClick={() => handleActSelect(act)}
-                        className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
-                      >
-                        <div className="font-medium text-slate-900">{actLabel(act)}</div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          <span>{formatDate(act.date)}</span>
-                          <span className="mx-2">·</span>
-                          <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
+          {isIncome && (
+            <div className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={actSearch}
+                  onChange={(event) => {
+                    setActSearch(event.target.value);
+                    setActDropdownOpen(true);
+                  }}
+                  onFocus={() => setActDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
+                  placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
+                  className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                {actSearch && (
+                  <button
+                    type="button"
+                    onClick={clearSelectedAct}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                    aria-label={t('clear') ?? 'Очистить'}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
+                  <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                    {actsLoading ? (
+                      <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                      </div>
+                    ) : actsError ? (
+                      <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
+                    ) : actSuggestions.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-slate-500">
+                        {t('nothingFound') ?? 'Ничего не найдено'}
+                      </div>
+                    ) : (
+                      actSuggestions.map((act) => (
+                        <button
+                          key={act.id}
+                          type="button"
+                          onClick={() => handleActSelect(act)}
+                          className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                        >
+                          <div className="font-medium text-slate-900">{actLabel(act)}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            <span>{formatDate(act.date)}</span>
+                            <span className="mx-2">·</span>
+                            <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>

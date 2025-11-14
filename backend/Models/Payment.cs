@@ -74,6 +74,11 @@ namespace PayPlanner.Api.Models
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
+        /// Название контрагента, от которого поступил или которому отправлен счёт.
+        /// </summary>
+        public string? CounterpartyName { get; set; }
+
+        /// <summary>
         /// Уникальный идентификатор платежа.
         /// </summary>
         public int Id { get; set; }
