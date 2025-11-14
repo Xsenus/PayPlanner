@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ChevronDown, Lock, Plus, RotateCcw, Search } from 'lucide-react';
+import { ChevronDown, Lock, Plus, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -9,7 +9,7 @@ import type { Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { formatLocalYMD, fromInputToApiDate } from '../../utils/dateUtils';
+import { formatLocalYMD, fromInputToApiDate, toRuDate } from '../../utils/dateUtils';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 
@@ -180,8 +180,10 @@ export function Payments({
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
 
-  const [fromDate, setFromDate] = useState(() => defaultFromDate());
-  const [toDate, setToDate] = useState(() => defaultToDate());
+  const initialFromDateRef = useRef(defaultFromDate());
+  const initialToDateRef = useRef(defaultToDate());
+  const [fromDate, setFromDate] = useState(initialFromDateRef.current);
+  const [toDate, setToDate] = useState(initialToDateRef.current);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [minAmount, setMinAmount] = useState('');
@@ -201,6 +203,7 @@ export function Payments({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<Payment['type']>(
     defaultType === 'Expense' ? 'Expense' : 'Income',
@@ -213,6 +216,101 @@ export function Payments({
 
   const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
+
+  const selectedClientLabels = useMemo(() => {
+    if (selectedClients.length === 0) {
+      return [] as string[];
+    }
+    const map = new Map(clientOptions.map((option) => [option.value, option.label]));
+    return selectedClients.map((id) => map.get(id) ?? `#${id}`);
+  }, [clientOptions, selectedClients]);
+
+  const selectedCategoryLabels = useMemo(() => {
+    if (selectedCategories.length === 0) {
+      return [] as string[];
+    }
+    const map = new Map(categoryOptions.map((option) => [option.value, option.label]));
+    return selectedCategories.map((value) => map.get(value) ?? value);
+  }, [categoryOptions, selectedCategories]);
+
+  const isDefaultDateRange = fromDate === initialFromDateRef.current && toDate === initialToDateRef.current;
+
+  const filtersBadgeCount =
+    (isDefaultDateRange ? 0 : 1) +
+    (selectedClients.length > 0 ? 1 : 0) +
+    (selectedCategories.length > 0 ? 1 : 0) +
+    (minAmount.trim() || maxAmount.trim() ? 1 : 0);
+
+  const filterSummaries = useMemo(() => {
+    const items: { key: string; text: string }[] = [];
+    const fromLabel = toRuDate(fromDate) || fromDate || '—';
+    const toLabel = toRuDate(toDate) || toDate || '—';
+    const dateTemplate =
+      t('paymentsFiltersSummaryDate') ?? 'Период: {{from}} — {{to}}';
+    items.push({
+      key: 'date',
+      text: dateTemplate.replace('{{from}}', fromLabel).replace('{{to}}', toLabel),
+    });
+
+    if (selectedClientLabels.length > 0) {
+      const template =
+        t('paymentsFiltersSummaryClients') ?? 'Клиенты: {{list}}';
+      const preview = selectedClientLabels.slice(0, 2).join(', ');
+      const suffix =
+        selectedClientLabels.length > 2
+          ? ` +${selectedClientLabels.length - 2}`
+          : '';
+      items.push({
+        key: 'clients',
+        text: template.replace('{{list}}', `${preview}${suffix}`),
+      });
+    }
+
+    if (selectedCategoryLabels.length > 0) {
+      const template =
+        t('paymentsFiltersSummaryCategories') ?? 'Категории: {{list}}';
+      const preview = selectedCategoryLabels.slice(0, 2).join(', ');
+      const suffix =
+        selectedCategoryLabels.length > 2
+          ? ` +${selectedCategoryLabels.length - 2}`
+          : '';
+      items.push({
+        key: 'categories',
+        text: template.replace('{{list}}', `${preview}${suffix}`),
+      });
+    }
+
+    if (minAmount.trim() || maxAmount.trim()) {
+      const fromValue = minAmount.trim() || null;
+      const toValue = maxAmount.trim() || null;
+      let text: string;
+      if (fromValue && toValue) {
+        const template =
+          t('paymentsFiltersSummaryAmountRange') ?? 'Сумма: от {{from}} до {{to}}';
+        text = template.replace('{{from}}', fromValue).replace('{{to}}', toValue);
+      } else if (fromValue) {
+        const template = t('paymentsFiltersSummaryAmountMin') ?? 'Сумма: от {{from}}';
+        text = template.replace('{{from}}', fromValue);
+      } else {
+        const template = t('paymentsFiltersSummaryAmountMax') ?? 'Сумма: до {{to}}';
+        text = template.replace('{{to}}', toValue ?? '');
+      }
+      items.push({ key: 'amount', text });
+    }
+
+    return items;
+  }, [
+    fromDate,
+    toDate,
+    selectedClientLabels,
+    selectedCategoryLabels,
+    minAmount,
+    maxAmount,
+    t,
+  ]);
+
+  const hasOnlyDefaultFilters =
+    filtersBadgeCount === 0 && filterSummaries.length === 1 && isDefaultDateRange;
 
   const clientOptions = useMemo<MultiSelectOption[]>(
     () =>
@@ -474,15 +572,14 @@ export function Payments({
     </div>,
   );
 
-  const summaryMdCols = summaryCards.length > 1 ? 'md:grid-cols-2' : 'md:grid-cols-1';
-  const summaryXlCols =
+  const summaryGridCols =
     summaryCards.length >= 4
-      ? 'xl:grid-cols-4'
+      ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4'
       : summaryCards.length === 3
-      ? 'xl:grid-cols-3'
+      ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
       : summaryCards.length === 2
-      ? 'xl:grid-cols-2'
-      : 'xl:grid-cols-1';
+      ? 'grid-cols-1 sm:grid-cols-2'
+      : 'grid-cols-1';
 
   const handleFromDateChange = useCallback(
     (value: string) => {
@@ -505,8 +602,12 @@ export function Payments({
   );
 
   const handleResetFilters = useCallback(() => {
-    setFromDate(defaultFromDate());
-    setToDate(defaultToDate());
+    const nextFrom = defaultFromDate();
+    const nextTo = defaultToDate();
+    setFromDate(nextFrom);
+    setToDate(nextTo);
+    initialFromDateRef.current = nextFrom;
+    initialToDateRef.current = nextTo;
     setSelectedClients([]);
     setSelectedCategories([]);
     setMinAmount('');
@@ -624,8 +725,8 @@ export function Payments({
   );
 
   const showErrorState = Boolean(error) && payments.length === 0;
-  const showTimeoutPlaceholder = loadTimeoutReached && payments.length === 0 && !error;
-  const initialLoading = loading && payments.length === 0 && !loadTimeoutReached && !error;
+  const showSlowNotice = loadTimeoutReached && payments.length === 0 && loading && !error;
+  const initialLoading = loading && payments.length === 0 && !error;
   const showIncomeButton =
     paymentsPermissions.canCreate &&
     (!lockType || effectiveDefaultType === 'Income' || effectiveDefaultType === 'all');
@@ -636,27 +737,34 @@ export function Payments({
   return (
     <div className="p-8">
       <div className="mx-auto max-w-none space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex-1">
             <h1 className="text-3xl font-bold text-slate-900">{headingText}</h1>
             {subtitleText ? (
-              <p className="mt-2 text-slate-600 max-w-2xl">{subtitleText}</p>
+              <p className="mt-2 max-w-2xl text-slate-600">{subtitleText}</p>
             ) : null}
             {lastUpdatedText ? (
               <p className="mt-2 text-xs text-slate-500">{lastUpdatedText}</p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleRefresh}
-              className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 ${
-                refreshing ? 'opacity-70 cursor-wait' : ''
-              }`}
-              disabled={refreshing}>
-              <RotateCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              {t('paymentsRefresh') ?? t('invoiceRefresh') ?? 'Обновить'}
-            </button>
+
+          <div className="flex w-full flex-col gap-4 xl:w-auto xl:min-w-[280px] xl:max-w-[560px]">
+            <div className="flex justify-start gap-3 xl:justify-end">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 ${
+                  refreshing ? 'cursor-wait opacity-70' : ''
+                }`}
+                disabled={refreshing}>
+                <RotateCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {t('paymentsRefresh') ?? t('invoiceRefresh') ?? 'Обновить'}
+              </button>
+            </div>
+
+            {summaryCards.length ? (
+              <div className={`grid gap-4 ${summaryGridCols} xl:justify-items-end`}>{summaryCards}</div>
+            ) : null}
           </div>
         </div>
 
@@ -666,9 +774,7 @@ export function Payments({
           </div>
         ) : null}
 
-        <div className={`grid gap-4 ${summaryMdCols} ${summaryXlCols}`}>{summaryCards}</div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               {lockType ? (
@@ -717,117 +823,152 @@ export function Payments({
                   className="w-64 rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
                 />
               </div>
-            </div>
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
-              </label>
-              <input
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(event) => handleFromDateChange(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
-              </label>
-              <input
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(event) => handleToDateChange(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-              </label>
-              <MultiSelect
-                options={clientOptions}
-                value={selectedClients}
-                label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-                placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
-                emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
-                clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
-                summaryLabel={(count) =>
-                  formatCountLabel(
-                    t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
-                    count,
-                  )
-                }
-                onChange={setSelectedClients}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
-              </label>
-              <MultiSelect
-                options={categoryOptions}
-                value={selectedCategories}
-                label={t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
-                placeholder={t('paymentsFilterCategoriesPlaceholder') ?? 'Все категории'}
-                emptyLabel={t('paymentsFilterCategoriesEmpty') ?? 'Категории не найдены'}
-                clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
-                summaryLabel={(count) =>
-                  formatCountLabel(
-                    t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
-                    count,
-                  )
-                }
-                onChange={setSelectedCategories}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterAmountMin') ?? 'Сумма от'}
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={minAmount}
-                onChange={(event) => setMinAmount(event.target.value)}
-                placeholder="0"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('paymentsFilterAmountMax') ?? 'Сумма до'}
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={maxAmount}
-                onChange={(event) => setMaxAmount(event.target.value)}
-                placeholder="0"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-              />
-            </div>
-
-            <div className="md:col-span-2 xl:col-span-1">
               <button
                 type="button"
-                onClick={handleResetFilters}
-                className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900">
-                {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
+                onClick={() => setFiltersOpen((prev) => !prev)}
+                aria-expanded={filtersOpen}
+                className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 ${filtersOpen ? 'shadow-sm' : ''}`}>
+                <SlidersHorizontal className="h-4 w-4" />
+                {filtersOpen
+                  ? t('paymentsFiltersHide') ?? 'Скрыть фильтры'
+                  : t('paymentsFiltersToggle') ?? 'Фильтры'}
+                {filtersBadgeCount > 0 ? (
+                  <span className="inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">
+                    {filtersBadgeCount}
+                  </span>
+                ) : null}
               </button>
             </div>
           </div>
+
+          {!filtersOpen ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 sm:text-sm">
+              {filterSummaries.map((summary) => (
+                <span
+                  key={summary.key}
+                  className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                  {summary.text}
+                </span>
+              ))}
+              {hasOnlyDefaultFilters ? (
+                <span className="text-xs text-slate-400 sm:text-sm">
+                  {t('paymentsFiltersDefaultInfo') ?? 'Используется текущий месяц. Дополнительные фильтры не применены.'}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {filtersOpen ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
+                </label>
+                <input
+                  type="date"
+                  value={fromDate}
+                  max={toDate || undefined}
+                  onChange={(event) => handleFromDateChange(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
+                </label>
+                <input
+                  type="date"
+                  value={toDate}
+                  min={fromDate || undefined}
+                  onChange={(event) => handleToDateChange(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1 md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+                </label>
+                <MultiSelect
+                  options={clientOptions}
+                  value={selectedClients}
+                  label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+                  placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
+                  emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
+                  clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                  summaryLabel={(count) =>
+                    formatCountLabel(
+                      t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                      count,
+                    )
+                  }
+                  onChange={setSelectedClients}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1 md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+                </label>
+                <MultiSelect
+                  options={categoryOptions}
+                  value={selectedCategories}
+                  label={t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+                  placeholder={t('paymentsFilterCategoriesPlaceholder') ?? 'Все категории'}
+                  emptyLabel={t('paymentsFilterCategoriesEmpty') ?? 'Категории не найдены'}
+                  clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                  summaryLabel={(count) =>
+                    formatCountLabel(
+                      t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                      count,
+                    )
+                  }
+                  onChange={setSelectedCategories}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterAmountMin') ?? 'Сумма от'}
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={minAmount}
+                  onChange={(event) => setMinAmount(event.target.value)}
+                  placeholder="0"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('paymentsFilterAmountMax') ?? 'Сумма до'}
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={maxAmount}
+                  onChange={(event) => setMaxAmount(event.target.value)}
+                  placeholder="0"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="md:col-span-2 xl:col-span-1">
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900">
+                  {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {paymentsPermissions.canCreate && (showIncomeButton || showExpenseButton) ? (
             <div className="flex flex-wrap gap-3">
@@ -859,6 +1000,12 @@ export function Payments({
               <div className="flex flex-col items-center gap-3 text-slate-500">
                 <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
                 <span className="text-sm">{t('loading') ?? 'Загрузка...'}</span>
+                {showSlowNotice ? (
+                  <span className="max-w-sm text-center text-xs text-amber-600">
+                    {t('paymentsSlowLoadMessage') ??
+                      'Загрузка занимает больше времени обычного, продолжаем ждать данные...'}
+                  </span>
+                ) : null}
               </div>
             </div>
           ) : showErrorState ? (
@@ -868,19 +1015,6 @@ export function Payments({
                 type="button"
                 onClick={handleRefresh}
                 className="mt-3 inline-flex items-center justify-center rounded-md border border-red-300 bg-white/80 px-3 py-1.5 font-medium text-red-700 transition-colors hover:bg-red-100">
-                {t('paymentsRetry') ?? 'Повторить попытку'}
-              </button>
-            </div>
-          ) : showTimeoutPlaceholder ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center text-sm text-amber-700">
-              <p>
-                {t('paymentsSlowLoadWarning') ??
-                  'Загрузка занимает больше обычного. Попробуйте обновить список чуть позже.'}
-              </p>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                className="mt-3 inline-flex items-center justify-center rounded-md border border-amber-300 bg-white/80 px-3 py-1.5 font-medium text-amber-700 transition-colors hover:bg-amber-100">
                 {t('paymentsRetry') ?? 'Повторить попытку'}
               </button>
             </div>
@@ -898,7 +1032,7 @@ export function Payments({
           )}
         </div>
 
-        {!initialLoading && !showErrorState && !showTimeoutPlaceholder && filteredPayments.length === 0 ? (
+        {!initialLoading && !showErrorState && filteredPayments.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-slate-500">
             {t('paymentsEmpty') ?? t('noPaymentsForFilter') ?? 'Платежи не найдены'}
           </div>
