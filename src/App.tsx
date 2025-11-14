@@ -38,6 +38,8 @@ function AppContent() {
     clientDetail: 'Карточка клиента',
     accounts: 'Счета',
     acts: 'Акты',
+    paymentsIncome: 'Доходные платежи',
+    paymentsExpense: 'Расходные платежи',
     payments: 'Платежи',
     contracts: 'Договоры',
     users: 'Пользователи',
@@ -95,6 +97,8 @@ function AppContent() {
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
+        { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
+        { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
         { tab: 'payments' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
@@ -122,6 +126,8 @@ function AppContent() {
           return permissions.accounts.canView;
         case 'acts':
           return permissions.acts.canView;
+        case 'paymentsIncome':
+        case 'paymentsExpense':
         case 'payments':
           return permissions.payments.canView;
         case 'contracts':
@@ -294,6 +300,32 @@ function AppContent() {
         return permissions.acts.canView
           ? <Acts />
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
+      case 'paymentsIncome':
+        return permissions.payments.canView
+          ? (
+              <Payments
+                onOpenClient={handleOpenClient}
+                defaultType="Income"
+                lockType
+                titleKey="paymentsIncomeTitle"
+                subtitleKey="paymentsIncomeSubtitle"
+                lockedTypeMessageKey="paymentsTypeLockedIncome"
+              />
+            )
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
+      case 'paymentsExpense':
+        return permissions.payments.canView
+          ? (
+              <Payments
+                onOpenClient={handleOpenClient}
+                defaultType="Expense"
+                lockType
+                titleKey="paymentsExpenseTitle"
+                subtitleKey="paymentsExpenseSubtitle"
+                lockedTypeMessageKey="paymentsTypeLockedExpense"
+              />
+            )
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
       case 'payments':
         return permissions.payments.canView
           ? <Payments onOpenClient={handleOpenClient} />

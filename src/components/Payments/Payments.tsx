@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, RotateCcw, Search } from 'lucide-react';
+import { Lock, Plus, RotateCcw, Search } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -9,15 +9,20 @@ import { PaymentsTable } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
 
-interface PaymentsProps {
-  onOpenClient?: (clientId: number, caseId?: number) => void;
-}
-
-type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
-
 type TypeFilter = 'all' | Payment['type'];
 
 type StatusFilter = 'all' | PaymentStatus;
+
+interface PaymentsProps {
+  onOpenClient?: (clientId: number, caseId?: number) => void;
+  defaultType?: TypeFilter;
+  lockType?: boolean;
+  titleKey?: string;
+  subtitleKey?: string;
+  lockedTypeMessageKey?: string;
+}
+
+type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
 
@@ -25,7 +30,14 @@ function formatCountLabel(template: string, count: number) {
   return template.replace('{{count}}', count.toLocaleString('ru-RU'));
 }
 
-export function Payments({ onOpenClient }: PaymentsProps) {
+export function Payments({
+  onOpenClient,
+  defaultType,
+  lockType = false,
+  titleKey,
+  subtitleKey,
+  lockedTypeMessageKey,
+}: PaymentsProps) {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
@@ -39,21 +51,49 @@ export function Payments({ onOpenClient }: PaymentsProps) {
     createPayment,
     updatePayment,
     deletePayment,
+    error,
   } = usePayments();
 
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<Payment['type']>('Income');
+  const [modalType, setModalType] = useState<Payment['type']>(
+    defaultType === 'Expense' ? 'Expense' : 'Income',
+  );
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const permissionTimerRef = useRef<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
+
+  useEffect(() => {
+    if (typeof defaultType === 'undefined') {
+      return;
+    }
+    setTypeFilter(defaultType);
+    if (defaultType === 'Income' || defaultType === 'Expense') {
+      setModalType(defaultType);
+    }
+  }, [defaultType]);
 
   useEffect(() => {
     setLastUpdated(new Date());
   }, [payments]);
+
+  useEffect(() => {
+    if (loading && payments.length === 0) {
+      setLoadTimeoutReached(false);
+      const timer = window.setTimeout(() => {
+        setLoadTimeoutReached(true);
+      }, 15000);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+    setLoadTimeoutReached(false);
+    return undefined;
+  }, [loading, payments.length]);
 
   useEffect(() => () => {
     if (permissionTimerRef.current) {
@@ -95,6 +135,22 @@ export function Payments({ onOpenClient }: PaymentsProps) {
     ordered.sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
     return ordered;
   }, [payments]);
+
+  const effectiveDefaultType: TypeFilter = defaultType ?? 'all';
+  const headingText =
+    (titleKey ? t(titleKey) : t('payments')) ?? t('payments') ?? 'Платежи';
+  const subtitleText =
+    subtitleKey
+      ? t(subtitleKey) ?? t('paymentsSubtitle') ?? 'Журнал всех платежей'
+      : t('paymentsSubtitle') ?? 'Журнал всех платежей';
+  const lockedTypeMessage = lockType
+    ? (lockedTypeMessageKey ? t(lockedTypeMessageKey) : undefined) ??
+      (effectiveDefaultType === 'Income'
+        ? t('paymentsTypeLockedIncome') ?? 'Отображаются только доходные платежи'
+        : effectiveDefaultType === 'Expense'
+        ? t('paymentsTypeLockedExpense') ?? 'Отображаются только расходные платежи'
+        : t('paymentsTypeLockedGeneric') ?? 'Фильтр по типу закреплён')
+    : null;
 
   const searchQuery = search.trim().toLowerCase();
 
@@ -254,17 +310,25 @@ export function Payments({ onOpenClient }: PaymentsProps) {
     [typeFilter],
   );
 
-  const initialLoading = loading && payments.length === 0;
+  const showErrorState = Boolean(error) && payments.length === 0;
+  const showTimeoutPlaceholder = loadTimeoutReached && payments.length === 0 && !error;
+  const initialLoading = loading && payments.length === 0 && !loadTimeoutReached && !error;
+  const showIncomeButton =
+    paymentsPermissions.canCreate &&
+    (!lockType || effectiveDefaultType === 'Income' || effectiveDefaultType === 'all');
+  const showExpenseButton =
+    paymentsPermissions.canCreate &&
+    (!lockType || effectiveDefaultType === 'Expense' || effectiveDefaultType === 'all');
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="mx-auto max-w-none space-y-6">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">{t('payments') ?? 'Платежи'}</h1>
-            <p className="mt-2 text-slate-600 max-w-2xl">
-              {t('paymentsSubtitle') ?? 'Журнал всех платежей'}
-            </p>
+            <h1 className="text-3xl font-bold text-slate-900">{headingText}</h1>
+            {subtitleText ? (
+              <p className="mt-2 text-slate-600 max-w-2xl">{subtitleText}</p>
+            ) : null}
             {lastUpdatedText ? (
               <p className="mt-2 text-xs text-slate-500">{lastUpdatedText}</p>
             ) : null}
@@ -345,15 +409,24 @@ export function Payments({ onOpenClient }: PaymentsProps) {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className={typeButtonClass('all')} onClick={() => setTypeFilter('all')}>
-                {t('paymentsFilterAll') ?? 'Все'}
-              </button>
-              <button type="button" className={typeButtonClass('Income')} onClick={() => setTypeFilter('Income')}>
-                {t('paymentsFilterIncome') ?? t('incomePlural') ?? 'Доходы'}
-              </button>
-              <button type="button" className={typeButtonClass('Expense')} onClick={() => setTypeFilter('Expense')}>
-                {t('paymentsFilterExpense') ?? t('expensePlural') ?? 'Расходы'}
-              </button>
+              {lockType ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
+                  <Lock className="h-3.5 w-3.5 text-slate-500" />
+                  {lockedTypeMessage}
+                </span>
+              ) : (
+                <>
+                  <button type="button" className={typeButtonClass('all')} onClick={() => setTypeFilter('all')}>
+                    {t('paymentsFilterAll') ?? 'Все'}
+                  </button>
+                  <button type="button" className={typeButtonClass('Income')} onClick={() => setTypeFilter('Income')}>
+                    {t('paymentsFilterIncome') ?? t('incomePlural') ?? 'Доходы'}
+                  </button>
+                  <button type="button" className={typeButtonClass('Expense')} onClick={() => setTypeFilter('Expense')}>
+                    {t('paymentsFilterExpense') ?? t('expensePlural') ?? 'Расходы'}
+                  </button>
+                </>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -385,22 +458,26 @@ export function Payments({ onOpenClient }: PaymentsProps) {
             </div>
           </div>
 
-          {paymentsPermissions.canCreate ? (
+          {paymentsPermissions.canCreate && (showIncomeButton || showExpenseButton) ? (
             <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => handleAddPayment('Income')}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none">
-                <Plus className="h-4 w-4" />
-                {t('addIncome') ?? 'Добавить доход'}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAddPayment('Expense')}
-                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none">
-                <Plus className="h-4 w-4" />
-                {t('addExpense') ?? 'Добавить расход'}
-              </button>
+              {showIncomeButton ? (
+                <button
+                  type="button"
+                  onClick={() => handleAddPayment('Income')}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none">
+                  <Plus className="h-4 w-4" />
+                  {t('addIncome') ?? 'Добавить доход'}
+                </button>
+              ) : null}
+              {showExpenseButton ? (
+                <button
+                  type="button"
+                  onClick={() => handleAddPayment('Expense')}
+                  className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none">
+                  <Plus className="h-4 w-4" />
+                  {t('addExpense') ?? 'Добавить расход'}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -412,6 +489,29 @@ export function Payments({ onOpenClient }: PaymentsProps) {
                 <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
                 <span className="text-sm">{t('loading') ?? 'Загрузка...'}</span>
               </div>
+            </div>
+          ) : showErrorState ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+              <p>{t('paymentsLoadError') ?? 'Не удалось загрузить платежи.'}</p>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="mt-3 inline-flex items-center justify-center rounded-md border border-red-300 bg-white/80 px-3 py-1.5 font-medium text-red-700 transition-colors hover:bg-red-100">
+                {t('paymentsRetry') ?? 'Повторить попытку'}
+              </button>
+            </div>
+          ) : showTimeoutPlaceholder ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center text-sm text-amber-700">
+              <p>
+                {t('paymentsSlowLoadWarning') ??
+                  'Загрузка занимает больше обычного. Попробуйте обновить список чуть позже.'}
+              </p>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="mt-3 inline-flex items-center justify-center rounded-md border border-amber-300 bg-white/80 px-3 py-1.5 font-medium text-amber-700 transition-colors hover:bg-amber-100">
+                {t('paymentsRetry') ?? 'Повторить попытку'}
+              </button>
             </div>
           ) : (
             <PaymentsTable
@@ -427,7 +527,7 @@ export function Payments({ onOpenClient }: PaymentsProps) {
           )}
         </div>
 
-        {!initialLoading && filteredPayments.length === 0 ? (
+        {!initialLoading && !showErrorState && !showTimeoutPlaceholder && filteredPayments.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-slate-500">
             {t('paymentsEmpty') ?? t('noPaymentsForFilter') ?? 'Платежи не найдены'}
           </div>
