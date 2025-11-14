@@ -15,6 +15,7 @@ import {
   FileCheck2,
   FileSignature,
   Eye,
+  CreditCard,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -94,6 +95,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users, allowed: permissions.clients.canView },
       { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards, allowed: permissions.accounts.canView },
       { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2, allowed: permissions.acts.canView },
+      { id: 'payments' as Tab, label: t('payments') ?? 'Платежи', icon: CreditCard, allowed: permissions.payments.canView },
       { id: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature, allowed: permissions.contracts.canView },
       {
         id: 'dictionaries' as Tab,
