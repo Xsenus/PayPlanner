@@ -98,7 +98,7 @@ export function PaymentsTable({
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto thin-scrollbar">
         <table className="min-w-[820px] w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
