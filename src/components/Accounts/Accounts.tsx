@@ -16,7 +16,15 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import type { Client, Invoice, InvoiceInput, PaymentStatus } from '../../types';
+import type {
+  Client,
+  IncomeType,
+  Invoice,
+  InvoiceInput,
+  PaymentKind,
+  PaymentSource,
+  PaymentStatus,
+} from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -60,6 +68,7 @@ export function Accounts() {
   const [from, setFrom] = useState<string>(startOfYear);
   const [to, setTo] = useState<string>(todayYMD);
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | PaymentKind>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -81,6 +90,7 @@ export function Accounts() {
     from: from || undefined,
     to: to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
+    type: typeFilter === 'all' ? undefined : typeFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
     sortDir: sortState.direction,
@@ -90,7 +100,7 @@ export function Accounts() {
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, statusFilter, debouncedSearch]);
+  }, [from, to, statusFilter, typeFilter, debouncedSearch]);
 
   const totalPages = useMemo(() => {
     if (!pagination.pageSize) return 1;
@@ -154,6 +164,19 @@ export function Accounts() {
     Cancelled: 'bg-slate-100 text-slate-600 border border-slate-200',
   };
 
+  const typeLabels: Record<PaymentKind, string> = {
+    Income: t('invoiceTypeIncome') ?? 'Доходный',
+    Expense: t('invoiceTypeExpense') ?? 'Расходный',
+  };
+
+  const typeClasses: Record<PaymentKind, string> = {
+    Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
+  const paymentSourceLabel = t('invoicePaymentSourceLabel') ?? t('paymentSource') ?? 'Источник';
+  const incomeTypeLabel = t('invoiceIncomeTypeLabel') ?? 'Группа';
+
   const handleSort = (key: InvoicesSortKey) => {
     setSortState((prev) => {
       if (prev.key === key) {
@@ -170,29 +193,62 @@ export function Accounts() {
   const [modalError, setModalError] = useState<string | null>(null);
 
   const [clients, setClients] = useState<Client[]>([]);
+  const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
+  const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
-  const ensureClients = useCallback(async () => {
+  const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;
-    if (clients.length > 0 && !lookupsError) return;
+    if (
+      clients.length > 0 &&
+      incomeTypes.length > 0 &&
+      paymentSources.length > 0 &&
+      !lookupsError
+    )
+      return;
     setLookupsLoading(true);
     try {
-      const response = await apiService.getClients();
-      setClients(response ?? []);
+      const [
+        clientsResponse,
+        incomeIncome,
+        incomeExpense,
+        sourceIncome,
+        sourceExpense,
+      ] = await Promise.all([
+        apiService.getClients(),
+        apiService.getIncomeTypes('Income'),
+        apiService.getIncomeTypes('Expense'),
+        apiService.getPaymentSources('Income'),
+        apiService.getPaymentSources('Expense'),
+      ]);
+
+      setClients(clientsResponse ?? []);
+
+      const mergedIncome = [...(incomeIncome ?? []), ...(incomeExpense ?? [])];
+      const uniqueIncome = new Map<number, IncomeType>();
+      mergedIncome.forEach((item) => uniqueIncome.set(item.id, item));
+      setIncomeTypes(Array.from(uniqueIncome.values()));
+
+      const mergedSources = [...(sourceIncome ?? []), ...(sourceExpense ?? [])];
+      const sourcesMap = new Map<number, PaymentSource>();
+      mergedSources.forEach((item) => sourcesMap.set(item.id, item));
+      setPaymentSources(Array.from(sourcesMap.values()));
       setLookupsError(null);
     } catch (err) {
-      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить клиентов');
+      setLookupsError(
+        err instanceof Error ? err.message : 'Не удалось загрузить данные для счёта',
+      );
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, clients.length, lookupsError]);
+  }, [modalOpen, clients.length, incomeTypes.length, paymentSources.length, lookupsError]);
 
   useEffect(() => {
     if (modalOpen) {
-      void ensureClients();
+      void ensureLookups();
     }
-  }, [modalOpen, ensureClients]);
+  }, [modalOpen, ensureLookups]);
 
   const openCreateModal = () => {
     setModalMode('create');
@@ -245,6 +301,7 @@ export function Accounts() {
     setFrom(startOfYear);
     setTo(todayYMD);
     setStatusFilter('all');
+    setTypeFilter('all');
     setSearch('');
   };
 
@@ -337,6 +394,18 @@ export function Accounts() {
                   {statusLabels[status]}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as 'all' | PaymentKind)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            >
+              <option value="all">{t('invoiceTypeAll') ?? 'Все направления'}</option>
+              <option value="Income">{t('invoiceTypeIncome') ?? 'Доходные'}</option>
+              <option value="Expense">{t('invoiceTypeExpense') ?? 'Расходные'}</option>
             </select>
           </div>
 
@@ -437,7 +506,35 @@ export function Accounts() {
                     return (
                       <tr key={invoice.id}>
                         <td className="px-4 py-3 font-medium text-gray-900">{formatDate(invoice.date)}</td>
-                        <td className="px-4 py-3 text-gray-900">{invoice.number}</td>
+                        <td className="px-4 py-3 text-gray-900">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-gray-900">{invoice.number}</span>
+                            {invoice.type && (
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${typeClasses[invoice.type]}`}
+                              >
+                                {typeLabels[invoice.type]}
+                              </span>
+                            )}
+                          </div>
+                          {(invoice.paymentSourceName || invoice.incomeTypeName) && (
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                              {invoice.paymentSourceName && (
+                                <span>
+                                  {paymentSourceLabel}: {invoice.paymentSourceName}
+                                  {invoice.paymentSourceType
+                                    ? ` (${typeLabels[invoice.paymentSourceType]})`
+                                    : ''}
+                                </span>
+                              )}
+                              {invoice.incomeTypeName && (
+                                <span>
+                                  {incomeTypeLabel}: {invoice.incomeTypeName}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -557,6 +654,8 @@ export function Accounts() {
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          incomeTypes={incomeTypes}
+          paymentSources={paymentSources}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}

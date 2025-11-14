@@ -1,42 +1,50 @@
+using System;
+using System.Collections.Generic;
+
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Источник платежа (например, банк, касса).
+    /// Payment source (bank transfer, cash and so on).
     /// </summary>
     public class PaymentSource
     {
         /// <summary>
-        /// Цвет в HEX-формате.
+        /// Color in HEX format.
         /// </summary>
         public string ColorHex { get; set; } = "#6B7280";
 
         /// <summary>
-        /// Дата создания.
+        /// Creation timestamp.
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание источника.
+        /// Optional description.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Идентификатор источника.
+        /// Identifier.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активности.
+        /// Active flag.
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Название источника.
+        /// Display name.
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Платежи, относящиеся к данному источнику.
+        /// Direction of payments where the source is applicable (income or expense).
+        /// </summary>
+        public PaymentType? PaymentType { get; set; }
+
+        /// <summary>
+        /// Payments linked with this source.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }

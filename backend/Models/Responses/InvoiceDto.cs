@@ -12,6 +12,7 @@ public class InvoiceDto
     public PaymentStatus Status { get; set; }
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
+    public PaymentType Type { get; set; }
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
     public string? ClientCompany { get; set; }
@@ -29,5 +30,12 @@ public class InvoiceDto
     public int? ResponsibleId { get; set; }
     public string? CounterpartyInn { get; set; }
     public string? PaymentStatusName { get; set; }
+    public int? PaymentSourceId { get; set; }
+    public string? PaymentSourceName { get; set; }
+    public string? PaymentSourceColor { get; set; }
+    public PaymentType? PaymentSourceType { get; set; }
+    public int? IncomeTypeId { get; set; }
+    public string? IncomeTypeName { get; set; }
+    public string? IncomeTypeColor { get; set; }
     public DateTime CreatedAt { get; set; }
 }

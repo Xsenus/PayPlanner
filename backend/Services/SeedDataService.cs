@@ -120,11 +120,11 @@ namespace PayPlanner.Api.Services
             {
                 var paymentSources = new[]
                 {
-                    new PaymentSource { Name = "Банковский перевод", Description = "Прямой банковский перевод", ColorHex = "#6B7280" },
-                    new PaymentSource { Name = "Банковская карта",   Description = "Оплата банковской картой",  ColorHex = "#4B5563" },
-                    new PaymentSource { Name = "PayPal",             Description = "Оплата через PayPal",       ColorHex = "#374151" },
-                    new PaymentSource { Name = "Чек",                Description = "Оплата банковским чеком",   ColorHex = "#1F2937" },
-                    new PaymentSource { Name = "Наличные",           Description = "Оплата наличными",          ColorHex = "#111827" }
+                    new PaymentSource { Name = "Банковский перевод", Description = "Прямой банковский перевод", ColorHex = "#6B7280", PaymentType = PaymentType.Income },
+                    new PaymentSource { Name = "Банковская карта",   Description = "Оплата банковской картой",  ColorHex = "#4B5563", PaymentType = PaymentType.Income },
+                    new PaymentSource { Name = "PayPal",             Description = "Оплата через PayPal",       ColorHex = "#374151", PaymentType = PaymentType.Income },
+                    new PaymentSource { Name = "Чек",                Description = "Оплата банковским чеком",   ColorHex = "#1F2937", PaymentType = PaymentType.Expense },
+                    new PaymentSource { Name = "Наличные",           Description = "Оплата наличными",          ColorHex = "#111827", PaymentType = PaymentType.Expense }
                 };
                 context.PaymentSources.AddRange(paymentSources);
                 await context.SaveChangesAsync();
@@ -775,12 +775,17 @@ namespace PayPlanner.Api.Services
             }
         }
 
-        private static async Task EnsurePaymentSourceAsync(PaymentContext ctx, string name, string color, string? desc)
+        private static async Task EnsurePaymentSourceAsync(PaymentContext ctx, string name, string color, string? desc, PaymentType? paymentType = null)
         {
-            var exists = await ctx.PaymentSources.AsNoTracking().AnyAsync(x => x.Name == name);
-            if (!exists)
+            var source = await ctx.PaymentSources.FirstOrDefaultAsync(x => x.Name == name);
+            if (source is null)
             {
-                ctx.PaymentSources.Add(new PaymentSource { Name = name, ColorHex = color, Description = desc ?? string.Empty, IsActive = true });
+                ctx.PaymentSources.Add(new PaymentSource { Name = name, ColorHex = color, Description = desc ?? string.Empty, IsActive = true, PaymentType = paymentType });
+                await ctx.SaveChangesAsync();
+            }
+            else if (paymentType.HasValue && source.PaymentType != paymentType)
+            {
+                source.PaymentType = paymentType;
                 await ctx.SaveChangesAsync();
             }
         }

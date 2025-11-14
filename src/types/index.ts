@@ -122,6 +122,7 @@ export interface PaymentSource {
   colorHex: string;
   isActive: boolean;
   createdAt: string;
+  paymentType?: PaymentKind | null;
 }
 
 export interface ClientStatus {
@@ -282,6 +283,7 @@ export interface Invoice {
   dueDate?: string | null;
   amount: number;
   status: PaymentStatus;
+  type: PaymentKind;
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;
@@ -301,6 +303,13 @@ export interface Invoice {
   responsibleName?: string | null;
   counterpartyInn?: string | null;
   paymentStatusName?: string | null;
+  paymentSourceId?: number | null;
+  paymentSourceName?: string | null;
+  paymentSourceColor?: string | null;
+  paymentSourceType?: PaymentKind | null;
+  incomeTypeId?: number | null;
+  incomeTypeName?: string | null;
+  incomeTypeColor?: string | null;
   createdAt: string;
 }
 
@@ -310,6 +319,7 @@ export interface InvoiceInput {
   dueDate?: string | null;
   amount: number;
   status: PaymentStatus;
+  type: PaymentKind;
   clientId: number;
   clientCaseId?: number | null;
   description?: string | null;

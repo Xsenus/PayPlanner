@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Invoice, InvoiceInput, InvoiceSummary, PaymentStatus } from '../types';
+import type { Invoice, InvoiceInput, InvoiceSummary, PaymentKind, PaymentStatus } from '../types';
 
 export type InvoicesSortKey =
   | 'date'
@@ -16,6 +16,7 @@ export interface InvoicesFilters {
   from?: string;
   to?: string;
   status?: PaymentStatus;
+  type?: PaymentKind;
   clientId?: number;
   responsibleId?: number;
   search?: string;
@@ -50,6 +51,7 @@ function makeSummaryKey(filters: InvoicesFilters): string {
     from: filters.from ?? null,
     to: filters.to ?? null,
     status: filters.status ?? null,
+    type: filters.type ?? null,
     clientId: filters.clientId ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
@@ -89,6 +91,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          type: filters.type,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -123,6 +126,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.from,
       filters.to,
       filters.status,
+      filters.type,
       filters.clientId,
       filters.responsibleId,
       filters.search,
@@ -144,6 +148,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          type: filters.type,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -160,7 +165,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         }
       }
     },
-    [filters.from, filters.to, filters.status, filters.clientId, filters.responsibleId, filters.search],
+    [filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.responsibleId, filters.search],
   );
 
   useEffect(() => {

@@ -28,8 +28,13 @@ public class DictionariesReadController : ControllerBase
     }
 
     [HttpGet("payment-sources")]
-    public async Task<IActionResult> PaymentSources(CancellationToken ct)
-        => Ok(await _db.PaymentSources.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
+    public async Task<IActionResult> PaymentSources([FromQuery] PaymentType? paymentType, [FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var q = _db.PaymentSources.AsNoTracking().AsQueryable();
+        if (isActive.HasValue) q = q.Where(s => s.IsActive == isActive.Value);
+        if (paymentType.HasValue) q = q.Where(s => s.PaymentType == paymentType.Value);
+        return Ok(await q.OrderBy(s => s.Name).ToListAsync(ct));
+    }
 
     [HttpGet("client-statuses")]
     public async Task<IActionResult> ClientStatuses(CancellationToken ct)

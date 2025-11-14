@@ -17,11 +17,20 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, statuses, clientStatusesResp] = await Promise.all([
+      const [
+        deal,
+        incIncome,
+        incExpense,
+        srcIncome,
+        srcExpense,
+        statuses,
+        clientStatusesResp,
+      ] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
-        apiService.getDict('payment-sources'),
+        apiService.getPaymentSources('Income'),
+        apiService.getPaymentSources('Expense'),
         apiService.getDict('payment-statuses'),
         apiService.getDict('client-statuses'),
       ]);
@@ -33,7 +42,10 @@ export function useDictionaries() {
       for (const it of merged) byId.set(it.id, it);
       setIncomeTypes(Array.from(byId.values()));
 
-      setPaymentSources(sources ?? []);
+      const mergedSources = [...(srcIncome ?? []), ...(srcExpense ?? [])];
+      const sourcesMap = new Map<number, PaymentSource>();
+      for (const source of mergedSources) sourcesMap.set(source.id, source);
+      setPaymentSources(Array.from(sourcesMap.values()));
       setPaymentStatuses(statuses ?? []);
       setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
     } catch (e) {

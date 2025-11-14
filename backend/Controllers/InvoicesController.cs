@@ -25,6 +25,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
+        [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
@@ -38,7 +39,7 @@ public class InvoicesController : ControllerBase
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search);
+        query = ApplyFilters(query, from, to, status, type, clientId, responsibleId, search);
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -53,18 +54,82 @@ public class InvoicesController : ControllerBase
         return Ok(new { items, total, page, pageSize });
     }
 
+    private async Task<ActionResult?> ValidateLookupsAsync(UpsertInvoiceRequest request, CancellationToken ct)
+    {
+        if (request.IncomeTypeId.HasValue)
+        {
+            var incomeType = await _db.IncomeTypes.AsNoTracking()
+                .Where(i => i.Id == request.IncomeTypeId.Value)
+                .Select(i => new { i.PaymentType })
+                .FirstOrDefaultAsync(ct);
+
+            if (incomeType is null)
+            {
+                return BadRequest($"Unknown incomeTypeId {request.IncomeTypeId.Value}");
+            }
+
+            if (incomeType.PaymentType != request.Type)
+            {
+                return BadRequest("Selected income type does not match invoice type.");
+            }
+        }
+
+        if (request.PaymentSourceId.HasValue)
+        {
+            var paymentSource = await _db.PaymentSources.AsNoTracking()
+                .Where(s => s.Id == request.PaymentSourceId.Value)
+                .Select(s => new { s.PaymentType })
+                .FirstOrDefaultAsync(ct);
+
+            if (paymentSource is null)
+            {
+                return BadRequest($"Unknown paymentSourceId {request.PaymentSourceId.Value}");
+            }
+
+            if (paymentSource.PaymentType.HasValue && paymentSource.PaymentType.Value != request.Type)
+            {
+                return BadRequest("Selected payment source does not match invoice type.");
+            }
+        }
+
+        if (request.DealTypeId.HasValue)
+        {
+            var dealTypeExists = await _db.DealTypes.AsNoTracking()
+                .AnyAsync(d => d.Id == request.DealTypeId.Value, ct);
+
+            if (!dealTypeExists)
+            {
+                return BadRequest($"Unknown dealTypeId {request.DealTypeId.Value}");
+            }
+        }
+
+        if (request.PaymentStatusEntityId.HasValue)
+        {
+            var statusExists = await _db.PaymentStatuses.AsNoTracking()
+                .AnyAsync(s => s.Id == request.PaymentStatusEntityId.Value, ct);
+
+            if (!statusExists)
+            {
+                return BadRequest($"Unknown paymentStatusEntityId {request.PaymentStatusEntityId.Value}");
+            }
+        }
+
+        return null;
+    }
+
     [HttpGet("summary")]
     public async Task<ActionResult<InvoiceSummaryDto>> GetSummary(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
+        [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         CancellationToken ct = default)
     {
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search);
+        query = ApplyFilters(query, from, to, status, type, clientId, responsibleId, search);
 
         var grouped = await query
             .GroupBy(x => x.Payment.Status)
@@ -120,6 +185,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var lookupError = await ValidateLookupsAsync(request, ct);
+        if (lookupError is not null)
+        {
+            return lookupError;
+        }
+
         var number = Normalize(request.Number);
         if (string.IsNullOrEmpty(number))
         {
@@ -133,7 +204,7 @@ public class InvoicesController : ControllerBase
             Date = (request.DueDate ?? request.Date).Date,
             Amount = request.Amount,
             Status = request.Status,
-            Type = PaymentType.Income,
+            Type = request.Type,
             Description = Normalize(request.Description) ?? string.Empty,
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
@@ -177,6 +248,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var lookupError = await ValidateLookupsAsync(request, ct);
+        if (lookupError is not null)
+        {
+            return lookupError;
+        }
+
         var number = Normalize(request.Number);
         if (string.IsNullOrEmpty(number))
         {
@@ -188,7 +265,7 @@ public class InvoicesController : ControllerBase
         payment.Date = (request.DueDate ?? request.Date).Date;
         payment.Amount = request.Amount;
         payment.Status = request.Status;
-        payment.Type = PaymentType.Income;
+        payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
@@ -228,7 +305,7 @@ public class InvoicesController : ControllerBase
     {
         var payments = _db.Payments.AsNoTracking()
             .WithPaymentIncludes()
-            .Where(p => p.Account != null && p.Account != "" && p.Type == PaymentType.Income);
+            .Where(p => p.Account != null && p.Account != "");
 
         var acts = _db.Acts.AsNoTracking()
             .Include(a => a.Client)
@@ -249,6 +326,7 @@ public class InvoicesController : ControllerBase
         DateTime? from,
         DateTime? to,
         PaymentStatus? status,
+        PaymentType? type,
         int? clientId,
         int? responsibleId,
         string? search)
@@ -268,6 +346,11 @@ public class InvoicesController : ControllerBase
         if (status.HasValue)
         {
             query = query.Where(x => x.Payment.Status == status.Value);
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(x => x.Payment.Type == type.Value);
         }
 
         if (clientId.HasValue)
@@ -388,6 +471,7 @@ public class InvoicesController : ControllerBase
         Status = x.Payment.Status,
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
+        Type = x.Payment.Type,
         ClientId = x.Payment.ClientId,
         ClientName = x.Payment.Client != null ? x.Payment.Client.Name : null,
         ClientCompany = x.Payment.Client != null ? x.Payment.Client.Company : null,
@@ -419,6 +503,13 @@ public class InvoicesController : ControllerBase
             : null,
         CounterpartyInn = x.Act != null ? x.Act.CounterpartyInn : null,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
+        PaymentSourceId = x.Payment.PaymentSourceId,
+        PaymentSourceName = x.Payment.PaymentSource != null ? x.Payment.PaymentSource.Name : null,
+        PaymentSourceColor = x.Payment.PaymentSource != null ? x.Payment.PaymentSource.ColorHex : null,
+        PaymentSourceType = x.Payment.PaymentSource != null ? x.Payment.PaymentSource.PaymentType : null,
+        IncomeTypeId = x.Payment.IncomeTypeId,
+        IncomeTypeName = x.Payment.IncomeType != null ? x.Payment.IncomeType.Name : null,
+        IncomeTypeColor = x.Payment.IncomeType != null ? x.Payment.IncomeType.ColorHex : null,
         CreatedAt = x.Payment.CreatedAt,
     };
 

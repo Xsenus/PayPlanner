@@ -49,8 +49,11 @@ import type {
   ContractInput,
   Invoice,
   InvoiceInput,
+  IncomeType,
   Payment,
   PaymentPayload,
+  PaymentKind,
+  PaymentSource,
   PaymentStatus,
 } from '../../types';
 import type { MenuSectionKey } from '../../types/permissions';
@@ -280,6 +283,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [invoiceFrom, setInvoiceFrom] = useState<string>(startOfYear);
   const [invoiceTo, setInvoiceTo] = useState<string>(todayYMD);
   const [invoiceStatus, setInvoiceStatus] = useState<'all' | PaymentStatus>('all');
+  const [invoiceType, setInvoiceType] = useState<'all' | PaymentKind>('all');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
   const [invoiceSort, setInvoiceSort] = useState<{ key: InvoicesSortKey; direction: 'asc' | 'desc' }>({
@@ -306,6 +310,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
   const [invoiceModalError, setInvoiceModalError] = useState<string | null>(null);
   const [invoiceClients, setInvoiceClients] = useState<Client[]>([]);
+  const [invoiceIncomeTypes, setInvoiceIncomeTypes] = useState<IncomeType[]>([]);
+  const [invoicePaymentSources, setInvoicePaymentSources] = useState<PaymentSource[]>([]);
   const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
   const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(null);
 
@@ -358,6 +364,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     from: invoiceFrom || undefined,
     to: invoiceTo || undefined,
     status: invoiceStatus === 'all' ? undefined : invoiceStatus,
+    type: invoiceType === 'all' ? undefined : invoiceType,
     clientId,
     search: debouncedInvoiceSearch || undefined,
     sortBy: invoiceSort.key,
@@ -368,7 +375,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     setInvoicePage(1);
-  }, [invoiceFrom, invoiceTo, invoiceStatus, debouncedInvoiceSearch, clientId]);
+  }, [invoiceFrom, invoiceTo, invoiceStatus, invoiceType, debouncedInvoiceSearch, clientId]);
 
   const invoiceTotalPages = useMemo(() => {
     if (!invoicesPagination.pageSize) return 1;
@@ -389,6 +396,9 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     Processing: t('processingStatus') ?? 'В обработке',
     Cancelled: t('cancelledStatus') ?? 'Отменено',
   };
+
+  const invoicePaymentSourceLabel = t('invoicePaymentSourceLabel') ?? t('paymentSource') ?? 'Источник';
+  const invoiceIncomeGroupLabel = t('invoiceIncomeTypeLabel') ?? 'Группа';
 
   const {
     contracts: clientContracts,
@@ -428,6 +438,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     Cancelled: 'bg-slate-100 text-slate-600 border border-slate-200',
   };
 
+  const invoiceTypeLabels: Record<PaymentKind, string> = {
+    Income: t('invoiceTypeIncome') ?? 'Доходный',
+    Expense: t('invoiceTypeExpense') ?? 'Расходный',
+  };
+
+  const invoiceTypeClasses: Record<PaymentKind, string> = {
+    Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
   const openInvoiceCreate = () => {
     if (!accountPermissions.canCreate) {
       showPermissionWarning('Недостаточно прав для добавления счетов.');
@@ -456,13 +476,36 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setInvoiceModalError(null);
   };
 
-  const ensureInvoiceClients = useCallback(async () => {
+  const ensureInvoiceLookups = useCallback(async () => {
     if (!invoiceModalOpen) return;
-    if (invoiceClients.length > 0 && !invoiceLookupsError) return;
+    if (
+      invoiceClients.length > 0 &&
+      invoiceIncomeTypes.length > 0 &&
+      invoicePaymentSources.length > 0 &&
+      !invoiceLookupsError
+    )
+      return;
     setInvoiceLookupsLoading(true);
     try {
-      const list = await apiService.getClients();
-      setInvoiceClients(list ?? []);
+      const [clientsList, incomeIncome, incomeExpense, sourceIncome, sourceExpense] = await Promise.all([
+        apiService.getClients(),
+        apiService.getIncomeTypes('Income'),
+        apiService.getIncomeTypes('Expense'),
+        apiService.getPaymentSources('Income'),
+        apiService.getPaymentSources('Expense'),
+      ]);
+
+      setInvoiceClients(clientsList ?? []);
+
+      const mergedIncome = [...(incomeIncome ?? []), ...(incomeExpense ?? [])];
+      const incomeMap = new Map<number, IncomeType>();
+      mergedIncome.forEach((item) => incomeMap.set(item.id, item));
+      setInvoiceIncomeTypes(Array.from(incomeMap.values()));
+
+      const mergedSources = [...(sourceIncome ?? []), ...(sourceExpense ?? [])];
+      const sourceMap = new Map<number, PaymentSource>();
+      mergedSources.forEach((item) => sourceMap.set(item.id, item));
+      setInvoicePaymentSources(Array.from(sourceMap.values()));
       setInvoiceLookupsError(null);
     } catch (err) {
       setInvoiceLookupsError(
@@ -471,13 +514,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     } finally {
       setInvoiceLookupsLoading(false);
     }
-  }, [invoiceModalOpen, invoiceClients.length, invoiceLookupsError, t]);
+  }, [
+    invoiceModalOpen,
+    invoiceClients.length,
+    invoiceIncomeTypes.length,
+    invoicePaymentSources.length,
+    invoiceLookupsError,
+    t,
+  ]);
 
   useEffect(() => {
     if (invoiceModalOpen) {
-      void ensureInvoiceClients();
+      void ensureInvoiceLookups();
     }
-  }, [invoiceModalOpen, ensureInvoiceClients]);
+  }, [invoiceModalOpen, ensureInvoiceLookups]);
 
   const submitInvoice = async (payload: InvoiceInput) => {
     const isEdit = invoiceModalMode === 'edit' && selectedInvoice;
@@ -522,6 +572,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setInvoiceFrom(startOfYear);
     setInvoiceTo(todayYMD);
     setInvoiceStatus('all');
+    setInvoiceType('all');
     setInvoiceSearch('');
   };
 
@@ -1472,6 +1523,18 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 </select>
               </div>
 
+              <div>
+                <select
+                  value={invoiceType}
+                  onChange={(e) => setInvoiceType(e.target.value as 'all' | PaymentKind)}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                >
+                  <option value="all">{t('invoiceTypeAll') ?? 'Все направления'}</option>
+                  <option value="Income">{t('invoiceTypeIncome') ?? 'Доходные'}</option>
+                  <option value="Expense">{t('invoiceTypeExpense') ?? 'Расходные'}</option>
+                </select>
+              </div>
+
               <div className="relative flex-1 min-w-[220px]">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
@@ -1811,7 +1874,33 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                           <tr key={invoice.id} className="hover:bg-gray-50/80">
                             <td className="px-4 py-3 font-medium text-gray-900">{toRuDate(invoice.date)}</td>
                             <td className="px-4 py-3">
-                              <div className="font-medium text-gray-900">№{invoice.number}</div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium text-gray-900">№{invoice.number}</div>
+                                {invoice.type && (
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${invoiceTypeClasses[invoice.type]}`}
+                                  >
+                                    {invoiceTypeLabels[invoice.type]}
+                                  </span>
+                                )}
+                              </div>
+                              {(invoice.paymentSourceName || invoice.incomeTypeName) && (
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                              {invoice.paymentSourceName && (
+                                <span>
+                                  {invoicePaymentSourceLabel}: {invoice.paymentSourceName}
+                                  {invoice.paymentSourceType
+                                    ? ` (${invoiceTypeLabels[invoice.paymentSourceType]})`
+                                    : ''}
+                                </span>
+                              )}
+                                  {invoice.incomeTypeName && (
+                                    <span>
+                                      {invoiceIncomeGroupLabel}: {invoice.incomeTypeName}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               {invoice.clientCaseTitle ? (
                                 <div className="text-xs text-gray-500">{invoice.clientCaseTitle}</div>
                               ) : null}
@@ -2451,6 +2540,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           submitting={invoiceSubmitting}
           errorMessage={invoiceModalError}
           clients={invoiceModalClients}
+          incomeTypes={invoiceIncomeTypes}
+          paymentSources={invoicePaymentSources}
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}

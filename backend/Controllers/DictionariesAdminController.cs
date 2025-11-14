@@ -98,7 +98,7 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.PaymentSources.FindAsync(id);
         if (e is null) return NotFound();
-        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive; e.PaymentType = m.PaymentType;
         await _db.SaveChangesAsync();
         return Ok(e);
     }

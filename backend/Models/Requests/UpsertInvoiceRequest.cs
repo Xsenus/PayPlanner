@@ -20,6 +20,8 @@ public class UpsertInvoiceRequest
     [Required]
     public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
 
+    public PaymentType Type { get; set; } = PaymentType.Income;
+
     public DateTime? PaidDate { get; set; }
 
     [Required]

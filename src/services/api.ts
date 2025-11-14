@@ -201,6 +201,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: PaymentStatus;
+    type?: PaymentKind;
     clientId?: number;
     responsibleId?: number;
     search?: string;
@@ -221,6 +222,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: PaymentStatus;
+    type?: PaymentKind;
     clientId?: number;
     responsibleId?: number;
     search?: string;
@@ -522,19 +524,22 @@ export class ApiService {
   }
   async getIncomeTypes(): Promise<IncomeType[]>;
   async getIncomeTypes(
-    paymentType?: 'Income' | 'Expense',
+    paymentType?: PaymentKind,
     isActive?: boolean,
   ): Promise<IncomeType[]>;
   async getIncomeTypes(
-    paymentType?: 'Income' | 'Expense',
+    paymentType?: PaymentKind,
     isActive?: boolean,
   ): Promise<IncomeType[]> {
     const q = buildQuery({ paymentType, isActive });
     return this.request<IncomeType[]>(`${pathForKind('income-types')}${q}`);
   }
 
-  async getPaymentSources() {
-    return this.getDict('payment-sources');
+  async getPaymentSources(): Promise<PaymentSource[]>;
+  async getPaymentSources(paymentType?: PaymentKind, isActive?: boolean): Promise<PaymentSource[]>;
+  async getPaymentSources(paymentType?: PaymentKind, isActive?: boolean): Promise<PaymentSource[]> {
+    const q = buildQuery({ paymentType, isActive });
+    return this.request<PaymentSource[]>(`${pathForKind('payment-sources')}${q}`);
   }
   async getClientStatuses() {
     return this.getDict('client-statuses');
@@ -590,6 +595,23 @@ export class ApiService {
     data: Omit<IncomeType, 'id' | 'createdAt'>,
   ): Promise<IncomeType> {
     return this.request<IncomeType>(`${pathForKind('income-types')}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createPaymentSource(data: Omit<PaymentSource, 'id' | 'createdAt'>): Promise<PaymentSource> {
+    return this.request<PaymentSource>(pathForKind('payment-sources'), {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePaymentSource(
+    id: number,
+    data: Omit<PaymentSource, 'id' | 'createdAt'>,
+  ): Promise<PaymentSource> {
+    return this.request<PaymentSource>(`${pathForKind('payment-sources')}/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
@@ -817,6 +839,7 @@ import type {
   InvoiceInput,
   InvoiceSummary,
   PaymentStatus,
+  PaymentKind,
   Client,
   ClientInput,
   LegalEntityDetail,

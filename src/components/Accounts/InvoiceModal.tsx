@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
-import type { Act, ActStatus, Client, Invoice, InvoiceInput, PaymentStatus } from '../../types';
+import type {
+  Act,
+  ActStatus,
+  Client,
+  IncomeType,
+  Invoice,
+  InvoiceInput,
+  PaymentKind,
+  PaymentSource,
+  PaymentStatus,
+} from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -16,10 +26,13 @@ type FormState = {
   dueDate: string;
   amount: string;
   status: PaymentStatus;
+  type: PaymentKind;
   clientId: string;
   description: string;
   actReference: string;
   paidDate: string;
+  paymentSourceId: string;
+  incomeTypeId: string;
 };
 
 type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'status'>;
@@ -33,6 +46,8 @@ interface InvoiceModalProps {
   submitting: boolean;
   errorMessage?: string | null;
   clients: Client[];
+  incomeTypes: IncomeType[];
+  paymentSources: PaymentSource[];
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
@@ -47,10 +62,13 @@ function normalizeInvoiceToForm(invoice: Invoice | null, defaultClientId?: numbe
       dueDate: '',
       amount: '',
       status: 'Pending',
+      type: 'Income',
       clientId: defaultClientId ? String(defaultClientId) : '',
       description: '',
       actReference: '',
       paidDate: '',
+      paymentSourceId: '',
+      incomeTypeId: '',
     };
   }
 
@@ -60,10 +78,13 @@ function normalizeInvoiceToForm(invoice: Invoice | null, defaultClientId?: numbe
     dueDate: toDateInputValue(invoice.dueDate) || '',
     amount: invoice.amount !== undefined && invoice.amount !== null ? String(invoice.amount) : '',
     status: invoice.status ?? 'Pending',
+    type: invoice.type ?? 'Income',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
     description: invoice.description ?? '',
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
+    paymentSourceId: invoice.paymentSourceId ? String(invoice.paymentSourceId) : '',
+    incomeTypeId: invoice.incomeTypeId ? String(invoice.incomeTypeId) : '',
   };
 }
 
@@ -92,6 +113,8 @@ export function InvoiceModal({
   submitting,
   errorMessage,
   clients,
+  incomeTypes,
+  paymentSources,
   lookupsLoading,
   lookupsError,
   defaultClientId,
@@ -100,6 +123,16 @@ export function InvoiceModal({
   const { setActiveTab } = useTabNavigation();
   const [form, setForm] = useState<FormState>(() => normalizeInvoiceToForm(invoice, defaultClientId));
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const paymentSourceLabel = t('invoicePaymentSource') ?? t('paymentSource') ?? 'Источник счёта';
+  const paymentSourcePlaceholder =
+    t('invoicePaymentSourcePlaceholder') ?? t('selectPaymentSource') ?? 'Выберите источник счёта';
+  const paymentSourceEmptyMessage =
+    t('invoicePaymentSourceEmpty') ?? 'Нет источников для выбранного направления';
+  const incomeTypeLabel = t('invoiceIncomeGroup') ?? 'Группа счёта';
+  const incomeTypePlaceholder =
+    t('invoiceIncomeGroupPlaceholder') ?? 'Выберите группу счёта';
+  const incomeTypeEmptyMessage = t('invoiceIncomeGroupEmpty') ?? 'Нет групп для выбранного направления';
 
   const initialAct = useMemo<ActOption | null>(() => {
     if (!invoice?.actId) return null;
@@ -127,6 +160,19 @@ export function InvoiceModal({
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
+  );
+
+  const filteredIncomeTypes = useMemo(
+    () => incomeTypes.filter((type) => type.paymentType === form.type),
+    [incomeTypes, form.type],
+  );
+
+  const filteredPaymentSources = useMemo(
+    () =>
+      paymentSources.filter(
+        (source) => !source.paymentType || source.paymentType === form.type,
+      ),
+    [paymentSources, form.type],
   );
 
   useEffect(() => {
@@ -213,7 +259,30 @@ export function InvoiceModal({
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const value = event.target.value;
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      if (field === 'type') {
+        const nextType = value as PaymentKind;
+        const keepIncome =
+          prev.incomeTypeId &&
+          incomeTypes.some(
+            (incomeType) =>
+              String(incomeType.id) === prev.incomeTypeId && incomeType.paymentType === nextType,
+          )
+            ? prev.incomeTypeId
+            : '';
+        const keepSource =
+          prev.paymentSourceId &&
+          paymentSources.some(
+            (source) =>
+              String(source.id) === prev.paymentSourceId &&
+              (!source.paymentType || source.paymentType === nextType),
+          )
+            ? prev.paymentSourceId
+            : '';
+        return { ...prev, type: nextType, incomeTypeId: keepIncome, paymentSourceId: keepSource };
+      }
+      return { ...prev, [field]: value };
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -246,10 +315,19 @@ export function InvoiceModal({
       dueDate: form.dueDate ? fromInputToApiDate(form.dueDate) ?? form.dueDate : undefined,
       amount: parsedAmount,
       status: form.status,
+      type: form.type,
       clientId: Number(form.clientId),
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
+      paymentSourceId:
+        form.paymentSourceId && !Number.isNaN(Number.parseInt(form.paymentSourceId, 10))
+          ? Number.parseInt(form.paymentSourceId, 10)
+          : undefined,
+      incomeTypeId:
+        form.incomeTypeId && !Number.isNaN(Number.parseInt(form.incomeTypeId, 10))
+          ? Number.parseInt(form.incomeTypeId, 10)
+          : undefined,
     };
 
     try {
@@ -374,6 +452,32 @@ export function InvoiceModal({
               </select>
             </label>
 
+            <div className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
+              <div className="flex flex-wrap gap-2">
+                {(['Income', 'Expense'] as PaymentKind[]).map((kind) => (
+                  <label
+                    key={kind}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      form.type === kind
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="invoice-type"
+                      value={kind}
+                      checked={form.type === kind}
+                      onChange={handleChange('type')}
+                      className="sr-only"
+                    />
+                    <span>{kind === 'Income' ? t('invoiceTypeIncome') ?? 'Доходный' : t('invoiceTypeExpense') ?? 'Расходный'}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Контрагент'}</span>
               <select
@@ -402,6 +506,46 @@ export function InvoiceModal({
                     <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                   )}
                 </div>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="font-medium text-slate-700">{paymentSourceLabel}</span>
+              <select
+                value={form.paymentSourceId}
+                onChange={handleChange('paymentSourceId')}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="">{paymentSourcePlaceholder}</option>
+                {filteredPaymentSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
+                    {source.isActive === false ? ` (${t('dictionaryInactive') ?? 'неактивен'})` : ''}
+                  </option>
+                ))}
+              </select>
+              {filteredPaymentSources.length === 0 && paymentSources.length > 0 && (
+                <span className="text-xs text-slate-500">{paymentSourceEmptyMessage}</span>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="font-medium text-slate-700">{incomeTypeLabel}</span>
+              <select
+                value={form.incomeTypeId}
+                onChange={handleChange('incomeTypeId')}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="">{incomeTypePlaceholder}</option>
+                {filteredIncomeTypes.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                    {type.isActive === false ? ` (${t('dictionaryInactive') ?? 'неактивен'})` : ''}
+                  </option>
+                ))}
+              </select>
+              {filteredIncomeTypes.length === 0 && incomeTypes.length > 0 && (
+                <span className="text-xs text-slate-500">{incomeTypeEmptyMessage}</span>
               )}
             </label>
           </div>

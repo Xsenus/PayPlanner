@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource } from '../../types';
+import type { ClientStatus, DealType, IncomeType, PaymentKind, PaymentSource } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
@@ -30,6 +30,7 @@ type FullDictItem = {
   colorHex: string;
   isActive: boolean;
   createdAt?: string;
+  paymentType?: PaymentKind | null;
 };
 
 type RowKey = string;
@@ -72,6 +73,10 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     'colorHex' in x && typeof x.colorHex === 'string' ? x.colorHex : defaultColor(kind);
   const isActive = 'isActive' in x && typeof x.isActive === 'boolean' ? x.isActive : true;
   const createdAt = 'createdAt' in x ? (x as { createdAt?: string }).createdAt : undefined;
+  const paymentType =
+    'paymentType' in x && (x as { paymentType?: PaymentKind | null }).paymentType !== undefined
+      ? ((x as { paymentType?: PaymentKind | null }).paymentType ?? null)
+      : undefined;
 
   return {
     id: x.id,
@@ -80,6 +85,7 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     colorHex,
     isActive,
     createdAt,
+    paymentType,
   };
 }
 
@@ -140,7 +146,13 @@ export const Dictionaries = () => {
         {
           _key: makeKey(),
           mode: 'new' as const,
-          item: { name: '', description: '', colorHex: defaultColor(kind), isActive: true },
+          item: {
+            name: '',
+            description: '',
+            colorHex: defaultColor(kind),
+            isActive: true,
+            paymentType: kind === 'payment-sources' ? 'Income' : undefined,
+          },
         },
         ...prev[kind],
       ],
@@ -202,6 +214,14 @@ export const Dictionaries = () => {
             colorHex: item.colorHex,
             paymentType: paymentTypeByKind(kind),
           })
+        : kind === 'payment-sources'
+        ? await apiService.createPaymentSource({
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+            paymentType: item.paymentType ?? null,
+          })
         : await apiService.createDict(dictKindFor(kind), {
             name: item.name,
             isActive: item.isActive,
@@ -238,6 +258,14 @@ export const Dictionaries = () => {
             description: item.description,
             colorHex: item.colorHex,
             paymentType: paymentTypeByKind(kind),
+          })
+        : kind === 'payment-sources'
+        ? await apiService.updatePaymentSource(item.id, {
+            name: item.name,
+            isActive: item.isActive,
+            description: item.description,
+            colorHex: item.colorHex,
+            paymentType: item.paymentType ?? null,
           })
         : await apiService.updateDict(dictKindFor(kind), item.id, {
             name: item.name,
@@ -329,6 +357,21 @@ export const Dictionaries = () => {
             </div>
           </div>
 
+          {kind === 'payment-sources' && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Направление</label>
+              <select
+                value={local.paymentType ?? 'Income'}
+                onChange={(e) => set({ paymentType: (e.target.value || null) as PaymentKind | null })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="Income">Доходные</option>
+                <option value="Expense">Расходные</option>
+                <option value="">Для всех</option>
+              </select>
+            </div>
+          )}
+
           <div className="lg:col-span-2 flex items-center lg:pt-7">
             <label className="inline-flex items-center gap-2 cursor-pointer">
               <input
@@ -409,6 +452,21 @@ export const Dictionaries = () => {
               />
             </div>
           </div>
+
+          {kind === 'payment-sources' && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Направление</label>
+              <select
+                value={local.paymentType ?? 'Income'}
+                onChange={(e) => set({ paymentType: (e.target.value || null) as PaymentKind | null })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="Income">Доходные</option>
+                <option value="Expense">Расходные</option>
+                <option value="">Для всех</option>
+              </select>
+            </div>
+          )}
 
           <div className="lg:col-span-2 flex items-center lg:pt-7">
             <label className="inline-flex items-center gap-2 cursor-pointer">
