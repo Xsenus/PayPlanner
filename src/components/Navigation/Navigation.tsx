@@ -15,6 +15,7 @@ import {
   FileCheck2,
   FileSignature,
   Eye,
+  Banknote,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -84,6 +85,8 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
   };
 
+  type SidebarTab = { id: Tab; label: string; icon: typeof Calendar; variant?: 'child' };
+
   // Базовые вкладки доступны всем
   const baseTabs = useMemo(() => {
     const tabs = [
@@ -94,6 +97,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       { id: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users, allowed: permissions.clients.canView },
       { id: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards, allowed: permissions.accounts.canView },
       { id: 'acts' as Tab, label: t('acts') ?? 'Акты', icon: FileCheck2, allowed: permissions.acts.canView },
+      {
+        id: 'payments' as Tab,
+        label: t('payments') ?? 'Платежи',
+        icon: Banknote,
+        allowed: permissions.payments.canView,
+        variant: 'child' as const,
+      },
       { id: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature, allowed: permissions.contracts.canView },
       {
         id: 'dictionaries' as Tab,
@@ -101,11 +111,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         icon: Settings,
         allowed: permissions.dictionaries.canView,
       },
-    ] as Array<{ id: Tab; label: string; icon: typeof Calendar; allowed: boolean }>;
+    ] as Array<{ id: Tab; label: string; icon: typeof Calendar; allowed: boolean; variant?: 'child' }>;
 
-    return tabs.reduce<Array<{ id: Tab; label: string; icon: typeof Calendar }>>((acc, tab) => {
+    return tabs.reduce<SidebarTab[]>((acc, tab) => {
       if (tab.allowed) {
-        acc.push({ id: tab.id, label: tab.label, icon: tab.icon });
+        const { allowed: _allowed, ...rest } = tab;
+        acc.push(rest);
       }
       return acc;
     }, []);
@@ -114,14 +125,14 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   // Админские вкладки добавляем отдельно
   const adminTabs = useMemo(() => {
     if (!isAdmin()) {
-      return [] as Array<{ id: Tab; label: string; icon: typeof Calendar }>;
+      return [] as SidebarTab[];
     }
 
     return [
       { id: 'users' as Tab, label: 'Пользователи', icon: UserCog },
       { id: 'roles' as Tab, label: 'Роли', icon: Shield },
       { id: 'userActivity' as Tab, label: 'Контроль пользователей', icon: Eye },
-    ];
+    ] as SidebarTab[];
   }, [isAdmin]);
 
   const tabs = useMemo(() => [...baseTabs, ...adminTabs], [baseTabs, adminTabs]);
@@ -210,7 +221,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                     title={tab.label}
                     className={[
                       'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
-                      collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
+                      collapsed
+                        ? 'justify-center p-3'
+                        : tab.variant === 'child'
+                        ? 'gap-3 pr-4 py-3 pl-10'
+                        : 'gap-3 px-4 py-3',
                       isActive
                         ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-900/30'
                         : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',

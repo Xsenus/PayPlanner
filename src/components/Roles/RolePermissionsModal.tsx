@@ -9,6 +9,7 @@ import {
   Building2,
   WalletCards,
   FileCheck2,
+  Banknote,
   FileSignature,
   Settings,
   Lock,
@@ -90,6 +91,12 @@ const SECTION_CONFIG: SectionConfig[] = [
     titleKey: 'acts',
     descriptionKey: 'permissionSectionActs',
     icon: FileCheck2,
+  },
+  {
+    key: 'payments',
+    titleKey: 'payments',
+    descriptionKey: 'permissionSectionPayments',
+    icon: Banknote,
   },
   {
     key: 'contracts',

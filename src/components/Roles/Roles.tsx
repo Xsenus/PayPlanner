@@ -15,6 +15,7 @@ const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = 
   legalEntities: 'Юр. лица',
   accounts: 'Счета',
   acts: 'Акты',
+  payments: 'Платежи',
   contracts: 'Договоры',
   dictionaries: 'Справочники',
 };

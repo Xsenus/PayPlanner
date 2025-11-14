@@ -14,6 +14,7 @@ import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
+import { Payments } from './components/Payments/Payments';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -37,6 +38,7 @@ function AppContent() {
     clientDetail: 'Карточка клиента',
     accounts: 'Счета',
     acts: 'Акты',
+    payments: 'Платежи',
     contracts: 'Договоры',
     users: 'Пользователи',
     roles: 'Роли',
@@ -93,6 +95,7 @@ function AppContent() {
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
+        { tab: 'payments' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
@@ -119,6 +122,8 @@ function AppContent() {
           return permissions.accounts.canView;
         case 'acts':
           return permissions.acts.canView;
+        case 'payments':
+          return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
         case 'dictionaries':
@@ -289,6 +294,10 @@ function AppContent() {
         return permissions.acts.canView
           ? <Acts />
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
+      case 'payments':
+        return permissions.payments.canView
+          ? <Payments onOpenClient={handleOpenClient} />
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
           ? <Contracts />

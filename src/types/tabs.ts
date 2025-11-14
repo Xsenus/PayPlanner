@@ -6,6 +6,7 @@ export type Tab =
   | 'clients'
   | 'accounts'
   | 'acts'
+  | 'payments'
   | 'contracts'
   | 'clientDetail'
   | 'users'
