@@ -31,6 +31,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
   const inflightRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const sigRef = useRef<string>('init');
+  const requestIdRef = useRef(0);
 
   const paramsKey = JSON.stringify({
     from: from ?? '',
@@ -41,12 +42,23 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
 
   const fetchOnce = useCallback(
     async (mode?: Mode) => {
-      if (inflightRef.current) return;
-      inflightRef.current = true;
+      if (inflightRef.current) {
+        if (abortRef.current?.signal.aborted) {
+          inflightRef.current = false;
+        } else {
+          return;
+        }
+      }
+
       const effectiveMode: Mode = mode ?? (hasLoadedRef.current ? 'background' : 'initial');
-      abortRef.current?.abort();
+      const previousController = abortRef.current;
       const ac = new AbortController();
       abortRef.current = ac;
+      previousController?.abort();
+
+      inflightRef.current = true;
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
 
       setError(null);
       if (effectiveMode === 'initial') setLoadingInitial(true);
@@ -78,7 +90,10 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
           if (effectiveMode === 'initial') setLoadingInitial(false);
           else setRefreshing(false);
         }
-        inflightRef.current = false;
+
+        if (requestIdRef.current === requestId && abortRef.current === ac) {
+          inflightRef.current = false;
+        }
       }
     },
     [from, to, opts?.clientId, opts?.caseId],
