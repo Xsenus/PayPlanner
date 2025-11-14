@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Plus, RotateCcw, Search } from 'lucide-react';
+import type { JSX } from 'react';
+import { ChevronDown, Lock, Plus, RotateCcw, Search } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -8,6 +9,9 @@ import type { Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { formatLocalYMD, fromInputToApiDate } from '../../utils/dateUtils';
+import { useClients } from '../../hooks/useClients';
+import { useDictionaries } from '../../hooks/useDictionaries';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -26,6 +30,137 @@ type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
 
+interface MultiSelectOption {
+  value: string;
+  label: string;
+}
+
+interface MultiSelectProps {
+  options: MultiSelectOption[];
+  value: string[];
+  label: string;
+  placeholder: string;
+  emptyLabel: string;
+  clearLabel: string;
+  summaryLabel: (count: number) => string;
+  onChange: (next: string[]) => void;
+}
+
+function MultiSelect({
+  options,
+  value,
+  label,
+  placeholder,
+  emptyLabel,
+  clearLabel,
+  summaryLabel,
+  onChange,
+}: MultiSelectProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, [open]);
+
+  const toggle = useCallback(
+    (nextValue: string) => {
+      onChange(
+        value.includes(nextValue)
+          ? value.filter((item) => item !== nextValue)
+          : [...value, nextValue],
+      );
+    },
+    [onChange, value],
+  );
+
+  const handleClear = useCallback(() => {
+    onChange([]);
+    setOpen(false);
+  }, [onChange]);
+
+  const summary = value.length ? summaryLabel(value.length) : placeholder;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className={`flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 ${
+          open ? 'ring-2 ring-slate-300 ring-offset-1' : ''
+        }`}>
+        <span className="truncate">{summary}</span>
+        <ChevronDown className={`ml-2 h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div className="absolute z-20 mt-2 w-full min-w-[220px] max-w-sm rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+            {value.length ? (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                {clearLabel}
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-2 max-h-60 space-y-1 overflow-y-auto pr-1">
+            {options.length === 0 ? (
+              <p className="px-2 py-3 text-center text-xs text-slate-400">{emptyLabel}</p>
+            ) : (
+              options.map((option) => {
+                const checked = value.includes(option.value);
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                      checked ? 'bg-slate-100 text-slate-900' : 'hover:bg-slate-50 text-slate-600'
+                    }`}>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500"
+                      checked={checked}
+                      onChange={() => toggle(option.value)}
+                    />
+                    <span className="truncate">{option.label}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function parseAmountInput(raw: string): number | null {
+  if (!raw) return null;
+  const normalized = raw.replace(/[\s\u00a0]/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function defaultFromDate() {
+  const now = new Date();
+  return formatLocalYMD(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+function defaultToDate() {
+  return formatLocalYMD(new Date());
+}
+
 function formatCountLabel(template: string, count: number) {
   return template.replace('{{count}}', count.toLocaleString('ru-RU'));
 }
@@ -42,6 +177,15 @@ export function Payments({
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
   const { t } = useTranslation();
+  const { clients } = useClients();
+  const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
+
+  const [fromDate, setFromDate] = useState(() => defaultFromDate());
+  const [toDate, setToDate] = useState(() => defaultToDate());
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
 
   const {
     payments,
@@ -52,7 +196,7 @@ export function Payments({
     updatePayment,
     deletePayment,
     error,
-  } = usePayments();
+  } = usePayments(fromInputToApiDate(fromDate), fromInputToApiDate(toDate));
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -66,6 +210,40 @@ export function Payments({
   const permissionTimerRef = useRef<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
+
+  const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
+  const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
+
+  const clientOptions = useMemo<MultiSelectOption[]>(
+    () =>
+      clients
+        .filter((client) => client?.id && client?.name)
+        .map((client) => ({
+          value: String(client.id),
+          label: client.name ?? `#${client.id}`,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
+    [clients],
+  );
+
+  const categoryOptions = useMemo<MultiSelectOption[]>(() => {
+    const options: MultiSelectOption[] = [];
+    const dealPrefix = t('paymentsCategoryDealPrefix') ?? t('dealType') ?? 'Сделка';
+    const incomePrefix = t('paymentsCategoryIncomePrefix') ?? t('incomeType') ?? 'Доход';
+    const sourcePrefix = t('paymentsCategorySourcePrefix') ?? t('paymentSource') ?? 'Источник';
+
+    dealTypes.forEach((deal) => {
+      options.push({ value: `deal-${deal.id}`, label: `${dealPrefix}: ${deal.name}` });
+    });
+    incomeTypes.forEach((income) => {
+      options.push({ value: `income-${income.id}`, label: `${incomePrefix}: ${income.name}` });
+    });
+    paymentSources.forEach((source) => {
+      options.push({ value: `source-${source.id}`, label: `${sourcePrefix}: ${source.name}` });
+    });
+
+    return options.sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  }, [dealTypes, incomeTypes, paymentSources, t]);
 
   useEffect(() => {
     if (typeof defaultType === 'undefined') {
@@ -154,11 +332,39 @@ export function Payments({
 
   const searchQuery = search.trim().toLowerCase();
 
+  const appliedTypeFilter: TypeFilter = lockType ? effectiveDefaultType : typeFilter;
+
   const filteredPayments = useMemo(() => {
     return payments.filter((payment) => {
-      const matchesType = typeFilter === 'all' || payment.type === typeFilter;
+      const matchesType = appliedTypeFilter === 'all' || payment.type === appliedTypeFilter;
       const matchesStatus = statusFilter === 'all' || payment.status === statusFilter;
+      const matchesClient =
+        selectedClients.length === 0 ||
+        (payment.clientId ? selectedClients.includes(String(payment.clientId)) : false);
+      const matchesCategory =
+        selectedCategories.length === 0 ||
+        selectedCategories.some((token) => {
+          if (token.startsWith('deal-')) {
+            const id = Number(token.slice(5));
+            return !Number.isNaN(id) && payment.dealTypeId === id;
+          }
+          if (token.startsWith('income-')) {
+            const id = Number(token.slice(7));
+            return !Number.isNaN(id) && payment.incomeTypeId === id;
+          }
+          if (token.startsWith('source-')) {
+            const id = Number(token.slice(7));
+            return !Number.isNaN(id) && payment.paymentSourceId === id;
+          }
+          return false;
+        });
+      const matchesAmount =
+        (minAmountValue === null || payment.amount >= minAmountValue) &&
+        (maxAmountValue === null || payment.amount <= maxAmountValue);
       if (!matchesType || !matchesStatus) {
+        return false;
+      }
+      if (!matchesClient || !matchesCategory || !matchesAmount) {
         return false;
       }
       if (!searchQuery) {
@@ -177,7 +383,16 @@ export function Payments({
       ];
       return fields.some((field) => field?.toLowerCase().includes(searchQuery));
     });
-  }, [payments, typeFilter, statusFilter, searchQuery]);
+  }, [
+    appliedTypeFilter,
+    payments,
+    searchQuery,
+    selectedCategories,
+    selectedClients,
+    statusFilter,
+    minAmountValue,
+    maxAmountValue,
+  ]);
 
   const summary = useMemo(() => {
     let income = 0;
@@ -202,6 +417,104 @@ export function Payments({
       total: filteredPayments.length,
     };
   }, [filteredPayments]);
+
+  const summaryCards: JSX.Element[] = [];
+  if (appliedTypeFilter === 'all' || appliedTypeFilter === 'Income') {
+    summaryCards.push(
+      <div key="income" className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm">
+        <div className="text-sm font-medium text-emerald-700">
+          {t('paymentsSummaryIncome') ?? t('incomePlural') ?? 'Доходы'}
+        </div>
+        <div className="mt-2 text-2xl font-semibold text-emerald-800">
+          {formatCurrencySmart(summary.income).full}
+        </div>
+        <div className="mt-1 text-xs text-emerald-700/80">
+          {formatCountLabel(t('paymentsEntriesCount') ?? 'Платежей: {{count}}', summary.incomeCount)}
+        </div>
+      </div>,
+    );
+  }
+  if (appliedTypeFilter === 'all' || appliedTypeFilter === 'Expense') {
+    summaryCards.push(
+      <div key="expense" className="rounded-xl border border-rose-100 bg-rose-50 p-4 shadow-sm">
+        <div className="text-sm font-medium text-rose-700">
+          {t('paymentsSummaryExpense') ?? t('expensePlural') ?? 'Расходы'}
+        </div>
+        <div className="mt-2 text-2xl font-semibold text-rose-700">
+          {formatCurrencySmart(summary.expense).full}
+        </div>
+        <div className="mt-1 text-xs text-rose-700/80">
+          {formatCountLabel(t('paymentsEntriesCount') ?? 'Платежей: {{count}}', summary.expenseCount)}
+        </div>
+      </div>,
+    );
+  }
+
+  summaryCards.push(
+    <div key="balance" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-medium text-slate-600">{t('paymentsSummaryBalance') ?? 'Сальдо'}</div>
+      <div className={`mt-2 text-2xl font-semibold ${summary.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+        {formatCurrencySmart(summary.balance).full}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        {t('paymentsTotalCount') ?? 'Всего платежей'}: {summary.total.toLocaleString('ru-RU')}
+      </div>
+    </div>,
+  );
+
+  summaryCards.push(
+    <div key="total" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-medium text-slate-600">{t('paymentsTotalCount') ?? 'Всего платежей'}</div>
+      <div className="mt-2 text-3xl font-semibold text-slate-900">
+        {summary.total.toLocaleString('ru-RU')}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        {t('recordsFound') ?? 'Найдено записей:'} {filteredPayments.length.toLocaleString('ru-RU')}
+      </div>
+    </div>,
+  );
+
+  const summaryMdCols = summaryCards.length > 1 ? 'md:grid-cols-2' : 'md:grid-cols-1';
+  const summaryXlCols =
+    summaryCards.length >= 4
+      ? 'xl:grid-cols-4'
+      : summaryCards.length === 3
+      ? 'xl:grid-cols-3'
+      : summaryCards.length === 2
+      ? 'xl:grid-cols-2'
+      : 'xl:grid-cols-1';
+
+  const handleFromDateChange = useCallback(
+    (value: string) => {
+      setFromDate(value);
+      if (toDate && value && value > toDate) {
+        setToDate(value);
+      }
+    },
+    [toDate],
+  );
+
+  const handleToDateChange = useCallback(
+    (value: string) => {
+      setToDate(value);
+      if (fromDate && value && value < fromDate) {
+        setFromDate(value);
+      }
+    },
+    [fromDate],
+  );
+
+  const handleResetFilters = useCallback(() => {
+    setFromDate(defaultFromDate());
+    setToDate(defaultToDate());
+    setSelectedClients([]);
+    setSelectedCategories([]);
+    setMinAmount('');
+    setMaxAmount('');
+    setStatusFilter('all');
+    setSearch('');
+    setTypeFilter(defaultType ?? 'all');
+  }, [defaultType]);
 
   const handleAddPayment = useCallback(
     (type: Payment['type']) => {
@@ -353,58 +666,7 @@ export function Payments({
           </div>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm">
-            <div className="text-sm font-medium text-emerald-700">
-              {t('paymentsSummaryIncome') ?? t('incomePlural') ?? 'Доходы'}
-            </div>
-            <div className="mt-2 text-2xl font-semibold text-emerald-800">
-              {formatCurrencySmart(summary.income).full}
-            </div>
-            <div className="mt-1 text-xs text-emerald-700/80">
-              {formatCountLabel(t('paymentsEntriesCount') ?? 'Платежей: {{count}}', summary.incomeCount)}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 shadow-sm">
-            <div className="text-sm font-medium text-rose-700">
-              {t('paymentsSummaryExpense') ?? t('expensePlural') ?? 'Расходы'}
-            </div>
-            <div className="mt-2 text-2xl font-semibold text-rose-700">
-              {formatCurrencySmart(summary.expense).full}
-            </div>
-            <div className="mt-1 text-xs text-rose-700/80">
-              {formatCountLabel(t('paymentsEntriesCount') ?? 'Платежей: {{count}}', summary.expenseCount)}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-sm font-medium text-slate-600">
-              {t('paymentsSummaryBalance') ?? 'Сальдо'}
-            </div>
-            <div
-              className={`mt-2 text-2xl font-semibold ${
-                summary.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'
-              }`}>
-              {formatCurrencySmart(summary.balance).full}
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              {t('paymentsTotalCount') ?? 'Всего платежей'}: {summary.total.toLocaleString('ru-RU')}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-sm font-medium text-slate-600">
-              {t('paymentsTotalCount') ?? 'Всего платежей'}
-            </div>
-            <div className="mt-2 text-3xl font-semibold text-slate-900">
-              {summary.total.toLocaleString('ru-RU')}
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              {t('recordsFound') ?? 'Найдено записей:'} {filteredPayments.length.toLocaleString('ru-RU')}
-            </div>
-          </div>
-        </div>
+        <div className={`grid gap-4 ${summaryMdCols} ${summaryXlCols}`}>{summaryCards}</div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -455,6 +717,115 @@ export function Payments({
                   className="w-64 rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
+              </label>
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(event) => handleFromDateChange(event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
+              </label>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(event) => handleToDateChange(event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+              </label>
+              <MultiSelect
+                options={clientOptions}
+                value={selectedClients}
+                label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+                placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
+                emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
+                clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                summaryLabel={(count) =>
+                  formatCountLabel(
+                    t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                    count,
+                  )
+                }
+                onChange={setSelectedClients}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+              </label>
+              <MultiSelect
+                options={categoryOptions}
+                value={selectedCategories}
+                label={t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+                placeholder={t('paymentsFilterCategoriesPlaceholder') ?? 'Все категории'}
+                emptyLabel={t('paymentsFilterCategoriesEmpty') ?? 'Категории не найдены'}
+                clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                summaryLabel={(count) =>
+                  formatCountLabel(
+                    t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                    count,
+                  )
+                }
+                onChange={setSelectedCategories}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterAmountMin') ?? 'Сумма от'}
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                value={minAmount}
+                onChange={(event) => setMinAmount(event.target.value)}
+                placeholder="0"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('paymentsFilterAmountMax') ?? 'Сумма до'}
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                value={maxAmount}
+                onChange={(event) => setMaxAmount(event.target.value)}
+                placeholder="0"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+              />
+            </div>
+
+            <div className="md:col-span-2 xl:col-span-1">
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900">
+                {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
+              </button>
             </div>
           </div>
 

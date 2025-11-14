@@ -60,6 +60,25 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         @media (max-width: 1024px) {
           body.pp-with-sidebar { padding-left: 0 !important; }
         }
+        .pp-sidebar-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+        }
+        .pp-sidebar-scroll::-webkit-scrollbar {
+          width: 8px;
+        }
+        .pp-sidebar-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .pp-sidebar-scroll::-webkit-scrollbar-thumb {
+          background-color: rgba(148, 163, 184, 0.6);
+          border-radius: 9999px;
+          border: 2px solid transparent;
+          background-clip: content-box;
+        }
+        .pp-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+          background-color: rgba(226, 232, 240, 0.9);
+        }
       `;
       document.head.appendChild(styleEl);
     }
@@ -293,7 +312,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4 px-2">
+        <nav className="pp-sidebar-scroll flex-1 overflow-y-auto py-4 px-2">
           <ul className="space-y-1.5">
             {sidebarItems.map((item) => {
               const Icon = item.icon;
@@ -376,13 +395,17 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                                 'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
                                 'gap-3 pr-4 py-2 pl-12',
                                 childActive
-                                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md shadow-blue-900/30'
+                                  ? 'bg-blue-500/25 text-blue-50 border border-blue-400/40 shadow-inner'
                                   : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
                               ].join(' ')}>
-                              <ChildIcon className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-white" />
+                              <ChildIcon
+                                className={`h-4 w-4 shrink-0 transition-colors ${
+                                  childActive ? 'text-blue-100' : 'text-slate-400 group-hover:text-white'
+                                }`}
+                              />
                               <span className="truncate text-sm font-medium">{child.label}</span>
                               {childActive && (
-                                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-l-full" />
+                                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-blue-100/80" />
                               )}
                             </button>
                           </li>
