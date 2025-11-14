@@ -214,7 +214,10 @@ export function Payments({
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
-  const autoRetryRef = useRef(false);
+  const [autoRetryScheduled, setAutoRetryScheduled] = useState(false);
+  const autoRetryAttemptsRef = useRef(0);
+  const autoRetryTimerRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
 
   const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
@@ -365,31 +368,53 @@ export function Payments({
     ],
   );
 
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+      if (autoRetryTimerRef.current) {
+        window.clearTimeout(autoRetryTimerRef.current);
+        autoRetryTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
-    autoRetryRef.current = false;
+    autoRetryAttemptsRef.current = 0;
+    setAutoRetryScheduled(false);
+    if (autoRetryTimerRef.current) {
+      window.clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = null;
+    }
   }, [filterSignature]);
 
   useEffect(() => {
-    if (!error) {
+    if (!error || payments.length > 0) {
+      autoRetryAttemptsRef.current = 0;
+      if (autoRetryTimerRef.current) {
+        window.clearTimeout(autoRetryTimerRef.current);
+        autoRetryTimerRef.current = null;
+      }
+      if (autoRetryScheduled) {
+        setAutoRetryScheduled(false);
+      }
       return;
     }
-    if (autoRetryRef.current) {
-      return;
-    }
-    autoRetryRef.current = true;
-    const timer = window.setTimeout(() => {
-      void refresh();
-    }, 800);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [error, refresh]);
 
-  useEffect(() => {
-    if (!error) {
-      autoRetryRef.current = false;
+    if (autoRetryAttemptsRef.current >= 1 || autoRetryScheduled) {
+      return;
     }
-  }, [error]);
+
+    autoRetryAttemptsRef.current += 1;
+    setAutoRetryScheduled(true);
+    autoRetryTimerRef.current = window.setTimeout(async () => {
+      autoRetryTimerRef.current = null;
+      await refresh();
+      if (isMountedRef.current) {
+        setAutoRetryScheduled(false);
+      }
+    }, 800);
+  }, [autoRetryScheduled, error, payments.length, refresh]);
 
   const filteredPayments = useMemo(() => {
     return payments.filter((payment) => {
@@ -720,8 +745,10 @@ export function Payments({
     [typeFilter],
   );
 
-  const showErrorState = Boolean(error) && payments.length === 0;
-  const showTimeoutPlaceholder = loadTimeoutReached && payments.length === 0 && !error;
+  const showErrorState = Boolean(error) && payments.length === 0 && !autoRetryScheduled;
+  const showTimeoutPlaceholder =
+    loadTimeoutReached && payments.length === 0 && !error && !autoRetryScheduled;
+  const showAutoRetrySpinner = autoRetryScheduled && payments.length === 0;
   const initialLoading = loading && payments.length === 0 && !loadTimeoutReached && !error;
   const showIncomeButton =
     paymentsPermissions.canCreate &&
@@ -988,11 +1015,15 @@ export function Payments({
         ) : null}
 
         <div className="space-y-4">
-          {initialLoading ? (
+          {initialLoading || showAutoRetrySpinner ? (
             <div className="flex justify-center py-12">
               <div className="flex flex-col items-center gap-3 text-slate-500">
                 <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
-                <span className="text-sm">{t('loading') ?? 'Загрузка...'}</span>
+                <span className="text-sm">
+                  {showAutoRetrySpinner
+                    ? t('paymentsRetrying') ?? 'Повторная попытка загрузки...'
+                    : t('loading') ?? 'Загрузка...'}
+                </span>
               </div>
             </div>
           ) : showErrorState ? (
@@ -1032,7 +1063,11 @@ export function Payments({
           )}
         </div>
 
-        {!initialLoading && !showErrorState && !showTimeoutPlaceholder && filteredPayments.length === 0 ? (
+        {!initialLoading &&
+        !showAutoRetrySpinner &&
+        !showErrorState &&
+        !showTimeoutPlaceholder &&
+        filteredPayments.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-slate-500">
             {t('paymentsEmpty') ?? t('noPaymentsForFilter') ?? 'Платежи не найдены'}
           </div>

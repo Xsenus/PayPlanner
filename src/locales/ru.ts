@@ -66,6 +66,7 @@ export const ru = {
   paymentsExpenseTitle: 'Расходные платежи',
   paymentsExpenseSubtitle: 'Журнал всех расходных платежей компании.',
   paymentsLoadError: 'Не удалось загрузить платежи. Проверьте подключение и попробуйте снова.',
+  paymentsRetrying: 'Повторная попытка загрузки...',
   paymentsRetry: 'Повторить попытку',
   paymentsSlowLoadWarning: 'Загрузка занимает больше обычного. Попробуйте обновить список чуть позже.',
   paymentsTypeLockedIncome: 'Отображаются только доходные платежи',
