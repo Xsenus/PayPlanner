@@ -39,6 +39,7 @@ interface InvoiceModalProps {
   lookupsError?: string | null;
   defaultClientId?: number;
   defaultType?: PaymentKind;
+  lockType?: boolean;
 }
 
 function normalizeInvoiceToForm(
@@ -107,10 +108,15 @@ export function InvoiceModal({
   lookupsError,
   defaultClientId,
   defaultType = 'Income',
+  lockType = false,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { setActiveTab } = useTabNavigation();
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
+  const typeBadgeClasses: Record<PaymentKind, string> = {
+    Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
@@ -232,6 +238,7 @@ export function InvoiceModal({
   };
 
   const handleTypeSelect = (nextType: PaymentKind) => {
+    if (lockType) return;
     setForm((prev) => ({
       ...prev,
       type: nextType,
@@ -347,27 +354,39 @@ export function InvoiceModal({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2 sm:col-span-2">
               <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
-              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1">
-                {typeOptions.map((option) => {
-                  const active = option === form.type;
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => handleTypeSelect(option)}
-                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                        active
-                          ? 'bg-blue-600 text-white shadow'
-                          : 'bg-transparent text-slate-600 hover:bg-white'
-                      }`}
-                    >
-                      {option === 'Income'
-                        ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                        : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
-                    </button>
-                  );
-                })}
-              </div>
+              {lockType ? (
+                <span
+                  className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                    typeBadgeClasses[form.type]
+                  }`}
+                >
+                  {form.type === 'Income'
+                    ? t('invoiceTypeIncome') ?? 'Доходные счета'
+                    : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                </span>
+              ) : (
+                <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1">
+                  {typeOptions.map((option) => {
+                    const active = option === form.type;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => handleTypeSelect(option)}
+                        className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                          active
+                            ? 'bg-blue-600 text-white shadow'
+                            : 'bg-transparent text-slate-600 hover:bg-white'
+                        }`}
+                      >
+                        {option === 'Income'
+                          ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
+                          : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <p className="text-xs text-slate-500">
                 {isIncome
                   ? t('invoiceTypeIncomeHint') ?? 'Используйте для выставления счётов клиентам.'

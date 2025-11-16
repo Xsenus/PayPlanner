@@ -58,6 +58,8 @@ export const ru = {
   clientStatusNotSelected: 'Без статуса',
   legalEntities: 'Юридические лица',
   accounts: 'Счета',
+  accountsIncomeNav: 'Доходные счета',
+  accountsExpenseNav: 'Расходные счета',
   payments: 'Платежи',
   paymentsIncomeNav: 'Доходные',
   paymentsExpenseNav: 'Расходные',

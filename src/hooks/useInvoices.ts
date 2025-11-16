@@ -164,7 +164,15 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         }
       }
     },
-    [filters.from, filters.to, filters.status, filters.clientId, filters.responsibleId, filters.search],
+    [
+      filters.from,
+      filters.to,
+      filters.status,
+      filters.clientId,
+      filters.responsibleId,
+      filters.search,
+      filters.type,
+    ],
   );
 
   useEffect(() => {

@@ -37,6 +37,8 @@ function AppContent() {
     clients: 'Клиенты',
     clientDetail: 'Карточка клиента',
     accounts: 'Счета',
+    accountsIncome: 'Доходные счета',
+    accountsExpense: 'Расходные счета',
     acts: 'Акты',
     paymentsIncome: 'Доходные платежи',
     paymentsExpense: 'Расходные платежи',
@@ -96,6 +98,8 @@ function AppContent() {
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
         { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
@@ -123,6 +127,8 @@ function AppContent() {
         case 'clientDetail':
           return permissions.clients.canView;
         case 'accounts':
+        case 'accountsIncome':
+        case 'accountsExpense':
           return permissions.accounts.canView;
         case 'acts':
           return permissions.acts.canView;
@@ -295,6 +301,14 @@ function AppContent() {
       case 'accounts':
         return permissions.accounts.canView
           ? <Accounts />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'accountsIncome':
+        return permissions.accounts.canView
+          ? <Accounts defaultType="Income" lockType />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'accountsExpense':
+        return permissions.accounts.canView
+          ? <Accounts defaultType="Expense" lockType />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'acts':
         return permissions.acts.canView

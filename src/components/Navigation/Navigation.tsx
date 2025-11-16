@@ -16,6 +16,8 @@ import {
   FileSignature,
   Eye,
   Banknote,
+  TrendingUp,
+  TrendingDown,
   ChevronDown,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -138,7 +140,26 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
     }
     if (permissions.accounts.canView) {
-      items.push({ id: 'accounts', tab: 'accounts' as Tab, label: t('accounts') ?? 'Счета', icon: WalletCards });
+      const accountChildren: SidebarChild[] = [
+        {
+          id: 'accountsIncome' as Tab,
+          label: t('accountsIncomeNav') ?? t('invoiceTypeIncome') ?? 'Доходные счета',
+          icon: TrendingUp,
+        },
+        {
+          id: 'accountsExpense' as Tab,
+          label: t('accountsExpenseNav') ?? t('invoiceTypeExpense') ?? 'Расходные счета',
+          icon: TrendingDown,
+        },
+      ];
+
+      items.push({
+        id: 'accounts',
+        tab: 'accounts' as Tab,
+        label: t('accounts') ?? 'Счета',
+        icon: WalletCards,
+        children: accountChildren,
+      });
     }
 
     const paymentsChildren: SidebarChild[] = permissions.payments.canView

@@ -34,6 +34,11 @@ type SummaryCard = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
+interface AccountsProps {
+  defaultType?: PaymentKind;
+  lockType?: boolean;
+}
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   const normalized = toDateInputValue(value);
@@ -44,7 +49,7 @@ function formatDate(value?: string | null): string {
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Processing', 'Cancelled'];
 
-export function Accounts() {
+export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
@@ -60,7 +65,7 @@ export function Accounts() {
   const [from, setFrom] = useState<string>(startOfYear);
   const [to, setTo] = useState<string>(todayYMD);
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
-  const [typeFilter, setTypeFilter] = useState<PaymentKind>('Income');
+  const [typeFilter, setTypeFilter] = useState<PaymentKind>(defaultType ?? 'Income');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -93,6 +98,11 @@ export function Accounts() {
   useEffect(() => {
     setPage(1);
   }, [from, to, statusFilter, debouncedSearch, typeFilter]);
+
+  useEffect(() => {
+    if (!defaultType) return;
+    setTypeFilter(defaultType);
+  }, [defaultType]);
 
   const totalPages = useMemo(() => {
     if (!pagination.pageSize) return 1;
@@ -284,29 +294,39 @@ export function Accounts() {
               <h1 className="text-2xl font-bold text-gray-900">{headingTitle}</h1>
               <p className="text-sm text-gray-500">{headingDescription}</p>
             </div>
-            <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
-              {typeOptions.map((option) => {
-                const isActive = option === typeFilter;
-                const buttonLabel =
-                  option === 'Income'
-                    ? t('invoiceTypeIncomeShort') ?? typeLabels[option]
-                    : t('invoiceTypeExpenseShort') ?? typeLabels[option];
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => setTypeFilter(option)}
-                    className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow'
-                        : 'bg-transparent text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    {buttonLabel}
-                  </button>
-                );
-              })}
-            </div>
+            {lockType ? (
+              <span
+                className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                  typeBadgeClasses[typeFilter]
+                }`}
+              >
+                {typeLabels[typeFilter]}
+              </span>
+            ) : (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+                {typeOptions.map((option) => {
+                  const isActive = option === typeFilter;
+                  const buttonLabel =
+                    option === 'Income'
+                      ? t('invoiceTypeIncomeShort') ?? typeLabels[option]
+                      : t('invoiceTypeExpenseShort') ?? typeLabels[option];
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setTypeFilter(option)}
+                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow'
+                          : 'bg-transparent text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {buttonLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -643,6 +663,7 @@ export function Accounts() {
           lookupsError={lookupsError}
           defaultClientId={undefined}
           defaultType={typeFilter}
+          lockType={lockType}
         />
       </div>
     </div>
