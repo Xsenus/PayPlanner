@@ -39,6 +39,8 @@ interface AccountsProps {
   lockType?: boolean;
 }
 
+type FilterType = PaymentKind | 'All';
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   const normalized = toDateInputValue(value);
@@ -65,7 +67,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const [from, setFrom] = useState<string>(startOfYear);
   const [to, setTo] = useState<string>(todayYMD);
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
-  const [typeFilter, setTypeFilter] = useState<PaymentKind>(defaultType ?? 'Income');
+  const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -88,7 +90,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     to: to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
-    type: typeFilter,
+    type: typeFilter === 'All' ? undefined : typeFilter,
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
@@ -100,7 +102,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   }, [from, to, statusFilter, debouncedSearch, typeFilter]);
 
   useEffect(() => {
-    if (!defaultType) return;
+    if (!defaultType) {
+      setTypeFilter('All');
+      return;
+    }
     setTypeFilter(defaultType);
   }, [defaultType]);
 
@@ -171,6 +176,12 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
   };
 
+  const typeFilterLabels: Record<FilterType, string> = {
+    All: t('invoiceTypeAll') ?? 'Все счета',
+    Income: t('invoiceTypeIncome') ?? 'Доходные счета',
+    Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
+  };
+
   const typeBadgeClasses: Record<PaymentKind, string> = {
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -179,15 +190,21 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const headingTitle =
     typeFilter === 'Expense'
       ? t('invoiceExpenseTitle') ?? 'Расходные счета'
-      : t('invoiceIncomeTitle') ?? t('invoicesTitle') ?? 'Доходные счета';
+      : typeFilter === 'Income'
+        ? t('invoiceIncomeTitle') ?? t('invoicesTitle') ?? 'Доходные счета'
+        : t('invoiceAllTitle') ?? t('accounts') ?? 'Все счета';
 
   const headingDescription =
     typeFilter === 'Expense'
       ? t('invoiceSectionDescriptionExpense') ??
         'Учитывайте входящие счета от поставщиков и контролируйте их оплату.'
-      : t('invoiceSectionDescriptionIncome') ??
-        t('invoiceSectionDescription') ??
-        'Отслеживайте выставленные счета и контролируйте их оплату.';
+      : typeFilter === 'Income'
+        ? t('invoiceSectionDescriptionIncome') ??
+          t('invoiceSectionDescription') ??
+          'Отслеживайте выставленные счета и контролируйте их оплату.'
+        : t('invoiceSectionDescriptionAll') ??
+          t('invoiceSectionDescription') ??
+          'Просматривайте все входящие и исходящие счета компании.';
 
   const handleSort = (key: InvoicesSortKey) => {
     setSortState((prev) => {
@@ -283,7 +300,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     setSearch('');
   };
 
-  const typeOptions: PaymentKind[] = ['Income', 'Expense'];
+  const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -297,10 +314,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
             {lockType ? (
               <span
                 className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
-                  typeBadgeClasses[typeFilter]
+                  typeBadgeClasses[typeFilter === 'Expense' ? 'Expense' : 'Income']
                 }`}
               >
-                {typeLabels[typeFilter]}
+                {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
               </span>
             ) : (
               <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
@@ -308,8 +325,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                   const isActive = option === typeFilter;
                   const buttonLabel =
                     option === 'Income'
-                      ? t('invoiceTypeIncomeShort') ?? typeLabels[option]
-                      : t('invoiceTypeExpenseShort') ?? typeLabels[option];
+                      ? t('invoiceTypeIncomeShort') ?? typeFilterLabels[option]
+                      : option === 'Expense'
+                        ? t('invoiceTypeExpenseShort') ?? typeFilterLabels[option]
+                        : t('invoiceTypeAllShort') ?? typeFilterLabels[option];
                   return (
                     <button
                       key={option}
@@ -662,7 +681,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
-          defaultType={typeFilter}
+          defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
         />
       </div>

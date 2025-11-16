@@ -45,16 +45,17 @@ interface InvoiceModalProps {
 function normalizeInvoiceToForm(
   invoice: Invoice | null,
   defaultClientId?: number,
-  defaultType: PaymentKind = 'Income',
+  defaultType?: PaymentKind,
 ): FormState {
   const today = formatLocalYMD(new Date());
+  const resolvedType: PaymentKind = defaultType ?? 'Income';
   if (!invoice) {
     return {
       number: '',
       date: today,
       dueDate: '',
       amount: '',
-      type: defaultType,
+      type: resolvedType,
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
       description: '',
@@ -69,7 +70,7 @@ function normalizeInvoiceToForm(
     date: toDateInputValue(invoice.date) || today,
     dueDate: toDateInputValue(invoice.dueDate) || '',
     amount: invoice.amount !== undefined && invoice.amount !== null ? String(invoice.amount) : '',
-    type: invoice.type ?? defaultType,
+    type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
     description: invoice.description ?? '',
@@ -107,7 +108,7 @@ export function InvoiceModal({
   lookupsLoading,
   lookupsError,
   defaultClientId,
-  defaultType = 'Income',
+  defaultType,
   lockType = false,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
