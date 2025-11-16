@@ -14,6 +14,7 @@ import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
+import { Payments } from './components/Payments/Payments';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -36,7 +37,12 @@ function AppContent() {
     clients: 'Клиенты',
     clientDetail: 'Карточка клиента',
     accounts: 'Счета',
+    accountsIncome: 'Доходные счета',
+    accountsExpense: 'Расходные счета',
     acts: 'Акты',
+    paymentsIncome: 'Доходные платежи',
+    paymentsExpense: 'Расходные платежи',
+    payments: 'Платежи',
     contracts: 'Договоры',
     users: 'Пользователи',
     roles: 'Роли',
@@ -92,7 +98,12 @@ function AppContent() {
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
+        { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
+        { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
+        { tab: 'payments' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
@@ -116,9 +127,15 @@ function AppContent() {
         case 'clientDetail':
           return permissions.clients.canView;
         case 'accounts':
+        case 'accountsIncome':
+        case 'accountsExpense':
           return permissions.accounts.canView;
         case 'acts':
           return permissions.acts.canView;
+        case 'paymentsIncome':
+        case 'paymentsExpense':
+        case 'payments':
+          return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
         case 'dictionaries':
@@ -285,10 +302,48 @@ function AppContent() {
         return permissions.accounts.canView
           ? <Accounts />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'accountsIncome':
+        return permissions.accounts.canView
+          ? <Accounts defaultType="Income" lockType />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'accountsExpense':
+        return permissions.accounts.canView
+          ? <Accounts defaultType="Expense" lockType />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'acts':
         return permissions.acts.canView
           ? <Acts />
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
+      case 'paymentsIncome':
+        return permissions.payments.canView
+          ? (
+              <Payments
+                onOpenClient={handleOpenClient}
+                defaultType="Income"
+                lockType
+                titleKey="paymentsIncomeTitle"
+                subtitleKey="paymentsIncomeSubtitle"
+                lockedTypeMessageKey="paymentsTypeLockedIncome"
+              />
+            )
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
+      case 'paymentsExpense':
+        return permissions.payments.canView
+          ? (
+              <Payments
+                onOpenClient={handleOpenClient}
+                defaultType="Expense"
+                lockType
+                titleKey="paymentsExpenseTitle"
+                subtitleKey="paymentsExpenseSubtitle"
+                lockedTypeMessageKey="paymentsTypeLockedExpense"
+              />
+            )
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
+      case 'payments':
+        return permissions.payments.canView
+          ? <Payments onOpenClient={handleOpenClient} />
+          : renderNoAccess('Журнал платежей недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
           ? <Contracts />

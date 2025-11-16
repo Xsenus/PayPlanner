@@ -9,6 +9,7 @@ public class InvoiceDto
     public DateTime Date { get; set; }
     public DateTime? DueDate { get; set; }
     public decimal Amount { get; set; }
+    public PaymentType Type { get; set; }
     public PaymentStatus Status { get; set; }
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
@@ -28,6 +29,7 @@ public class InvoiceDto
     public string? ResponsibleName { get; set; }
     public int? ResponsibleId { get; set; }
     public string? CounterpartyInn { get; set; }
+    public string? CounterpartyName { get; set; }
     public string? PaymentStatusName { get; set; }
     public DateTime CreatedAt { get; set; }
 }

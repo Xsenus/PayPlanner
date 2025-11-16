@@ -28,6 +28,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
+        [FromQuery] PaymentType? type,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -38,7 +39,7 @@ public class InvoicesController : ControllerBase
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search);
+        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search, type);
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -61,10 +62,11 @@ public class InvoicesController : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
+        [FromQuery] PaymentType? type,
         CancellationToken ct = default)
     {
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search);
+        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search, type);
 
         var grouped = await query
             .GroupBy(x => x.Payment.Status)
@@ -133,7 +135,7 @@ public class InvoicesController : ControllerBase
             Date = (request.DueDate ?? request.Date).Date,
             Amount = request.Amount,
             Status = request.Status,
-            Type = PaymentType.Income,
+            Type = request.Type,
             Description = Normalize(request.Description) ?? string.Empty,
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
@@ -142,6 +144,7 @@ public class InvoicesController : ControllerBase
             IncomeTypeId = request.IncomeTypeId,
             DealTypeId = request.DealTypeId,
             PaymentStatusId = request.PaymentStatusEntityId,
+            CounterpartyName = Normalize(request.CounterpartyName),
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -188,7 +191,7 @@ public class InvoicesController : ControllerBase
         payment.Date = (request.DueDate ?? request.Date).Date;
         payment.Amount = request.Amount;
         payment.Status = request.Status;
-        payment.Type = PaymentType.Income;
+        payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
@@ -197,6 +200,7 @@ public class InvoicesController : ControllerBase
         payment.IncomeTypeId = request.IncomeTypeId;
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
+        payment.CounterpartyName = Normalize(request.CounterpartyName);
 
         ApplyPaidFlags(payment, request.PaidDate);
 
@@ -228,7 +232,7 @@ public class InvoicesController : ControllerBase
     {
         var payments = _db.Payments.AsNoTracking()
             .WithPaymentIncludes()
-            .Where(p => p.Account != null && p.Account != "" && p.Type == PaymentType.Income);
+            .Where(p => p.Account != null && p.Account != "");
 
         var acts = _db.Acts.AsNoTracking()
             .Include(a => a.Client)
@@ -251,8 +255,14 @@ public class InvoicesController : ControllerBase
         PaymentStatus? status,
         int? clientId,
         int? responsibleId,
-        string? search)
+        string? search,
+        PaymentType? type)
     {
+        if (type.HasValue)
+        {
+            query = query.Where(x => x.Payment.Type == type.Value);
+        }
+
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
@@ -288,6 +298,7 @@ public class InvoicesController : ControllerBase
                 (x.Payment.Account != null && EF.Functions.Like(x.Payment.Account, like)) ||
                 (x.Payment.Description != null && EF.Functions.Like(x.Payment.Description, like)) ||
                 (x.Payment.Notes != null && EF.Functions.Like(x.Payment.Notes, like)) ||
+                (x.Payment.CounterpartyName != null && EF.Functions.Like(x.Payment.CounterpartyName, like)) ||
                 (x.Payment.Client != null && x.Payment.Client.Name != null && EF.Functions.Like(x.Payment.Client.Name, like)) ||
                 (x.Payment.Client != null && x.Payment.Client.Company != null && EF.Functions.Like(x.Payment.Client.Company, like)) ||
                 (x.Payment.ClientCase != null && x.Payment.ClientCase.Title != null && EF.Functions.Like(x.Payment.ClientCase.Title, like)) ||
@@ -385,6 +396,7 @@ public class InvoicesController : ControllerBase
         Date = x.Payment.AccountDate ?? x.Payment.Date,
         DueDate = x.Payment.Date,
         Amount = x.Payment.Amount,
+        Type = x.Payment.Type,
         Status = x.Payment.Status,
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
@@ -418,6 +430,7 @@ public class InvoicesController : ControllerBase
                 : x.Act.Responsible.FullName)
             : null,
         CounterpartyInn = x.Act != null ? x.Act.CounterpartyInn : null,
+        CounterpartyName = x.Payment.CounterpartyName,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
         CreatedAt = x.Payment.CreatedAt,
     };

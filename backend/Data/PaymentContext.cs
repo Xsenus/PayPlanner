@@ -119,6 +119,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);

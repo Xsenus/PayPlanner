@@ -16,7 +16,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import type { Client, Invoice, InvoiceInput, PaymentStatus } from '../../types';
+import type { Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -34,6 +34,13 @@ type SummaryCard = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
+interface AccountsProps {
+  defaultType?: PaymentKind;
+  lockType?: boolean;
+}
+
+type FilterType = PaymentKind | 'All';
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   const normalized = toDateInputValue(value);
@@ -44,7 +51,7 @@ function formatDate(value?: string | null): string {
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Processing', 'Cancelled'];
 
-export function Accounts() {
+export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
@@ -60,6 +67,7 @@ export function Accounts() {
   const [from, setFrom] = useState<string>(startOfYear);
   const [to, setTo] = useState<string>(todayYMD);
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
+  const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -82,6 +90,7 @@ export function Accounts() {
     to: to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
+    type: typeFilter === 'All' ? undefined : typeFilter,
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
@@ -90,7 +99,15 @@ export function Accounts() {
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, statusFilter, debouncedSearch]);
+  }, [from, to, statusFilter, debouncedSearch, typeFilter]);
+
+  useEffect(() => {
+    if (!defaultType) {
+      setTypeFilter('All');
+      return;
+    }
+    setTypeFilter(defaultType);
+  }, [defaultType]);
 
   const totalPages = useMemo(() => {
     if (!pagination.pageSize) return 1;
@@ -153,6 +170,41 @@ export function Accounts() {
     Processing: 'bg-blue-100 text-blue-700 border border-blue-200',
     Cancelled: 'bg-slate-100 text-slate-600 border border-slate-200',
   };
+
+  const typeLabels: Record<PaymentKind, string> = {
+    Income: t('invoiceTypeIncome') ?? 'Доходные счета',
+    Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
+  };
+
+  const typeFilterLabels: Record<FilterType, string> = {
+    All: t('invoiceTypeAll') ?? 'Все счета',
+    Income: t('invoiceTypeIncome') ?? 'Доходные счета',
+    Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
+  };
+
+  const typeBadgeClasses: Record<PaymentKind, string> = {
+    Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
+  const headingTitle =
+    typeFilter === 'Expense'
+      ? t('invoiceExpenseTitle') ?? 'Расходные счета'
+      : typeFilter === 'Income'
+        ? t('invoiceIncomeTitle') ?? t('invoicesTitle') ?? 'Доходные счета'
+        : t('invoiceAllTitle') ?? t('accounts') ?? 'Все счета';
+
+  const headingDescription =
+    typeFilter === 'Expense'
+      ? t('invoiceSectionDescriptionExpense') ??
+        'Учитывайте входящие счета от поставщиков и контролируйте их оплату.'
+      : typeFilter === 'Income'
+        ? t('invoiceSectionDescriptionIncome') ??
+          t('invoiceSectionDescription') ??
+          'Отслеживайте выставленные счета и контролируйте их оплату.'
+        : t('invoiceSectionDescriptionAll') ??
+          t('invoiceSectionDescription') ??
+          'Просматривайте все входящие и исходящие счета компании.';
 
   const handleSort = (key: InvoicesSortKey) => {
     setSortState((prev) => {
@@ -248,17 +300,52 @@ export function Accounts() {
     setSearch('');
   };
 
+  const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              {t('invoicesTitle') ?? t('accounts') ?? 'Исходящие счета'}
-            </h1>
-            <p className="text-sm text-gray-500">
-              {t('invoiceSectionDescription') ?? 'Отслеживайте выставленные счета и контролируйте их оплату.'}
-            </p>
+        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-col gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{headingTitle}</h1>
+              <p className="text-sm text-gray-500">{headingDescription}</p>
+            </div>
+            {lockType ? (
+              <span
+                className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                  typeBadgeClasses[typeFilter === 'Expense' ? 'Expense' : 'Income']
+                }`}
+              >
+                {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
+              </span>
+            ) : (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+                {typeOptions.map((option) => {
+                  const isActive = option === typeFilter;
+                  const buttonLabel =
+                    option === 'Income'
+                      ? t('invoiceTypeIncomeShort') ?? typeFilterLabels[option]
+                      : option === 'Expense'
+                        ? t('invoiceTypeExpenseShort') ?? typeFilterLabels[option]
+                        : t('invoiceTypeAllShort') ?? typeFilterLabels[option];
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setTypeFilter(option)}
+                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow'
+                          : 'bg-transparent text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {buttonLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -429,10 +516,37 @@ export function Accounts() {
                 ) : (
                   invoices.map((invoice) => {
                     const status = invoice.status ?? 'Pending';
+                    const type = (invoice.type ?? 'Income') as PaymentKind;
                     const actPieces: string[] = [];
                     if (invoice.actNumber) actPieces.push(`№${invoice.actNumber}`);
                     if (invoice.actTitle) actPieces.push(invoice.actTitle);
                     const actLine = actPieces.join(' · ');
+                    const typeBadgeClass = typeBadgeClasses[type];
+                    const typeLabel = typeLabels[type];
+                    const primaryName =
+                      type === 'Expense'
+                        ? invoice.counterpartyName ?? invoice.clientName ?? '—'
+                        : invoice.clientName ?? invoice.counterpartyName ?? '—';
+                    const extraLines: string[] = [];
+                    if (type === 'Expense') {
+                      if (invoice.clientName) {
+                        extraLines.push(
+                          `${t('invoiceLinkedClientLabel') ?? 'Связан с клиентом'}: ${invoice.clientName}`,
+                        );
+                      }
+                      if (invoice.clientCompany) {
+                        extraLines.push(invoice.clientCompany);
+                      }
+                    } else {
+                      if (invoice.clientCompany) {
+                        extraLines.push(invoice.clientCompany);
+                      }
+                      if (invoice.counterpartyName) {
+                        extraLines.push(
+                          `${t('invoiceCounterpartyLabel') ?? 'От поставщика'}: ${invoice.counterpartyName}`,
+                        );
+                      }
+                    }
 
                     return (
                       <tr key={invoice.id}>
@@ -441,12 +555,19 @@ export function Accounts() {
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium text-gray-900">{invoice.clientName ?? '—'}</span>
+                              <span className="font-medium text-gray-900">{primaryName}</span>
                               <ClientStatusBadge status={invoice.clientStatus} />
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
+                              >
+                                {typeLabel}
+                              </span>
                             </div>
-                            {invoice.clientCompany && (
-                              <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
-                            )}
+                            {extraLines.map((line, index) => (
+                              <div key={`${line}-${index}`} className="text-xs text-gray-500">
+                                {line}
+                              </div>
+                            ))}
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -560,6 +681,8 @@ export function Accounts() {
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
+          defaultType={typeFilter === 'All' ? undefined : typeFilter}
+          lockType={lockType}
         />
       </div>
     </div>
