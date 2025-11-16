@@ -118,6 +118,7 @@ export function InvoiceModal({
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+  const isTypeLocked = lockType && mode === 'create';
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
@@ -239,7 +240,7 @@ export function InvoiceModal({
   };
 
   const handleTypeSelect = (nextType: PaymentKind) => {
-    if (lockType) return;
+    if (isTypeLocked) return;
     setForm((prev) => ({
       ...prev,
       type: nextType,
@@ -329,7 +330,7 @@ export function InvoiceModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="relative w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
@@ -337,9 +338,9 @@ export function InvoiceModal({
                 ? t('invoiceEdit') ?? 'Редактировать счёт'
                 : t('invoiceCreate') ?? 'Создать счёт'}
             </h2>
-              <p className="text-sm text-slate-500">
-                {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
-              </p>
+            <p className="text-sm text-slate-500">
+              {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
+            </p>
           </div>
           <button
             type="button"
@@ -351,259 +352,315 @@ export function InvoiceModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-2 sm:col-span-2">
-              <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
-              {lockType ? (
-                <span
-                  className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
-                    typeBadgeClasses[form.type]
-                  }`}
-                >
-                  {form.type === 'Income'
-                    ? t('invoiceTypeIncome') ?? 'Доходные счета'
-                    : t('invoiceTypeExpense') ?? 'Расходные счета'}
-                </span>
-              ) : (
-                <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1">
-                  {typeOptions.map((option) => {
-                    const active = option === form.type;
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => handleTypeSelect(option)}
-                        className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                          active
-                            ? 'bg-blue-600 text-white shadow'
-                            : 'bg-transparent text-slate-600 hover:bg-white'
-                        }`}
-                      >
-                        {option === 'Income'
-                          ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                          : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                {isIncome
-                  ? t('invoiceTypeIncomeHint') ?? 'Используйте для выставления счётов клиентам.'
-                  : t('invoiceTypeExpenseHint') ?? 'Подходит для входящих счетов от поставщиков.'}
-              </p>
-            </div>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
-              <input
-                type="text"
-                value={form.number}
-                onChange={handleChange('number')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                required
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Дата выставления'}</span>
-              <input
-                type="date"
-                value={form.date}
-                onChange={handleChange('date')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                required
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Срок оплаты'}</span>
-              <input
-                type="date"
-                value={form.dueDate}
-                onChange={handleChange('dueDate')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
-                {t('invoiceAmount') ?? 'Сумма'}
-                {isIncome && (
-                  <button
-                    type="button"
-                    onClick={handleOpenInstallmentCalculator}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                  >
-                    {t('invoiceInstallmentButton') ?? 'Рассрочка'}
-                  </button>
-                )}
+        <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-6">
+          <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
+            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('invoiceMainDetailsTitle') ?? 'Основные параметры'}
               </span>
-              <input
-                type="number"
-                step="0.01"
-                value={form.amount}
-                onChange={handleChange('amount')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                placeholder="0.00"
-              />
-            </label>
+              <p className="text-sm text-slate-500">
+                {t('invoiceMainDetailsHint') ?? 'Укажите тип, номер, сумму и назначение счёта.'}
+              </p>
+            </header>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
-              <select
-                value={form.status}
-                onChange={handleChange('status')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
-                <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается'}</option>
-                <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
-                <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
-                <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
-                <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Контрагент'}</span>
-              <select
-                value={form.clientId}
-                onChange={handleChange('clientId')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
-                <option value="">{t('invoiceClientPlaceholder') ?? 'Выберите клиента'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                  </option>
-                ))}
-              </select>
-              {lookupsLoading && (
-                <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
-              )}
-              {lookupsError && (
-                <span className="text-xs text-rose-600">{lookupsError}</span>
-              )}
-              {selectedClient?.clientStatus && (
-                <div className="mt-2 space-y-1">
-                  <ClientStatusBadge status={selectedClient.clientStatus} />
-                  {selectedClient.clientStatus.description && (
-                    <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
+            <div className="mt-4 space-y-4">
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
+                  {lockType && mode === 'edit' && (
+                    <span className="text-xs text-slate-500">
+                      {t('invoiceTypeEditHint') ?? 'Можно изменить тип, если счёт попал не в ту группу.'}
+                    </span>
                   )}
                 </div>
-              )}
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="font-medium text-slate-700">{t('invoiceCounterparty') ?? 'От кого счёт'}</span>
-              <input
-                type="text"
-                value={form.counterpartyName}
-                onChange={handleChange('counterpartyName')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
-              />
-              <span className="text-xs text-slate-500">
-                {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
-              </span>
-            </label>
-          </div>
-
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoiceDescription') ?? t('description') ?? 'Описание'}</span>
-            <textarea
-              value={form.description}
-              onChange={handleChange('description')}
-              rows={3}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </label>
-
-          {isIncome && (
-            <div className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={actSearch}
-                  onChange={(event) => {
-                    setActSearch(event.target.value);
-                    setActDropdownOpen(true);
-                  }}
-                  onFocus={() => setActDropdownOpen(true)}
-                  onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
-                  placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
-                  className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-                {actSearch && (
-                  <button
-                    type="button"
-                    onClick={clearSelectedAct}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                    aria-label={t('clear') ?? 'Очистить'}
+                {isTypeLocked ? (
+                  <span
+                    className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                      typeBadgeClasses[form.type]
+                    }`}
                   >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
-                  <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                    {actsLoading ? (
-                      <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
-                        <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
-                      </div>
-                    ) : actsError ? (
-                      <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
-                    ) : actSuggestions.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-500">
-                        {t('nothingFound') ?? 'Ничего не найдено'}
-                      </div>
-                    ) : (
-                      actSuggestions.map((act) => (
+                    {form.type === 'Income'
+                      ? t('invoiceTypeIncome') ?? 'Доходные счета'
+                      : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                  </span>
+                ) : (
+                  <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
+                    {typeOptions.map((option) => {
+                      const active = option === form.type;
+                      return (
                         <button
-                          key={act.id}
+                          key={option}
                           type="button"
-                          onClick={() => handleActSelect(act)}
-                          className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                          onClick={() => handleTypeSelect(option)}
+                          className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                            active
+                              ? 'bg-blue-600 text-white shadow'
+                              : 'bg-transparent text-slate-600 hover:bg-slate-100'
+                          }`}
                         >
-                          <div className="font-medium text-slate-900">{actLabel(act)}</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            <span>{formatDate(act.date)}</span>
-                            <span className="mx-2">·</span>
-                            <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
-                          </div>
+                          {option === 'Income'
+                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
+                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
                         </button>
-                      ))
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-xs text-slate-500">
+                  {isIncome
+                    ? t('invoiceTypeIncomeHint') ?? 'Используйте для выставления счётов клиентам.'
+                    : t('invoiceTypeExpenseHint') ?? 'Используйте для входящих счетов от поставщиков и подрядчиков.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
+                  <input
+                    type="text"
+                    value={form.number}
+                    onChange={handleChange('number')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    required
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
+                    {t('invoiceAmount') ?? 'Сумма'}
+                    {isIncome && (
+                      <button
+                        type="button"
+                        onClick={handleOpenInstallmentCalculator}
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                      >
+                        {t('invoiceInstallmentButton') ?? 'Рассрочка'}
+                      </button>
+                    )}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.amount}
+                    onChange={handleChange('amount')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="0.00"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
+                  <select
+                    value={form.status}
+                    onChange={handleChange('status')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается'}</option>
+                    <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
+                    <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
+                    <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
+                    <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
+                  </select>
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                <textarea
+                  value={form.description}
+                  onChange={handleChange('description')}
+                  rows={3}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('invoicePartiesTitle') ?? 'Контрагент и источник'}
+              </span>
+              <p className="text-sm text-slate-500">
+                {t('invoicePartiesHint') ?? 'Привяжите счёт к клиенту или укажите поставщика услуги.'}
+              </p>
+            </header>
+            <div className="mt-4 grid grid-cols-1 gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Контрагент'}</span>
+                <select
+                  value={form.clientId}
+                  onChange={handleChange('clientId')}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="">{t('invoiceClientPlaceholder') ?? 'Выберите клиента'}</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                      {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {lookupsLoading && (
+                  <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
+                )}
+                {lookupsError && (
+                  <span className="text-xs text-rose-600">{lookupsError}</span>
+                )}
+                {selectedClient?.clientStatus && (
+                  <div className="mt-2 space-y-1 rounded-xl border border-slate-100 bg-slate-50 p-2">
+                    <ClientStatusBadge status={selectedClient.clientStatus} />
+                    {selectedClient.clientStatus.description && (
+                      <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                     )}
                   </div>
                 )}
-              </div>
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceCounterparty') ?? 'От кого счёт'}</span>
+                <input
+                  type="text"
+                  value={form.counterpartyName}
+                  onChange={handleChange('counterpartyName')}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
+                />
+                <span className="text-xs text-slate-500">
+                  {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
+                </span>
+              </label>
             </div>
-          )}
+          </section>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
-            <textarea
-              value={form.actReference}
-              onChange={handleChange('actReference')}
-              rows={2}
-              placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </label>
+          <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('invoiceScheduleTitle') ?? 'Сроки и оплата'}
+              </span>
+              <p className="text-sm text-slate-500">
+                {t('invoiceScheduleHint') ?? 'Помогает контролировать вовремя ли оплатят счёт.'}
+              </p>
+            </header>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Дата выставления'}</span>
+                <input
+                  type="date"
+                  value={form.date}
+                  onChange={handleChange('date')}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  required
+                />
+              </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Дата оплаты'}</span>
-            <input
-              type="date"
-              value={form.paidDate}
-              onChange={handleChange('paidDate')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Срок оплаты'}</span>
+                <input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={handleChange('dueDate')}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
 
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Дата оплаты'}</span>
+                <input
+                  type="date"
+                  value={form.paidDate}
+                  onChange={handleChange('paidDate')}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
+              </span>
+              <p className="text-sm text-slate-500">
+                {t('invoiceDocumentsHint') ?? 'Прикрепите акт или оставьте комментарий.'}
+              </p>
+            </header>
+            <div className="mt-4 space-y-4">
+              {isIncome && (
+                <div className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={actSearch}
+                      onChange={(event) => {
+                        setActSearch(event.target.value);
+                        setActDropdownOpen(true);
+                      }}
+                      onFocus={() => setActDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
+                      placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
+                      className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                    {actSearch && (
+                      <button
+                        type="button"
+                        onClick={clearSelectedAct}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                        aria-label={t('clear') ?? 'Очистить'}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
+                      <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        {actsLoading ? (
+                          <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
+                            <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                          </div>
+                        ) : actsError ? (
+                          <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
+                        ) : actSuggestions.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-slate-500">
+                            {t('nothingFound') ?? 'Ничего не найдено'}
+                          </div>
+                        ) : (
+                          actSuggestions.map((act) => (
+                            <button
+                              key={act.id}
+                              type="button"
+                              onClick={() => handleActSelect(act)}
+                              className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                            >
+                              <div className="font-medium text-slate-900">{actLabel(act)}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                <span>{formatDate(act.date)}</span>
+                                <span className="mx-2">·</span>
+                                <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
+                <textarea
+                  value={form.actReference}
+                  onChange={handleChange('actReference')}
+                  rows={2}
+                  placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+            </div>
+          </section>
           {(localError || errorMessage) && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {localError ?? errorMessage}
