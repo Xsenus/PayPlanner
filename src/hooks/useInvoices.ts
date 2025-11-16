@@ -129,6 +129,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.clientId,
       filters.responsibleId,
       filters.search,
+      filters.type,
       filters.sortBy,
       filters.sortDir,
       filters.page,
