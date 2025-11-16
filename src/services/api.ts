@@ -204,6 +204,7 @@ export class ApiService {
     clientId?: number;
     responsibleId?: number;
     search?: string;
+    type?: 'Income' | 'Expense';
     sortBy?: InvoicesSortKey;
     sortDir?: SortDir;
     page?: number;
@@ -224,6 +225,7 @@ export class ApiService {
     clientId?: number;
     responsibleId?: number;
     search?: string;
+    type?: 'Income' | 'Expense';
   }) {
     const q = buildQuery(params ?? {});
     return this.request<InvoiceSummary>(`/invoices/summary${q}`);

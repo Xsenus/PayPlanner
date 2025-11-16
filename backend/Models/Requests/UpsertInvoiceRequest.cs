@@ -18,6 +18,9 @@ public class UpsertInvoiceRequest
     public decimal Amount { get; set; }
 
     [Required]
+    public PaymentType Type { get; set; } = PaymentType.Income;
+
+    [Required]
     public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
 
     public DateTime? PaidDate { get; set; }
@@ -32,6 +35,9 @@ public class UpsertInvoiceRequest
 
     [MaxLength(300)]
     public string? ActReference { get; set; }
+
+    [MaxLength(200)]
+    public string? CounterpartyName { get; set; }
 
     public int? PaymentSourceId { get; set; }
 

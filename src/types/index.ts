@@ -281,6 +281,7 @@ export interface Invoice {
   date: string;
   dueDate?: string | null;
   amount: number;
+  type: 'Income' | 'Expense';
   status: PaymentStatus;
   isPaid: boolean;
   paidDate?: string | null;
@@ -300,6 +301,7 @@ export interface Invoice {
   responsibleId?: number | null;
   responsibleName?: string | null;
   counterpartyInn?: string | null;
+  counterpartyName?: string | null;
   paymentStatusName?: string | null;
   createdAt: string;
 }
@@ -309,11 +311,13 @@ export interface InvoiceInput {
   date: string;
   dueDate?: string | null;
   amount: number;
+  type: 'Income' | 'Expense';
   status: PaymentStatus;
   clientId: number;
   clientCaseId?: number | null;
   description?: string | null;
   actReference?: string | null;
+  counterpartyName?: string | null;
   paymentSourceId?: number | null;
   incomeTypeId?: number | null;
   dealTypeId?: number | null;
