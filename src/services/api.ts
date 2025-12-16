@@ -800,6 +800,13 @@ export class ApiService {
       body: JSON.stringify(payload),
     });
   }
+
+  async deleteUserActivityLogs(password: string) {
+    return this.request<{ deleted: number }>('/user-activity/cleanup', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    });
+  }
 }
 
 export const apiService = new ApiService();

@@ -206,6 +206,27 @@ public class UserActivityController : ControllerBase
         return Created($"/api/user-activity/{dto.Id}", dto);
     }
 
+    [HttpDelete("cleanup")]
+    [Authorize(Policy = "Admin")]
+    public async Task<IActionResult> DeleteAllAsync([FromBody] DeleteUserActivityRequest request, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(request?.Password, "Qwerty!@#", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("Попытка очистки журнала активности с неверным паролем");
+            return Forbid();
+        }
+
+        var total = await _context.UserActivityLogs.CountAsync(cancellationToken);
+        if (total == 0)
+        {
+            return Ok(new { deleted = 0 });
+        }
+
+        var deleted = await _context.UserActivityLogs.ExecuteDeleteAsync(cancellationToken);
+        _logger.LogInformation("Журнал активности пользователей очищен. Удалено: {Deleted}", deleted);
+        return Ok(new { deleted });
+    }
+
     private static UserActivityLogDto MapToDto(UserActivityLog log)
     {
         return new UserActivityLogDto

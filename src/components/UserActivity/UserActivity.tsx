@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -67,9 +67,41 @@ export const UserActivity = () => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
+  const [clearing, setClearing] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const debouncedSearch = useDebouncedValue(search, 500);
+
+  const handleClearLogs = async () => {
+    if (!isAdmin()) return;
+
+    const password = window.prompt(
+      'Для удаления всей истории контроля введите пароль безопасности (Qwerty!@#):',
+    );
+    if (password === null) return;
+
+    if (password !== 'Qwerty!@#') {
+      alert('Неверный пароль, журнал не был очищен.');
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      'Вы уверены, что хотите безвозвратно удалить все записи пользовательского контроля?',
+    );
+    if (!confirmDelete) return;
+
+    try {
+      setClearing(true);
+      await apiService.deleteUserActivityLogs(password);
+      setRefreshToken((token) => token + 1);
+      alert('История контроля успешно очищена.');
+    } catch (error) {
+      console.error('Не удалось очистить журнал контроля', error);
+      alert('Не удалось очистить историю. Попробуйте позже или проверьте подключение.');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin()) {
@@ -158,7 +190,7 @@ export const UserActivity = () => {
                 Анализируйте действия пользователей, входы в разделы и системные события в режиме реального времени.
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
               <div className="text-sm text-slate-500">
                 Найдено записей: <span className="font-semibold text-slate-700">{total}</span>
               </div>
@@ -169,6 +201,15 @@ export const UserActivity = () => {
               >
                 <RefreshCw className="w-4 h-4" />
                 Обновить
+              </button>
+              <button
+                type="button"
+                onClick={handleClearLogs}
+                disabled={clearing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors disabled:opacity-60"
+              >
+                <Trash2 className="w-4 h-4" />
+                {clearing ? 'Очищаем…' : 'Очистить историю'}
               </button>
             </div>
           </div>
