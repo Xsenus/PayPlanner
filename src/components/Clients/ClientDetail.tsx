@@ -2489,6 +2489,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
+          onCreateRemainder={createPayment}
           onDelete={async (id: number) => {
             await removePayment(id);
             closePayModal();

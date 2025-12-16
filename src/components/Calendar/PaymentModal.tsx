@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, Info, History } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -29,6 +29,7 @@ interface PaymentModalProps {
   onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<void>;
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
+  onCreateRemainder?: (payment: PaymentPayload) => Promise<void>;
 }
 
 export function PaymentModal({
@@ -37,6 +38,7 @@ export function PaymentModal({
   onSubmit,
   payment,
   onDelete,
+  onCreateRemainder,
   defaultClientId,
   defaultClientCaseId,
   casesPrefetch,
@@ -91,6 +93,10 @@ export function PaymentModal({
       .filter(Boolean)
       .map((line) => (line.startsWith('• ') ? line.slice(2) : line));
   }, [formData.systemNotes]);
+  const transferTrail = useMemo(() => {
+    if (!systemNotesEntries.length) return [] as string[];
+    return systemNotesEntries.filter((note) => /остаток|перенес|источник платежа/i.test(note));
+  }, [systemNotesEntries]);
   const selectedClient = useMemo(
     () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
     [clients, formData.clientId],
@@ -101,6 +107,9 @@ export function PaymentModal({
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState<string>('');
+  const [showProcessHelp, setShowProcessHelp] = useState(false);
 
   /* -------------------- Подсказки по счёту -------------------- */
   useEffect(() => {
@@ -237,6 +246,11 @@ export function PaymentModal({
         setSyncDateWithPayment(false);
       }
 
+      const fallbackDate =
+        (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || todayYMD();
+      setRescheduleDate(fallbackDate);
+      setRescheduleRemainder(false);
+
       prevOpenRef.current = true;
     }
   }, [isOpen, defaultClientId, defaultClientCaseId, type]);
@@ -263,6 +277,14 @@ export function PaymentModal({
       return s.amount === fixed ? s : { ...s, amount: fixed };
     });
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !rescheduleRemainder) return;
+    const amount = parseDecimal(formData.amount);
+    const paid = parseDecimal(formData.paidAmount);
+    const hasPartialPayment = paid > 0 && amount - paid > 0;
+    if (!hasPartialPayment) setRescheduleRemainder(false);
+  }, [formData.amount, formData.paidAmount, isOpen, rescheduleRemainder]);
 
   const clientIdRef = useRef(formData.clientId);
   useEffect(() => {
@@ -484,6 +506,7 @@ export function PaymentModal({
 
     const rawPaidAmount = parseDecimal(formData.paidAmount);
     const safePaidAmount = Math.min(Math.max(rawPaidAmount, 0), amountNum);
+    const remainder = Math.max(Number((amountNum - safePaidAmount).toFixed(2)), 0);
 
     setLoading(true);
 
@@ -499,21 +522,62 @@ export function PaymentModal({
       : safePaidAmount > 0
       ? normalizedPaidDate ?? normalizedDate
       : undefined;
+    const normalizedRescheduleDate = rescheduleDate ? fromInputToApiDate(rescheduleDate) : undefined;
+
+    if (rescheduleRemainder && remainder > 0 && !normalizedRescheduleDate) {
+      alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
+      setLoading(false);
+      return;
+    }
+
+    const shouldCreateRemainder =
+      rescheduleRemainder &&
+      remainder > 0 &&
+      safePaidAmount > 0 &&
+      Number.isFinite(remainder) &&
+      Boolean(normalizedRescheduleDate);
 
     try {
+      const baseAmount = shouldCreateRemainder ? Number(safePaidAmount.toFixed(2)) : amountNum;
+      const primaryStatus = shouldCreateRemainder ? 'Completed' : formData.status;
+      const primaryPaidDate = shouldCreateRemainder
+        ? normalizedPaidDate ?? normalizedDate
+        : normalizedPaidDate;
+      const primaryLastPaymentDate = shouldCreateRemainder
+        ? normalizedLastPaymentDate ?? normalizedDate
+        : normalizedLastPaymentDate;
+
+      const baseSystemNotes = (formData.systemNotes ?? '').trim();
+      const baseSystemNotesLines = baseSystemNotes
+        ? baseSystemNotes
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+        : [];
+
+      const payableBreakdownNote = shouldCreateRemainder
+        ? `${t('partialCloseNote') ?? 'Частичная оплата'}: ${safePaidAmount.toFixed(2)} / ${amountNum.toFixed(
+            2,
+          )} • ${t('remainderNoteLabel') ?? 'Остаток'} ${remainder.toFixed(2)} → ${
+            toRuDate(rescheduleDate) || rescheduleDate
+          }`
+        : undefined;
+
       const paymentData: PaymentPayload = {
         date: normalizedDate,
         plannedDate: normalizedPlannedDate,
-        amount: amountNum,
+        amount: baseAmount,
         paidAmount: Number(safePaidAmount.toFixed(2)),
-        lastPaymentDate: normalizedLastPaymentDate,
+        lastPaymentDate: primaryLastPaymentDate,
         type: formData.type,
-        status: formData.status,
+        status: primaryStatus as PaymentStatus,
         description: formData.description,
-        isPaid: formData.isPaid,
-        paidDate: normalizedPaidDate,
+        isPaid: shouldCreateRemainder ? true : formData.isPaid,
+        paidDate: primaryPaidDate,
         notes: formData.notes,
-        systemNotes: formData.systemNotes ?? '',
+        systemNotes: [...baseSystemNotesLines, payableBreakdownNote]
+          .filter(Boolean)
+          .join('\n'),
         rescheduleCount: formData.rescheduleCount ?? 0,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
@@ -533,6 +597,34 @@ export function PaymentModal({
         await onSubmit({ id: payment.id, ...paymentData });
       } else {
         await onSubmit(paymentData);
+      }
+
+      if (shouldCreateRemainder && onCreateRemainder && normalizedRescheduleDate) {
+        const nextPayment: PaymentPayload = {
+          ...paymentData,
+          date: normalizedRescheduleDate,
+          plannedDate: normalizedRescheduleDate,
+          amount: remainder,
+          paidAmount: 0,
+          lastPaymentDate: undefined,
+          status: normalizedRescheduleDate < normalizedDate ? 'Overdue' : 'Pending',
+          isPaid: false,
+          paidDate: undefined,
+          systemNotes: [
+            `${t('remainderNotePrefix') ?? 'Остаток после частичной оплаты'} (${toRuDate(
+              formData.date,
+            ) || formData.date})`,
+            `${
+              t('remainderOriginNote') ?? 'Источник платежа'
+            }${payment?.id ? ` #${payment.id}` : ''}: ${amountNum.toFixed(2)} • ${t('paidLabel') ?? 'Оплачено'} ${
+              safePaidAmount.toFixed(2)
+            } • ${t('remainderNoteLabel') ?? 'Остаток'} ${remainder.toFixed(2)} → ${
+              toRuDate(rescheduleDate) || rescheduleDate
+            }`,
+          ].join('\n'),
+          rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
+        };
+        await onCreateRemainder(nextPayment);
       }
 
       onClose();
@@ -606,13 +698,26 @@ export function PaymentModal({
   const selSourceId = formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-6xl w-full max-h-[92vh] shadow-2xl flex flex-col">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/95 px-6 py-4 backdrop-blur">
+          <div>
+            <p className="text-xs uppercase tracking-[0.08em] text-gray-500">
               {payment ? t('editPayment') : t('addPayment')}
-            </h2>
+            </p>
+            <h2 className="text-xl font-semibold text-gray-900">{payment?.description || t('payment')}</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowProcessHelp((prev) => !prev)}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors">
+              <Info className="h-4 w-4" />
+              {showProcessHelp
+                ? t('hidePaymentProcessHelp') ?? 'Скрыть логику'
+                : t('showPaymentProcessHelp') ?? 'Как работает платеж'}
+            </button>
+
             <button
               onClick={onClose}
               type="button"
@@ -621,495 +726,695 @@ export function PaymentModal({
               <X size={20} />
             </button>
           </div>
+        </div>
 
-          <form ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('type') ?? 'Тип'}
-              </label>
-              <select
-                name="type"
-                value={formData.type}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="Income">{t('income') ?? 'Доход'}</option>
-                <option value="Expense">{t('expense') ?? 'Расход'}</option>
-              </select>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}
-                </label>
-                <input
-                  type="date"
-                  name="date"
-                  value={formData.date}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('plannedScheduleDate') ?? 'Плановая дата по графику'}
-                </label>
-                <input
-                  type="date"
-                  name="plannedDate"
-                  value={formData.plannedDate}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
-                <input
-                  ref={amountRef}
-                  type="text"
-                  name="amount"
-                  value={formData.amount}
-                  onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
-                  onBlur={formatAmountOnBlur}
-                  onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
-                  inputMode="decimal"
-                  pattern="^\d+([.,]\d{0,2})?$"
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('paidAmount') ?? 'Получено фактически'}
-                </label>
-                <input
-                  type="number"
-                  name="paidAmount"
-                  min="0"
-                  step="0.01"
-                  value={formData.paidAmount}
-                  onChange={handleChange}
-                  onBlur={formatPaidAmountOnBlur}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 items-end">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('lastPaymentDate') ?? 'Дата фактического платежа'}
-                </label>
-                <input
-                  type="date"
-                  name="lastPaymentDate"
-                  value={formData.lastPaymentDate}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={syncDateWithPayment}
-                  onChange={(e) => setSyncDateWithPayment(e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
-              </div>
-            </div>
-
-            {hasPartial && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                <p>
-                  {(t('partialPaidInfoPaid') ?? 'Внесено:')} {paidAmountNum.toFixed(2)}
-                </p>
-                <p>
-                  {(t('partialPaidInfoRemaining') ?? 'Остаток:')} {remainingAmount.toFixed(2)}
-                </p>
-                <p>
-                  {t('partialPaidReminder') ??
-                    'Обновите ожидаемую дату поступления оставшейся суммы.'}
-                </p>
+        <div className="flex-1 overflow-y-auto px-6 pb-6">
+          <form ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-6 py-4">
+            {showProcessHelp && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 shadow-sm">
+                <div className="flex items-center gap-2 font-semibold">
+                  <Info className="h-4 w-4" />
+                  <span>{t('paymentFlowTitle') ?? 'Как работает разнесение платежей'}</span>
+                </div>
+                <ul className="mt-2 space-y-1 list-disc list-inside">
+                  <li>
+                    {t('paymentFlowStepPlan') ??
+                      'Запланируйте сумму и дату платежа, привяжите клиента и источник.'}
+                  </li>
+                  <li>
+                    {t('paymentFlowStepFact') ??
+                      'Когда получили деньги, введите фактически оплачено и дату оплаты.'}
+                  </li>
+                  <li>
+                    {t('paymentFlowStepRemainder') ??
+                      'Если оплатили частично, включите перенос остатка — система создаст новый платеж на остаток и отметит связь.'}
+                  </li>
+                  <li>
+                    {t('paymentFlowStepHistory') ??
+                      'История переносов и расчёт остатка фиксируются в служебных заметках.'}
+                  </li>
+                </ul>
               </div>
             )}
 
-            {overpaid && (
-              <div className="text-sm text-rose-600">
-                {t('partialPaidOverpaid') ??
-                  'Внесённая сумма превышает запланированную. Она будет ограничена суммой платежа.'}{' '}
-                {amountNum.toFixed(2)}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('amount')}</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-semibold text-gray-900">{amountNum.toFixed(2)}</span>
+                  <span className="text-xs text-gray-500">{t('plannedScheduleDate') ?? 'План'}</span>
+                </div>
               </div>
-            )}
-
-            {formData.rescheduleCount > 0 && (
-              <div className="text-sm text-gray-600">
-                {(t('rescheduleCountLabel') ?? 'Количество переносов:')}{' '}
-                {formData.rescheduleCount}
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('paidAmount') ?? 'Получено'}</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-semibold text-emerald-600">{paidAmountNum.toFixed(2)}</span>
+                  <span className="text-xs text-gray-500">{t('lastPaymentDate') ?? 'Факт'}</span>
+                </div>
               </div>
-            )}
-
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <label className="block text-sm font-medium text-gray-700">{t('client')}</label>
-                {selectedClient?.clientStatus ? (
-                  <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
-                ) : null}
+              <div
+                className={`rounded-xl px-4 py-3 shadow-sm border ${
+                  remainingAmount > 0
+                    ? 'border-amber-200 bg-amber-50'
+                    : 'border-emerald-200 bg-emerald-50'
+                }`}>
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-600">
+                  {remainingAmount > 0
+                    ? t('partialPaidInfoRemaining') ?? 'Остаток'
+                    : t('paymentReceived') ?? 'Закрыт'}
+                </p>
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={`text-2xl font-semibold ${
+                      remainingAmount > 0 ? 'text-amber-700' : 'text-emerald-700'
+                    }`}>
+                    {remainingAmount > 0 ? remainingAmount.toFixed(2) : t('completedStatus')}
+                  </span>
+                  {hasPartial && (
+                    <span className="inline-flex items-center rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
+                      {t('rescheduleRemainderOption') ?? 'Перенос остатка'}
+                    </span>
+                  )}
+                </div>
               </div>
-              <select
-                name="clientId"
-                value={formData.clientId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">{t('selectClient')}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                    {client.company ? ` — ${client.company}` : ''}
-                  </option>
-                ))}
-              </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('case') ?? 'Дело'}
-              </label>
-              <select
-                key={(formData.clientId || 'no-client') + ':' + cases.length}
-                name="clientCaseId"
-                value={formData.clientCaseId}
-                onChange={handleChange}
-                disabled={!formData.clientId}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">{t('selectCase') ?? 'Без дела'}</option>
-
-                {formData.clientCaseId &&
-                  !cases.some((c) => String(c.id) === String(formData.clientCaseId)) &&
-                  (fallbackCase ? (
-                    <option value={fallbackCase.id}>{fallbackCase.title}</option>
-                  ) : (
-                    <option value={formData.clientCaseId}>
-                      {t('case') ?? 'Дело'} #{formData.clientCaseId}
-                    </option>
-                  ))}
-
-                {cases.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* СЧЁТ */}
-            <div className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('account') ?? 'Счёт'}
-              </label>
-
-              <input
-                ref={accountInputRef}
-                name="account"
-                value={formData.account}
-                onChange={handleChange}
-                onFocus={() => {
-                  suppressBrowserAutocomplete();
-                  setAccountOpen(true);
-                }}
-                onClick={suppressBrowserAutocomplete}
-                onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
-                placeholder="Например: Счет № 12345"
-                maxLength={120}
-                autoComplete="new-password"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-
-              {accountOpen &&
-                (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
-                  <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
-                    {accountLoading && (
-                      <div className="px-3 py-2 text-sm text-gray-500">Загрузка…</div>
+            {(transferTrail.length > 0 || (formData.rescheduleCount ?? 0) > 0 || hasPartial) && (
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 text-amber-800">
+                    <History className="h-5 w-5" />
+                    <div>
+                      <p className="text-sm font-semibold">{t('transferHistoryTitle') ?? 'Цепочка переносов'}</p>
+                      <p className="text-xs text-amber-700">
+                        {t('transferHistorySubtitle') ?? 'Как образовался текущий остаток и связанные платежи'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-semibold text-amber-800">
+                    <span className="rounded-full bg-white/80 px-2 py-1 ring-1 ring-amber-200">
+                      {t('transferCountLabel') ?? 'Переносов'}: {formData.rescheduleCount ?? 0}
+                    </span>
+                    {formData.lastPaymentDate && (
+                      <span className="rounded-full bg-white/80 px-2 py-1 ring-1 ring-amber-200">
+                        {t('lastPaymentDate') ?? 'Факт'}: {toRuDate(formData.lastPaymentDate) || formData.lastPaymentDate}
+                      </span>
                     )}
+                  </div>
+                </div>
 
-                    {formData.account &&
-                      !accountOpts.some(
-                        (x) => x.account.toLowerCase() === formData.account.trim().toLowerCase(),
-                      ) && (
-                        <button
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => setAccountOpen(false)}>
-                          Создать «{formData.account.trim()}»
-                        </button>
-                      )}
-
-                    {accountOpts.map((opt) => {
-                      const key = `${opt.account}__${opt.accountDate ?? ''}`;
-                      const human =
-                        opt.account + (opt.accountDate ? ` от ${toRuDate(opt.accountDate)}` : '');
-
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={async () => {
-                            setFormData((s) => ({ ...s, account: opt.account }));
-                            setAccountOpen(false);
-
-                            if (opt.accountDate) {
-                              setFormData((s) => ({
-                                ...s,
-                                accountDate: toDateInputValue(opt.accountDate),
-                              }));
-                              return;
-                            }
-
-                            try {
-                              const cid = formData.clientId
-                                ? parseInt(formData.clientId, 10)
-                                : undefined;
-                              const caseId = formData.clientCaseId
-                                ? parseInt(formData.clientCaseId, 10)
-                                : undefined;
-
-                              const resp = await apiService.getAccounts({
-                                clientId: cid,
-                                caseId,
-                                q: opt.account,
-                                take: 50,
-                                withDate: true as const,
-                                dedupe: false,
-                              });
-
-                              const found = resp.find(
-                                (x) => x.account === opt.account && x.accountDate,
-                              );
-                              if (found?.accountDate) {
-                                setFormData((s) => ({
-                                  ...s,
-                                  accountDate: toDateInputValue(found.accountDate),
-                                }));
-                              }
-                            } catch {
-                              /* no-op */
-                            }
-                          }}>
-                          {human}
-                        </button>
-                      );
-                    })}
+                {transferTrail.length > 0 ? (
+                  <ul className="mt-3 space-y-2 text-sm text-amber-900">
+                    {transferTrail.map((note, idx) => (
+                      <li key={`${note}-${idx}`} className="flex gap-2">
+                        <span className="text-amber-400 leading-6">•</span>
+                        <span className="flex-1 whitespace-pre-wrap">{note}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="mt-3 text-sm text-amber-800">
+                    {t('transferHistoryEmpty') ?? 'Пока нет служебных отметок о переносах.'}
                   </div>
                 )}
-            </div>
-
-            {/* ДАТА СЧЁТА */}
-            <div className="mt-3">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('accountDate') ?? 'Дата счёта'}
-              </label>
-              <input
-                type="date"
-                name="accountDate"
-                value={formData.accountDate}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('dealType')}
-              </label>
-              <select
-                name="dealTypeId"
-                value={formData.dealTypeId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">{t('selectDealType')}</option>
-                {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (
-                  <option key={d.id} value={String(d.id)}>
-                    {d.name}
-                    {!d.isActive ? ' (не активно)' : ''}
-                  </option>
-                ))}
-              </select>{' '}
-              {(() => {
-                const picked = dealTypes.find((d) => d.id === selDealTypeId);
-                if (picked && !picked.isActive) {
-                  return (
-                    <div className="mt-1 text-xs text-amber-600">
-                      Внимание: выбранный тип сделки деактивирован. Вы можете сохранить платёж как
-                      есть или выбрать актуальный тип.
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {formData.type === 'Income'
-                  ? t('incomeType') ?? 'Тип дохода'
-                  : t('expenseType') ?? 'Тип расхода'}
-              </label>
-              <select
-                name="incomeTypeId"
-                value={formData.incomeTypeId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">
-                  {formData.type === 'Income'
-                    ? t('selectIncomeType') ?? 'Выберите тип дохода'
-                    : t('selectExpenseType') ?? 'Выберите тип расхода'}
-                </option>
-                {buildOptionsWithSelected(
-                  incomeTypes,
-                  selIncomeTypeId,
-                  (it) => it.isActive && it.paymentType === formData.type,
-                ).map((it) => (
-                  <option key={it.id} value={String(it.id)}>
-                    {it.name}
-                    {!it.isActive ? ' (не активно)' : ''}
-                    {it.paymentType !== formData.type ? ' (другое направление)' : ''}
-                  </option>
-                ))}
-              </select>
-              {(() => {
-                const picked = incomeTypes.find((it) => it.id === selIncomeTypeId);
-                if (!picked) return null;
-                if (!picked.isActive || picked.paymentType !== formData.type) {
-                  return (
-                    <div className="mt-1 text-xs text-amber-600">
-                      Внимание: выбранная категория
-                      {!picked.isActive ? ' деактивирована' : ''}
-                      {picked.paymentType !== formData.type
-                        ? ' и относится к другому направлению'
-                        : ''}
-                      . Вы можете сохранить платёж как есть или выбрать актуальную категорию.
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('paymentSource')}
-              </label>
-              <select
-                name="paymentSourceId"
-                value={formData.paymentSourceId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">{t('selectPaymentSource')}</option>
-                {buildOptionsWithSelected(paymentSources, selSourceId, (s) => s.isActive).map(
-                  (s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      {s.name}
-                      {!s.isActive ? ' (не активно)' : ''}
-                    </option>
-                  ),
-                )}
-              </select>
-              {(() => {
-                const picked = paymentSources.find((s) => s.id === selSourceId);
-                if (picked && !picked.isActive) {
-                  return (
-                    <div className="mt-1 text-xs text-amber-600">
-                      Внимание: выбранный источник деактивирован. Вы можете сохранить платёж как
-                      есть или выбрать актуальный источник.
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
-              <select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="Pending">{t('pending')}</option>
-                <option value="Completed">{t('completedStatus')}</option>
-                <option value="Overdue">{t('overdue')}</option>
-              </select>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                name="isPaid"
-                checked={formData.isPaid}
-                onChange={handleChange}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label className="ml-2 block text-sm text-gray-700">{t('paymentReceived')}</label>
-            </div>
-
-            {formData.isPaid && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('paidDate')}
-                </label>
-                <input
-                  type="date"
-                  name="paidDate"
-                  value={formData.paidDate}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('description')}
-              </label>
-              <textarea
-                name="description"
-                value={formData.description}
-                onChange={handleChange}
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={t('paymentDescription')}
-              />
+            <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+              <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                  <span className="h-6 w-6 rounded-full bg-blue-50 text-blue-600 grid place-items-center text-xs font-bold">1</span>
+                  <span>{t('expectedPaymentDate') ?? 'Планирование платежа'}</span>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('type') ?? 'Тип'}
+                    </label>
+                    <select
+                      name="type"
+                      value={formData.type}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      <option value="Income">{t('income') ?? 'Доход'}</option>
+                      <option value="Expense">{t('expense') ?? 'Расход'}</option>
+                    </select>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
+                    <select
+                      name="status"
+                      value={formData.status}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      <option value="Pending">{t('pending')}</option>
+                      <option value="Completed">{t('completedStatus')}</option>
+                      <option value="Overdue">{t('overdue')}</option>
+                    </select>
+                  </div>
+
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}
+                    </label>
+                    <input
+                      type="date"
+                      name="date"
+                      value={formData.date}
+                      onChange={handleChange}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="lg:col-span-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('plannedScheduleDate') ?? 'Плановая дата по графику'}
+                    </label>
+                    <input
+                      type="date"
+                      name="plannedDate"
+                      value={formData.plannedDate}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
+                    <input
+                      ref={amountRef}
+                      type="text"
+                      name="amount"
+                      value={formData.amount}
+                      onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
+                      onBlur={formatAmountOnBlur}
+                      onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                      inputMode="decimal"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('paidAmount')}</label>
+                    <input
+                      type="text"
+                      name="paidAmount"
+                      value={formData.paidAmount}
+                      onChange={(e) =>
+                        setFormData((s) => ({
+                          ...s,
+                          paidAmount: e.target.value,
+                        }))
+                      }
+                      onBlur={formatPaidAmountOnBlur}
+                      inputMode="decimal"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  <div className="lg:col-span-4 space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">{t('paidDate')}</label>
+                    <input
+                      type="date"
+                      name="paidDate"
+                      value={formData.paidDate}
+                      onChange={handleChange}
+                      disabled={!formData.isPaid}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
+
+                {hasPartial && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow-inner">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-amber-700 ring-1 ring-amber-200">
+                          {t('remaining') ?? 'Остаток'}
+                        </span>
+                        {t('remainingAmount', { amount: remainingAmount.toFixed(2) }) ??
+                          `Остаток: ${remainingAmount.toFixed(2)}`}
+                      </span>
+                      <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+                        {t('partialPaidBadge') ?? 'частичный платёж'}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-amber-700">
+                      {t('partialPaidReminder') ??
+                        'Обновите ожидаемую дату поступления оставшейся суммы.'}
+                    </p>
+                    <div className="mt-3 space-y-2 rounded-md border border-amber-200 bg-white/80 p-3 text-amber-900">
+                      <label className="flex items-start gap-2 text-sm font-medium text-amber-900">
+                        <input
+                          type="checkbox"
+                          checked={rescheduleRemainder}
+                          onChange={(e) => setRescheduleRemainder(e.target.checked)}
+                          className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span>{t('rescheduleRemainderOption') ?? 'Перенести остаток на новую дату'}</span>
+                      </label>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto,1fr] sm:items-center">
+                        <label className="text-sm text-gray-700" htmlFor="reschedule-date">
+                          {t('rescheduleRemainderDate') ?? 'Новая дата остатка'}
+                        </label>
+                        <input
+                          id="reschedule-date"
+                          type="date"
+                          value={rescheduleDate}
+                          onChange={(e) => setRescheduleDate(e.target.value)}
+                          disabled={!rescheduleRemainder}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
+                        />
+                      </div>
+                      <p className="text-xs text-amber-700">
+                        {t('rescheduleRemainderHint') ??
+                          'Текущий платёж будет закрыт на внесённую сумму, остаток появится в календаре новой записью.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {overpaid && (
+                  <div className="text-sm text-rose-600">
+                    {t('partialPaidOverpaid') ??
+                      'Внесённая сумма превышает запланированную. Она будет ограничена суммой платежа.'}{' '}
+                    {amountNum.toFixed(2)}
+                  </div>
+                )}
+
+                {formData.rescheduleCount > 0 && (
+                  <div className="text-sm text-gray-600">
+                    {(t('rescheduleCountLabel') ?? 'Количество переносов:')}{' '}
+                    {formData.rescheduleCount}
+                  </div>
+                )}
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('lastPaymentDate') ?? 'Дата фактического платежа'}
+                    </label>
+                    <input
+                      type="date"
+                      name="lastPaymentDate"
+                      value={formData.lastPaymentDate}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <label className="flex h-full items-center gap-2 text-sm font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        name="isPaid"
+                        checked={formData.isPaid}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span>{t('paymentReceived')}</span>
+                    </label>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <label className="flex h-full items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={syncDateWithPayment}
+                        onChange={(e) => setSyncDateWithPayment(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                  <span className="h-6 w-6 rounded-full bg-indigo-50 text-indigo-600 grid place-items-center text-xs font-bold">2</span>
+                  <span>{t('client')}</span>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <label className="block text-sm font-medium text-gray-700">{t('client')}</label>
+                      {selectedClient?.clientStatus ? (
+                        <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
+                      ) : null}
+                    </div>
+                    <select
+                      name="clientId"
+                      value={formData.clientId}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      <option value="">{t('selectClient')}</option>
+                      {clients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name}
+                          {client.company ? ` — ${client.company}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('case') ?? 'Дело'}
+                      </label>
+                      <select
+                        key={(formData.clientId || 'no-client') + ':' + cases.length}
+                        name="clientCaseId"
+                        value={formData.clientCaseId}
+                        onChange={handleChange}
+                        disabled={!formData.clientId}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">{t('selectCase') ?? 'Без дела'}</option>
+
+                        {formData.clientCaseId &&
+                          !cases.some((c) => String(c.id) === String(formData.clientCaseId)) &&
+                          (fallbackCase ? (
+                            <option value={fallbackCase.id}>{fallbackCase.title}</option>
+                          ) : (
+                            <option value={formData.clientCaseId}>
+                              {t('case') ?? 'Дело'} #{formData.clientCaseId}
+                            </option>
+                          ))}
+
+                        {cases.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('paymentSource')}
+                      </label>
+                      <select
+                        name="paymentSourceId"
+                        value={formData.paymentSourceId}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">{t('selectPaymentSource')}</option>
+                        {buildOptionsWithSelected(paymentSources, selSourceId, (s) => s.isActive).map((s) => (
+                          <option key={s.id} value={String(s.id)}>
+                            {s.name}
+                            {!s.isActive ? ' (не активно)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {(() => {
+                        const picked = paymentSources.find((s) => s.id === selSourceId);
+                        if (picked && !picked.isActive) {
+                          return (
+                            <div className="mt-1 text-xs text-amber-600">
+                              Внимание: выбранный источник деактивирован. Вы можете сохранить платёж как есть или
+                              выбрать актуальный источник.
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[2fr,1fr] sm:items-end">
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('account') ?? 'Счёт'}
+                      </label>
+
+                      <input
+                        ref={accountInputRef}
+                        name="account"
+                        value={formData.account}
+                        onChange={handleChange}
+                        onFocus={() => {
+                          suppressBrowserAutocomplete();
+                          setAccountOpen(true);
+                        }}
+                        onClick={suppressBrowserAutocomplete}
+                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                        placeholder="Например: Счет № 12345"
+                        maxLength={120}
+                        autoComplete="new-password"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+
+                      {accountOpen &&
+                        (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
+                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
+                            {accountLoading && (
+                              <div className="px-3 py-2 text-sm text-gray-500">Загрузка…</div>
+                            )}
+
+                            {formData.account &&
+                              !accountOpts.some(
+                                (x) => x.account.toLowerCase() === formData.account.trim().toLowerCase(),
+                              ) && (
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => setAccountOpen(false)}>
+                                  Создать «{formData.account.trim()}»
+                                </button>
+                              )}
+
+                            {accountOpts.map((opt) => {
+                              const key = `${opt.account}__${opt.accountDate ?? ''}`;
+                              const human =
+                                opt.account + (opt.accountDate ? ` от ${toRuDate(opt.accountDate)}` : '');
+
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={async () => {
+                                    setFormData((s) => ({ ...s, account: opt.account }));
+                                    setAccountOpen(false);
+
+                                    if (opt.accountDate) {
+                                      setFormData((s) => ({
+                                        ...s,
+                                        accountDate: toDateInputValue(opt.accountDate),
+                                      }));
+                                      return;
+                                    }
+
+                                    try {
+                                      const cid = formData.clientId
+                                        ? parseInt(formData.clientId, 10)
+                                        : undefined;
+                                      const caseId = formData.clientCaseId
+                                        ? parseInt(formData.clientCaseId, 10)
+                                        : undefined;
+
+                                      const resp = await apiService.getAccounts({
+                                        clientId: cid,
+                                        caseId,
+                                        q: opt.account,
+                                        take: 50,
+                                        withDate: true as const,
+                                        dedupe: false,
+                                      });
+
+                                      const found = resp.find(
+                                        (x) => x.account === opt.account && x.accountDate,
+                                      );
+                                      if (found?.accountDate) {
+                                        setFormData((s) => ({
+                                          ...s,
+                                          accountDate: toDateInputValue(found.accountDate),
+                                        }));
+                                      }
+                                    } catch {
+                                      /* no-op */
+                                    }
+                                  }}>
+                                  {human}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('accountDate') ?? 'Дата счёта'}
+                      </label>
+                      <input
+                        type="date"
+                        name="accountDate"
+                        value={formData.accountDate}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {t('dealType')}
+                      </label>
+                      <select
+                        name="dealTypeId"
+                        value={formData.dealTypeId}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">{t('selectDealType')}</option>
+                        {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (
+                          <option key={d.id} value={String(d.id)}>
+                            {d.name}
+                            {!d.isActive ? ' (не активно)' : ''}
+                          </option>
+                        ))}
+                      </select>{' '}
+                      {(() => {
+                        const picked = dealTypes.find((d) => d.id === selDealTypeId);
+                        if (picked && !picked.isActive) {
+                          return (
+                            <div className="mt-1 text-xs text-amber-600">
+                              Внимание: выбранный тип сделки деактивирован. Вы можете сохранить платёж как есть или выбрать
+                              актуальный тип.
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {formData.type === 'Income'
+                          ? t('incomeType') ?? 'Тип дохода'
+                          : t('expenseType') ?? 'Тип расхода'}
+                      </label>
+                      <select
+                        name="incomeTypeId"
+                        value={formData.incomeTypeId}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">
+                          {formData.type === 'Income'
+                            ? t('selectIncomeType') ?? 'Выберите тип дохода'
+                            : t('selectExpenseType') ?? 'Выберите тип расхода'}
+                        </option>
+                        {buildOptionsWithSelected(
+                          incomeTypes,
+                          selIncomeTypeId,
+                          (it) => it.isActive && it.paymentType === formData.type,
+                        ).map((it) => (
+                          <option key={it.id} value={String(it.id)}>
+                            {it.name}
+                            {!it.isActive ? ' (не активно)' : ''}
+                            {it.paymentType !== formData.type ? ' (другое направление)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {(() => {
+                        const picked = incomeTypes.find((it) => it.id === selIncomeTypeId);
+                        if (!picked) return null;
+                        if (!picked.isActive || picked.paymentType !== formData.type) {
+                          return (
+                            <div className="mt-1 text-xs text-amber-600">
+                              Внимание: выбранная категория
+                              {!picked.isActive ? ' деактивирована' : ''}
+                              {picked.paymentType !== formData.type ? ' и относится к другому направлению' : ''}.
+                              Вы можете сохранить платёж как есть или выбрать актуальную категорию.
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[auto,1fr] sm:items-center">
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        name="isPaid"
+                        checked={formData.isPaid}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span>{t('paymentReceived')}</span>
+                    </label>
+
+                    {formData.isPaid && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {t('paidDate')}
+                        </label>
+                        <input
+                          type="date"
+                          name="paidDate"
+                          value={formData.paidDate}
+                          onChange={handleChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleChange}
-                rows={2}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={t('additionalNotes')}
-              />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('description')}
+                </label>
+                <textarea
+                  name="description"
+                  value={formData.description}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder={t('paymentDescription')}
+                />
+              </div>
+
+              <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
+                <textarea
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder={t('additionalNotes')}
+                />
+              </div>
             </div>
 
             {systemNotesEntries.length > 0 && (
-              <div>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 shadow-sm">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   {t('systemNotesLabel') ?? 'Служебные заметки'}
                 </label>
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
                   <ul className="space-y-2">
                     {systemNotesEntries.map((note, idx) => (
                       <li key={`${note}-${idx}`} className="flex gap-2">
@@ -1122,7 +1427,7 @@ export function PaymentModal({
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-3 pt-4">
+            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-gray-200 bg-white/95 py-3 backdrop-blur sm:flex-row">
               {canDelete && (
                 <button
                   type="button"
