@@ -29,6 +29,7 @@ interface PaymentModalProps {
   onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<void>;
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
+  onCreateRemainder?: (payment: PaymentPayload) => Promise<void>;
 }
 
 export function PaymentModal({
@@ -37,6 +38,7 @@ export function PaymentModal({
   onSubmit,
   payment,
   onDelete,
+  onCreateRemainder,
   defaultClientId,
   defaultClientCaseId,
   casesPrefetch,
@@ -101,6 +103,8 @@ export function PaymentModal({
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState<string>('');
 
   /* -------------------- Подсказки по счёту -------------------- */
   useEffect(() => {
@@ -237,6 +241,11 @@ export function PaymentModal({
         setSyncDateWithPayment(false);
       }
 
+      const fallbackDate =
+        (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || todayYMD();
+      setRescheduleDate(fallbackDate);
+      setRescheduleRemainder(false);
+
       prevOpenRef.current = true;
     }
   }, [isOpen, defaultClientId, defaultClientCaseId, type]);
@@ -263,6 +272,14 @@ export function PaymentModal({
       return s.amount === fixed ? s : { ...s, amount: fixed };
     });
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !rescheduleRemainder) return;
+    const amount = parseDecimal(formData.amount);
+    const paid = parseDecimal(formData.paidAmount);
+    const hasPartialPayment = paid > 0 && amount - paid > 0;
+    if (!hasPartialPayment) setRescheduleRemainder(false);
+  }, [formData.amount, formData.paidAmount, isOpen, rescheduleRemainder]);
 
   const clientIdRef = useRef(formData.clientId);
   useEffect(() => {
@@ -484,6 +501,7 @@ export function PaymentModal({
 
     const rawPaidAmount = parseDecimal(formData.paidAmount);
     const safePaidAmount = Math.min(Math.max(rawPaidAmount, 0), amountNum);
+    const remainder = Math.max(Number((amountNum - safePaidAmount).toFixed(2)), 0);
 
     setLoading(true);
 
@@ -499,19 +517,42 @@ export function PaymentModal({
       : safePaidAmount > 0
       ? normalizedPaidDate ?? normalizedDate
       : undefined;
+    const normalizedRescheduleDate = rescheduleDate ? fromInputToApiDate(rescheduleDate) : undefined;
+
+    if (rescheduleRemainder && remainder > 0 && !normalizedRescheduleDate) {
+      alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
+      setLoading(false);
+      return;
+    }
+
+    const shouldCreateRemainder =
+      rescheduleRemainder &&
+      remainder > 0 &&
+      safePaidAmount > 0 &&
+      Number.isFinite(remainder) &&
+      Boolean(normalizedRescheduleDate);
 
     try {
+      const baseAmount = shouldCreateRemainder ? Number(safePaidAmount.toFixed(2)) : amountNum;
+      const primaryStatus = shouldCreateRemainder ? 'Completed' : formData.status;
+      const primaryPaidDate = shouldCreateRemainder
+        ? normalizedPaidDate ?? normalizedDate
+        : normalizedPaidDate;
+      const primaryLastPaymentDate = shouldCreateRemainder
+        ? normalizedLastPaymentDate ?? normalizedDate
+        : normalizedLastPaymentDate;
+
       const paymentData: PaymentPayload = {
         date: normalizedDate,
         plannedDate: normalizedPlannedDate,
-        amount: amountNum,
+        amount: baseAmount,
         paidAmount: Number(safePaidAmount.toFixed(2)),
-        lastPaymentDate: normalizedLastPaymentDate,
+        lastPaymentDate: primaryLastPaymentDate,
         type: formData.type,
-        status: formData.status,
+        status: primaryStatus as PaymentStatus,
         description: formData.description,
-        isPaid: formData.isPaid,
-        paidDate: normalizedPaidDate,
+        isPaid: shouldCreateRemainder ? true : formData.isPaid,
+        paidDate: primaryPaidDate,
         notes: formData.notes,
         systemNotes: formData.systemNotes ?? '',
         rescheduleCount: formData.rescheduleCount ?? 0,
@@ -533,6 +574,23 @@ export function PaymentModal({
         await onSubmit({ id: payment.id, ...paymentData });
       } else {
         await onSubmit(paymentData);
+      }
+
+      if (shouldCreateRemainder && onCreateRemainder && normalizedRescheduleDate) {
+        const nextPayment: PaymentPayload = {
+          ...paymentData,
+          date: normalizedRescheduleDate,
+          plannedDate: normalizedRescheduleDate,
+          amount: remainder,
+          paidAmount: 0,
+          lastPaymentDate: undefined,
+          status: normalizedRescheduleDate < normalizedDate ? 'Overdue' : 'Pending',
+          isPaid: false,
+          paidDate: undefined,
+          systemNotes: `${t('remainderNotePrefix') ?? 'Остаток после частичной оплаты'} (${formData.date})`,
+          rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
+        };
+        await onCreateRemainder(nextPayment);
       }
 
       onClose();
@@ -736,6 +794,34 @@ export function PaymentModal({
                   {t('partialPaidReminder') ??
                     'Обновите ожидаемую дату поступления оставшейся суммы.'}
                 </p>
+                <div className="mt-3 space-y-2 rounded-md border border-amber-200 bg-white/80 p-3 text-amber-900">
+                  <label className="flex items-start gap-2 text-sm font-medium text-amber-900">
+                    <input
+                      type="checkbox"
+                      checked={rescheduleRemainder}
+                      onChange={(e) => setRescheduleRemainder(e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span>{t('rescheduleRemainderOption') ?? 'Перенести остаток на новую дату'}</span>
+                  </label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto,1fr] sm:items-center">
+                    <label className="text-sm text-gray-700" htmlFor="reschedule-date">
+                      {t('rescheduleRemainderDate') ?? 'Новая дата остатка'}
+                    </label>
+                    <input
+                      id="reschedule-date"
+                      type="date"
+                      value={rescheduleDate}
+                      onChange={(e) => setRescheduleDate(e.target.value)}
+                      disabled={!rescheduleRemainder}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                  <p className="text-xs text-amber-700">
+                    {t('rescheduleRemainderHint') ??
+                      'Текущий платёж будет закрыт на внесённую сумму, остаток появится в календаре новой записью.'}
+                  </p>
+                </div>
               </div>
             )}
 

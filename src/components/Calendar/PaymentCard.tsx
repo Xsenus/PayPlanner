@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { useTranslation } from '../../hooks/useTranslation';
 import type { Payment } from '../../types';
 import type React from 'react';
 
@@ -17,7 +18,12 @@ export function PaymentCard({
   neutral = false,
   className = '',
 }: PaymentCardProps) {
+  const { t } = useTranslation();
   const isIncome = payment.type === 'Income';
+  const hasRemainder = payment.hasPartialPayment && payment.outstandingAmount > 0;
+  const amountToShow = hasRemainder ? payment.outstandingAmount : payment.amount;
+
+  const formatMoney = (v: number) => new Intl.NumberFormat('ru-RU').format(v);
 
   const base = 'p-1.5 sm:p-2 rounded-lg text-[11px] sm:text-xs select-none pr-6';
   const interactive = onClick ? 'cursor-pointer hover:bg-gray-50 transition-colors' : '';
@@ -32,8 +38,16 @@ export function PaymentCard({
             <TrendingDown className="h-3.5 w-3.5 text-red-600" />
           )}
           <span className="font-medium text-gray-900">
-            {new Intl.NumberFormat('ru-RU').format(payment.amount)} ₽
+            {formatMoney(amountToShow)} ₽
           </span>
+          {hasRemainder && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+              {t('outstandingShort') ?? 'Остаток'}
+              <span className="font-normal text-amber-700">
+                / {formatMoney(payment.amount)} ₽
+              </span>
+            </span>
+          )}
         </div>
 
         {!neutral && <span className="text-[10px] sm:text-xs text-gray-500">{payment.status}</span>}

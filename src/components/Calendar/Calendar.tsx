@@ -536,6 +536,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onClose={handleCloseModal}
           type={modalType}
           onSubmit={handleSubmit}
+          onCreateRemainder={createPayment}
           payment={editingPayment}
           onDelete={
             calendarPermissions.canDelete

@@ -1078,6 +1078,7 @@ export function Payments({
         isOpen={isModalOpen}
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
+        onCreateRemainder={createPayment}
         payment={editingPayment}
         type={modalType}
         onDelete={

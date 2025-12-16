@@ -306,9 +306,16 @@ export const ru = {
   partialPaidInfoPaid: 'Внесено:',
   partialPaidInfoRemaining: 'Остаток:',
   partialPaidReminder: 'Обновите ожидаемую дату поступления оставшейся суммы.',
+  rescheduleRemainderOption: 'Перенести остаток на новую дату',
+  rescheduleRemainderDate: 'Новая дата остатка',
+  rescheduleRemainderHint:
+    'Текущий платёж будет закрыт на внесённую сумму, остаток появится в календаре новой записью.',
+  rescheduleDateRequired: 'Укажите новую дату для остатка платежа.',
+  remainderNotePrefix: 'Остаток после частичной оплаты',
   partialPaidOverpaid:
     'Внесённая сумма превышает запланированную. Она будет ограничена суммой платежа.',
   systemNotesLabel: 'Служебные заметки',
+  outstandingShort: 'Остаток',
   rescheduleCountLabel: 'Количество переносов:',
   paymentReceived: 'Платёж получен',
   paidDate: 'Дата оплаты',
