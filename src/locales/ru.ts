@@ -320,6 +320,7 @@ export const ru = {
     'Внесённая сумма превышает запланированную. Она будет ограничена суммой платежа.',
   systemNotesLabel: 'Служебные заметки',
   outstandingShort: 'Остаток',
+  outstandingFromFull: 'От общей суммы {{amount}} ₽',
   rescheduleCountLabel: 'Количество переносов:',
   transferHistoryTitle: 'Цепочка переносов',
   transferHistorySubtitle: 'Как образовался текущий остаток и связанные платежи',

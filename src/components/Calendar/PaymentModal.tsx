@@ -840,7 +840,7 @@ export function PaymentModal({
               </div>
             )}
 
-            <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+            <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
               <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
                   <span className="h-6 w-6 rounded-full bg-blue-50 text-blue-600 grid place-items-center text-xs font-bold">1</span>
@@ -848,7 +848,7 @@ export function PaymentModal({
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
-                  <div className="lg:col-span-3">
+                  <div className="lg:col-span-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('type') ?? 'Тип'}
                     </label>
@@ -862,7 +862,7 @@ export function PaymentModal({
                     </select>
                   </div>
 
-                  <div className="lg:col-span-3">
+                  <div className="lg:col-span-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
                     <select
                       name="status"
@@ -875,7 +875,10 @@ export function PaymentModal({
                     </select>
                   </div>
 
-                  <div className="lg:col-span-3">
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}
                     </label>
@@ -888,7 +891,7 @@ export function PaymentModal({
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div className="lg:col-span-3">
+                  <div className="lg:col-span-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('plannedScheduleDate') ?? 'Плановая дата по графику'}
                     </label>
@@ -920,10 +923,7 @@ export function PaymentModal({
                   </div>
 
                   <div className="lg:col-span-4">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <label className="block text-sm font-medium text-gray-700">{t('paidAmount')}</label>
-                      <span className="text-xs text-gray-500">{t('paidAmountHint') ?? 'Сколько пришло фактически'}</span>
-                    </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('paidAmount')}</label>
                     <input
                       type="text"
                       name="paidAmount"
@@ -941,34 +941,16 @@ export function PaymentModal({
                     />
                   </div>
 
-                  <div className="lg:col-span-4">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
-                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input
-                          type="checkbox"
-                          name="isPaid"
-                          checked={formData.isPaid}
-                          onChange={handleChange}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <span>{t('paymentReceived')}</span>
-                      </label>
-
-                      {formData.isPaid && (
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            {t('paidDate')}
-                          </label>
-                          <input
-                            type="date"
-                            name="paidDate"
-                            value={formData.paidDate}
-                            onChange={handleChange}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                      )}
-                    </div>
+                  <div className="lg:col-span-4 space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">{t('paidDate')}</label>
+                    <input
+                      type="date"
+                      name="paidDate"
+                      value={formData.paidDate}
+                      onChange={handleChange}
+                      disabled={!formData.isPaid}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                    />
                   </div>
                 </div>
 
@@ -1049,15 +1031,31 @@ export function PaymentModal({
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <label className="lg:col-span-8 flex items-center gap-2 text-sm text-gray-700 lg:justify-end lg:pb-1">
-                    <input
-                      type="checkbox"
-                      checked={syncDateWithPayment}
-                      onChange={(e) => setSyncDateWithPayment(e.target.checked)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
-                  </label>
+
+                  <div className="lg:col-span-4">
+                    <label className="flex h-full items-center gap-2 text-sm font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        name="isPaid"
+                        checked={formData.isPaid}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span>{t('paymentReceived')}</span>
+                    </label>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <label className="flex h-full items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={syncDateWithPayment}
+                        onChange={(e) => setSyncDateWithPayment(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
