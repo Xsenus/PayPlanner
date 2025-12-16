@@ -846,8 +846,9 @@ export function PaymentModal({
                   <span className="h-6 w-6 rounded-full bg-blue-50 text-blue-600 grid place-items-center text-xs font-bold">1</span>
                   <span>{t('expectedPaymentDate') ?? 'Планирование платежа'}</span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
+
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('type') ?? 'Тип'}
                     </label>
@@ -861,7 +862,7 @@ export function PaymentModal({
                     </select>
                   </div>
 
-                  <div>
+                  <div className="lg:col-span-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
                     <select
                       name="status"
@@ -873,10 +874,8 @@ export function PaymentModal({
                       <option value="Overdue">{t('overdue')}</option>
                     </select>
                   </div>
-                </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
+                  <div className="lg:col-span-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}
                     </label>
@@ -889,7 +888,7 @@ export function PaymentModal({
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+                  <div className="lg:col-span-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('plannedScheduleDate') ?? 'Плановая дата по графику'}
                     </label>
@@ -903,8 +902,8 @@ export function PaymentModal({
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
                     <input
                       ref={amountRef}
@@ -915,38 +914,79 @@ export function PaymentModal({
                       onBlur={formatAmountOnBlur}
                       onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
                       inputMode="decimal"
-                      pattern="^\d+([.,]\d{0,2})?$"
-                      placeholder="0.00"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="0.00"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('paidAmount') ?? 'Получено фактически'}
-                    </label>
+
+                  <div className="lg:col-span-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <label className="block text-sm font-medium text-gray-700">{t('paidAmount')}</label>
+                      <span className="text-xs text-gray-500">{t('paidAmountHint') ?? 'Сколько пришло фактически'}</span>
+                    </div>
                     <input
-                      type="number"
+                      type="text"
                       name="paidAmount"
-                      min="0"
-                      step="0.01"
                       value={formData.paidAmount}
-                      onChange={handleChange}
+                      onChange={(e) =>
+                        setFormData((s) => ({
+                          ...s,
+                          paidAmount: e.target.value,
+                        }))
+                      }
                       onBlur={formatPaidAmountOnBlur}
+                      inputMode="decimal"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       placeholder="0.00"
                     />
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input
+                          type="checkbox"
+                          name="isPaid"
+                          checked={formData.isPaid}
+                          onChange={handleChange}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span>{t('paymentReceived')}</span>
+                      </label>
+
+                      {formData.isPaid && (
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            {t('paidDate')}
+                          </label>
+                          <input
+                            type="date"
+                            name="paidDate"
+                            value={formData.paidDate}
+                            onChange={handleChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {hasPartial && (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                    <p>
-                      {(t('partialPaidInfoPaid') ?? 'Внесено:')} {paidAmountNum.toFixed(2)}
-                    </p>
-                    <p>
-                      {(t('partialPaidInfoRemaining') ?? 'Остаток:')} {remainingAmount.toFixed(2)}
-                    </p>
-                    <p>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow-inner">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-amber-700 ring-1 ring-amber-200">
+                          {t('remaining') ?? 'Остаток'}
+                        </span>
+                        {t('remainingAmount', { amount: remainingAmount.toFixed(2) }) ??
+                          `Остаток: ${remainingAmount.toFixed(2)}`}
+                      </span>
+                      <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+                        {t('partialPaidBadge') ?? 'частичный платёж'}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-amber-700">
                       {t('partialPaidReminder') ??
                         'Обновите ожидаемую дату поступления оставшейся суммы.'}
                     </p>
@@ -996,8 +1036,8 @@ export function PaymentModal({
                   </div>
                 )}
 
-                <div className="grid gap-3 sm:grid-cols-[1fr,auto] sm:items-end">
-                  <div>
+                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                  <div className="lg:col-span-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {t('lastPaymentDate') ?? 'Дата фактического платежа'}
                     </label>
@@ -1009,7 +1049,7 @@ export function PaymentModal({
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <label className="lg:col-span-8 flex items-center gap-2 text-sm text-gray-700 lg:justify-end lg:pb-1">
                     <input
                       type="checkbox"
                       checked={syncDateWithPayment}
