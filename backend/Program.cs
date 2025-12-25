@@ -48,7 +48,7 @@ static string NormalizeSqliteConnection(string raw)
     };
 
     // Переключаем SQLite в WAL, чтобы операции записи из разных потоков не блокировали друг друга
-    builder["Journal Mode"] = "WAL";
+    builder.JournalMode = SqliteJournalModeEnum.Wal;
 
     if (!Path.IsPathRooted(builder.DataSource))
     {
