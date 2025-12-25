@@ -228,66 +228,6 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
   }, [pagination.total, pagination.pageSize]);
 
-  const summaryBuckets = useMemo(() => {
-    const base = {
-      total: { amount: 0, count: 0 },
-      pending: { amount: 0, count: 0 },
-      paid: { amount: 0, count: 0 },
-      overdue: { amount: 0, count: 0 },
-    };
-
-    accountRows.forEach((row) => {
-      base.total.amount += row.totalAmount;
-      base.total.count += 1;
-
-      if (row.status === 'paid') {
-        base.paid.amount += row.totalAmount;
-        base.paid.count += 1;
-      } else if (row.status === 'partial') {
-        base.pending.amount += row.totalAmount;
-        base.pending.count += 1;
-      }
-
-      const isOverdue = row.payments.some((payment) => payment.status === 'Overdue');
-      if (isOverdue) {
-        base.overdue.amount += row.totalAmount;
-        base.overdue.count += 1;
-      }
-    });
-
-    return summary ?? base;
-  }, [accountRows, summary]);
-
-  const summaryCards: SummaryCard[] = useMemo(
-    () => [
-      {
-        key: 'total',
-        title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего',
-        amount: summaryBuckets.total.amount,
-        count: summaryBuckets.total.count,
-        accent: 'border border-blue-100 bg-blue-50 text-blue-700',
-        icon: WalletCards,
-      },
-      {
-        key: 'overdue',
-        title: t('invoiceSummaryOverdue') ?? 'Просрочено',
-        amount: summaryBuckets.overdue.amount,
-        count: summaryBuckets.overdue.count,
-        accent: 'border border-rose-100 bg-rose-50 text-rose-700',
-        icon: AlertTriangle,
-      },
-      {
-        key: 'paid',
-        title: t('invoiceSummaryPaid') ?? 'Оплачено',
-        amount: summaryBuckets.paid.amount,
-        count: summaryBuckets.paid.count,
-        accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700',
-        icon: CheckCircle2,
-      },
-    ],
-    [summaryBuckets, t],
-  );
-
   const statusLabels: Record<AccountStatus, string> = {
     created: 'Создан',
     paid: 'Оплачен',
@@ -506,6 +446,66 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
     return rows;
   }, [invoiceByNumber, invoices, paymentsByAccount]);
+
+  const summaryBuckets = useMemo(() => {
+    const base = {
+      total: { amount: 0, count: 0 },
+      pending: { amount: 0, count: 0 },
+      paid: { amount: 0, count: 0 },
+      overdue: { amount: 0, count: 0 },
+    };
+
+    accountRows.forEach((row) => {
+      base.total.amount += row.totalAmount;
+      base.total.count += 1;
+
+      if (row.status === 'paid') {
+        base.paid.amount += row.totalAmount;
+        base.paid.count += 1;
+      } else if (row.status === 'partial') {
+        base.pending.amount += row.totalAmount;
+        base.pending.count += 1;
+      }
+
+      const isOverdue = row.payments.some((payment) => payment.status === 'Overdue');
+      if (isOverdue) {
+        base.overdue.amount += row.totalAmount;
+        base.overdue.count += 1;
+      }
+    });
+
+    return summary ?? base;
+  }, [accountRows, summary]);
+
+  const summaryCards: SummaryCard[] = useMemo(
+    () => [
+      {
+        key: 'total',
+        title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего',
+        amount: summaryBuckets.total.amount,
+        count: summaryBuckets.total.count,
+        accent: 'border border-blue-100 bg-blue-50 text-blue-700',
+        icon: WalletCards,
+      },
+      {
+        key: 'overdue',
+        title: t('invoiceSummaryOverdue') ?? 'Просрочено',
+        amount: summaryBuckets.overdue.amount,
+        count: summaryBuckets.overdue.count,
+        accent: 'border border-rose-100 bg-rose-50 text-rose-700',
+        icon: AlertTriangle,
+      },
+      {
+        key: 'paid',
+        title: t('invoiceSummaryPaid') ?? 'Оплачено',
+        amount: summaryBuckets.paid.amount,
+        count: summaryBuckets.paid.count,
+        accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700',
+        icon: CheckCircle2,
+      },
+    ],
+    [summaryBuckets, t],
+  );
 
   const filteredAccounts = useMemo(() => {
     const searchTerm = normalizedSearch;
