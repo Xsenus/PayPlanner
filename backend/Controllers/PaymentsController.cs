@@ -26,8 +26,21 @@ public class PaymentsController : ControllerBase
         CancellationToken ct)
     {
         var q = _db.Payments.AsQueryable().WithPaymentIncludes();
-        if (from.HasValue) q = q.Where(p => p.Date >= from.Value);
-        if (to.HasValue) q = q.Where(p => p.Date <= to.Value);
+        if (from.HasValue)
+        {
+            var fromDate = from.Value.Date;
+            q = q.Where(p =>
+                p.Date >= fromDate ||
+                (p.AccountDate.HasValue && p.AccountDate.Value >= fromDate));
+        }
+
+        if (to.HasValue)
+        {
+            var toDate = to.Value.Date;
+            q = q.Where(p =>
+                p.Date <= toDate ||
+                (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
+        }
         if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value);
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
         var list = await q.AsNoTracking().OrderBy(p => p.Date).ToListAsync(ct);
