@@ -8,6 +8,7 @@ import { Clients } from './components/Clients/Clients';
 import { LegalEntities } from './components/LegalEntities/LegalEntities';
 import { ClientDetail } from './components/Clients/ClientDetail';
 import { Accounts } from './components/Accounts/Accounts';
+import { Installments } from './components/Accounts/Installments';
 import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
 import { Users } from './components/Users/Users';
@@ -39,6 +40,7 @@ function AppContent() {
     accounts: 'Счета',
     accountsIncome: 'Доходные счета',
     accountsExpense: 'Расходные счета',
+    installments: 'Рассрочка',
     acts: 'Акты',
     paymentsIncome: 'Доходные платежи',
     paymentsExpense: 'Расходные платежи',
@@ -100,6 +102,7 @@ function AppContent() {
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'installments' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
         { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
@@ -129,6 +132,7 @@ function AppContent() {
         case 'accounts':
         case 'accountsIncome':
         case 'accountsExpense':
+        case 'installments':
           return permissions.accounts.canView;
         case 'acts':
           return permissions.acts.canView;
@@ -309,6 +313,10 @@ function AppContent() {
       case 'accountsExpense':
         return permissions.accounts.canView
           ? <Accounts defaultType="Expense" lockType />
+          : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'installments':
+        return permissions.accounts.canView
+          ? <Installments />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'acts':
         return permissions.acts.canView

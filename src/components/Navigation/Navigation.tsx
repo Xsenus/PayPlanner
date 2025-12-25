@@ -19,6 +19,7 @@ import {
   TrendingUp,
   TrendingDown,
   ChevronDown,
+  CalendarRange,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -150,6 +151,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             id: 'accountsExpense' as Tab,
             label: t('accountsExpenseNav') ?? t('invoiceTypeExpenseShort') ?? 'Расходные',
             icon: TrendingDown,
+          },
+          {
+            id: 'installments' as Tab,
+            label: t('installmentsNav') ?? 'Рассрочка',
+            icon: CalendarRange,
           },
         ];
 
