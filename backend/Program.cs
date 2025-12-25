@@ -47,9 +47,6 @@ static string NormalizeSqliteConnection(string raw)
         ForeignKeys = true
     };
 
-    // Переключаем SQLite в WAL, чтобы операции записи из разных потоков не блокировали друг друга
-    builder.JournalMode = SqliteJournalModeEnum.Wal;
-
     if (!Path.IsPathRooted(builder.DataSource))
     {
         builder.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, builder.DataSource));
@@ -60,6 +57,20 @@ static string NormalizeSqliteConnection(string raw)
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
 void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
+
+// Переключаем SQLite в WAL отдельной командой, т.к. свойство JournalMode
+// отсутствует в текущей версии Microsoft.Data.Sqlite, а ключ в строке подключения
+// не поддерживается билдером.
+static void EnsureWalMode(string connectionString)
+{
+    using var connection = new SqliteConnection(connectionString);
+    connection.Open();
+
+    using var command = connection.CreateCommand();
+    command.CommandText = "PRAGMA journal_mode=WAL;";
+    command.ExecuteNonQuery();
+}
+EnsureWalMode(normalizedCs);
 
 builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
 builder.Services.AddScoped<PaymentContext>(sp =>
