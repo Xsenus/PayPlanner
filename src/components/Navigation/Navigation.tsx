@@ -151,6 +151,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             label: t('accountsExpenseNav') ?? t('invoiceTypeExpenseShort') ?? 'Расходные',
             icon: TrendingDown,
           },
+          {
+            id: 'installments' as Tab,
+            label: t('installments') ?? 'Рассрочка',
+            icon: CalendarRange,
+          },
         ];
 
       items.push({

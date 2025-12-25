@@ -8,6 +8,7 @@ import { Clients } from './components/Clients/Clients';
 import { LegalEntities } from './components/LegalEntities/LegalEntities';
 import { ClientDetail } from './components/Clients/ClientDetail';
 import { Accounts } from './components/Accounts/Accounts';
+import { Installments } from './components/Installments/Installments';
 import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
 import { Users } from './components/Users/Users';
@@ -37,6 +38,7 @@ function AppContent() {
     clients: 'Клиенты',
     clientDetail: 'Карточка клиента',
     accounts: 'Счета',
+    installments: 'Рассрочка',
     accountsIncome: 'Доходные счета',
     accountsExpense: 'Расходные счета',
     acts: 'Акты',
@@ -98,6 +100,7 @@ function AppContent() {
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
+        { tab: 'installments' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
@@ -127,6 +130,7 @@ function AppContent() {
         case 'clientDetail':
           return permissions.clients.canView;
         case 'accounts':
+        case 'installments':
         case 'accountsIncome':
         case 'accountsExpense':
           return permissions.accounts.canView;
@@ -302,6 +306,10 @@ function AppContent() {
         return permissions.accounts.canView
           ? <Accounts />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
+      case 'installments':
+        return permissions.accounts.canView
+          ? <Installments />
+          : renderNoAccess('Раздел рассрочки недоступен для вашей роли.');
       case 'accountsIncome':
         return permissions.accounts.canView
           ? <Accounts defaultType="Income" lockType />

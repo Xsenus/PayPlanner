@@ -79,6 +79,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const fetchInvoices = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      const normalizedSearch = filters.search?.toLowerCase();
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -93,7 +94,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           status: filters.status,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
-          search: filters.search,
+          search: normalizedSearch,
           type: filters.type,
           sortBy: filters.sortBy,
           sortDir: filters.sortDir,
@@ -139,6 +140,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const fetchSummary = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      const normalizedSearch = filters.search?.toLowerCase();
       const isInitial = mode === 'refresh' ? false : !hasSummaryLoadedRef.current;
       if (isInitial) {
         setSummaryLoading(true);
@@ -150,7 +152,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           status: filters.status,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
-          search: filters.search,
+          search: normalizedSearch,
           type: filters.type,
         });
         setSummary(response);
