@@ -399,6 +399,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
   const accountRows = useMemo(() => {
     const rows: AccountRow[] = [];
+    const seenAccounts = new Set<string>();
 
     paymentsByAccount.forEach((group, key) => {
       const invoice = invoiceByNumber.get(key) ?? null;
@@ -427,11 +428,19 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
         status: deriveStatusFromPayments(group, invoice),
         type,
       });
+
+      const normalizedAccount = accountNumber?.toLowerCase().trim();
+      if (normalizedAccount) {
+        seenAccounts.add(normalizedAccount);
+      }
     });
 
     invoices.forEach((invoice) => {
       const key = invoice.number?.trim().toLowerCase() ?? '';
-      if (key && paymentsByAccount.has(key)) return;
+      if (!key) return;
+      if (seenAccounts.has(key)) return;
+      if (paymentsByAccount.has(key)) return;
+
       rows.push({
         accountNumber: invoice.number,
         invoice,
@@ -442,6 +451,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
         status: deriveAccountStatus(invoice),
         type: invoice.type ?? 'Income',
       });
+
+      seenAccounts.add(key);
     });
 
     return rows;
