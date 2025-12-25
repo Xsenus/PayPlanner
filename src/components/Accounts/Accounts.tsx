@@ -109,6 +109,20 @@ function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null
   return anyProgress ? 'partial' : 'created';
 }
 
+function accountKey(value?: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const numeric = normalized.replace(/\D+/g, '');
+  if (numeric) return numeric;
+
+  const stripped = normalized.replace(/[^a-z0-9а-яё]+/gi, '');
+  if (stripped) return stripped;
+
+  return normalized;
+}
+
 function safeRead<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -378,9 +392,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const paymentsByAccount = useMemo(() => {
     const map = new Map<string, Payment[]>();
     payments.forEach((payment) => {
-      const account = payment.account?.trim();
-      if (!account) return;
-      const key = account.toLowerCase();
+      const key = accountKey(payment.account);
+      if (!key) return;
       const existing = map.get(key) ?? [];
       map.set(key, [...existing, payment]);
     });
@@ -390,7 +403,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const invoiceByNumber = useMemo(() => {
     const map = new Map<string, Invoice>();
     invoices.forEach((invoice) => {
-      const key = invoice.number?.trim().toLowerCase();
+      const key = accountKey(invoice.number);
       if (!key) return;
       map.set(key, invoice);
     });
@@ -429,14 +442,14 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
         type,
       });
 
-      const normalizedAccount = accountNumber?.toLowerCase().trim();
+      const normalizedAccount = accountKey(accountNumber);
       if (normalizedAccount) {
         seenAccounts.add(normalizedAccount);
       }
     });
 
     invoices.forEach((invoice) => {
-      const key = invoice.number?.trim().toLowerCase() ?? '';
+      const key = accountKey(invoice.number) ?? '';
       if (!key) return;
       if (seenAccounts.has(key)) return;
       if (paymentsByAccount.has(key)) return;
