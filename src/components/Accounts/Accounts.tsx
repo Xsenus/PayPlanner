@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CalendarRange,
   CheckCircle2,
+  ChevronDown,
   Loader2,
   Pencil,
   Plus,
@@ -11,13 +12,14 @@ import {
   Trash2,
   WalletCards,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import type { Client, Invoice, InvoiceInput, PaymentKind } from '../../types';
+import { usePayments } from '../../hooks/usePayments';
+import type { Client, Invoice, InvoiceInput, Payment, PaymentKind } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -61,6 +63,17 @@ type TableColumn = {
   sortable?: boolean;
 };
 
+type AccountRow = {
+  accountNumber: string;
+  invoice: Invoice | null;
+  payments: Payment[];
+  totalAmount: number;
+  dueDate?: string | null;
+  paidDate?: string | null;
+  status: AccountStatus;
+  type: PaymentKind;
+};
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   const normalized = toDateInputValue(value);
@@ -76,6 +89,24 @@ function deriveAccountStatus(invoice: Invoice): AccountStatus {
   if (invoice.status === 'Cancelled') return 'cancelled';
   if (invoice.status === 'Pending') return 'created';
   return 'partial';
+}
+
+function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null): AccountStatus {
+  if (!payments.length) {
+    return fallback ? deriveAccountStatus(fallback) : 'created';
+  }
+
+  const allCancelled = payments.every((payment) => payment.status === 'Cancelled');
+  if (allCancelled) return 'cancelled';
+
+  const allPaid = payments.every((payment) => payment.status === 'Completed');
+  if (allPaid) return 'paid';
+
+  const anyProgress = payments.some(
+    (payment) => payment.status === 'Completed' || payment.status === 'Processing' || payment.status === 'Overdue',
+  );
+
+  return anyProgress ? 'partial' : 'created';
 }
 
 function safeRead<T>(key: string, fallback: T): T {
@@ -131,6 +162,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const pageSize = 15;
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
 
   const {
     invoices,
@@ -162,6 +194,15 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     pageSize,
   });
 
+  const {
+    payments,
+    loading: paymentsLoading,
+    refreshing: paymentsRefreshing,
+  } = usePayments(from || undefined, to || undefined);
+
+  const isLoading = loading || paymentsLoading;
+  const isRefreshing = refreshing || paymentsRefreshing;
+
   useEffect(() => {
     setPage(1);
   }, [from, to, statusFilter, debouncedSearch, typeFilter]);
@@ -187,16 +228,35 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
   }, [pagination.total, pagination.pageSize]);
 
-  const summaryBuckets = useMemo(
-    () =>
-      summary ?? {
-        total: { amount: 0, count: 0 },
-        pending: { amount: 0, count: 0 },
-        paid: { amount: 0, count: 0 },
-        overdue: { amount: 0, count: 0 },
-      },
-    [summary],
-  );
+  const summaryBuckets = useMemo(() => {
+    const base = {
+      total: { amount: 0, count: 0 },
+      pending: { amount: 0, count: 0 },
+      paid: { amount: 0, count: 0 },
+      overdue: { amount: 0, count: 0 },
+    };
+
+    accountRows.forEach((row) => {
+      base.total.amount += row.totalAmount;
+      base.total.count += 1;
+
+      if (row.status === 'paid') {
+        base.paid.amount += row.totalAmount;
+        base.paid.count += 1;
+      } else if (row.status === 'partial') {
+        base.pending.amount += row.totalAmount;
+        base.pending.count += 1;
+      }
+
+      const isOverdue = row.payments.some((payment) => payment.status === 'Overdue');
+      if (isOverdue) {
+        base.overdue.amount += row.totalAmount;
+        base.overdue.count += 1;
+      }
+    });
+
+    return summary ?? base;
+  }, [accountRows, summary]);
 
   const summaryCards: SummaryCard[] = useMemo(
     () => [
@@ -375,29 +435,128 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
   const normalizedSearch = debouncedSearch.toLowerCase();
 
-  const filteredInvoices = useMemo(() => {
+  const paymentsByAccount = useMemo(() => {
+    const map = new Map<string, Payment[]>();
+    payments.forEach((payment) => {
+      const account = payment.account?.trim();
+      if (!account) return;
+      const key = account.toLowerCase();
+      const existing = map.get(key) ?? [];
+      map.set(key, [...existing, payment]);
+    });
+    return map;
+  }, [payments]);
+
+  const invoiceByNumber = useMemo(() => {
+    const map = new Map<string, Invoice>();
+    invoices.forEach((invoice) => {
+      const key = invoice.number?.trim().toLowerCase();
+      if (!key) return;
+      map.set(key, invoice);
+    });
+    return map;
+  }, [invoices]);
+
+  const accountRows = useMemo(() => {
+    const rows: AccountRow[] = [];
+
+    paymentsByAccount.forEach((group, key) => {
+      const invoice = invoiceByNumber.get(key) ?? null;
+      const accountNumber = invoice?.number ?? group[0].account ?? '—';
+      const type = (invoice?.type ?? group[0].type ?? 'Income') as PaymentKind;
+      const totalAmount = group.reduce((sum, payment) => sum + (payment.amount ?? 0), invoice?.amount ?? 0);
+      const dueDate = group.reduce<string | null>((acc, payment) => {
+        if (!payment.plannedDate) return acc;
+        if (!acc) return payment.plannedDate;
+        return new Date(payment.plannedDate) > new Date(acc) ? payment.plannedDate : acc;
+      }, invoice?.dueDate ?? null);
+      const paidDate = group.reduce<string | null>((acc, payment) => {
+        if (!payment.paidDate) return acc;
+        if (!acc) return payment.paidDate;
+        return new Date(payment.paidDate) > new Date(acc) ? payment.paidDate : acc;
+      }, invoice?.paidDate ?? null);
+
+      rows.push({
+        accountNumber,
+        invoice,
+        payments: group,
+        totalAmount,
+        dueDate,
+        paidDate,
+        status: deriveStatusFromPayments(group, invoice),
+        type,
+      });
+    });
+
+    invoices.forEach((invoice) => {
+      const key = invoice.number?.trim().toLowerCase() ?? '';
+      if (key && paymentsByAccount.has(key)) return;
+      rows.push({
+        accountNumber: invoice.number,
+        invoice,
+        payments: [],
+        totalAmount: invoice.amount,
+        dueDate: invoice.dueDate,
+        paidDate: invoice.paidDate,
+        status: deriveAccountStatus(invoice),
+        type: invoice.type ?? 'Income',
+      });
+    });
+
+    return rows;
+  }, [invoiceByNumber, invoices, paymentsByAccount]);
+
+  const filteredAccounts = useMemo(() => {
     const searchTerm = normalizedSearch;
-    return invoices.filter((invoice) => {
-      const derivedStatus = deriveAccountStatus(invoice);
-      if (statusFilter !== 'all' && derivedStatus !== statusFilter) return false;
+    const filteredByType = accountRows.filter((row) => {
+      if (typeFilter !== 'All' && row.type !== typeFilter) return false;
+      if (statusFilter !== 'all' && row.status !== statusFilter) return false;
 
       if (!searchTerm) return true;
+      const invoice = row.invoice;
       const haystack = [
-        invoice.number,
-        invoice.clientName,
-        invoice.counterpartyName,
-        invoice.actNumber,
-        invoice.actTitle,
-        invoice.actReference,
-        invoice.description,
-        invoice.paymentStatusName,
+        row.accountNumber,
+        invoice?.clientName,
+        invoice?.counterpartyName,
+        invoice?.actNumber,
+        invoice?.actTitle,
+        invoice?.actReference,
+        invoice?.description,
+        invoice?.paymentStatusName,
+        ...row.payments.map((payment) => payment.description ?? ''),
       ]
         .map((value) => (value ? String(value).toLowerCase() : ''))
         .filter(Boolean);
 
       return haystack.some((value) => value.includes(searchTerm));
     });
-  }, [invoices, normalizedSearch, statusFilter]);
+
+    const sorted = [...filteredByType].sort((a, b) => {
+      const direction = sortState.direction === 'asc' ? 1 : -1;
+      const key = sortState.key;
+
+      switch (key) {
+        case 'amount':
+          return (a.totalAmount - b.totalAmount) * direction;
+        case 'number':
+          return (a.accountNumber ?? '').localeCompare(b.accountNumber ?? '') * direction;
+        case 'dueDate': {
+          const aDate = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+          const bDate = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+          return (aDate - bDate) * direction;
+        }
+        case 'date': {
+          const aDate = a.invoice?.date ? new Date(a.invoice.date).getTime() : 0;
+          const bDate = b.invoice?.date ? new Date(b.invoice.date).getTime() : 0;
+          return (aDate - bDate) * direction;
+        }
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [accountRows, normalizedSearch, sortState.direction, sortState.key, statusFilter, typeFilter]);
 
   const columns: TableColumn[] = useMemo(
     () => [
@@ -424,6 +583,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
       }
       return [...prev, key];
     });
+  };
+
+  const toggleExpanded = (key: string) => {
+    setExpandedAccounts((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
@@ -567,7 +730,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                 onClick={() => void refresh()}
                 className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
               >
-                {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
+                {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
                 {t('actFiltersApply') ?? 'Обновить'}
               </button>
               <div className="relative">
@@ -652,7 +815,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
-                {loading ? (
+                {isLoading ? (
                   <tr>
                     <td colSpan={visibleColumns.length + 1} className="py-10 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
@@ -661,136 +824,191 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                       </div>
                     </td>
                   </tr>
-                ) : filteredInvoices.length === 0 ? (
+                ) : filteredAccounts.length === 0 ? (
                   <tr>
                     <td colSpan={visibleColumns.length + 1} className="py-10 text-center text-gray-500">
                       {t('invoiceNoData') ?? 'Счета не найдены'}
                     </td>
                   </tr>
                 ) : (
-                  filteredInvoices.map((invoice) => {
-                    const accountStatus = deriveAccountStatus(invoice);
-                    const type = (invoice.type ?? 'Income') as PaymentKind;
+                  filteredAccounts.map((row) => {
+                    const invoice = row.invoice;
+                    const accountStatus = row.status;
+                    const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
                     const actPieces: string[] = [];
-                    if (invoice.actNumber) actPieces.push(`№${invoice.actNumber}`);
-                    if (invoice.actTitle) actPieces.push(invoice.actTitle);
+                    if (invoice?.actNumber) actPieces.push(`№${invoice.actNumber}`);
+                    if (invoice?.actTitle) actPieces.push(invoice.actTitle);
                     const actLine = actPieces.join(' · ');
-                    const primaryName = invoice.clientName || invoice.counterpartyName || '—';
+                    const primaryName =
+                      invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
+                    const isExpanded = expandedAccounts[row.accountNumber] ?? false;
+                    const colSpan = visibleColumns.length + (canEdit || canDelete ? 1 : 0);
 
                     return (
-                      <tr key={invoice.id} className="hover:bg-gray-50/70">
-                        {visibleColumns.includes('date') && (
-                          <td className="px-4 py-3 font-medium text-gray-900">{formatDate(invoice.date)}</td>
-                        )}
-                        {visibleColumns.includes('number') && (
-                          <td className="px-4 py-3 text-gray-900">{invoice.number}</td>
-                        )}
-                        {visibleColumns.includes('amount') && (
-                          <td className="px-4 py-3">
-                            <span className="font-semibold text-gray-900">
-                              {formatCurrencySmart(invoice.amount).full}
-                            </span>
-                          </td>
-                        )}
-                        {visibleColumns.includes('counterparty') && (
-                          <td className="px-4 py-3">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium text-gray-900">{primaryName}</span>
-                                <ClientStatusBadge status={invoice.clientStatus} />
-                                <span
-                                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
-                                >
-                                  {typeLabel}
-                                </span>
-                              </div>
-                              {invoice.clientCompany && (
-                                <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
-                              )}
-                              {invoice.counterpartyName && invoice.counterpartyName !== invoice.clientName && (
-                                <div className="text-xs text-gray-500">
-                                  {t('invoiceCounterpartyLabel') ?? 'От поставщика'}: {invoice.counterpartyName}
+                      <Fragment key={`${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`}>
+                        <tr className="hover:bg-gray-50/70">
+                          {visibleColumns.includes('date') && (
+                            <td className="px-4 py-3 font-medium text-gray-900">{formatDate(invoice?.date)}</td>
+                          )}
+                          {visibleColumns.includes('number') && (
+                            <td className="px-4 py-3 text-gray-900">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpanded(row.accountNumber)}
+                                className="inline-flex items-center gap-2 font-semibold text-blue-700"
+                              >
+                                <ChevronDown
+                                  className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                />
+                                {row.accountNumber}
+                              </button>
+                            </td>
+                          )}
+                          {visibleColumns.includes('amount') && (
+                            <td className="px-4 py-3">
+                              <span className="font-semibold text-gray-900">
+                                {formatCurrencySmart(row.totalAmount).full}
+                              </span>
+                            </td>
+                          )}
+                          {visibleColumns.includes('counterparty') && (
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-gray-900">{primaryName}</span>
+                                  <ClientStatusBadge status={invoice?.clientStatus} />
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
+                                  >
+                                    {typeLabel}
+                                  </span>
                                 </div>
+                                {invoice?.clientCompany && (
+                                  <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
+                                )}
+                                {invoice?.counterpartyName && invoice.counterpartyName !== invoice.clientName && (
+                                  <div className="text-xs text-gray-500">
+                                    {t('invoiceCounterpartyLabel') ?? 'От поставщика'}: {invoice.counterpartyName}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                          {visibleColumns.includes('status') && (
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[accountStatus]}`}
+                              >
+                                {statusLabels[accountStatus]}
+                              </span>
+                              {invoice?.paymentStatusName && (
+                                <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>
                               )}
-                            </div>
-                          </td>
-                        )}
-                        {visibleColumns.includes('status') && (
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[accountStatus]}`}
-                            >
-                              {statusLabels[accountStatus]}
-                            </span>
-                            {invoice.paymentStatusName && (
-                              <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>
-                            )}
-                          </td>
-                        )}
-                        {visibleColumns.includes('dueDate') && (
-                          <td className="px-4 py-3">{formatDate(invoice.dueDate)}</td>
-                        )}
-                        {visibleColumns.includes('paidDate') && (
-                          <td className="px-4 py-3">{formatDate(invoice.paidDate)}</td>
-                        )}
-                        {visibleColumns.includes('act') && (
-                          <td className="px-4 py-3">
-                            {actLine ? (
-                              <div className="font-medium text-gray-900">{actLine}</div>
-                            ) : (
-                              <div className="text-gray-500">—</div>
-                            )}
-                            {invoice.actReference && (
-                              <div className="text-xs text-gray-500">{invoice.actReference}</div>
-                            )}
-                          </td>
-                        )}
-                        {visibleColumns.includes('responsible') && (
-                          <td className="px-4 py-3">{invoice.responsibleName ? invoice.responsibleName : '—'}</td>
-                        )}
-                        {visibleColumns.includes('type') && (
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
-                            >
-                              {typeLabel}
-                            </span>
-                          </td>
-                        )}
-                        {visibleColumns.includes('description') && (
-                          <td className="px-4 py-3 text-gray-600">{invoice.description || '—'}</td>
-                        )}
-                        {(canEdit || canDelete) && (
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-2">
-                              {canEdit && (
-                                <button
-                                  type="button"
-                                  onClick={() => openEditModal(invoice)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                  title={t('edit') ?? 'Редактировать'}
-                                  aria-label={t('edit') ?? 'Редактировать'}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </button>
+                            </td>
+                          )}
+                          {visibleColumns.includes('dueDate') && (
+                            <td className="px-4 py-3">{formatDate(row.dueDate)}</td>
+                          )}
+                          {visibleColumns.includes('paidDate') && (
+                            <td className="px-4 py-3">{formatDate(row.paidDate)}</td>
+                          )}
+                          {visibleColumns.includes('act') && (
+                            <td className="px-4 py-3">
+                              {actLine ? <div className="font-medium text-gray-900">{actLine}</div> : <div className="text-gray-500">—</div>}
+                              {invoice?.actReference && (
+                                <div className="text-xs text-gray-500">{invoice.actReference}</div>
                               )}
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeInvoice(invoice)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
-                                  title={t('delete') ?? 'Удалить'}
-                                  aria-label={t('delete') ?? 'Удалить'}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                              {!invoice?.actNumber && (
+                                <div className="mt-2 text-xs text-blue-600">{t('actCreateFromInvoice') ?? 'Создать акт из счёта'}</div>
                               )}
-                            </div>
-                          </td>
+                            </td>
+                          )}
+                          {visibleColumns.includes('responsible') && (
+                            <td className="px-4 py-3">{invoice?.responsibleName ? invoice.responsibleName : '—'}</td>
+                          )}
+                          {visibleColumns.includes('type') && (
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
+                              >
+                                {typeLabel}
+                              </span>
+                            </td>
+                          )}
+                          {visibleColumns.includes('description') && (
+                            <td className="px-4 py-3 text-gray-600">{invoice?.description || '—'}</td>
+                          )}
+                          {(canEdit || canDelete) && (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-2">
+                                {canEdit && invoice && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(invoice)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                    title={t('edit') ?? 'Редактировать'}
+                                    aria-label={t('edit') ?? 'Редактировать'}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                )}
+                                {canDelete && invoice && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeInvoice(invoice)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                    title={t('delete') ?? 'Удалить'}
+                                    aria-label={t('delete') ?? 'Удалить'}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                        {isExpanded && row.payments.length > 0 && (
+                          <tr>
+                            <td colSpan={colSpan} className="bg-gray-50 px-4 py-3">
+                              <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                                <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold uppercase text-gray-500">
+                                  {t('paymentOperations') ?? 'Операции по счёту'}
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full divide-y divide-gray-100 text-sm">
+                                    <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500">
+                                      <tr>
+                                        <th className="px-4 py-2">{t('paymentDate') ?? 'Дата платежа'}</th>
+                                        <th className="px-4 py-2">{t('amount') ?? 'Сумма'}</th>
+                                        <th className="px-4 py-2">{t('status') ?? 'Статус'}</th>
+                                        <th className="px-4 py-2">{t('description') ?? 'Описание'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {row.payments.map((payment) => (
+                                        <tr key={payment.id}>
+                                          <td className="px-4 py-2">{formatDate(payment.plannedDate)}</td>
+                                          <td className="px-4 py-2 font-semibold text-gray-900">
+                                            {formatCurrencySmart(payment.amount).full}
+                                          </td>
+                                          <td className="px-4 py-2">
+                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                              {statusLabels[deriveStatusFromPayments([payment], invoice)]}
+                                            </span>
+                                          </td>
+                                          <td className="px-4 py-2 text-gray-600">{payment.description || '—'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </tr>
+                      </Fragment>
                     );
                   })
                 )}
@@ -802,10 +1020,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
             <div className="border-t border-gray-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{String(error)}</div>
           )}
 
-          {!loading && filteredInvoices.length > 0 && (
+          {!isLoading && filteredAccounts.length > 0 && (
             <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
               <div>
-                {t('recordsFound') ?? 'Найдено записей'}: {pagination.total}
+                {t('recordsFound') ?? 'Найдено записей'}: {filteredAccounts.length}
               </div>
               <div className="flex items-center gap-2">
                 <button

@@ -140,24 +140,19 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     if (permissions.clients.canView) {
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
     }
-      if (permissions.accounts.canView) {
-        const accountChildren: SidebarChild[] = [
-          {
-            id: 'accountsIncome' as Tab,
-            label: t('accountsIncomeNav') ?? t('invoiceTypeIncomeShort') ?? 'Доходные',
-            icon: TrendingUp,
-          },
-          {
-            id: 'accountsExpense' as Tab,
-            label: t('accountsExpenseNav') ?? t('invoiceTypeExpenseShort') ?? 'Расходные',
-            icon: TrendingDown,
-          },
-          {
-            id: 'installments' as Tab,
-            label: t('installmentsNav') ?? 'Рассрочка',
-            icon: CalendarRange,
-          },
-        ];
+    if (permissions.accounts.canView) {
+      const accountChildren: SidebarChild[] = [
+        {
+          id: 'accountsIncome' as Tab,
+          label: t('accountsIncomeNav') ?? t('invoiceTypeIncomeShort') ?? 'Доходные',
+          icon: TrendingUp,
+        },
+        {
+          id: 'accountsExpense' as Tab,
+          label: t('accountsExpenseNav') ?? t('invoiceTypeExpenseShort') ?? 'Расходные',
+          icon: TrendingDown,
+        },
+      ];
 
       items.push({
         id: 'accounts',
@@ -165,6 +160,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         label: t('accounts') ?? 'Счета',
         icon: WalletCards,
         children: accountChildren,
+      });
+
+      items.push({
+        id: 'installments',
+        tab: 'installments' as Tab,
+        label: t('installmentsNav') ?? 'Рассрочка',
+        icon: CalendarRange,
       });
     }
 
