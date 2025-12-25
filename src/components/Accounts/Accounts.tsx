@@ -464,7 +464,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
       const invoice = invoiceByNumber.get(key) ?? null;
       const accountNumber = invoice?.number ?? group[0].account ?? '—';
       const type = (invoice?.type ?? group[0].type ?? 'Income') as PaymentKind;
-      const totalAmount = group.reduce((sum, payment) => sum + (payment.amount ?? 0), invoice?.amount ?? 0);
+      const paymentsAmount = group.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
+      const totalAmount = invoice?.amount ?? paymentsAmount;
       const dueDate = group.reduce<string | null>((acc, payment) => {
         if (!payment.plannedDate) return acc;
         if (!acc) return payment.plannedDate;

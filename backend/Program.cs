@@ -63,12 +63,19 @@ void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(norma
 // не поддерживается билдером.
 static void EnsureWalMode(string connectionString)
 {
-    using var connection = new SqliteConnection(connectionString);
-    connection.Open();
+    try
+    {
+        using var connection = new SqliteConnection(connectionString);
+        connection.Open();
 
-    using var command = connection.CreateCommand();
-    command.CommandText = "PRAGMA journal_mode=WAL;";
-    command.ExecuteNonQuery();
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL;";
+        command.ExecuteNonQuery();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[SQLite] Не удалось включить WAL: {ex.Message}");
+    }
 }
 EnsureWalMode(normalizedCs);
 
