@@ -19,11 +19,12 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { usePayments } from '../../hooks/usePayments';
-import type { Client, Invoice, InvoiceInput, Payment, PaymentKind } from '../../types';
+import type { Client, Invoice, InvoiceInput, Payment, PaymentKind, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
+import { PaymentModal } from '../Calendar/PaymentModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 interface AccountsProps {
@@ -177,6 +178,9 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
 
   const {
     invoices,
@@ -185,7 +189,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     error,
     summary,
     pagination,
-    refresh,
+    refresh: refreshInvoices,
     createInvoice,
     updateInvoice,
     deleteInvoice,
@@ -212,6 +216,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     payments,
     loading: paymentsLoading,
     refreshing: paymentsRefreshing,
+    refresh: refreshPayments,
+    updatePayment,
+    deletePayment,
+    createPayment,
   } = usePayments(from || undefined, to || undefined);
 
   const isLoading = loading || paymentsLoading;
@@ -614,6 +622,30 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     setExpandedAccounts((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const openPaymentEditModal = (payment: Payment) => {
+    setEditingPayment(payment);
+    setPaymentModalType(payment.type ?? 'Income');
+    setPaymentModalOpen(true);
+  };
+
+  const handleClosePaymentModal = () => {
+    setPaymentModalOpen(false);
+    setEditingPayment(null);
+  };
+
+  const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
+    const isUpdate = 'id' in payload;
+
+    if (isUpdate) {
+      await updatePayment(payload as { id: number } & PaymentPayload);
+    } else {
+      await createPayment(payload as PaymentPayload);
+    }
+
+    await Promise.all([refreshPayments(), refreshInvoices()]);
+    handleClosePaymentModal();
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
@@ -752,7 +784,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
               </button>
               <button
                 type="button"
-                onClick={() => void refresh()}
+                onClick={() => void refreshInvoices()}
                 className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
               >
                 {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
@@ -1009,6 +1041,9 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                                         <th className="px-4 py-2">{t('amount') ?? 'Сумма'}</th>
                                         <th className="px-4 py-2">{t('status') ?? 'Статус'}</th>
                                         <th className="px-4 py-2">{t('description') ?? 'Описание'}</th>
+                                        {canEdit && (
+                                          <th className="px-4 py-2 text-right">{t('actions') ?? 'Действия'}</th>
+                                        )}
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -1024,6 +1059,19 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                                             </span>
                                           </td>
                                           <td className="px-4 py-2 text-gray-600">{payment.description || '—'}</td>
+                                          {canEdit && (
+                                            <td className="px-4 py-2 text-right">
+                                              <button
+                                                type="button"
+                                                onClick={() => openPaymentEditModal(payment)}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
+                                                title={t('edit') ?? 'Редактировать'}
+                                                aria-label={t('edit') ?? 'Редактировать'}
+                                              >
+                                                <Pencil className="h-4 w-4" />
+                                              </button>
+                                            </td>
+                                          )}
                                         </tr>
                                       ))}
                                     </tbody>
@@ -1089,6 +1137,24 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
           defaultClientId={undefined}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
+        />
+
+        <PaymentModal
+          isOpen={paymentModalOpen}
+          onClose={handleClosePaymentModal}
+          onSubmit={handleSubmitPayment}
+          payment={editingPayment ?? undefined}
+          type={paymentModalType}
+          onDelete={
+            canDelete
+              ? async (id) => {
+                  await deletePayment(id);
+                  await Promise.all([refreshPayments(), refreshInvoices()]);
+                  handleClosePaymentModal();
+                }
+              : undefined
+          }
+          onCreateRemainder={createPayment}
         />
       </div>
     </div>
