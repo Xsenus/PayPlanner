@@ -37,8 +37,18 @@ static string NormalizeSqliteConnection(string raw)
     var builder = new SqliteConnectionStringBuilder(raw)
     {
         // DefaultTimeout задаёт время ожидания завершения блокировок при выполнении команд (в секундах)
-        DefaultTimeout = 30
+        DefaultTimeout = 30,
+        // Разрешаем одновременный доступ нескольким подключениям (фронт + фоновые задачи)
+        Cache = SqliteCacheMode.Shared,
+        // Обязательно читаем/создаём БД в режиме R/W, чтобы не получать разрозненные режимы
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        // Включаем пула подключений и внешние ключи, чтобы избежать "залипших" соединений
+        Pooling = true,
+        ForeignKeys = true
     };
+
+    // Переключаем SQLite в WAL, чтобы операции записи из разных потоков не блокировали друг друга
+    builder["Journal Mode"] = "WAL";
 
     if (!Path.IsPathRooted(builder.DataSource))
     {
