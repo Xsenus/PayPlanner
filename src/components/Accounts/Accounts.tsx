@@ -475,76 +475,39 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     return map;
   }, [payments]);
 
-  const invoiceByNumber = useMemo(() => {
-    const map = new Map<string, Invoice>();
-    invoices.forEach((invoice) => {
-      const key = accountKey(invoice.number);
-      if (!key) return;
-      map.set(key, invoice);
-    });
-    return map;
-  }, [invoices]);
-
   const accountRows = useMemo(() => {
     const rows: AccountRow[] = [];
-    const seenAccounts = new Set<string>();
 
-    paymentsByAccount.forEach((group, key) => {
-      const invoice = invoiceByNumber.get(key) ?? null;
-      const accountNumber = invoice?.number ?? group[0].account ?? '—';
-      const type = (invoice?.type ?? group[0].type ?? 'Income') as PaymentKind;
-      const paymentsAmount = group.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
-      const totalAmount = invoice?.amount ?? paymentsAmount;
-      const dueDate = group.reduce<string | null>((acc, payment) => {
+    invoices.forEach((invoice) => {
+      const normalized = accountKey(invoice.number) ?? '';
+      const paymentsForInvoice = normalized ? paymentsByAccount.get(normalized) ?? [] : [];
+
+      const dueDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.plannedDate) return acc;
         if (!acc) return payment.plannedDate;
         return new Date(payment.plannedDate) > new Date(acc) ? payment.plannedDate : acc;
-      }, invoice?.dueDate ?? null);
-      const paidDate = group.reduce<string | null>((acc, payment) => {
+      }, invoice.dueDate ?? null);
+
+      const paidDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.paidDate) return acc;
         if (!acc) return payment.paidDate;
         return new Date(payment.paidDate) > new Date(acc) ? payment.paidDate : acc;
-      }, invoice?.paidDate ?? null);
-
-      rows.push({
-        accountNumber,
-        invoice,
-        payments: group,
-        totalAmount,
-        dueDate,
-        paidDate,
-        status: deriveStatusFromPayments(group, invoice),
-        type,
-      });
-
-      const normalizedAccount = accountKey(accountNumber);
-      if (normalizedAccount) {
-        seenAccounts.add(normalizedAccount);
-      }
-    });
-
-    invoices.forEach((invoice) => {
-      const key = accountKey(invoice.number) ?? '';
-      if (!key) return;
-      if (seenAccounts.has(key)) return;
-      if (paymentsByAccount.has(key)) return;
+      }, invoice.paidDate ?? null);
 
       rows.push({
         accountNumber: invoice.number,
         invoice,
-        payments: [],
+        payments: paymentsForInvoice,
         totalAmount: invoice.amount,
-        dueDate: invoice.dueDate,
-        paidDate: invoice.paidDate,
-        status: deriveAccountStatus(invoice),
+        dueDate,
+        paidDate,
+        status: deriveStatusFromPayments(paymentsForInvoice, invoice),
         type: invoice.type ?? 'Income',
       });
-
-      seenAccounts.add(key);
     });
 
     return rows;
-  }, [invoiceByNumber, invoices, paymentsByAccount]);
+  }, [invoices, paymentsByAccount]);
 
   const loadActsForInvoices = useCallback(async () => {
     const invoiceNumbers = Array.from(
