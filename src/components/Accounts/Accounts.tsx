@@ -19,11 +19,23 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { usePayments } from '../../hooks/usePayments';
-import type { Client, Invoice, InvoiceInput, Payment, PaymentKind, PaymentPayload } from '../../types';
+import type {
+  Act,
+  ActInput,
+  ActResponsible,
+  ActStatus,
+  Client,
+  Invoice,
+  InvoiceInput,
+  Payment,
+  PaymentKind,
+  PaymentPayload,
+} from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
+import { ActModal } from '../Acts/ActModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
@@ -143,6 +155,14 @@ function safeWrite<T>(key: string, value: T) {
   }
 }
 
+type ActPrefill = Partial<ActInput> & {
+  number?: string;
+  title?: string | null;
+  date?: string;
+  clientId?: number | null;
+  responsibleId?: number | null;
+};
+
 export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
@@ -165,6 +185,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     () => safeRead<ColumnKey[]>(`${storagePrefix}.columns`, DEFAULT_VISIBLE_COLUMNS),
     [storagePrefix],
   );
+  const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 15), [storagePrefix]);
 
   const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
   const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
@@ -174,13 +195,20 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
-  const pageSize = 15;
+  const [pageSize, setPageSize] = useState<number>(savedPageSize || 15);
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
+  const [actsByInvoiceNumber, setActsByInvoiceNumber] = useState<Record<string, Act[]>>({});
+  const [actsLoading, setActsLoading] = useState(false);
+  const [actsError, setActsError] = useState<string | null>(null);
+  const [actModalOpen, setActModalOpen] = useState(false);
+  const [actSubmitting, setActSubmitting] = useState(false);
+  const [actModalError, setActModalError] = useState<string | null>(null);
+  const [actPrefill, setActPrefill] = useState<ActPrefill | null>(null);
 
   const {
     invoices,
@@ -223,11 +251,11 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   } = usePayments(from || undefined, to || undefined);
 
   const isLoading = loading || paymentsLoading;
-  const isRefreshing = refreshing || paymentsRefreshing;
+  const isRefreshing = refreshing || paymentsRefreshing || actsLoading;
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, statusFilter, debouncedSearch, typeFilter]);
+  }, [from, to, statusFilter, debouncedSearch, typeFilter, pageSize]);
 
   useEffect(() => {
     if (!defaultType) {
@@ -244,6 +272,14 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   useEffect(() => {
     safeWrite(`${storagePrefix}.columns`, visibleColumns);
   }, [storagePrefix, visibleColumns]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.pageSize`, pageSize);
+  }, [storagePrefix, pageSize]);
+
+  useEffect(() => {
+    void loadActs();
+  }, [loadActs]);
 
   const totalPages = useMemo(() => {
     if (!pagination.pageSize) return 1;
@@ -262,6 +298,20 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     partial: 'bg-blue-100 text-blue-700 border border-blue-200',
     cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
+  };
+
+  const actStatusLabels: Record<ActStatus, string> = {
+    Created: t('actStatusCreated') ?? 'Создан',
+    Transferred: t('actStatusTransferred') ?? 'Передано',
+    Signed: t('actStatusSigned') ?? 'Подписано',
+    Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
+  };
+
+  const actStatusClasses: Record<ActStatus, string> = {
+    Created: 'bg-slate-100 text-slate-700 border border-slate-200',
+    Transferred: 'bg-amber-100 text-amber-800 border border-amber-200',
+    Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
 
   const typeLabels: Record<PaymentKind, string> = {
@@ -308,6 +358,35 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     });
   };
 
+  const loadActs = useCallback(async () => {
+    setActsLoading(true);
+    setActsError(null);
+    try {
+      const response = await apiService.getActs({
+        from: from || undefined,
+        to: to || undefined,
+        search: debouncedSearch || undefined,
+        pageSize: 500,
+      });
+      const grouped: Record<string, Act[]> = {};
+      (response.items ?? []).forEach((act) => {
+        const key = accountKey(act.invoiceNumber ?? act.number);
+        if (!key) return;
+        grouped[key] = [...(grouped[key] ?? []), act];
+      });
+      setActsByInvoiceNumber(grouped);
+    } catch (err) {
+      setActsError(err instanceof Error ? err.message : 'Не удалось загрузить акты по счетам');
+      setActsByInvoiceNumber({});
+    } finally {
+      setActsLoading(false);
+    }
+  }, [debouncedSearch, from, to]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshInvoices(), loadActs()]);
+  }, [loadActs, refreshInvoices]);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -317,9 +396,11 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
+  const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
+  const [actLookupsLoading, setActLookupsLoading] = useState(false);
+  const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
   const ensureClients = useCallback(async () => {
-    if (!modalOpen) return;
     if (clients.length > 0 && !lookupsError) return;
     setLookupsLoading(true);
     try {
@@ -331,13 +412,40 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, clients.length, lookupsError]);
+  }, [clients.length, lookupsError]);
+
+  const ensureActLookups = useCallback(async () => {
+    if (actResponsibles.length > 0 && clients.length > 0 && !actLookupsError) return;
+    setActLookupsLoading(true);
+    try {
+      const [clientsResponse, responsiblesResponse] = await Promise.all([
+        clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
+        apiService.getActResponsibles(),
+      ]);
+      if (clients.length === 0) {
+        setClients(clientsResponse ?? []);
+      }
+      setActResponsibles(responsiblesResponse ?? []);
+      setActLookupsError(null);
+    } catch (err) {
+      setActLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить ответственных или клиентов');
+    } finally {
+      setActLookupsLoading(false);
+    }
+  }, [actResponsibles.length, actLookupsError, clients.length]);
 
   useEffect(() => {
     if (modalOpen) {
       void ensureClients();
     }
   }, [modalOpen, ensureClients]);
+
+  useEffect(() => {
+    if (actModalOpen) {
+      void ensureClients();
+      void ensureActLookups();
+    }
+  }, [actModalOpen, ensureActLookups, ensureClients]);
 
   const openCreateModal = () => {
     setModalMode('create');
@@ -376,6 +484,49 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     }
   };
 
+  const openActModalForInvoice = (row: AccountRow) => {
+    const invoice = row.invoice;
+    const clientId = invoice?.clientId ?? row.payments[0]?.clientId ?? row.payments[0]?.client?.id ?? null;
+    const plannedDate = invoice?.date || row.payments[0]?.plannedDate || toDateInputValue(new Date());
+
+    const prefill: ActPrefill = {
+      number: invoice?.actNumber ?? invoice?.number ?? row.accountNumber,
+      title: invoice?.actTitle ?? invoice?.description ?? null,
+      invoiceNumber: invoice?.number ?? row.accountNumber,
+      amount: invoice?.amount ?? row.totalAmount,
+      date: plannedDate ?? formatLocalYMD(new Date()),
+      status: 'Created',
+      clientId: clientId ?? undefined,
+      responsibleId: invoice?.responsibleId ?? undefined,
+      counterpartyInn: invoice?.counterpartyInn ?? undefined,
+      comment: invoice?.actReference ?? undefined,
+    };
+
+    setActPrefill(prefill);
+    setActModalError(null);
+    setActModalOpen(true);
+  };
+
+  const closeActModal = () => {
+    setActModalOpen(false);
+    setActPrefill(null);
+    setActModalError(null);
+  };
+
+  const submitAct = async (payload: ActInput) => {
+    setActSubmitting(true);
+    setActModalError(null);
+    try {
+      await apiService.createAct(payload);
+      await refreshAll();
+      closeActModal();
+    } catch (err) {
+      setActModalError(err instanceof Error ? err.message : 'Не удалось сохранить акт');
+    } finally {
+      setActSubmitting(false);
+    }
+  };
+
   const removeInvoice = async (invoice: Invoice) => {
     if (!canDelete) return;
     if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
@@ -394,6 +545,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   };
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
+  const pageSizeOptions = [10, 15, 25, 50];
 
   const normalizedSearch = debouncedSearch.toLowerCase();
 
@@ -642,183 +794,209 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
       await createPayment(payload as PaymentPayload);
     }
 
-    await Promise.all([refreshPayments(), refreshInvoices()]);
+    await refreshPayments();
+    await refreshAll();
     handleClosePaymentModal();
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-          <div className="flex flex-col gap-3">
+        <div className="mb-8 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{headingTitle}</h1>
               <p className="text-sm text-gray-500">{headingDescription}</p>
             </div>
-            {lockType ? (
-              <span
-                className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
-                  typeBadgeClasses[typeFilter === 'Expense' ? 'Expense' : 'Income']
-                }`}
-              >
-                {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
-              </span>
-            ) : (
-              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
-                {typeOptions.map((option) => {
-                  const isActive = option === typeFilter;
-                  const buttonLabel =
-                    option === 'Income'
-                      ? t('invoiceTypeIncomeShort') ?? typeFilterLabels[option]
-                      : option === 'Expense'
-                        ? t('invoiceTypeExpenseShort') ?? typeFilterLabels[option]
-                        : t('invoiceTypeAllShort') ?? typeFilterLabels[option];
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setTypeFilter(option)}
-                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                        isActive ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      {buttonLabel}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
-            <div className="flex flex-wrap gap-3">
-              {summaryCards.map((card) => (
-                <div
-                  key={card.key}
-                  className={`flex min-w-[12rem] flex-1 items-center gap-3 rounded-xl bg-white p-4 shadow-sm ${card.accent}`}
-                >
-                  <card.icon className="h-5 w-5" />
-                  <div className="flex flex-col">
-                    <span className="text-xs uppercase text-gray-500">{card.title}</span>
-                    <span className="text-lg font-semibold text-gray-900">
-                      {formatCurrencySmart(card.amount).full}
-                    </span>
-                    <span className="text-sm text-gray-600">{card.count} шт.</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {canCreate && (
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500"
-            >
-              <Plus className="h-4 w-4" />
-              {t('addInvoice') ?? 'Добавить счёт'}
-            </button>
-          )}
-        </div>
-
-        <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:items-end sm:justify-between">
-          <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-gray-700">{t('invoiceFiltersPeriod') ?? 'Период с'}</span>
-              <div className="relative">
-                <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(event) => setFrom(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-gray-700">{t('invoiceFiltersPeriodTo') ?? 'Период по'}</span>
-              <div className="relative">
-                <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-gray-700">{t('status') ?? 'Статус'}</span>
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as 'all' | AccountStatus)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
-                <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-                <option value="created">{statusLabels.created}</option>
-                <option value="partial">{statusLabels.partial}</option>
-                <option value="paid">{statusLabels.paid}</option>
-                <option value="cancelled">{statusLabels.cancelled}</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-1 sm:flex-row sm:items-end sm:justify-end">
-            <div className="relative w-full sm:w-72">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта, клиент или акт'}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
-              >
-                <RotateCcw className="h-4 w-4" />
-                {t('invoiceFiltersReset') ?? 'Сбросить'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void refreshInvoices()}
-                className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
-              >
-                {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
-                {t('actFiltersApply') ?? 'Обновить'}
-              </button>
-              <div className="relative">
+            {canCreate && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setColumnsOpen((prev) => !prev)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+                  onClick={openCreateModal}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500"
                 >
-                  <Settings2 className="h-4 w-4" />
-                  {t('tableSettings') ?? 'Настройка таблицы'}
+                  <Plus className="h-4 w-4" />
+                  {t('addInvoice') ?? 'Добавить счёт'}
                 </button>
-                {columnsOpen && (
-                  <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-                    <div className="mb-2 text-xs font-semibold uppercase text-gray-500">
-                      {t('visibleColumns') ?? 'Отображаемые столбцы'}
-                    </div>
-                    <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                      {columns.map((column) => (
-                        <label key={column.key} className="flex items-center gap-2 text-sm text-gray-700">
-                          <input
-                            type="checkbox"
-                            checked={visibleColumns.includes(column.key)}
-                            onChange={() => toggleColumn(column.key)}
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span>{column.label}</span>
-                        </label>
-                      ))}
-                    </div>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
+              <div className="flex flex-col gap-3 lg:col-span-7">
+                {lockType ? (
+                  <span
+                    className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                      typeBadgeClasses[typeFilter === 'Expense' ? 'Expense' : 'Income']
+                    }`}
+                  >
+                    {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
+                  </span>
+                ) : (
+                  <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+                    {typeOptions.map((option) => {
+                      const isActive = option === typeFilter;
+                      const buttonLabel =
+                        option === 'Income'
+                          ? t('invoiceTypeIncomeShort') ?? typeFilterLabels[option]
+                          : option === 'Expense'
+                            ? t('invoiceTypeExpenseShort') ?? typeFilterLabels[option]
+                            : t('invoiceTypeAllShort') ?? typeFilterLabels[option];
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setTypeFilter(option)}
+                          className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                            isActive ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          {buttonLabel}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {summaryCards.map((card) => (
+                    <div
+                      key={card.key}
+                      className={`flex min-w-[12rem] flex-1 items-center gap-3 rounded-xl bg-white p-4 shadow-sm ${card.accent}`}
+                    >
+                      <card.icon className="h-5 w-5" />
+                      <div className="flex flex-col">
+                        <span className="text-xs uppercase text-gray-500">{card.title}</span>
+                        <span className="text-lg font-semibold text-gray-900">
+                          {formatCurrencySmart(card.amount).full}
+                        </span>
+                        <span className="text-sm text-gray-600">{card.count} шт.</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 lg:col-span-5">
+                <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-gray-700">{t('invoiceFiltersPeriod') ?? 'Период с'}</span>
+                    <div className="relative">
+                      <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                      <input
+                        type="date"
+                        value={from}
+                        onChange={(event) => setFrom(event.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      />
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-gray-700">{t('invoiceFiltersPeriodTo') ?? 'Период по'}</span>
+                    <div className="relative">
+                      <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                      <input
+                        type="date"
+                        value={to}
+                        onChange={(event) => setTo(event.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      />
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-gray-700">{t('status') ?? 'Статус'}</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value as 'all' | AccountStatus)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    >
+                      <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+                      <option value="created">{statusLabels.created}</option>
+                      <option value="partial">{statusLabels.partial}</option>
+                      <option value="paid">{statusLabels.paid}</option>
+                      <option value="cancelled">{statusLabels.cancelled}</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap items-end justify-end gap-2">
+                  <div className="relative w-full min-w-[240px] sm:w-64">
+                    <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта, клиент или акт'}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    <span>{t('tablePageSize') ?? 'Строк на странице'}</span>
+                    <select
+                      value={pageSize}
+                      onChange={(event) => {
+                        const value = Number(event.target.value) || 10;
+                        setPageSize(value);
+                        setPage(1);
+                      }}
+                      className="rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    >
+                      {pageSizeOptions.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {t('invoiceFiltersReset') ?? 'Сбросить'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshAll()}
+                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
+                  >
+                    {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
+                    {t('actFiltersApply') ?? 'Обновить'}
+                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setColumnsOpen((prev) => !prev)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      {t('tableSettings') ?? 'Таблица'}
+                    </button>
+                    {columnsOpen && (
+                      <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+                        <div className="mb-2 text-xs font-semibold uppercase text-gray-500">
+                          {t('visibleColumns') ?? 'Отображаемые столбцы'}
+                        </div>
+                        <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+                          {columns.map((column) => (
+                            <label key={column.key} className="flex items-center gap-2 text-sm text-gray-700">
+                              <input
+                                type="checkbox"
+                                checked={visibleColumns.includes(column.key)}
+                                onChange={() => toggleColumn(column.key)}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span>{column.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -894,10 +1072,37 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
-                    const actPieces: string[] = [];
-                    if (invoice?.actNumber) actPieces.push(`№${invoice.actNumber}`);
-                    if (invoice?.actTitle) actPieces.push(invoice.actTitle);
-                    const actLine = actPieces.join(' · ');
+                    const normalizedAccount = accountKey(invoice?.number ?? row.accountNumber);
+                    const actsFromLookup = normalizedAccount
+                      ? actsByInvoiceNumber[normalizedAccount] ?? []
+                      : [];
+                    const fallbackAct =
+                      actsFromLookup.length === 0 && invoice?.actNumber
+                        ? [
+                            {
+                              id: invoice.actId ?? Number(`${invoice.id ?? 0}${invoice.actNumber}`),
+                              number: invoice.actNumber,
+                              title: invoice.actTitle ?? undefined,
+                              date:
+                                invoice.date ||
+                                row.payments[0]?.plannedDate ||
+                                toDateInputValue(new Date()) ||
+                                '',
+                              amount: invoice.amount ?? row.totalAmount,
+                              invoiceNumber: invoice.number ?? row.accountNumber,
+                              counterpartyInn: invoice.counterpartyInn ?? undefined,
+                              status: (invoice.actStatus as ActStatus | undefined) ?? 'Created',
+                              clientId: invoice.clientId ?? undefined,
+                              clientName: invoice.clientName ?? undefined,
+                              responsibleId: invoice.responsibleId ?? undefined,
+                              responsibleName: invoice.responsibleName ?? undefined,
+                              comment: invoice.actReference ?? undefined,
+                              createdAt: invoice.createdAt ?? new Date().toISOString(),
+                            } satisfies Act,
+                          ]
+                        : [];
+                    const actsForRow = actsFromLookup.length > 0 ? actsFromLookup : fallbackAct;
+                    const hasActs = actsForRow.length > 0;
                     const primaryName =
                       invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
@@ -973,12 +1178,52 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                           )}
                           {visibleColumns.includes('act') && (
                             <td className="px-4 py-3">
-                              {actLine ? <div className="font-medium text-gray-900">{actLine}</div> : <div className="text-gray-500">—</div>}
-                              {invoice?.actReference && (
-                                <div className="text-xs text-gray-500">{invoice.actReference}</div>
+                              {actsLoading ? (
+                                <div className="inline-flex items-center gap-2 text-gray-500">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  {t('loading') ?? 'Загрузка...'}
+                                </div>
+                              ) : hasActs ? (
+                                <div className="flex flex-col gap-2">
+                                  {actsForRow.map((act) => (
+                                    <div
+                                      key={`${act.id ?? act.number}-${act.invoiceNumber ?? row.accountNumber}`}
+                                      className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
+                                    >
+                                      <div className="flex flex-col">
+                                        <span className="font-semibold text-gray-900">№{act.number}</span>
+                                        {act.title && <span className="text-xs text-gray-600">{act.title}</span>}
+                                        {act.invoiceNumber && act.invoiceNumber !== row.accountNumber && (
+                                          <span className="text-[11px] text-gray-500">
+                                            {(t('account') ?? 'Счёт') + ': '} {act.invoiceNumber}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span
+                                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${actStatusClasses[act.status] || actStatusClasses.Created}`}
+                                      >
+                                        {actStatusLabels[act.status] ?? actStatusLabels.Created}
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {invoice?.actReference && (
+                                    <div className="text-xs text-gray-500">{invoice.actReference}</div>
+                                  )}
+                                </div>
+                              ) : canCreate ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openActModalForInvoice(row)}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  {t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
+                                </button>
+                              ) : (
+                                <div className="text-gray-500">—</div>
                               )}
-                              {!invoice?.actNumber && (
-                                <div className="mt-2 text-xs text-blue-600">{t('actCreateFromInvoice') ?? 'Создать акт из счёта'}</div>
+                              {actsError && (
+                                <div className="mt-1 text-xs text-rose-600">{actsError}</div>
                               )}
                             </td>
                           )}
@@ -1149,12 +1394,30 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
             canDelete
               ? async (id) => {
                   await deletePayment(id);
-                  await Promise.all([refreshPayments(), refreshInvoices()]);
+                  await refreshPayments();
+                  await refreshAll();
                   handleClosePaymentModal();
                 }
               : undefined
           }
           onCreateRemainder={createPayment}
+        />
+
+        <ActModal
+          open={actModalOpen}
+          mode="create"
+          act={null}
+          prefill={actPrefill ?? undefined}
+          onClose={closeActModal}
+          onSubmit={submitAct}
+          submitting={actSubmitting}
+          errorMessage={actModalError}
+          clients={clients}
+          responsibles={actResponsibles}
+          lookupsLoading={actLookupsLoading || lookupsLoading}
+          lookupsError={actLookupsError}
+          defaultClientId={actPrefill?.clientId ?? undefined}
+          defaultResponsibleId={actPrefill?.responsibleId ?? undefined}
         />
       </div>
     </div>

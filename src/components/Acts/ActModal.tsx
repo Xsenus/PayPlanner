@@ -9,6 +9,7 @@ interface ActModalProps {
   open: boolean;
   mode: 'create' | 'edit';
   act: Act | null;
+  prefill?: ActModalPrefill;
   onClose: () => void;
   onSubmit: (payload: ActInput) => Promise<void>;
   submitting: boolean;
@@ -34,26 +35,40 @@ type FormState = {
   comment: string;
 };
 
+type ActModalPrefill = Partial<ActInput> & {
+  title?: string | null;
+  number?: string;
+  date?: string;
+  clientId?: number | null;
+  responsibleId?: number | null;
+};
+
 const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 
 function normalizeActToForm(
   act: Act | null,
   defaultClientId?: number | null,
   defaultResponsibleId?: number | null,
+  prefill?: ActModalPrefill,
 ): FormState {
   if (!act) {
     const today = toDateInputValue(new Date());
     return {
-      number: '',
-      title: '',
-      date: today,
-      amount: '',
-      invoiceNumber: '',
-      counterpartyInn: '',
-      status: 'Created',
-      clientId: defaultClientId ? String(defaultClientId) : '',
-      responsibleId: defaultResponsibleId ? String(defaultResponsibleId) : '',
-      comment: '',
+      number: prefill?.number ?? '',
+      title: prefill?.title ?? '',
+      date: prefill?.date ? toDateInputValue(prefill.date) ?? prefill.date : today,
+      amount:
+        prefill?.amount !== undefined && prefill.amount !== null ? String(prefill.amount) : '',
+      invoiceNumber: prefill?.invoiceNumber ?? '',
+      counterpartyInn: prefill?.counterpartyInn ?? '',
+      status: prefill?.status ?? 'Created',
+      clientId: prefill?.clientId ? String(prefill.clientId) : defaultClientId ? String(defaultClientId) : '',
+      responsibleId: prefill?.responsibleId
+        ? String(prefill.responsibleId)
+        : defaultResponsibleId
+          ? String(defaultResponsibleId)
+          : '',
+      comment: prefill?.comment ?? '',
     };
   }
 
@@ -79,6 +94,7 @@ export function ActModal({
   open,
   mode,
   act,
+  prefill,
   onClose,
   onSubmit,
   submitting,
@@ -92,7 +108,7 @@ export function ActModal({
 }: ActModalProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() =>
-    normalizeActToForm(act, defaultClientId, defaultResponsibleId),
+    normalizeActToForm(act, defaultClientId, defaultResponsibleId, prefill),
   );
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -101,7 +117,7 @@ export function ActModal({
       setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId));
       setLocalError(null);
     }
-  }, [open, act, defaultClientId, defaultResponsibleId]);
+  }, [open, act, defaultClientId, defaultResponsibleId, prefill]);
 
   const isEdit = mode === 'edit';
 
