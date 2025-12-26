@@ -9,6 +9,12 @@ interface ActModalProps {
   open: boolean;
   mode: 'create' | 'edit';
   act: Act | null;
+  createDefaults?: Partial<ActInput & { counterpartyInn?: string; invoiceNumber?: string }> & {
+    number?: string;
+    title?: string | null;
+    date?: string;
+    amount?: number;
+  };
   onClose: () => void;
   onSubmit: (payload: ActInput) => Promise<void>;
   submitting: boolean;
@@ -40,20 +46,32 @@ function normalizeActToForm(
   act: Act | null,
   defaultClientId?: number | null,
   defaultResponsibleId?: number | null,
+  defaults?: ActModalProps['createDefaults'],
 ): FormState {
   if (!act) {
     const today = toDateInputValue(new Date());
     return {
-      number: '',
-      title: '',
-      date: today,
-      amount: '',
-      invoiceNumber: '',
-      counterpartyInn: '',
-      status: 'Created',
-      clientId: defaultClientId ? String(defaultClientId) : '',
-      responsibleId: defaultResponsibleId ? String(defaultResponsibleId) : '',
-      comment: '',
+      number: defaults?.number ?? '',
+      title: defaults?.title ?? '',
+      date: toDateInputValue(defaults?.date || new Date()) || today,
+      amount:
+        defaults?.amount !== undefined && defaults?.amount !== null
+          ? String(defaults.amount)
+          : '',
+      invoiceNumber: defaults?.invoiceNumber ?? '',
+      counterpartyInn: defaults?.counterpartyInn ?? '',
+      status: defaults?.status ?? 'Created',
+      clientId: defaults?.clientId
+        ? String(defaults.clientId)
+        : defaultClientId
+          ? String(defaultClientId)
+          : '',
+      responsibleId: defaults?.responsibleId
+        ? String(defaults.responsibleId)
+        : defaultResponsibleId
+          ? String(defaultResponsibleId)
+          : '',
+      comment: defaults?.comment ?? '',
     };
   }
 
@@ -79,6 +97,7 @@ export function ActModal({
   open,
   mode,
   act,
+  createDefaults,
   onClose,
   onSubmit,
   submitting,
@@ -92,16 +111,16 @@ export function ActModal({
 }: ActModalProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() =>
-    normalizeActToForm(act, defaultClientId, defaultResponsibleId),
+    normalizeActToForm(act, defaultClientId, defaultResponsibleId, createDefaults),
   );
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId));
+      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, createDefaults));
       setLocalError(null);
     }
-  }, [open, act, defaultClientId, defaultResponsibleId]);
+  }, [open, act, defaultClientId, defaultResponsibleId, createDefaults]);
 
   const isEdit = mode === 'edit';
 
