@@ -264,10 +264,6 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   }, [defaultType]);
 
   useEffect(() => {
-    void loadActsForInvoices();
-  }, [loadActsForInvoices]);
-
-  useEffect(() => {
     safeWrite(`${storagePrefix}.period`, { from, to });
   }, [from, to, storagePrefix]);
 
@@ -613,6 +609,10 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
     return summary ?? base;
   }, [accountRows, summary]);
+
+  useEffect(() => {
+    void loadActsForInvoices();
+  }, [loadActsForInvoices]);
 
   const summaryCards: SummaryCard[] = useMemo(
     () => [
