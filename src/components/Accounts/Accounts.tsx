@@ -464,8 +464,6 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
 
-  const normalizedSearch = debouncedSearch.toLowerCase();
-
   const paymentsByAccount = useMemo(() => {
     const map = new Map<string, Payment[]>();
     payments.forEach((payment) => {
@@ -646,66 +644,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     [summaryBuckets, t],
   );
 
-  const filteredAccounts = useMemo(() => {
-    const searchTerm = normalizedSearch;
-    const fromTs = from ? new Date(from).getTime() : null;
-    const toTs = to ? new Date(to).getTime() : null;
-
-    const filteredByType = accountRows.filter((row) => {
-      if (typeFilter !== 'All' && row.type !== typeFilter) return false;
-      if (statusFilter !== 'all' && row.status !== statusFilter) return false;
-
-      const issueDate = row.invoice?.date || row.dueDate || row.paidDate || row.payments[0]?.plannedDate;
-      const issueTs = issueDate ? new Date(issueDate).getTime() : null;
-
-      if (fromTs !== null && issueTs !== null && issueTs < fromTs) return false;
-      if (toTs !== null && issueTs !== null && issueTs > toTs) return false;
-
-      if (!searchTerm) return true;
-      const invoice = row.invoice;
-      const haystack = [
-        row.accountNumber,
-        invoice?.clientName,
-        invoice?.counterpartyName,
-        invoice?.actNumber,
-        invoice?.actTitle,
-        invoice?.actReference,
-        invoice?.description,
-        invoice?.paymentStatusName,
-        ...row.payments.map((payment) => payment.description ?? ''),
-      ]
-        .map((value) => (value ? String(value).toLowerCase() : ''))
-        .filter(Boolean);
-
-      return haystack.some((value) => value.includes(searchTerm));
-    });
-
-    const sorted = [...filteredByType].sort((a, b) => {
-      const direction = sortState.direction === 'asc' ? 1 : -1;
-      const key = sortState.key;
-
-      switch (key) {
-        case 'amount':
-          return (a.totalAmount - b.totalAmount) * direction;
-        case 'number':
-          return (a.accountNumber ?? '').localeCompare(b.accountNumber ?? '') * direction;
-        case 'dueDate': {
-          const aDate = a.dueDate ? new Date(a.dueDate).getTime() : 0;
-          const bDate = b.dueDate ? new Date(b.dueDate).getTime() : 0;
-          return (aDate - bDate) * direction;
-        }
-        case 'date': {
-          const aDate = a.invoice?.date ? new Date(a.invoice.date).getTime() : 0;
-          const bDate = b.invoice?.date ? new Date(b.invoice.date).getTime() : 0;
-          return (aDate - bDate) * direction;
-        }
-        default:
-          return 0;
-      }
-    });
-
-    return sorted;
-  }, [accountRows, from, normalizedSearch, sortState.direction, sortState.key, statusFilter, to, typeFilter]);
+  const filteredAccounts = useMemo(() => accountRows, [accountRows]);
 
   const columns: TableColumn[] = useMemo(
     () => [
