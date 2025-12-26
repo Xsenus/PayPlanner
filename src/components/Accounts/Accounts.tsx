@@ -202,6 +202,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const [actModalSubmitting, setActModalSubmitting] = useState(false);
   const [actModalError, setActModalError] = useState<string | null>(null);
   const [actModalInvoice, setActModalInvoice] = useState<AccountRow | null>(null);
+  const [actModalMode, setActModalMode] = useState<'create' | 'edit'>('create');
+  const [activeAct, setActiveAct] = useState<Act | null>(null);
   const [actInitialValues, setActInitialValues] = useState<Partial<ActInput> & { amount?: number | null } | null>(null);
   const [actClients, setActClients] = useState<Client[]>([]);
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
@@ -646,9 +648,18 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
   const filteredAccounts = useMemo(() => {
     const searchTerm = normalizedSearch;
+    const fromTs = from ? new Date(from).getTime() : null;
+    const toTs = to ? new Date(to).getTime() : null;
+
     const filteredByType = accountRows.filter((row) => {
       if (typeFilter !== 'All' && row.type !== typeFilter) return false;
       if (statusFilter !== 'all' && row.status !== statusFilter) return false;
+
+      const issueDate = row.invoice?.date || row.dueDate || row.paidDate || row.payments[0]?.plannedDate;
+      const issueTs = issueDate ? new Date(issueDate).getTime() : null;
+
+      if (fromTs !== null && issueTs !== null && issueTs < fromTs) return false;
+      if (toTs !== null && issueTs !== null && issueTs > toTs) return false;
 
       if (!searchTerm) return true;
       const invoice = row.invoice;
@@ -694,7 +705,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     });
 
     return sorted;
-  }, [accountRows, normalizedSearch, sortState.direction, sortState.key, statusFilter, typeFilter]);
+  }, [accountRows, from, normalizedSearch, sortState.direction, sortState.key, statusFilter, to, typeFilter]);
 
   const columns: TableColumn[] = useMemo(
     () => [
@@ -752,6 +763,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   };
 
   const openActCreateModal = (row: AccountRow) => {
+    setActModalMode('create');
+    setActiveAct(null);
     const normalizedDate =
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
     setActModalInvoice(row);
@@ -770,10 +783,32 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     setActModalOpen(true);
   };
 
+  const openActEditModal = (act: Act, row: AccountRow) => {
+    setActModalMode('edit');
+    setActiveAct(act);
+    setActModalInvoice(row);
+    setActInitialValues({
+      invoiceNumber: act.invoiceNumber ?? row.accountNumber,
+      number: act.number,
+      title: act.title ?? '',
+      date: act.date,
+      amount: act.amount,
+      clientId: act.clientId ?? row.invoice?.clientId ?? null,
+      responsibleId: act.responsibleId ?? row.invoice?.responsibleId ?? null,
+      comment: act.comment ?? '',
+      status: act.status,
+      counterpartyInn: act.counterpartyInn ?? '',
+    });
+    setActModalError(null);
+    setActModalOpen(true);
+  };
+
   const closeActModal = () => {
     if (actModalSubmitting) return;
     setActModalOpen(false);
     setActModalInvoice(null);
+    setActiveAct(null);
+    setActModalMode('create');
     setActInitialValues(null);
     setActModalError(null);
   };
@@ -782,10 +817,17 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     setActModalSubmitting(true);
     setActModalError(null);
     try {
-      await apiService.createAct({
-        ...payload,
-        invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
-      });
+      if (actModalMode === 'edit' && activeAct) {
+        await apiService.updateAct(activeAct.id, {
+          ...payload,
+          invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
+        });
+      } else {
+        await apiService.createAct({
+          ...payload,
+          invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
+        });
+      }
       await loadActsForInvoices();
       closeActModal();
     } catch (err) {
@@ -996,7 +1038,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
-                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <tr className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {columns
                     .filter((column) => visibleColumns.includes(column.key))
                     .map((column) => {
@@ -1006,7 +1048,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                       const sortKey = (column.key as InvoicesSortKey) ?? 'date';
 
                       return (
-                        <th key={column.key} scope="col" className="px-4 py-3">
+                        <th key={column.key} scope="col" className="px-4 py-3 text-center align-middle">
                           {isSortable ? (
                             <button
                               type="button"
@@ -1014,19 +1056,19 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                                 handleSort(sortKey);
                                 setPage(1);
                               }}
-                              className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                              className="inline-flex items-center justify-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
                             >
                               {column.label}
                               <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
                             </button>
                           ) : (
-                            <span>{column.label}</span>
+                            <span className="inline-flex items-center justify-center">{column.label}</span>
                           )}
                         </th>
                       );
                     })}
                   {(canEdit || canDelete) && (
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-4 py-3 text-center align-middle text-xs font-semibold uppercase tracking-wide text-gray-500">
                       {t('actions') ?? 'Действия'}
                     </th>
                   )}
@@ -1055,10 +1097,6 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
-                    const actPieces: string[] = [];
-                    if (invoice?.actNumber) actPieces.push(`№${invoice.actNumber}`);
-                    if (invoice?.actTitle) actPieces.push(invoice.actTitle);
-                    const actLine = actPieces.join(' · ');
                     const invoiceKey = accountKey(row.accountNumber) ?? row.accountNumber;
                     const actsForInvoice = invoiceKey ? actsByInvoice[invoiceKey] ?? [] : [];
                     const primaryName =
@@ -1070,7 +1108,9 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                       <Fragment key={`${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`}>
                         <tr className="hover:bg-gray-50/70">
                           {visibleColumns.includes('date') && (
-                            <td className="px-4 py-3 font-medium text-gray-900">{formatDate(invoice?.date)}</td>
+                            <td className="px-4 py-3 text-center align-middle font-medium text-gray-900">
+                              {formatDate(invoice?.date)}
+                            </td>
                           )}
                           {visibleColumns.includes('number') && (
                             <td className="px-4 py-3 text-gray-900">
@@ -1129,83 +1169,72 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                             </td>
                           )}
                           {visibleColumns.includes('dueDate') && (
-                            <td className="px-4 py-3">{formatDate(row.dueDate)}</td>
+                            <td className="px-4 py-3 text-center align-middle">{formatDate(row.dueDate)}</td>
                           )}
                           {visibleColumns.includes('paidDate') && (
-                            <td className="px-4 py-3">{formatDate(row.paidDate)}</td>
+                            <td className="px-4 py-3 text-center align-middle">{formatDate(row.paidDate)}</td>
                           )}
                           {visibleColumns.includes('act') && (
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-2">
+                            <td className="px-4 py-3 text-center align-middle">
+                              <div className="flex flex-col items-center gap-2">
+                                {actsLoading && actsForInvoice.length === 0 && (
+                                  <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'}</div>
+                                )}
                                 {actsForInvoice.length > 0 ? (
-                                  <div className="flex flex-col gap-2">
-                                    {actsForInvoice.map((act) => (
-                                      <div
-                                        key={act.id}
-                                        className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm"
-                                      >
-                                        <div className="flex items-center justify-between text-sm font-semibold text-gray-900">
-                                          <span>{act.number ? `№${act.number}` : t('act') ?? 'Акт'}</span>
-                                          <span className="text-xs text-gray-500">{formatDate(act.date)}</span>
-                                        </div>
-                                        <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
-                                          <span className="font-semibold text-gray-800">
-                                            {formatCurrencySmart(act.amount ?? 0).full}
-                                          </span>
-                                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                                  <>
+                                    <div className="flex items-center justify-center gap-2">
+                                      {canCreate && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openActCreateModal(row)}
+                                          className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
+                                          aria-label={t('addAct') ?? 'Добавить акт'}
+                                        >
+                                          <FilePlus2 className="h-4 w-4" />
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col items-center gap-2">
+                                      {actsForInvoice.map((act) => (
+                                        <button
+                                          key={act.id}
+                                          type="button"
+                                          onClick={() => openActEditModal(act, row)}
+                                          className="group inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                                        >
+                                          <span>{act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}</span>
+                                          <span className="text-[11px] font-medium text-gray-500">{formatDate(act.date)}</span>
+                                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
                                             {actStatusLabels[act.status]}
                                           </span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : actLine ? (
-                                  <div className="font-medium text-gray-900">{actLine}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </>
                                 ) : (
-                                  <div className="text-gray-500">—</div>
-                                )}
-
-                                {invoice?.actReference && (
-                                  <div className="text-xs text-gray-500">{invoice.actReference}</div>
-                                )}
-
-                                {actsLoading && !actsForInvoice.length && (
-                                  <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'} актов</div>
-                                )}
-
-                                {canCreate && (
-                                  <div className="flex flex-wrap gap-2">
-                                    {actsForInvoice.length === 0 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => openActCreateModal(row)}
-                                        className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
-                                      >
-                                        <FilePlus2 className="h-4 w-4" />
-                                        {t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => openActCreateModal(row)}
-                                        className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100"
-                                      >
-                                        <Plus className="h-4 w-4" />
-                                        {t('addAct') ?? 'Добавить акт'}
-                                      </button>
-                                    )}
-                                  </div>
+                                  canCreate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openActCreateModal(row)}
+                                      className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
+                                      aria-label={t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
+                                    >
+                                      <FilePlus2 className="h-5 w-5" />
+                                    </button>
+                                  )
                                 )}
                               </div>
                             </td>
                           )}
                           {visibleColumns.includes('responsible') && (
-                            <td className="px-4 py-3">{invoice?.responsibleName ? invoice.responsibleName : '—'}</td>
+                            <td className="px-4 py-3 text-center align-middle">
+                              {invoice?.responsibleName ? invoice.responsibleName : '—'}
+                            </td>
                           )}
                           {visibleColumns.includes('type') && (
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3 text-center align-middle">
                               <span
-                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
+                                className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
                               >
                                 {typeLabel}
                               </span>
@@ -1374,8 +1403,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
         <ActModal
           open={actModalOpen}
-          mode="create"
-          act={null}
+          mode={actModalMode}
+          act={activeAct}
           onClose={closeActModal}
           onSubmit={handleSubmitAct}
           submitting={actModalSubmitting}
