@@ -24,6 +24,14 @@ export function useClientStatuses() {
     void fetchAll();
   }, [fetchAll]);
 
+  useEffect(() => {
+    const handleDictsChanged = () => {
+      void fetchAll();
+    };
+    window.addEventListener('dicts:changed', handleDictsChanged);
+    return () => window.removeEventListener('dicts:changed', handleDictsChanged);
+  }, [fetchAll]);
+
   const sorted = useMemo(
     () =>
       [...statuses].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
