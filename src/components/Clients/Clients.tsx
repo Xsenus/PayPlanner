@@ -16,6 +16,7 @@ import {
   List,
   Ban,
   SlidersHorizontal,
+  GripVertical,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -352,6 +353,7 @@ export function Clients() {
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [draggingColumnId, setDraggingColumnId] = useState<ColumnId | null>(null);
   const resizingRef = useRef<{
     columnId: ColumnId;
     startX: number;
@@ -636,6 +638,42 @@ export function Clients() {
       [order[idx], order[target]] = [order[target], order[idx]];
       return { ...prev, order };
     });
+  };
+
+  const reorderColumns = (sourceId: ColumnId, targetId: ColumnId) => {
+    if (sourceId === targetId) return;
+    setTableSettings((prev) => {
+      const order = [...prev.order];
+      const fromIndex = order.indexOf(sourceId);
+      const toIndex = order.indexOf(targetId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+      order.splice(fromIndex, 1);
+      order.splice(toIndex, 0, sourceId);
+      return { ...prev, order };
+    });
+  };
+
+  const handleColumnDragStart = (columnId: ColumnId, event: React.DragEvent<HTMLElement>) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', columnId);
+    setDraggingColumnId(columnId);
+  };
+
+  const handleColumnDragOver = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleColumnDrop = (targetId: ColumnId, event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData('text/plain') as ColumnId;
+    if (!sourceId) return;
+    reorderColumns(sourceId, targetId);
+    setDraggingColumnId(null);
+  };
+
+  const handleColumnDragEnd = () => {
+    setDraggingColumnId(null);
   };
 
   const handleResizeStart = (columnId: ColumnId, e: React.MouseEvent<HTMLDivElement>) => {
@@ -959,8 +997,23 @@ export function Clients() {
                 return (
                   <div
                     key={columnId}
-                    className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
+                    className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                      draggingColumnId === columnId
+                        ? 'border-blue-200 bg-blue-50'
+                        : 'border-gray-100 bg-gray-50'
+                    }`}
+                    draggable
+                    onDragStart={(event) => handleColumnDragStart(columnId, event)}
+                    onDragOver={handleColumnDragOver}
+                    onDrop={(event) => handleColumnDrop(columnId, event)}
+                    onDragEnd={handleColumnDragEnd}
                   >
+                    <span
+                      className="cursor-grab text-gray-400 active:cursor-grabbing"
+                      aria-hidden="true"
+                    >
+                      <GripVertical size={16} />
+                    </span>
                     <input
                       type="checkbox"
                       checked={tableSettings.visible[columnId]}
@@ -1045,9 +1098,22 @@ export function Clients() {
                         <th
                           key={columnId}
                           style={{ width }}
-                          className="relative px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
+                          className={`relative px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${
+                            draggingColumnId === columnId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                          }`}
+                          onDragOver={handleColumnDragOver}
+                          onDrop={(event) => handleColumnDrop(columnId, event)}
                         >
-                          {meta.label}
+                          <div
+                            className="inline-flex items-center gap-2 cursor-move select-none"
+                            draggable
+                            onDragStart={(event) => handleColumnDragStart(columnId, event)}
+                            onDragEnd={handleColumnDragEnd}
+                            title="Перетащите, чтобы изменить порядок"
+                          >
+                            <GripVertical size={14} className="text-gray-400" />
+                            {meta.label}
+                          </div>
                           <div
                             role="separator"
                             aria-label={`Изменить ширину колонки ${meta.label}`}
