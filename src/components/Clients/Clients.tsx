@@ -413,38 +413,6 @@ export function Clients() {
     window.alert(message || 'Недостаточно прав для выполнения действия.');
   };
 
-  if (!canViewClients) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white px-6 py-10 text-center shadow-sm">
-          <Ban className="mx-auto h-12 w-12 text-red-500" />
-          <h1 className="mt-4 text-2xl font-semibold text-red-700">Доступ к клиентам ограничен</h1>
-          <p className="mt-2 text-sm text-red-600">
-            Обратитесь к администратору, чтобы получить права на просмотр и управление базой клиентов.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (selectedClientId) {
-    return (
-      <ClientDetail
-        clientId={selectedClientId}
-        onBack={() => setSelectedClientId(null)}
-        initialCaseId={initialCaseId}
-      />
-    );
-  }
-
-  if (loading || legalEntitiesLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">{t('loading')}</div>
-      </div>
-    );
-  }
-
   const handleAddClient = () => {
     if (!canCreateClients) {
       showPermissionWarning('Недостаточно прав для добавления клиентов.');
@@ -699,6 +667,38 @@ export function Clients() {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
   };
+
+  if (!canViewClients) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white px-6 py-10 text-center shadow-sm">
+          <Ban className="mx-auto h-12 w-12 text-red-500" />
+          <h1 className="mt-4 text-2xl font-semibold text-red-700">Доступ к клиентам ограничен</h1>
+          <p className="mt-2 text-sm text-red-600">
+            Обратитесь к администратору, чтобы получить права на просмотр и управление базой клиентов.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedClientId) {
+    return (
+      <ClientDetail
+        clientId={selectedClientId}
+        onBack={() => setSelectedClientId(null)}
+        initialCaseId={initialCaseId}
+      />
+    );
+  }
+
+  if (loading || legalEntitiesLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-500">{t('loading')}</div>
+      </div>
+    );
+  }
 
   const handleOpenClient = (clientId: number) => {
     setSelectedClientId(clientId);
