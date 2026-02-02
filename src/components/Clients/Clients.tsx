@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
   Users,
   Plus,
@@ -15,6 +15,10 @@ import {
   LayoutGrid,
   List,
   Ban,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Columns,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -28,6 +32,58 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
+
+type ClientColumnId =
+  | 'id'
+  | 'name'
+  | 'company'
+  | 'email'
+  | 'phone'
+  | 'status'
+  | 'clientStatusId'
+  | 'legalEntity'
+  | 'legalEntityId'
+  | 'legalInn'
+  | 'legalOgrn'
+  | 'legalKpp'
+  | 'address'
+  | 'notes'
+  | 'isActive'
+  | 'createdAt'
+  | 'cases'
+  | 'actions';
+
+type ClientColumnMeta = {
+  id: ClientColumnId;
+  label: string;
+  defaultVisible: boolean;
+  minWidth?: number;
+  align?: 'left' | 'right';
+};
+
+const CLIENT_COLUMNS: ClientColumnMeta[] = [
+  { id: 'id', label: 'ID', defaultVisible: false, minWidth: 90 },
+  { id: 'name', label: 'Клиент', defaultVisible: true, minWidth: 260 },
+  { id: 'company', label: 'Компания', defaultVisible: true, minWidth: 200 },
+  { id: 'status', label: 'Статус', defaultVisible: true, minWidth: 160 },
+  { id: 'clientStatusId', label: 'ID статуса', defaultVisible: false, minWidth: 140 },
+  { id: 'email', label: 'E-mail', defaultVisible: false, minWidth: 220 },
+  { id: 'phone', label: 'Телефон', defaultVisible: false, minWidth: 180 },
+  { id: 'legalEntity', label: 'Юр. лицо', defaultVisible: true, minWidth: 220 },
+  { id: 'legalEntityId', label: 'ID юр. лица', defaultVisible: false, minWidth: 140 },
+  { id: 'legalInn', label: 'ИНН', defaultVisible: false, minWidth: 160 },
+  { id: 'legalOgrn', label: 'ОГРН', defaultVisible: false, minWidth: 160 },
+  { id: 'legalKpp', label: 'КПП', defaultVisible: false, minWidth: 160 },
+  { id: 'address', label: 'Адрес', defaultVisible: false, minWidth: 240 },
+  { id: 'notes', label: 'Комментарий', defaultVisible: false, minWidth: 240 },
+  { id: 'cases', label: 'Дела', defaultVisible: true, minWidth: 160 },
+  { id: 'isActive', label: 'Активность', defaultVisible: false, minWidth: 140 },
+  { id: 'createdAt', label: 'Создан', defaultVisible: false, minWidth: 150 },
+  { id: 'actions', label: 'Действия', defaultVisible: true, minWidth: 160, align: 'right' },
+];
+
+const CLIENT_TABLE_SETTINGS_KEY = 'pp.clients_table_settings';
+const CLIENT_STATUS_NONE = 'no-status';
 
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
@@ -222,6 +278,10 @@ export function Clients() {
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
 
   const [query, setQuery] = useState('');
+  const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [statusFilterOpen, setStatusFilterOpen] = useState(false);
+  const statusFilterRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
     try {
       return (localStorage.getItem('pp.clients_view') as 'cards' | 'table') || 'cards';
@@ -229,14 +289,92 @@ export function Clients() {
       return 'cards';
     }
   });
+  const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
+  const tableSettingsRef = useRef<HTMLDivElement | null>(null);
+  const [columnOrder, setColumnOrder] = useState<ClientColumnId[]>(() => {
+    try {
+      const raw = localStorage.getItem(CLIENT_TABLE_SETTINGS_KEY);
+      if (!raw) return CLIENT_COLUMNS.map((col) => col.id);
+      const parsed = JSON.parse(raw) as { order?: ClientColumnId[] };
+      const fallback = CLIENT_COLUMNS.map((col) => col.id);
+      if (!parsed?.order?.length) return fallback;
+      const known = new Set(fallback);
+      const sanitized = parsed.order.filter((id) => known.has(id));
+      return sanitized.length ? [...sanitized, ...fallback.filter((id) => !sanitized.includes(id))] : fallback;
+    } catch {
+      return CLIENT_COLUMNS.map((col) => col.id);
+    }
+  });
+  const [columnVisibility, setColumnVisibility] = useState<Record<ClientColumnId, boolean>>(() => {
+    const defaults = CLIENT_COLUMNS.reduce<Record<ClientColumnId, boolean>>((acc, col) => {
+      acc[col.id] = col.defaultVisible;
+      return acc;
+    }, {} as Record<ClientColumnId, boolean>);
+    try {
+      const raw = localStorage.getItem(CLIENT_TABLE_SETTINGS_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as { visibility?: Record<ClientColumnId, boolean> };
+      if (!parsed?.visibility) return defaults;
+      return { ...defaults, ...parsed.visibility };
+    } catch {
+      return defaults;
+    }
+  });
+  const [columnWidths, setColumnWidths] = useState<Record<ClientColumnId, number>>(() => {
+    try {
+      const raw = localStorage.getItem(CLIENT_TABLE_SETTINGS_KEY);
+      if (!raw) return {} as Record<ClientColumnId, number>;
+      const parsed = JSON.parse(raw) as { widths?: Record<ClientColumnId, number> };
+      return parsed?.widths ?? ({} as Record<ClientColumnId, number>);
+    } catch {
+      return {} as Record<ClientColumnId, number>;
+    }
+  });
+  const [draggingColumn, setDraggingColumn] = useState<ClientColumnId | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<ClientColumnId | null>(null);
   const filteredClients = useMemo(() => {
-    if (!query.trim()) return clients;
-    return clients.filter((c) => matchesClient(c, query));
-  }, [clients, query]);
+    const trimmed = query.trim();
+    return clients.filter((c) => {
+      if (trimmed && !matchesClient(c, trimmed)) return false;
+      if (activityFilter === 'active' && !c.isActive) return false;
+      if (activityFilter === 'inactive' && c.isActive) return false;
+      if (statusFilters.length > 0) {
+        const statusId = c.clientStatusId ? String(c.clientStatusId) : CLIENT_STATUS_NONE;
+        if (!statusFilters.includes(statusId)) return false;
+      }
+      return true;
+    });
+  }, [clients, query, activityFilter, statusFilters]);
 
   const sortedClients = useMemo(
     () => [...filteredClients].sort((a, b) => Number(b.isActive) - Number(a.isActive)),
     [filteredClients],
+  );
+
+  const statusOptions = useMemo(
+    () =>
+      [...clientStatuses]
+        .filter((status) => status.isActive !== false)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [clientStatuses],
+  );
+
+  const statusFilterLabel = useMemo(() => {
+    if (statusFilters.length === 0) return 'Все статусы';
+    const lookup = new Map(statusOptions.map((s) => [String(s.id), s.name]));
+    const names = statusFilters.map((id) => (id === CLIENT_STATUS_NONE ? 'Без статуса' : lookup.get(id) ?? id));
+    if (names.length <= 2) return names.join(', ');
+    return `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+  }, [statusFilters, statusOptions]);
+
+  const visibleColumnIds = useMemo(
+    () => columnOrder.filter((id) => columnVisibility[id] !== false),
+    [columnOrder, columnVisibility],
+  );
+
+  const columnMeta = useMemo(
+    () => new Map<ClientColumnId, ClientColumnMeta>(CLIENT_COLUMNS.map((col) => [col.id, col])),
+    [],
   );
 
   useEffect(() => {
@@ -254,6 +392,93 @@ export function Clients() {
     window.addEventListener('open-client-detail', handler as EventListener);
     return () => window.removeEventListener('open-client-detail', handler as EventListener);
   }, []);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (statusFilterOpen && statusFilterRef.current && !statusFilterRef.current.contains(target)) {
+        setStatusFilterOpen(false);
+      }
+      if (tableSettingsOpen && tableSettingsRef.current && !tableSettingsRef.current.contains(target)) {
+        setTableSettingsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [statusFilterOpen, tableSettingsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CLIENT_TABLE_SETTINGS_KEY,
+        JSON.stringify({
+          order: columnOrder,
+          visibility: columnVisibility,
+          widths: columnWidths,
+        }),
+      );
+    } catch {
+      /** */
+    }
+  }, [columnOrder, columnVisibility, columnWidths]);
+
+  const toggleStatusFilter = (statusId: string) => {
+    setStatusFilters((prev) => {
+      if (prev.includes(statusId)) {
+        return prev.filter((id) => id !== statusId);
+      }
+      return [...prev, statusId];
+    });
+  };
+
+  const clearStatusFilters = () => setStatusFilters([]);
+
+  const resetColumns = () => {
+    setColumnOrder(CLIENT_COLUMNS.map((col) => col.id));
+    setColumnVisibility(
+      CLIENT_COLUMNS.reduce<Record<ClientColumnId, boolean>>((acc, col) => {
+        acc[col.id] = col.defaultVisible;
+        return acc;
+      }, {} as Record<ClientColumnId, boolean>),
+    );
+    setColumnWidths({});
+  };
+
+  const moveColumn = (columnId: ClientColumnId, direction: 'up' | 'down') => {
+    setColumnOrder((prev) => {
+      const idx = prev.indexOf(columnId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= next.length) return prev;
+      const temp = next[targetIdx];
+      next[targetIdx] = columnId;
+      next[idx] = temp;
+      return next;
+    });
+  };
+
+  const startResize = (columnId: ClientColumnId, minWidth: number | undefined, event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = columnWidths[columnId] ?? minWidth ?? 180;
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = Math.max(minWidth ?? 140, startWidth + delta);
+      setColumnWidths((prev) => ({ ...prev, [columnId]: nextWidth }));
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   const toggleCases = (clientId: number) =>
     setExpandedCards((prev) => {
@@ -455,6 +680,168 @@ export function Clients() {
     }
   };
 
+  const renderColumnCell = (columnId: ClientColumnId, client: Client) => {
+    switch (columnId) {
+      case 'id':
+        return <span className="text-sm text-gray-700">#{client.id}</span>;
+      case 'name':
+        return (
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setSelectedClientId(client.id)}
+              className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0 hover:bg-blue-200 transition-colors"
+              title="Открыть карточку клиента"
+            >
+              <Users size={20} className="text-blue-600" />
+            </button>
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => setSelectedClientId(client.id)}
+                className="text-left font-medium text-gray-900 hover:text-blue-600 truncate"
+                title="Открыть карточку клиента"
+              >
+                {highlight(client.name ?? '', query)}
+              </button>
+              {client.company && (
+                <div className="text-sm text-gray-500 truncate">
+                  {highlight(client.company ?? '', query)}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      case 'company':
+        return <span className="text-sm text-gray-700">{client.company || '—'}</span>;
+      case 'email':
+        return client.email ? (
+          <span className="text-sm text-gray-700">{highlight(client.email ?? '', query)}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        );
+      case 'phone':
+        return client.phone ? (
+          <span className="text-sm text-gray-700">{highlightPhone(client.phone ?? '', query)}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        );
+      case 'status':
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <ClientStatusBadge status={client.clientStatus} />
+            {!client.clientStatus && <span className="text-xs text-gray-400">Без статуса</span>}
+          </div>
+        );
+      case 'clientStatusId':
+        return (
+          <span className="text-sm text-gray-700">
+            {client.clientStatusId ? `#${client.clientStatusId}` : '—'}
+          </span>
+        );
+      case 'legalEntity':
+        return client.legalEntity ? (
+          <div className="space-y-1 text-sm text-gray-600">
+            <div className="flex items-center gap-2 text-gray-700">
+              <Building2 size={14} className="text-blue-500" />
+              <span className="truncate">{client.legalEntity.shortName ?? '—'}</span>
+            </div>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400">{t('legalEntityNotAssigned') || 'Не указано'}</span>
+        );
+      case 'legalEntityId':
+        return (
+          <span className="text-sm text-gray-700">
+            {client.legalEntityId ? `#${client.legalEntityId}` : '—'}
+          </span>
+        );
+      case 'legalInn':
+        return <span className="text-sm text-gray-700">{client.legalEntity?.inn || '—'}</span>;
+      case 'legalOgrn':
+        return <span className="text-sm text-gray-700">{client.legalEntity?.ogrn || '—'}</span>;
+      case 'legalKpp':
+        return <span className="text-sm text-gray-700">{client.legalEntity?.kpp || '—'}</span>;
+      case 'address':
+        return client.address ? (
+          <span className="text-sm text-gray-700">{client.address}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        );
+      case 'notes':
+        return client.notes ? (
+          <span className="text-sm text-gray-700 line-clamp-2">{client.notes}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        );
+      case 'isActive':
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+              client.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'
+            }`}
+          >
+            {client.isActive ? 'Активен' : 'Неактивен'}
+          </span>
+        );
+      case 'createdAt':
+        return <span className="text-sm text-gray-600">{formatDate(client.createdAt) || '—'}</span>;
+      case 'cases': {
+        const totalCases = (client.cases ?? []).length;
+        return totalCases > 0 ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedClientId(client.id);
+              setInitialCaseId('all');
+            }}
+            className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+            title="Посмотреть дела"
+          >
+            {totalCases} {totalCases === 1 ? 'дело' : totalCases < 5 ? 'дела' : 'дел'}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">Нет</span>
+        );
+      }
+      case 'actions':
+        return (
+          <div className="flex items-center justify-end gap-1">
+            {canCreateClients && (
+              <button
+                type="button"
+                onClick={() => openAddCase(client.id)}
+                className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                title="Добавить дело"
+              >
+                <PlusCircle size={16} />
+              </button>
+            )}
+            {canEditClients && (
+              <button
+                type="button"
+                onClick={() => handleEditClient(client)}
+                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title={t('edit')}
+              >
+                <Edit size={16} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedClientId(client.id)}
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              title={t('viewDetails')}
+            >
+              <Eye size={16} />
+            </button>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
@@ -487,6 +874,64 @@ export function Clients() {
                   </button>
                 )}
               </div>
+              <div className="relative" ref={statusFilterRef}>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilterOpen((prev) => !prev)}
+                  className="inline-flex w-full sm:w-auto items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  aria-expanded={statusFilterOpen}
+                >
+                  <span className="truncate">Статус: {statusFilterLabel}</span>
+                  <ChevronDown size={16} className="text-gray-500" />
+                </button>
+                {statusFilterOpen && (
+                  <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-gray-200 bg-white shadow-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-gray-500 uppercase">Статусы</span>
+                      {statusFilters.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearStatusFilters}
+                          className="text-xs text-blue-600 hover:text-blue-700"
+                        >
+                          Сбросить
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={statusFilters.includes(CLIENT_STATUS_NONE)}
+                          onChange={() => toggleStatusFilter(CLIENT_STATUS_NONE)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        Без статуса
+                      </label>
+                      {statusOptions.map((status) => (
+                        <label key={status.id} className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={statusFilters.includes(String(status.id))}
+                            onChange={() => toggleStatusFilter(String(status.id))}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          {status.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <select
+                value={activityFilter}
+                onChange={(e) => setActivityFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                className="w-full sm:w-auto rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+              >
+                <option value="all">Все клиенты</option>
+                <option value="active">Активные</option>
+                <option value="inactive">Неактивные</option>
+              </select>
               <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
                 <button
                   type="button"
@@ -511,6 +956,79 @@ export function Clients() {
                   <List size={18} />
                 </button>
               </div>
+              {viewMode === 'table' && (
+                <div className="relative" ref={tableSettingsRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTableSettingsOpen((prev) => !prev)}
+                    className="inline-flex w-full sm:w-auto items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Columns size={16} />
+                    Настроить таблицу
+                  </button>
+                  {tableSettingsOpen && (
+                    <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-500 uppercase">Колонки</span>
+                        <button
+                          type="button"
+                          onClick={resetColumns}
+                          className="text-xs text-blue-600 hover:text-blue-700"
+                        >
+                          Сбросить
+                        </button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                        {columnOrder.map((columnId) => {
+                          const meta = columnMeta.get(columnId);
+                          if (!meta) return null;
+                          const isVisible = columnVisibility[columnId] !== false;
+                          return (
+                            <div key={columnId} className="flex items-center gap-2">
+                              <GripVertical size={14} className="text-gray-400 shrink-0" />
+                              <label className="flex items-center gap-2 text-sm text-gray-700 flex-1">
+                                <input
+                                  type="checkbox"
+                                  checked={isVisible}
+                                  onChange={() => {
+                                    const visibleCount = visibleColumnIds.length;
+                                    if (isVisible && visibleCount === 1) return;
+                                    setColumnVisibility((prev) => ({ ...prev, [columnId]: !isVisible }));
+                                  }}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                {meta.label}
+                              </label>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => moveColumn(columnId, 'up')}
+                                  className="p-1 rounded hover:bg-gray-100"
+                                  title="Вверх"
+                                >
+                                  <ChevronUp size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveColumn(columnId, 'down')}
+                                  className="p-1 rounded hover:bg-gray-100"
+                                  title="Вниз"
+                                >
+                                  <ChevronDown size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-[11px] text-gray-400">
+                        Перетаскивайте заголовки таблицы для быстрой перестановки и тяните за край
+                        для изменения ширины.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               {canCreateClients && (
                 <button
                   type="button"
@@ -567,162 +1085,93 @@ export function Clients() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Клиент
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      {t('legalEntity') || 'Юр. лицо'}
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Контакты
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Дела
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Действия
-                    </th>
+                    {visibleColumnIds.map((columnId) => {
+                      const meta = columnMeta.get(columnId);
+                      if (!meta) return null;
+                      const width = columnWidths[columnId];
+                      const isRight = meta.align === 'right';
+                      const isDragOver = dragOverColumn === columnId && draggingColumn !== columnId;
+                      return (
+                        <th
+                          key={columnId}
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggingColumn(columnId);
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', columnId);
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOverColumn(columnId);
+                          }}
+                          onDragLeave={() => setDragOverColumn(null)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const sourceId =
+                              draggingColumn ?? (e.dataTransfer.getData('text/plain') as ClientColumnId);
+                            if (!sourceId || sourceId === columnId) {
+                              setDraggingColumn(null);
+                              setDragOverColumn(null);
+                              return;
+                            }
+                            setColumnOrder((prev) => {
+                              const next = [...prev];
+                              const from = next.indexOf(sourceId);
+                              const to = next.indexOf(columnId);
+                              if (from === -1 || to === -1) return prev;
+                              next.splice(from, 1);
+                              next.splice(to, 0, sourceId);
+                              return next;
+                            });
+                            setDraggingColumn(null);
+                            setDragOverColumn(null);
+                          }}
+                          onDragEnd={() => {
+                            setDraggingColumn(null);
+                            setDragOverColumn(null);
+                          }}
+                          style={{
+                            width: width ? `${width}px` : undefined,
+                            minWidth: meta.minWidth ? `${meta.minWidth}px` : undefined,
+                          }}
+                          className={`relative px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-700 ${
+                            isRight ? 'text-right' : 'text-left'
+                          } ${isDragOver ? 'bg-emerald-50' : ''}`}
+                        >
+                          <div className={`flex items-center gap-2 ${isRight ? 'justify-end' : ''}`}>
+                            <span>{meta.label}</span>
+                          </div>
+                          <div
+                            role="separator"
+                            onMouseDown={(event) => startResize(columnId, meta.minWidth, event)}
+                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                          />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {sortedClients.map((client) => {
-                    const cases = (client.cases ?? []) as ClientCase[];
-                    const totalCases = cases.length;
-                    const counts = cases.reduce<Record<string, number>>((acc, c) => {
-                      const key = (c.status ?? 'unknown').toLowerCase();
-                      acc[key] = (acc[key] ?? 0) + 1;
-                      return acc;
-                    }, {});
-
                     return (
                       <tr
                         key={client.id}
                         className={`hover:bg-gray-50 transition-colors ${
                           client.isActive ? '' : 'bg-gray-50 opacity-70'
                         }`}>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                              <Users size={20} className="text-blue-600" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium text-gray-900">
-                                  {highlight(client.name ?? '', query)}
-                                </span>
-                                <ClientStatusBadge status={client.clientStatus} />
-                              </div>
-                              {client.company && (
-                                <div className="text-sm text-gray-500">
-                                  {highlight(client.company ?? '', query)}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          {client.legalEntity ? (
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <div className="flex items-center gap-2 text-gray-700">
-                                <Building2 size={14} className="text-blue-500" />
-                                <span className="truncate">
-                                  {highlight(client.legalEntity.shortName ?? '', query)}
-                                </span>
-                              </div>
-                              {client.legalEntity.inn && (
-                                <div className="text-xs text-gray-500">
-                                  ИНН: {highlight(client.legalEntity.inn ?? '', query)}
-                                </div>
-                              )}
-                              {client.legalEntity.ogrn && (
-                                <div className="text-xs text-gray-500">
-                                  ОГРН: {highlight(client.legalEntity.ogrn ?? '', query)}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-400">{t('legalEntityNotAssigned') || 'Не указано'}</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm space-y-1">
-                            {client.email && (
-                              <div className="flex items-center gap-2 text-gray-600">
-                                <Mail size={14} />
-                                <span>{highlight(client.email ?? '', query)}</span>
-                              </div>
-                            )}
-                            {client.phone && (
-                              <div className="flex items-center gap-2 text-gray-600">
-                                <Phone size={14} />
-                                <span>{highlightPhone(client.phone ?? '', query)}</span>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          {totalCases > 0 ? (
-                            <div className="space-y-1.5">
-                              <div className="flex flex-wrap gap-1.5">
-                                {Object.entries(counts)
-                                  .sort((a, b) => b[1] - a[1])
-                                  .slice(0, 3)
-                                  .map(([status, count]) => {
-                                    const label = caseStatusLabel(status);
-                                    return (
-                                      <span
-                                        key={status}
-                                        className={`text-xs px-2 py-1 rounded-full ${statusClasses(
-                                          status,
-                                        )}`}>
-                                        {label} · {count}
-                                      </span>
-                                    );
-                                  })}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedClientId(client.id);
-                                  setInitialCaseId('all');
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-700 hover:underline">
-                                Посмотреть все дела →
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-500">Дел нет</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-end gap-1">
-                            {canCreateClients && (
-                              <button
-                                type="button"
-                                onClick={() => openAddCase(client.id)}
-                                className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                                title="Добавить дело">
-                                <PlusCircle size={16} />
-                              </button>
-                            )}
-                            {canEditClients && (
-                              <button
-                                type="button"
-                                onClick={() => handleEditClient(client)}
-                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                title={t('edit')}>
-                                <Edit size={16} />
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setSelectedClientId(client.id)}
-                              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                              title={t('viewDetails')}>
-                              <Eye size={16} />
-                            </button>
-                          </div>
-                        </td>
+                        {visibleColumnIds.map((columnId) => {
+                          const meta = columnMeta.get(columnId);
+                          if (!meta) return null;
+                          const isRight = meta.align === 'right';
+                          return (
+                            <td
+                              key={columnId}
+                              className={`px-6 py-4 align-top ${isRight ? 'text-right' : 'text-left'}`}
+                            >
+                              {renderColumnCell(columnId, client)}
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
@@ -767,14 +1216,24 @@ export function Clients() {
                   ${client.isActive ? 'bg-white' : 'bg-gray-100 opacity-70'}`}>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClientId(client.id)}
+                        className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center shrink-0 hover:bg-blue-200 transition-colors"
+                        title="Открыть карточку клиента"
+                      >
                         <Users size={24} className="text-blue-600" />
-                      </div>
+                      </button>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold text-gray-900 block max-w-full truncate">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedClientId(client.id)}
+                            className="font-semibold text-gray-900 block max-w-full truncate hover:text-blue-600 text-left"
+                            title="Открыть карточку клиента"
+                          >
                             {highlight(client.name ?? '', query)}
-                          </h3>
+                          </button>
                           <ClientStatusBadge status={client.clientStatus} />
                         </div>
                         {client.company && (

@@ -77,6 +77,7 @@ type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
 
 type ClientDetailSection =
+  | 'card'
   | 'payments'
   | 'accounts'
   | 'acts'
@@ -84,6 +85,7 @@ type ClientDetailSection =
   | 'settlement';
 
 const SECTION_ORDER: ClientDetailSection[] = [
+  'card',
   'payments',
   'accounts',
   'acts',
@@ -101,6 +103,10 @@ const SECTION_META: Record<
     icon?: LucideIcon | null;
   }
 > = {
+  card: {
+    label: 'Карточка',
+    actionLabel: 'Редактировать клиента',
+  },
   payments: {
     label: 'Платежи',
     actionLabel: 'Добавить платёж',
@@ -136,6 +142,7 @@ const SECTION_META: Record<
 };
 
 const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
+  card: 'clients',
   payments: 'clients',
   accounts: 'accounts',
   acts: 'acts',
@@ -1310,7 +1317,175 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        {activeSection === 'payments' ? (
+        {activeSection === 'card' ? (
+          <div className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Основная информация</h2>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Имя клиента</dt>
+                    <dd className="text-gray-900 font-medium text-right">
+                      {clientData?.name || clientName}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Компания</dt>
+                    <dd className="text-gray-900 text-right">{clientData?.company || '—'}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Статус</dt>
+                    <dd className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <ClientStatusBadge status={clientData?.clientStatus} />
+                        {!clientData?.clientStatus && (
+                          <span className="text-xs text-gray-400">Без статуса</span>
+                        )}
+                      </div>
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Активность</dt>
+                    <dd
+                      className={`text-right font-medium ${
+                        clientData?.isActive ? 'text-emerald-600' : 'text-gray-500'
+                      }`}
+                    >
+                      {clientData?.isActive ? 'Активен' : 'Неактивен'}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Создан</dt>
+                    <dd className="text-right text-gray-700">
+                      {clientData?.createdAt ? toRuDate(clientData.createdAt) : '—'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Контакты</h2>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">E-mail</dt>
+                    <dd className="text-right text-gray-900">{clientData?.email || '—'}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Телефон</dt>
+                    <dd className="text-right text-gray-900">{clientData?.phone || '—'}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Адрес</dt>
+                    <dd className="text-right text-gray-900">{clientData?.address || '—'}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Юридическое лицо</h2>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">Название</dt>
+                    <dd className="text-right text-gray-900">
+                      {clientData?.legalEntity?.shortName || '—'}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">ИНН</dt>
+                    <dd className="text-right text-gray-900">
+                      {clientData?.legalEntity?.inn || '—'}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">ОГРН</dt>
+                    <dd className="text-right text-gray-900">
+                      {clientData?.legalEntity?.ogrn || '—'}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-gray-500">КПП</dt>
+                    <dd className="text-right text-gray-900">
+                      {clientData?.legalEntity?.kpp || '—'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Комментарий</h2>
+                <div className="mt-4 text-sm text-gray-700 whitespace-pre-wrap">
+                  {clientData?.notes || 'Комментарий не указан.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Дела клиента</h2>
+                {clientPermissions.canCreate && (
+                  <button
+                    type="button"
+                    onClick={openAddCase}
+                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                  >
+                    <Plus size={14} /> Добавить дело
+                  </button>
+                )}
+              </div>
+              {cases.length === 0 ? (
+                <p className="mt-4 text-sm text-gray-500">У клиента пока нет дел.</p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {cases.map((k) => {
+                    const s = (k.status ?? '').toLowerCase();
+                    const badge =
+                      s.includes('open')
+                        ? 'bg-green-50 text-green-700 border-green-200'
+                        : s.includes('hold')
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : s.includes('closed')
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-slate-50 text-slate-700 border-slate-200';
+                    return (
+                      <div
+                        key={k.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{k.title}</div>
+                          {k.description && (
+                            <div className="text-xs text-gray-500 truncate">{k.description}</div>
+                          )}
+                          <div className="text-xs text-gray-400 mt-1">
+                            Создано: {toRuDate(k.createdAt)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-1 rounded-full border ${badge}`}>
+                            {caseStatusLabel(k.status)}
+                          </span>
+                          {clientPermissions.canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCase(k);
+                                setCaseMode('edit');
+                                setCaseModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-white"
+                            >
+                              <Edit size={12} /> Редактировать
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeSection === 'payments' ? (
           <>
             <TwoTypeStats
               clientId={clientId}
