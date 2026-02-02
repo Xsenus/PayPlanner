@@ -1022,6 +1022,43 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("UserActivityLogs");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserSettings_User_Key");
+
+                    b.ToTable("UserSettings");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -1166,6 +1203,17 @@ namespace PayPlanner.Api.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

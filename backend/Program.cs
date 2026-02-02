@@ -37,7 +37,14 @@ static string NormalizeSqliteConnection(string raw)
     var builder = new SqliteConnectionStringBuilder(raw)
     {
         // DefaultTimeout задаёт время ожидания завершения блокировок при выполнении команд (в секундах)
-        DefaultTimeout = 30
+        DefaultTimeout = 30,
+        // Разрешаем одновременный доступ нескольким подключениям (фронт + фоновые задачи)
+        Cache = SqliteCacheMode.Shared,
+        // Обязательно читаем/создаём БД в режиме R/W, чтобы не получать разрозненные режимы
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        // Включаем пула подключений и внешние ключи, чтобы избежать "залипших" соединений
+        Pooling = true,
+        ForeignKeys = true
     };
 
     if (!Path.IsPathRooted(builder.DataSource))
@@ -50,6 +57,27 @@ static string NormalizeSqliteConnection(string raw)
 var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
 var normalizedCs = NormalizeSqliteConnection(rawCs);
 void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
+
+// Переключаем SQLite в WAL отдельной командой, т.к. свойство JournalMode
+// отсутствует в текущей версии Microsoft.Data.Sqlite, а ключ в строке подключения
+// не поддерживается билдером.
+static void EnsureWalMode(string connectionString)
+{
+    try
+    {
+        using var connection = new SqliteConnection(connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL;";
+        command.ExecuteNonQuery();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[SQLite] Не удалось включить WAL: {ex.Message}");
+    }
+}
+EnsureWalMode(normalizedCs);
 
 builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
 builder.Services.AddScoped<PaymentContext>(sp =>

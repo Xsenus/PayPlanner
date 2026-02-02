@@ -448,6 +448,25 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Action).HasDatabaseName("IX_UserActivityLogs_Action");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_UserActivityLogs_Status");
         });
+
+        // ------------------ UserSettings ------------------
+        modelBuilder.Entity<UserSetting>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(160).IsRequired();
+            entity.Property(e => e.Value).HasColumnType("text").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.UserId, e.Key })
+                  .IsUnique()
+                  .HasDatabaseName("IX_UserSettings_User_Key");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     /// <summary>
@@ -524,6 +543,11 @@ public class PaymentContext : DbContext
     /// Журнал действий пользователей.
     /// </summary>
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
+
+    /// <summary>
+    /// Пользовательские настройки.
+    /// </summary>
+    public DbSet<UserSetting> UserSettings { get; set; }
 
     /// <summary>
     /// Пользователи системы.

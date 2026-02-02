@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search, Trash2, Filter } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -67,9 +67,82 @@ export const UserActivity = () => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
+  const [clearing, setClearing] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const debouncedSearch = useDebouncedValue(search, 500);
+
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(
+        search ||
+          status !== 'all' ||
+          category !== 'all' ||
+          action !== 'all' ||
+          section !== 'all' ||
+          method !== 'all' ||
+          actor !== 'all' ||
+          from ||
+          to,
+      ),
+    [action, actor, category, from, method, search, section, status, to],
+  );
+
+  const activeFiltersSummary = useMemo(() => {
+    const items: string[] = [];
+    if (search) items.push(`Поиск: "${search}"`);
+    if (status !== 'all') items.push(`Статус: ${statusLabels[status as UserActivityStatus] ?? status}`);
+    if (category !== 'all') items.push(`Категория: ${category}`);
+    if (action !== 'all') items.push(`Действие: ${action}`);
+    if (section !== 'all') items.push(`Раздел: ${section}`);
+    if (method !== 'all') items.push(`Метод: ${method}`);
+    if (actor !== 'all') items.push(`Пользователь: ${actor}`);
+    if (from) items.push(`С: ${from}`);
+    if (to) items.push(`По: ${to}`);
+    return items;
+  }, [action, actor, category, from, method, search, section, status, to]);
+
+  const resetFilters = () => {
+    setSearch('');
+    setStatus('all');
+    setCategory('all');
+    setAction('all');
+    setSection('all');
+    setMethod('all');
+    setActor('all');
+    setFrom('');
+    setTo('');
+  };
+
+  const handleClearLogs = async () => {
+    if (!isAdmin()) return;
+
+    const password = window.prompt('Для удаления всей истории контроля введите пароль безопасности:');
+    if (password === null) return;
+
+    if (password !== 'Qwerty!@#') {
+      alert('Неверный пароль, журнал не был очищен.');
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      'Вы уверены, что хотите безвозвратно удалить все записи пользовательского контроля?',
+    );
+    if (!confirmDelete) return;
+
+    try {
+      setClearing(true);
+      await apiService.deleteUserActivityLogs(password);
+      setRefreshToken((token) => token + 1);
+      alert('История контроля успешно очищена.');
+    } catch (error) {
+      console.error('Не удалось очистить журнал контроля', error);
+      alert('Не удалось очистить историю. Попробуйте позже или проверьте подключение.');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin()) {
@@ -158,10 +231,23 @@ export const UserActivity = () => {
                 Анализируйте действия пользователей, входы в разделы и системные события в режиме реального времени.
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
               <div className="text-sm text-slate-500">
                 Найдено записей: <span className="font-semibold text-slate-700">{total}</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((open) => !open)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+              >
+                <Filter className="w-4 h-4" />
+                {filtersOpen ? 'Скрыть фильтры' : 'Показать фильтры'}
+                {hasActiveFilters && (
+                  <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                    {activeFiltersSummary.length}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => setRefreshToken((token) => token + 1)}
@@ -170,158 +256,204 @@ export const UserActivity = () => {
                 <RefreshCw className="w-4 h-4" />
                 Обновить
               </button>
+              <button
+                type="button"
+                onClick={handleClearLogs}
+                disabled={clearing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors disabled:opacity-60"
+              >
+                <Trash2 className="w-4 h-4" />
+                {clearing ? 'Очищаем…' : 'Очистить историю'}
+              </button>
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-              <label className="col-span-1 lg:col-span-2">
-                <span className="text-sm font-medium text-slate-600 flex items-center gap-2">
-                  <Search className="w-4 h-4" /> Поиск
+          {filtersOpen && (
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <label className="col-span-1 lg:col-span-2">
+                  <span className="text-sm font-medium text-slate-600 flex items-center gap-2">
+                    <Search className="w-4 h-4" /> Поиск
+                  </span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Описание, объект, раздел"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  />
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Статус</span>
+                  <select
+                    value={status}
+                    onChange={(event) => setStatus(event.target.value as UserActivityStatus | 'all')}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {filters?.statuses.map((item) => (
+                      <option key={item} value={item}>
+                        {statusLabels[item]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Категория</span>
+                  <select
+                    value={category}
+                    onChange={(event) => setCategory(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {filters?.categories.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Действие</span>
+                  <select
+                    value={action}
+                    onChange={(event) => setAction(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {filters?.actions.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Раздел</span>
+                  <select
+                    value={section}
+                    onChange={(event) => setSection(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {filters?.sections.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">HTTP-метод</span>
+                  <select
+                    value={method}
+                    onChange={(event) => setMethod(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {filters?.httpMethods.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Пользователь</span>
+                  <select
+                    value={actor}
+                    onChange={(event) =>
+                      setActor(event.target.value === 'all' ? 'all' : Number.parseInt(event.target.value, 10) || 'all')
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    <option value="all">Все</option>
+                    {actors.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.fullName || item.email || `ID ${item.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Дата с</span>
+                  <input
+                    type="datetime-local"
+                    value={from}
+                    onChange={(event) => setFrom(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  />
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">Дата по</span>
+                  <input
+                    type="datetime-local"
+                    value={to}
+                    onChange={(event) => setTo(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  />
+                </label>
+
+                <label>
+                  <span className="text-sm font-medium text-slate-600">На странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number.parseInt(event.target.value, 10) || 25)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
+                  >
+                    {[10, 25, 50, 100, 150, 200].map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2 text-sm">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                >
+                  Сбросить фильтры
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                >
+                  Свернуть
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!filtersOpen && hasActiveFilters && (
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 flex flex-wrap items-center gap-2 text-sm text-slate-700">
+              <span className="font-semibold text-slate-900">Активные фильтры:</span>
+              {activeFiltersSummary.map((item) => (
+                <span key={item} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1">
+                  {item}
                 </span>
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Описание, объект, раздел"
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                />
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Статус</span>
-                <select
-                  value={status}
-                  onChange={(event) => setStatus(event.target.value as UserActivityStatus | 'all')}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {filters?.statuses.map((item) => (
-                    <option key={item} value={item}>
-                      {statusLabels[item]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Категория</span>
-                <select
-                  value={category}
-                  onChange={(event) => setCategory(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {filters?.categories.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Действие</span>
-                <select
-                  value={action}
-                  onChange={(event) => setAction(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {filters?.actions.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Раздел</span>
-                <select
-                  value={section}
-                  onChange={(event) => setSection(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {filters?.sections.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">HTTP-метод</span>
-                <select
-                  value={method}
-                  onChange={(event) => setMethod(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {filters?.httpMethods.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Пользователь</span>
-                <select
-                  value={actor}
-                  onChange={(event) =>
-                    setActor(event.target.value === 'all' ? 'all' : Number.parseInt(event.target.value, 10) || 'all')
-                  }
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  <option value="all">Все</option>
-                  {actors.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.fullName || item.email || `ID ${item.id}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Дата с</span>
-                <input
-                  type="datetime-local"
-                  value={from}
-                  onChange={(event) => setFrom(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                />
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">Дата по</span>
-                <input
-                  type="datetime-local"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                />
-              </label>
-
-              <label>
-                <span className="text-sm font-medium text-slate-600">На странице</span>
-                <select
-                  value={pageSize}
-                  onChange={(event) => setPageSize(Number.parseInt(event.target.value, 10) || 25)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                >
-                  {[10, 25, 50, 100, 150, 200].map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              ))}
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+              >
+                Сбросить
+              </button>
             </div>
-          </div>
+          )}
 
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>

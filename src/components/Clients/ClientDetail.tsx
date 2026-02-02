@@ -77,6 +77,7 @@ type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
 
 type ClientDetailSection =
+  | 'profile'
   | 'payments'
   | 'accounts'
   | 'acts'
@@ -84,6 +85,7 @@ type ClientDetailSection =
   | 'settlement';
 
 const SECTION_ORDER: ClientDetailSection[] = [
+  'profile',
   'payments',
   'accounts',
   'acts',
@@ -101,6 +103,10 @@ const SECTION_META: Record<
     icon?: LucideIcon | null;
   }
 > = {
+  profile: {
+    label: 'Карточка клиента',
+    actionLabel: 'Сохранить',
+  },
   payments: {
     label: 'Платежи',
     actionLabel: 'Добавить платёж',
@@ -136,6 +142,7 @@ const SECTION_META: Record<
 };
 
 const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
+  profile: 'clients',
   payments: 'clients',
   accounts: 'accounts',
   acts: 'acts',
@@ -234,6 +241,18 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [clientData, setClientData] = useState<Client | null>(null);
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
+  const [clientFormSaving, setClientFormSaving] = useState(false);
+  const [clientFormState, setClientFormState] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    company: '',
+    address: '',
+    notes: '',
+    legalEntityId: '',
+    isActive: true,
+    clientStatusId: '',
+  });
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
@@ -728,6 +747,21 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     };
   }, [clientId]);
 
+  useEffect(() => {
+    if (!clientData) return;
+    setClientFormState({
+      name: clientData.name ?? '',
+      email: clientData.email ?? '',
+      phone: clientData.phone ?? '',
+      company: clientData.company ?? '',
+      address: clientData.address ?? '',
+      notes: clientData.notes ?? '',
+      legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
+      isActive: clientData.isActive ?? true,
+      clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
+    });
+  }, [clientData]);
+
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
 
   const { fromDateStr, toDateStr } = useMemo(() => {
@@ -934,6 +968,38 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   const editClientLabel = t('editClient') ?? 'Изменить клиента';
   const addCaseLabel = t('addCase') ?? 'Добавить дело';
+
+  const sortedLegalEntities = useMemo(
+    () =>
+      [...legalEntities].sort((a, b) =>
+        a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' }),
+      ),
+    [legalEntities],
+  );
+
+  const sortedClientStatuses = useMemo(
+    () =>
+      [...clientStatuses].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      ),
+    [clientStatuses],
+  );
+
+  const selectedLegalEntity = useMemo(() => {
+    if (!clientFormState.legalEntityId) return null;
+    return (
+      sortedLegalEntities.find((entity) => entity.id === Number(clientFormState.legalEntityId)) ??
+      null
+    );
+  }, [clientFormState.legalEntityId, sortedLegalEntities]);
+
+  const selectedClientStatus = useMemo(() => {
+    if (!clientFormState.clientStatusId) return null;
+    return (
+      sortedClientStatuses.find((status) => status.id === Number(clientFormState.clientStatusId)) ??
+      null
+    );
+  }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
@@ -1184,6 +1250,68 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   const notFound = !loadingPayments && clientName === '...' && payments.length === 0;
 
+  const handleClientFormChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  ) => {
+    const { name, value } = event.target;
+    if (name === 'legalEntityId') {
+      setClientFormState((prev) => ({ ...prev, legalEntityId: value }));
+      return;
+    }
+    if (name === 'clientStatusId') {
+      setClientFormState((prev) => ({ ...prev, clientStatusId: value }));
+      return;
+    }
+    const el = event.target as HTMLInputElement;
+    setClientFormState((prev) => ({
+      ...prev,
+      [name]: el.type === 'checkbox' ? el.checked : value,
+    }));
+  };
+
+  const resetClientForm = () => {
+    if (!clientData) return;
+    setClientFormState({
+      name: clientData.name ?? '',
+      email: clientData.email ?? '',
+      phone: clientData.phone ?? '',
+      company: clientData.company ?? '',
+      address: clientData.address ?? '',
+      notes: clientData.notes ?? '',
+      legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
+      isActive: clientData.isActive ?? true,
+      clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
+    });
+  };
+
+  const handleClientFormSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования клиента.');
+      return;
+    }
+    setClientFormSaving(true);
+    try {
+      await handleUpdateClient({
+        name: clientFormState.name.trim(),
+        email: clientFormState.email.trim(),
+        phone: clientFormState.phone.trim(),
+        company: clientFormState.company.trim(),
+        address: clientFormState.address.trim(),
+        notes: clientFormState.notes.trim(),
+        isActive: clientFormState.isActive,
+        legalEntityId: clientFormState.legalEntityId
+          ? Number(clientFormState.legalEntityId)
+          : null,
+        clientStatusId: clientFormState.clientStatusId
+          ? Number(clientFormState.clientStatusId)
+          : null,
+      });
+    } finally {
+      setClientFormSaving(false);
+    }
+  };
+
   if (visibleSections.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -1310,7 +1438,189 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </div>
         </div>
 
-        {activeSection === 'payments' ? (
+        {activeSection === 'profile' ? (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Основные данные</h2>
+                <p className="text-sm text-gray-500">
+                  Обновляйте контактные данные клиента и юридическую информацию.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openClientEdit}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50"
+              >
+                <Edit size={16} />
+                Открыть в модальном окне
+              </button>
+            </div>
+            {!clientPermissions.canEdit && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Недостаточно прав для редактирования клиента. Доступен только просмотр.
+              </div>
+            )}
+            <form onSubmit={handleClientFormSubmit} className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} *</label>
+                <input
+                  type="text"
+                  name="name"
+                  value={clientFormState.name}
+                  onChange={handleClientFormChange}
+                  required
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
+                <select
+                  name="clientStatusId"
+                  value={clientFormState.clientStatusId}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                >
+                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                  {sortedClientStatuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedClientStatus?.description && (
+                  <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')}</label>
+                <input
+                  type="email"
+                  name="email"
+                  value={clientFormState.email}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')}</label>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={clientFormState.phone}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('company')}</label>
+                <input
+                  type="text"
+                  name="company"
+                  value={clientFormState.company}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('legalEntity') || 'Юридическое лицо'}
+                </label>
+                <select
+                  name="legalEntityId"
+                  value={clientFormState.legalEntityId}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                >
+                  <option value="">{t('legalEntityNotSelected') || 'Без юридического лица'}</option>
+                  {sortedLegalEntities.map((entity) => (
+                    <option key={entity.id} value={entity.id}>
+                      {entity.shortName}
+                      {entity.inn ? ` · ${entity.inn}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {selectedLegalEntity && (
+                  <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
+                    {selectedLegalEntity.fullName && (
+                      <p className="font-medium text-gray-700">{selectedLegalEntity.fullName}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                      {selectedLegalEntity.inn && <span>ИНН: {selectedLegalEntity.inn}</span>}
+                      {selectedLegalEntity.kpp && <span>КПП: {selectedLegalEntity.kpp}</span>}
+                      {selectedLegalEntity.ogrn && <span>ОГРН: {selectedLegalEntity.ogrn}</span>}
+                    </div>
+                    {selectedLegalEntity.address && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        {t('legalEntityAddress') || 'Адрес'}: {selectedLegalEntity.address}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('address')}</label>
+                <input
+                  type="text"
+                  name="address"
+                  value={clientFormState.address}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
+                <textarea
+                  name="notes"
+                  value={clientFormState.notes}
+                  onChange={handleClientFormChange}
+                  rows={3}
+                  disabled={!clientPermissions.canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                  placeholder={t('additionalInfo')}
+                />
+              </div>
+              <div className="md:col-span-2 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  name="isActive"
+                  checked={clientFormState.isActive}
+                  onChange={handleClientFormChange}
+                  disabled={!clientPermissions.canEdit}
+                  className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded"
+                  id="client-detail-is-active"
+                />
+                <label htmlFor="client-detail-is-active" className="text-sm text-gray-700">
+                  {t('activeClient')}
+                </label>
+              </div>
+              <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={!clientPermissions.canEdit || clientFormSaving}
+                  className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  {clientFormSaving ? t('saving') ?? 'Сохранение...' : t('update') ?? 'Сохранить'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetClientForm}
+                  disabled={!clientPermissions.canEdit || clientFormSaving}
+                  className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {t('reset') ?? 'Сбросить'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : activeSection === 'payments' ? (
           <>
             <TwoTypeStats
               clientId={clientId}
@@ -2489,6 +2799,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
+          onCreateRemainder={createPayment}
           onDelete={async (id: number) => {
             await removePayment(id);
             closePayModal();

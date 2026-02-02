@@ -37,6 +37,12 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
+export interface UserSettingDto {
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
 type SortDir = 'asc' | 'desc';
 type ActsSortKey =
   | 'date'
@@ -194,6 +200,18 @@ export class ApiService {
 
   async deleteContract(id: number) {
     return this.request<void>(`/contracts/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== User settings =====
+  async getUserSetting(key: string) {
+    return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`);
+  }
+
+  async upsertUserSetting(key: string, value: string) {
+    return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    });
   }
 
   // ===== Invoices =====
@@ -798,6 +816,13 @@ export class ApiService {
     return this.request<UserActivityLogItem>('/user-activity', {
       method: 'POST',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteUserActivityLogs(password: string) {
+    return this.request<{ deleted: number }>('/user-activity/cleanup', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
     });
   }
 }
