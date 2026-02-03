@@ -5,14 +5,17 @@ import {
   ChevronDown,
   Filter,
   Plus,
+  Pencil,
   Search,
   SlidersHorizontal,
+  Trash2,
   WalletCards,
   UploadCloud,
 } from 'lucide-react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
 import { apiService } from '../../services/api';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import type {
   MoneyOperation,
   MoneyOperationAccountingType,
@@ -318,6 +321,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
   const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
+  const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -429,10 +433,15 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     setModalOpen(true);
   };
 
-  const handleDelete = async (item: MoneyOperation) => {
-    if (!confirm('Удалить операцию?')) return;
-    await apiService.deleteMoneyOperation(item.id);
-    setItems((prev) => prev.filter((entry) => entry.id !== item.id));
+  const handleDelete = (item: MoneyOperation) => {
+    setConfirmDelete(item);
+  };
+
+  const confirmDeleteOperation = async () => {
+    if (!confirmDelete) return;
+    await apiService.deleteMoneyOperation(confirmDelete.id);
+    setItems((prev) => prev.filter((entry) => entry.id !== confirmDelete.id));
+    setConfirmDelete(null);
   };
 
   return (
@@ -749,13 +758,15 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleEdit(item)}
-                          className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
-                          Изменить
+                          className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                          aria-label="Изменить">
+                          <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(item)}
-                          className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50">
-                          Удалить
+                          className="rounded-md border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                          aria-label="Удалить">
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -777,6 +788,16 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         }}
         onSave={handleSave}
         isSaving={saving}
+      />
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        title="Удалить операцию?"
+        description="Действие необратимо. Вы уверены, что хотите удалить операцию?"
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        variant="danger"
+        onConfirm={confirmDeleteOperation}
+        onCancel={() => setConfirmDelete(null)}
       />
         </>
       )}
