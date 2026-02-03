@@ -76,14 +76,16 @@ function MoneyOperationModal({
   source: MoneyOperationSource;
   open: boolean;
   onClose: () => void;
-  onSave: (payload: MoneyOperation) => void;
+  onSave: (payload: MoneyOperation) => Promise<void>;
   isSaving: boolean;
 }) {
   const [form, setForm] = useState<MoneyOperation>(() => ({ ...DEFAULT_FORM, source }));
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setForm({ ...DEFAULT_FORM, source });
+      setError(null);
     }
   }, [open, source]);
 
@@ -93,11 +95,21 @@ function MoneyOperationModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleSubmit = async () => {
+    setError(null);
+    try {
+      await onSave(form);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось сохранить операцию.';
+      setError(message);
+    }
+  };
+
   const title = `Добавить операцию по ${SOURCE_LABELS[source].toLowerCase()}`;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
@@ -106,7 +118,7 @@ function MoneyOperationModal({
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
 
-        <div className="space-y-6 p-6">
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm text-slate-500">Операция</span>
@@ -275,8 +287,9 @@ function MoneyOperationModal({
         </div>
 
         <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
+          {error ? <div className="text-sm text-red-500">{error}</div> : <span />}
           <button
-            onClick={() => onSave(form)}
+            onClick={handleSubmit}
             disabled={isSaving}
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
             {isSaving ? 'Сохранение...' : 'Сохранить'}
@@ -339,9 +352,14 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const handleSave = async (payload: MoneyOperation) => {
     setSaving(true);
     try {
+      const normalizedRecognitionDate =
+        payload.recognitionDate && payload.recognitionDate.trim() !== '' ? payload.recognitionDate : null;
+      const normalizedPaidAmount = Number.isFinite(payload.paidAmount ?? NaN) ? payload.paidAmount : null;
       const prepared = {
         ...payload,
         source: apiSource ?? payload.source,
+        recognitionDate: normalizedRecognitionDate,
+        paidAmount: normalizedPaidAmount,
       };
       const created = await apiService.createMoneyOperation({
         ...prepared,
@@ -350,8 +368,6 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
       });
       setItems((prev) => [created, ...prev]);
       setModalOpen(false);
-    } catch (error) {
-      console.error(error);
     } finally {
       setSaving(false);
     }
