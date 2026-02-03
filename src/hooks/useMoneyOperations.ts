@@ -16,7 +16,24 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const stableFilters = useMemo(() => ({ ...filters }), [filters]);
+  const stableFilters = useMemo(
+    () => ({
+      from: filters.from,
+      to: filters.to,
+      source: filters.source,
+      direction: filters.direction,
+      accountingType: filters.accountingType,
+      search: filters.search,
+    }),
+    [
+      filters.from,
+      filters.to,
+      filters.source,
+      filters.direction,
+      filters.accountingType,
+      filters.search,
+    ],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
