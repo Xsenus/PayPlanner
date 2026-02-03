@@ -68,12 +68,14 @@ function formatDate(value: string) {
 
 function MoneyOperationModal({
   source,
+  initialData,
   open,
   onClose,
   onSave,
   isSaving,
 }: {
   source: MoneyOperationSource;
+  initialData?: MoneyOperation | null;
   open: boolean;
   onClose: () => void;
   onSave: (payload: MoneyOperation) => Promise<void>;
@@ -84,10 +86,10 @@ function MoneyOperationModal({
 
   useEffect(() => {
     if (open) {
-      setForm({ ...DEFAULT_FORM, source });
+      setForm(initialData ? { ...initialData } : { ...DEFAULT_FORM, source });
       setError(null);
     }
-  }, [open, source]);
+  }, [initialData, open, source]);
 
   if (!open) return null;
 
@@ -105,7 +107,9 @@ function MoneyOperationModal({
     }
   };
 
-  const title = `Добавить операцию по ${SOURCE_LABELS[source].toLowerCase()}`;
+  const title = initialData
+    ? `Редактировать операцию по ${SOURCE_LABELS[source].toLowerCase()}`
+    : `Добавить операцию по ${SOURCE_LABELS[source].toLowerCase()}`;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -312,6 +316,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -361,16 +366,33 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         recognitionDate: normalizedRecognitionDate,
         paidAmount: normalizedPaidAmount,
       };
-      const created = await apiService.createMoneyOperation({
-        ...prepared,
-        id: 0,
-        createdAt: new Date().toISOString(),
-      });
-      setItems((prev) => [created, ...prev]);
+      if (editingOperation) {
+        const updated = await apiService.updateMoneyOperation(editingOperation.id, prepared);
+        setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      } else {
+        const created = await apiService.createMoneyOperation({
+          ...prepared,
+          id: 0,
+          createdAt: new Date().toISOString(),
+        });
+        setItems((prev) => [created, ...prev]);
+      }
       setModalOpen(false);
+      setEditingOperation(null);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleEdit = (item: MoneyOperation) => {
+    setEditingOperation(item);
+    setModalOpen(true);
+  };
+
+  const handleDelete = async (item: MoneyOperation) => {
+    if (!confirm('Удалить операцию?')) return;
+    await apiService.deleteMoneyOperation(item.id);
+    setItems((prev) => prev.filter((entry) => entry.id !== item.id));
   };
 
   return (
@@ -426,7 +448,10 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             Текущий год
           </button>
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setEditingOperation(null);
+              setModalOpen(true);
+            }}
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             <Plus className="h-4 w-4" />
             Добавить
@@ -565,6 +590,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                   'Назначение',
                   'Опл. счета',
                   'Статья',
+                  'Действия',
                 ].map((label) => (
                   <th key={label} className="px-3 py-2 text-left font-medium">
                     {label}
@@ -575,19 +601,19 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={15} className="px-4 py-10 text-center text-slate-500">
                     Загрузка операций...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-10 text-center text-red-500">
+                  <td colSpan={15} className="px-4 py-10 text-center text-red-500">
                     {error}
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={15} className="px-4 py-10 text-center text-slate-500">
                     В указанном периоде нет операций. Добавить операцию или импортировать из банка
                   </td>
                 </tr>
@@ -612,6 +638,20 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                     <td className="px-3 py-2">{item.purpose ?? '—'}</td>
                     <td className="px-3 py-2">{item.paidAccountName ?? '—'}</td>
                     <td className="px-3 py-2">{item.categoryName ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEdit(item)}
+                          className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                          Изменить
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item)}
+                          className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50">
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -622,8 +662,12 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
       <MoneyOperationModal
         source={apiSource ?? 'Bank'}
+        initialData={editingOperation}
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingOperation(null);
+        }}
         onSave={handleSave}
         isSaving={saving}
       />
