@@ -18,6 +18,21 @@ public class ClientsV2Controller : ControllerBase
     public async Task<IActionResult> Get(
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
+        [FromQuery] int? id,
+        [FromQuery] string? name,
+        [FromQuery] string? email,
+        [FromQuery] string? phone,
+        [FromQuery] string? company,
+        [FromQuery] string? address,
+        [FromQuery] string? notes,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] string? legalEntityShortName,
+        [FromQuery] string? legalEntityFullName,
+        [FromQuery] string? legalEntityInn,
+        [FromQuery] string? legalEntityOgrn,
+        [FromQuery] string? legalEntityKpp,
+        [FromQuery] int? clientStatusId,
+        [FromQuery] string? clientStatus,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -27,7 +42,12 @@ public class ClientsV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
 
-        var q = _db.Clients.AsQueryable();
+        var q = _db.Clients
+            .Include(c => c.Cases)
+            .Include(c => c.Contracts)
+            .Include(c => c.LegalEntity)
+            .Include(c => c.ClientStatus)
+            .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -40,14 +60,59 @@ public class ClientsV2Controller : ControllerBase
                 (c.Address != null && EF.Functions.Like(c.Address, $"%{search}%")));
         }
 
+        if (id.HasValue)
+            q = q.Where(c => c.Id == id.Value);
+        if (!string.IsNullOrWhiteSpace(name))
+            q = q.Where(c => c.Name != null && EF.Functions.Like(c.Name, $"%{name.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(email))
+            q = q.Where(c => c.Email != null && EF.Functions.Like(c.Email, $"%{email.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(phone))
+            q = q.Where(c => c.Phone != null && EF.Functions.Like(c.Phone, $"%{phone.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(company))
+            q = q.Where(c => c.Company != null && EF.Functions.Like(c.Company, $"%{company.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(address))
+            q = q.Where(c => c.Address != null && EF.Functions.Like(c.Address, $"%{address.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(notes))
+            q = q.Where(c => c.Notes != null && EF.Functions.Like(c.Notes, $"%{notes.Trim()}%"));
+        if (legalEntityId.HasValue)
+            q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
+        if (!string.IsNullOrWhiteSpace(legalEntityShortName))
+            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.ShortName, $"%{legalEntityShortName.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(legalEntityFullName))
+            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.FullName, $"%{legalEntityFullName.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(legalEntityInn))
+            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Inn, $"%{legalEntityInn.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(legalEntityOgrn))
+            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Ogrn, $"%{legalEntityOgrn.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(legalEntityKpp))
+            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Kpp, $"%{legalEntityKpp.Trim()}%"));
+        if (clientStatusId.HasValue)
+            q = q.Where(c => c.ClientStatusId == clientStatusId.Value);
+        if (!string.IsNullOrWhiteSpace(clientStatus))
+        {
+            var statusValue = clientStatus.Trim();
+            if (string.Equals(statusValue, "__none__", StringComparison.OrdinalIgnoreCase))
+            {
+                q = q.Where(c => c.ClientStatusId == null);
+            }
+            else
+            {
+                q = q.Where(c => c.ClientStatus != null && EF.Functions.Like(c.ClientStatus.Name, $"%{statusValue}%"));
+            }
+        }
+
         if (isActive.HasValue)
             q = q.Where(c => c.IsActive == isActive.Value);
 
         bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
         q = (sortBy?.ToLowerInvariant()) switch
         {
-            "createdat" => (desc ? q.OrderByDescending(c => c.CreatedAt) : q.OrderBy(c => c.CreatedAt)),
-            _ => (desc ? q.OrderByDescending(c => c.Name) : q.OrderBy(c => c.Name)),
+            "createdat" => (desc
+                ? q.OrderByDescending(c => c.IsActive).ThenByDescending(c => c.CreatedAt)
+                : q.OrderByDescending(c => c.IsActive).ThenBy(c => c.CreatedAt)),
+            _ => (desc
+                ? q.OrderByDescending(c => c.IsActive).ThenByDescending(c => c.Name)
+                : q.OrderByDescending(c => c.IsActive).ThenBy(c => c.Name)),
         };
 
         var total = await q.CountAsync(ct);
