@@ -450,6 +450,7 @@ export class ApiService {
     sortDir?: SortDir;
     page?: number;
     pageSize?: number;
+    [key: string]: string | number | boolean | undefined;
   }) {
     const q = buildQuery({
       ...(params ?? {}),

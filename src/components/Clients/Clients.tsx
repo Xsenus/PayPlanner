@@ -16,6 +16,7 @@ import {
   Ban,
   SlidersHorizontal,
   GripVertical,
+  Filter,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -77,42 +78,6 @@ function formatDate(d?: string) {
   } catch {
     return d;
   }
-}
-
-function matchesClient(c: Client, q: string): boolean {
-  const ql = q.trim().toLowerCase();
-  if (!ql) return true;
-
-  const qDigits = q.replace(/\D/g, '');
-  const name = (c.name ?? '').toLowerCase();
-  const company = (c.company ?? '').toLowerCase();
-  const email = (c.email ?? '').toLowerCase();
-  const phone = (c.phone ?? '').toLowerCase();
-  const phoneDigits = (c.phone ?? '').replace(/\D/g, '');
-  const legal = c.legalEntity;
-  const legalShort = (legal?.shortName ?? '').toLowerCase();
-  const legalFull = (legal?.fullName ?? '').toLowerCase();
-  const legalInn = (legal?.inn ?? '').toLowerCase();
-  const legalOgrn = (legal?.ogrn ?? '').toLowerCase();
-  const legalKpp = (legal?.kpp ?? '').toLowerCase();
-  const statusName = (c.clientStatus?.name ?? '').toLowerCase();
-  const legalDigits = [legal?.inn ?? '', legal?.ogrn ?? '', legal?.kpp ?? '']
-    .map((value) => value.replace(/\D/g, ''))
-    .join(' ');
-
-  return (
-    name.includes(ql) ||
-    company.includes(ql) ||
-    email.includes(ql) ||
-    phone.includes(ql) ||
-    statusName.includes(ql) ||
-    legalShort.includes(ql) ||
-    legalFull.includes(ql) ||
-    legalInn.includes(ql) ||
-    legalOgrn.includes(ql) ||
-    legalKpp.includes(ql) ||
-    (!!qDigits && (phoneDigits.includes(qDigits) || legalDigits.includes(qDigits)))
-  );
 }
 
 function escapeRegExp(s: string) {
@@ -220,25 +185,26 @@ type ColumnDefinition = {
   label: string;
   defaultWidth: number;
   defaultVisible: boolean;
+  filterable?: boolean;
 };
 
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { id: 'id', label: 'ID', defaultWidth: 80, defaultVisible: false },
-  { id: 'name', label: 'Клиент', defaultWidth: 220, defaultVisible: true },
-  { id: 'status', label: 'Статус', defaultWidth: 160, defaultVisible: true },
-  { id: 'company', label: 'Компания', defaultWidth: 180, defaultVisible: true },
-  { id: 'email', label: 'Email', defaultWidth: 200, defaultVisible: true },
-  { id: 'phone', label: 'Телефон', defaultWidth: 160, defaultVisible: true },
-  { id: 'address', label: 'Адрес', defaultWidth: 220, defaultVisible: false },
-  { id: 'notes', label: 'Заметки', defaultWidth: 260, defaultVisible: false },
+  { id: 'name', label: 'Клиент', defaultWidth: 220, defaultVisible: true, filterable: true },
+  { id: 'status', label: 'Статус', defaultWidth: 160, defaultVisible: true, filterable: true },
+  { id: 'company', label: 'Компания', defaultWidth: 180, defaultVisible: true, filterable: true },
+  { id: 'email', label: 'Email', defaultWidth: 200, defaultVisible: true, filterable: true },
+  { id: 'phone', label: 'Телефон', defaultWidth: 160, defaultVisible: true, filterable: true },
+  { id: 'address', label: 'Адрес', defaultWidth: 220, defaultVisible: false, filterable: true },
+  { id: 'notes', label: 'Заметки', defaultWidth: 260, defaultVisible: false, filterable: true },
   { id: 'createdAt', label: 'Создан', defaultWidth: 140, defaultVisible: false },
   { id: 'isActive', label: 'Активность', defaultWidth: 130, defaultVisible: true },
-  { id: 'legalEntityId', label: 'ID юр. лица', defaultWidth: 140, defaultVisible: false },
-  { id: 'legalEntityShortName', label: 'Юр. лицо', defaultWidth: 200, defaultVisible: true },
-  { id: 'legalEntityFullName', label: 'Юр. лицо (полное)', defaultWidth: 240, defaultVisible: false },
-  { id: 'legalEntityInn', label: 'ИНН юр. лица', defaultWidth: 160, defaultVisible: false },
-  { id: 'legalEntityOgrn', label: 'ОГРН юр. лица', defaultWidth: 160, defaultVisible: false },
-  { id: 'legalEntityKpp', label: 'КПП юр. лица', defaultWidth: 160, defaultVisible: false },
+  { id: 'legalEntityId', label: 'ID юр. лица', defaultWidth: 140, defaultVisible: false, filterable: true },
+  { id: 'legalEntityShortName', label: 'Юр. лицо', defaultWidth: 200, defaultVisible: true, filterable: true },
+  { id: 'legalEntityFullName', label: 'Юр. лицо (полное)', defaultWidth: 240, defaultVisible: false, filterable: true },
+  { id: 'legalEntityInn', label: 'ИНН юр. лица', defaultWidth: 160, defaultVisible: false, filterable: true },
+  { id: 'legalEntityOgrn', label: 'ОГРН юр. лица', defaultWidth: 160, defaultVisible: false, filterable: true },
+  { id: 'legalEntityKpp', label: 'КПП юр. лица', defaultWidth: 160, defaultVisible: false, filterable: true },
   { id: 'casesCount', label: 'Дела', defaultWidth: 120, defaultVisible: true },
   { id: 'contractsCount', label: 'Договоры', defaultWidth: 130, defaultVisible: false },
 ];
@@ -258,6 +224,9 @@ type TableSettings = {
   order: ColumnId[];
   visible: Record<ColumnId, boolean>;
   widths: Record<ColumnId, number>;
+  filters: Record<ColumnId, string>;
+  filterColumns: ColumnId[];
+  pageSize: number;
 };
 
 const DEFAULT_TABLE_SETTINGS: TableSettings = {
@@ -270,6 +239,12 @@ const DEFAULT_TABLE_SETTINGS: TableSettings = {
     (acc, col) => ({ ...acc, [col.id]: col.defaultWidth }),
     {} as Record<ColumnId, number>,
   ),
+  filters: COLUMN_DEFINITIONS.reduce(
+    (acc, col) => ({ ...acc, [col.id]: '' }),
+    {} as Record<ColumnId, string>,
+  ),
+  filterColumns: [],
+  pageSize: 25,
 };
 
 function normalizeTableSettings(parsed?: Partial<TableSettings> | null): TableSettings {
@@ -284,7 +259,17 @@ function normalizeTableSettings(parsed?: Partial<TableSettings> | null): TableSe
     : fallbackOrder;
   const visible = { ...DEFAULT_TABLE_SETTINGS.visible, ...(parsed?.visible ?? {}) };
   const widths = { ...DEFAULT_TABLE_SETTINGS.widths, ...(parsed?.widths ?? {}) };
-  return { order: finalOrder, visible, widths };
+  const filters = { ...DEFAULT_TABLE_SETTINGS.filters, ...(parsed?.filters ?? {}) };
+  const filterColumns = Array.isArray(parsed?.filterColumns)
+    ? parsed?.filterColumns.filter((id): id is ColumnId =>
+        COLUMN_DEFINITIONS.some((col) => col.id === id),
+      )
+    : DEFAULT_TABLE_SETTINGS.filterColumns;
+  const pageSize =
+    typeof parsed?.pageSize === 'number'
+      ? Math.max(1, parsed.pageSize)
+      : DEFAULT_TABLE_SETTINGS.pageSize;
+  return { order: finalOrder, visible, widths, filters, filterColumns, pageSize };
 }
 
 function loadTableSettings(): TableSettings {
@@ -307,8 +292,6 @@ function saveTableSettings(settings: TableSettings) {
 }
 
 export function Clients() {
-  const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
-    useClients();
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -348,7 +331,74 @@ export function Clients() {
       return DEFAULT_TABLE_SETTINGS;
     }
   });
+  const [page, setPage] = useState(1);
+  const pageSize = tableSettings.pageSize;
+
+  const filterableColumns = useMemo(
+    () => COLUMN_DEFINITIONS.filter((col) => col.filterable),
+    [],
+  );
+
+  const activeFilterColumns = tableSettings.filterColumns;
+
+  const filterParamMap = useMemo(
+    () =>
+      ({
+        id: 'id',
+        name: 'name',
+        status: 'clientStatus',
+        company: 'company',
+        email: 'email',
+        phone: 'phone',
+        address: 'address',
+        notes: 'notes',
+        legalEntityId: 'legalEntityId',
+        legalEntityShortName: 'legalEntityShortName',
+        legalEntityFullName: 'legalEntityFullName',
+        legalEntityInn: 'legalEntityInn',
+        legalEntityOgrn: 'legalEntityOgrn',
+        legalEntityKpp: 'legalEntityKpp',
+      }) satisfies Record<string, string>,
+    [],
+  );
+
+  const activeFilters = useMemo(() => {
+    const filters: Record<string, string> = {};
+    activeFilterColumns.forEach((columnId) => {
+      const raw = tableSettings.filters[columnId]?.trim();
+      if (raw) {
+        const paramKey = filterParamMap[columnId] ?? columnId;
+        filters[paramKey] = raw;
+      }
+    });
+    return filters;
+  }, [activeFilterColumns, tableSettings.filters, filterParamMap]);
+
+  const clientsQueryOptions = useMemo(
+    () => ({
+      mode: 'paged' as const,
+      search: query.trim() || undefined,
+      isActive: activityFilter === 'all' ? undefined : activityFilter === 'active',
+      sortBy: 'name' as const,
+      sortDir: 'asc' as const,
+      page,
+      pageSize,
+      filters: {
+        ...(statusFilter !== 'all'
+          ? statusFilter === 'none'
+            ? { clientStatus: '__none__' }
+            : { clientStatusId: statusFilter }
+          : {}),
+        ...activeFilters,
+      },
+    }),
+    [query, activityFilter, page, pageSize, statusFilter, activeFilters],
+  );
+
+  const { clients, loading, total, createClient, updateClient, deleteClient, setClients, refresh } =
+    useClients(clientsQueryOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [draggingColumnId, setDraggingColumnId] = useState<ColumnId | null>(null);
   const resizingRef = useRef<{
@@ -357,29 +407,9 @@ export function Clients() {
     startWidth: number;
   } | null>(null);
   const saveTimerRef = useRef<number | null>(null);
-  const filteredClients = useMemo(() => {
-    let list = clients;
-    if (query.trim()) {
-      list = list.filter((c) => matchesClient(c, query));
-    }
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'none') {
-        list = list.filter((c) => !c.clientStatusId);
-      } else {
-        list = list.filter((c) => String(c.clientStatusId ?? '') === statusFilter);
-      }
-    }
-    if (activityFilter !== 'all') {
-      const shouldBeActive = activityFilter === 'active';
-      list = list.filter((c) => c.isActive === shouldBeActive);
-    }
-    return list;
-  }, [clients, query, statusFilter, activityFilter]);
+  const sortedClients = clients;
 
-  const sortedClients = useMemo(
-    () => [...filteredClients].sort((a, b) => Number(b.isActive) - Number(a.isActive)),
-    [filteredClients],
-  );
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -553,7 +583,12 @@ export function Clients() {
     setEditingCase(null);
   };
 
-  const hasAnyClients = clients.length > 0;
+  const hasAnyClients = total > 0;
+  const isFiltered =
+    !!query.trim() ||
+    statusFilter !== 'all' ||
+    activityFilter !== 'all' ||
+    Object.keys(activeFilters).length > 0;
 
   const handleViewModeChange = (mode: 'cards' | 'table') => {
     setViewMode(mode);
@@ -605,8 +640,19 @@ export function Clients() {
   useEffect(() => {
     if (viewMode !== 'table') {
       setSettingsOpen(false);
+      setFiltersOpen(false);
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, statusFilter, activityFilter, activeFilters, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const visibleColumnIds = useMemo(
     () => tableSettings.order.filter((id) => tableSettings.visible[id]),
@@ -615,6 +661,37 @@ export function Clients() {
 
   const resetTableSettings = () => {
     setTableSettings(DEFAULT_TABLE_SETTINGS);
+    setPage(1);
+  };
+
+  const handleFilterColumnsChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = Array.from(event.target.selectedOptions).map((option) => option.value as ColumnId);
+    setTableSettings((prev) => ({ ...prev, filterColumns: selected }));
+  };
+
+  const handleFilterValueChange = (columnId: ColumnId, value: string) => {
+    setTableSettings((prev) => ({
+      ...prev,
+      filters: { ...prev.filters, [columnId]: value },
+    }));
+  };
+
+  const resetFilters = () => {
+    setTableSettings((prev) => ({
+      ...prev,
+      filters: { ...DEFAULT_TABLE_SETTINGS.filters },
+      filterColumns: [],
+    }));
+    setPage(1);
+  };
+
+  const handlePageSizeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = Number(event.target.value);
+    setTableSettings((prev) => ({
+      ...prev,
+      pageSize: Number.isFinite(next) && next > 0 ? next : prev.pageSize,
+    }));
+    setPage(1);
   };
 
   const toggleColumn = (columnId: ColumnId) => {
@@ -751,7 +828,7 @@ export function Clients() {
   const renderCell = (client: Client, columnId: ColumnId) => {
     switch (columnId) {
       case 'id':
-        return <span className="text-sm text-gray-600">#{client.id}</span>;
+        return <span className="text-sm text-gray-600 block truncate">#{client.id}</span>;
       case 'name':
         return (
           <div className="flex items-center gap-3 min-w-0">
@@ -778,33 +855,41 @@ export function Clients() {
       case 'status':
         return <ClientStatusBadge status={client.clientStatus} />;
       case 'company':
-        return <span className="text-sm text-gray-700">{highlight(client.company ?? '', query)}</span>;
+        return (
+          <span className="text-sm text-gray-700 block truncate">
+            {highlight(client.company ?? '', query)}
+          </span>
+        );
       case 'email':
         return client.email ? (
-          <span className="text-sm text-gray-700">{highlight(client.email ?? '', query)}</span>
+          <span className="text-sm text-gray-700 block truncate">
+            {highlight(client.email ?? '', query)}
+          </span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'phone':
         return client.phone ? (
-          <span className="text-sm text-gray-700">{highlightPhone(client.phone ?? '', query)}</span>
+          <span className="text-sm text-gray-700 block truncate">
+            {highlightPhone(client.phone ?? '', query)}
+          </span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'address':
         return client.address ? (
-          <span className="text-sm text-gray-700">{client.address}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.address}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'notes':
         return client.notes ? (
-          <span className="text-sm text-gray-700 line-clamp-2">{client.notes}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.notes}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'createdAt':
-        return <span className="text-sm text-gray-600">{formatDate(client.createdAt)}</span>;
+        return <span className="text-sm text-gray-600 block truncate">{formatDate(client.createdAt)}</span>;
       case 'isActive':
         return client.isActive ? (
           <span className="inline-flex items-center px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
@@ -817,13 +902,13 @@ export function Clients() {
         );
       case 'legalEntityId':
         return client.legalEntityId ? (
-          <span className="text-sm text-gray-700">#{client.legalEntityId}</span>
+          <span className="text-sm text-gray-700 block truncate">#{client.legalEntityId}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'legalEntityShortName':
         return client.legalEntity ? (
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-gray-700 block truncate">
             {highlight(client.legalEntity.shortName ?? '', query)}
           </span>
         ) : (
@@ -831,25 +916,25 @@ export function Clients() {
         );
       case 'legalEntityFullName':
         return client.legalEntity?.fullName ? (
-          <span className="text-sm text-gray-700">{client.legalEntity.fullName}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.legalEntity.fullName}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'legalEntityInn':
         return client.legalEntity?.inn ? (
-          <span className="text-sm text-gray-700">{client.legalEntity.inn}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.legalEntity.inn}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'legalEntityOgrn':
         return client.legalEntity?.ogrn ? (
-          <span className="text-sm text-gray-700">{client.legalEntity.ogrn}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.legalEntity.ogrn}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
       case 'legalEntityKpp':
         return client.legalEntity?.kpp ? (
-          <span className="text-sm text-gray-700">{client.legalEntity.kpp}</span>
+          <span className="text-sm text-gray-700 block truncate">{client.legalEntity.kpp}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
@@ -864,7 +949,9 @@ export function Clients() {
           </button>
         );
       case 'contractsCount':
-        return <span className="text-sm text-gray-700">{(client.contracts ?? []).length}</span>;
+        return (
+          <span className="text-sm text-gray-700 block truncate">{(client.contracts ?? []).length}</span>
+        );
       default:
         return null;
     }
@@ -953,18 +1040,32 @@ export function Clients() {
                 </button>
               </div>
               {viewMode === 'table' && (
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen((prev) => !prev)}
-                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                    settingsOpen
-                      ? 'border-blue-200 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <SlidersHorizontal size={16} />
-                  Колонки
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen((prev) => !prev)}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      settingsOpen
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <SlidersHorizontal size={16} />
+                    Колонки
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen((prev) => !prev)}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      filtersOpen
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Filter size={16} />
+                    Фильтры
+                  </button>
+                </div>
               )}
               {canCreateClients && (
                 <button
@@ -1053,7 +1154,68 @@ export function Clients() {
           </div>
         )}
 
-        {!hasAnyClients ? (
+        {viewMode === 'table' && filtersOpen && (
+          <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Фильтры по колонкам</h2>
+                <p className="text-xs text-gray-500">
+                  Выберите колонки (удерживайте CTRL для нескольких) и задайте значения фильтров.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                Сбросить фильтры
+              </button>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[280px,1fr]">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-2">
+                  Колонки для фильтра
+                </label>
+                <select
+                  multiple
+                  value={activeFilterColumns}
+                  onChange={handleFilterColumnsChange}
+                  className="w-full min-h-[160px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {filterableColumns.map((column) => (
+                    <option key={column.id} value={column.id}>
+                      {column.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {activeFilterColumns.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    Выберите хотя бы одну колонку, чтобы задать фильтр.
+                  </div>
+                ) : (
+                  activeFilterColumns.map((columnId) => (
+                    <div key={columnId}>
+                      <label className="block text-xs font-medium text-gray-600 mb-2">
+                        {COLUMN_META[columnId].label}
+                      </label>
+                      <input
+                        type="text"
+                        value={tableSettings.filters[columnId] ?? ''}
+                        onChange={(event) => handleFilterValueChange(columnId, event.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Введите значение"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!hasAnyClients && !isFiltered ? (
           <div className="text-center py-12">
             <Users size={48} className="mx-auto mb-4 text-gray-300" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">{t('noClientsYet')}</h3>
@@ -1152,7 +1314,7 @@ export function Clients() {
                         <td
                           key={columnId}
                           style={{ width: getColumnWidth(columnId) }}
-                          className="px-4 py-3 align-top"
+                          className="px-4 py-3 align-top max-w-0 overflow-hidden"
                         >
                           {renderCell(client, columnId)}
                         </td>
@@ -1397,6 +1559,52 @@ export function Clients() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {total > 0 && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <span>Страница</span>
+              <span className="font-semibold text-gray-900">
+                {page} из {totalPages}
+              </span>
+              <span className="text-gray-400">·</span>
+              <span>Всего: {total}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                Назад
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                Вперёд
+              </button>
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span>Показывать</span>
+                <select
+                  value={pageSize}
+                  onChange={handlePageSizeChange}
+                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {[5, 10, 25, 50, 100].map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+                <span>записей</span>
+              </div>
+            </div>
           </div>
         )}
 

@@ -27,26 +27,56 @@ function isClient(x: unknown): x is Client {
   return typeof o.id === 'number' && typeof o.createdAt === 'string';
 }
 
-export function useClients() {
+export type ClientsListMode = 'all' | 'paged';
+
+export type ClientsListOptions = {
+  mode?: ClientsListMode;
+  search?: string;
+  isActive?: boolean;
+  sortBy?: 'name' | 'createdAt';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+  filters?: Record<string, string>;
+};
+
+export function useClients(options?: ClientsListOptions) {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
 
   const fetchClients = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const base = await apiService.getClients();
-      const normalized = (base as Client[]).map((c) => normalizeClient(c));
+      if (options?.mode === 'paged') {
+        const response = await apiService.getClientsV2({
+          search: options.search,
+          isActive: options.isActive,
+          sortBy: options.sortBy,
+          sortDir: options.sortDir,
+          page: options.page,
+          pageSize: options.pageSize,
+          ...(options.filters ?? {}),
+        });
+        const normalized = (response.items as Client[]).map((c) => normalizeClient(c));
+        setClients(normalized);
+        setTotal(response.total ?? 0);
+      } else {
+        const base = await apiService.getClients();
+        const normalized = (base as Client[]).map((c) => normalizeClient(c));
 
-      setClients(normalized);
+        setClients(normalized);
+        setTotal(normalized.length);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch clients');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [options]);
 
   useEffect(() => {
     void fetchClients();
@@ -58,6 +88,9 @@ export function useClients() {
       if (isClient(created)) {
         const normalized = normalizeClient(created);
         setClients((prev) => [normalized, ...prev]);
+        if (options?.mode === 'paged') {
+          await fetchClients();
+        }
       } else {
         await fetchClients();
       }
@@ -107,6 +140,9 @@ export function useClients() {
     try {
       setClients((prev) => prev.filter((c) => c.id !== id));
       await apiService.deleteClient(id);
+      if (options?.mode === 'paged') {
+        await fetchClients();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete client');
       await fetchClients();
@@ -118,6 +154,7 @@ export function useClients() {
     clients,
     loading,
     error,
+    total,
     createClient,
     updateClient,
     deleteClient,
