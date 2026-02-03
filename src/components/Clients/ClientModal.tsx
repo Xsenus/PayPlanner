@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
-import type { Client, ClientInput, LegalEntitySummary, ClientStatus } from '../../types';
+import type { Client, ClientInput } from '../../types';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -10,8 +10,6 @@ interface ClientModalProps {
   onSubmit: (client: ClientInput) => Promise<void>;
   onDelete?: (id: number) => Promise<void>;
   client?: Client;
-  legalEntities: LegalEntitySummary[];
-  clientStatuses: ClientStatus[];
 }
 
 export function ClientModal({
@@ -20,8 +18,6 @@ export function ClientModal({
   onSubmit,
   onDelete,
   client,
-  legalEntities,
-  clientStatuses,
 }: ClientModalProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -30,41 +26,8 @@ export function ClientModal({
     name: '',
     email: '',
     phone: '',
-    company: '',
-    address: '',
     notes: '',
-    legalEntityId: '',
-    isActive: true,
-    clientStatusId: '',
   });
-
-  const sortedLegalEntities = useMemo(
-    () =>
-      [...legalEntities].sort((a, b) =>
-        a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' }),
-      ),
-    [legalEntities],
-  );
-
-  const selectedLegalEntity = useMemo(() => {
-    if (!formData.legalEntityId) return null;
-    return sortedLegalEntities.find((entity) => entity.id === Number(formData.legalEntityId)) ?? null;
-  }, [formData.legalEntityId, sortedLegalEntities]);
-
-  const sortedClientStatuses = useMemo(
-    () =>
-      [...clientStatuses].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      ),
-    [clientStatuses],
-  );
-
-  const selectedClientStatus = useMemo(() => {
-    if (!formData.clientStatusId) return null;
-    return (
-      sortedClientStatuses.find((status) => status.id === Number(formData.clientStatusId)) ?? null
-    );
-  }, [formData.clientStatusId, sortedClientStatuses]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -81,24 +44,14 @@ export function ClientModal({
         name: client.name,
         email: client.email || '',
         phone: client.phone || '',
-        company: client.company || '',
-        address: client.address || '',
         notes: client.notes || '',
-        legalEntityId: client.legalEntityId ? String(client.legalEntityId) : '',
-        isActive: client.isActive,
-        clientStatusId: client.clientStatusId ? String(client.clientStatusId) : '',
       });
     } else {
       setFormData({
         name: '',
         email: '',
         phone: '',
-        company: '',
-        address: '',
         notes: '',
-        legalEntityId: '',
-        isActive: true,
-        clientStatusId: '',
       });
     }
   }, [client]);
@@ -108,16 +61,17 @@ export function ClientModal({
     e.stopPropagation();
     setLoading(true);
     try {
+      const baseClient = client ?? ({} as Client);
       const payload: ClientInput = {
         name: formData.name.trim(),
         email: formData.email.trim(),
         phone: formData.phone.trim(),
-        company: formData.company.trim(),
-        address: formData.address.trim(),
         notes: formData.notes.trim(),
-        isActive: formData.isActive,
-        legalEntityId: formData.legalEntityId ? Number(formData.legalEntityId) : null,
-        clientStatusId: formData.clientStatusId ? Number(formData.clientStatusId) : null,
+        company: baseClient.company ?? '',
+        address: baseClient.address ?? '',
+        isActive: baseClient.isActive ?? true,
+        legalEntityId: baseClient.legalEntityId ?? null,
+        clientStatusId: baseClient.clientStatusId ?? null,
       };
       await onSubmit(payload);
       onClose();
@@ -132,14 +86,6 @@ export function ClientModal({
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target;
-    if (name === 'legalEntityId') {
-      setFormData((prev) => ({ ...prev, legalEntityId: value }));
-      return;
-    }
-    if (name === 'clientStatusId') {
-      setFormData((prev) => ({ ...prev, clientStatusId: value }));
-      return;
-    }
     const el = e.target as HTMLInputElement;
     setFormData((prev) => ({
       ...prev,
@@ -223,88 +169,7 @@ export function ClientModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('company')}</label>
-              <input
-                type="text"
-                name="company"
-                value={formData.company}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('clientStatus') || 'Статус клиента'}
-              </label>
-              <select
-                name="clientStatusId"
-                value={formData.clientStatusId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                {sortedClientStatuses.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
-              {selectedClientStatus?.description && (
-                <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('legalEntity') || 'Юридическое лицо'}
-              </label>
-              <select
-                name="legalEntityId"
-                value={formData.legalEntityId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">
-                  {t('legalEntityNotSelected') || 'Без юридического лица'}
-                </option>
-                {sortedLegalEntities.map((entity) => (
-                  <option key={entity.id} value={entity.id}>
-                    {entity.shortName}
-                    {entity.inn ? ` · ${entity.inn}` : ''}
-                  </option>
-                ))}
-              </select>
-              {selectedLegalEntity && (
-                <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
-                  {selectedLegalEntity.fullName && (
-                    <p className="font-medium text-gray-700">{selectedLegalEntity.fullName}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                    {selectedLegalEntity.inn && <span>ИНН: {selectedLegalEntity.inn}</span>}
-                    {selectedLegalEntity.kpp && <span>КПП: {selectedLegalEntity.kpp}</span>}
-                    {selectedLegalEntity.ogrn && <span>ОГРН: {selectedLegalEntity.ogrn}</span>}
-                  </div>
-                  {selectedLegalEntity.address && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      {t('legalEntityAddress') || 'Адрес'}: {selectedLegalEntity.address}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('address')}</label>
-              <input
-                type="text"
-                name="address"
-                value={formData.address}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий</label>
               <textarea
                 name="notes"
                 value={formData.notes}
@@ -313,20 +178,6 @@ export function ClientModal({
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder={t('additionalInfo')}
               />
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                name="isActive"
-                checked={formData.isActive}
-                onChange={handleChange}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                id="client-is-active"
-              />
-              <label htmlFor="client-is-active" className="ml-2 block text-sm text-gray-700">
-                {t('activeClient')}
-              </label>
             </div>
 
             <div className="flex gap-3 pt-4">

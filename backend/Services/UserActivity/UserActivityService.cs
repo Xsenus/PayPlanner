@@ -5,6 +5,7 @@ using System.Threading;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.UserActivity;
@@ -95,23 +96,30 @@ public class UserActivityService : IUserActivityService
                 CreatedAt = entry.CreatedAtUtc ?? DateTime.UtcNow
             };
 
-            var lockTaken = false;
-            try
-            {
-                await WriteLock.WaitAsync(cancellationToken);
-                lockTaken = true;
-
-                await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-                context.UserActivityLogs.Add(log);
-                await context.SaveChangesAsync(cancellationToken);
-            }
-            finally
-            {
-                if (lockTaken)
+            await SqliteRetryHelper.ExecuteAsync(
+                async token =>
                 {
-                    WriteLock.Release();
-                }
-            }
+                    var lockTaken = false;
+                    try
+                    {
+                        await WriteLock.WaitAsync(token);
+                        lockTaken = true;
+
+                        await using var context = await _contextFactory.CreateDbContextAsync(token);
+                        context.UserActivityLogs.Add(log);
+                        await context.SaveChangesAsync(token);
+                        return log;
+                    }
+                    finally
+                    {
+                        if (lockTaken)
+                        {
+                            WriteLock.Release();
+                        }
+                    }
+                },
+                _logger,
+                cancellationToken);
 
             return log;
         }

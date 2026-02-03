@@ -6,7 +6,6 @@ import {
   Building2,
   Mail,
   Phone,
-  Eye,
   Edit,
   FolderKanban,
   PlusCircle,
@@ -27,7 +26,6 @@ import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
-import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 
@@ -311,7 +309,6 @@ function saveTableSettings(settings: TableSettings) {
 export function Clients() {
   const { clients, loading, createClient, updateClient, deleteClient, setClients, refresh } =
     useClients();
-  const { legalEntities, loading: legalEntitiesLoading } = useLegalEntities();
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -429,8 +426,7 @@ export function Clients() {
       showPermissionWarning('Недостаточно прав для редактирования клиентов.');
       return;
     }
-    setEditingClient(client);
-    setIsModalOpen(true);
+    handleOpenClient(client.id);
   };
 
   const handleCloseModal = () => {
@@ -680,6 +676,10 @@ export function Clients() {
     e.preventDefault();
     e.stopPropagation();
     const startWidth = tableSettings.widths[columnId] ?? 120;
+    const previousCursor = document.body.style.cursor;
+    const previousSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
     resizingRef.current = {
       columnId,
       startX: e.clientX,
@@ -698,6 +698,8 @@ export function Clients() {
 
     const handleMouseUp = () => {
       resizingRef.current = null;
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousSelect;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -730,7 +732,7 @@ export function Clients() {
     );
   }
 
-  if (loading || legalEntitiesLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-gray-500">{t('loading')}</div>
@@ -742,6 +744,9 @@ export function Clients() {
     setSelectedClientId(clientId);
     setInitialCaseId('all');
   };
+
+  const getColumnWidth = (columnId: ColumnId) =>
+    tableSettings.widths[columnId] ?? COLUMN_META[columnId].defaultWidth;
 
   const renderCell = (client: Client, columnId: ColumnId) => {
     switch (columnId) {
@@ -1089,11 +1094,17 @@ export function Clients() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed">
+                <colgroup>
+                  {visibleColumnIds.map((columnId) => (
+                    <col key={columnId} style={{ width: getColumnWidth(columnId) }} />
+                  ))}
+                  <col style={{ width: 140 }} />
+                </colgroup>
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     {visibleColumnIds.map((columnId) => {
                       const meta = COLUMN_META[columnId];
-                      const width = tableSettings.widths[columnId] ?? meta.defaultWidth;
+                      const width = getColumnWidth(columnId);
                       return (
                         <th
                           key={columnId}
@@ -1119,6 +1130,7 @@ export function Clients() {
                             aria-label={`Изменить ширину колонки ${meta.label}`}
                             className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
                             onMouseDown={(e) => handleResizeStart(columnId, e)}
+                            onDragStart={(event) => event.preventDefault()}
                           />
                         </th>
                       );
@@ -1137,7 +1149,11 @@ export function Clients() {
                       }`}
                     >
                       {visibleColumnIds.map((columnId) => (
-                        <td key={columnId} className="px-4 py-3 align-top">
+                        <td
+                          key={columnId}
+                          style={{ width: getColumnWidth(columnId) }}
+                          className="px-4 py-3 align-top"
+                        >
                           {renderCell(client, columnId)}
                         </td>
                       ))}
@@ -1158,19 +1174,11 @@ export function Clients() {
                               type="button"
                               onClick={() => handleEditClient(client)}
                               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title={t('edit')}
+                              title="Открыть карточку клиента"
                             >
                               <Edit size={16} />
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenClient(client.id)}
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            title={t('viewDetails')}
-                          >
-                            <Eye size={16} />
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1258,17 +1266,10 @@ export function Clients() {
                           type="button"
                           onClick={() => handleEditClient(client)}
                           className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title={t('edit')}>
+                          title="Открыть карточку клиента">
                           <Edit size={16} />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenClient(client.id)}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        title={t('viewDetails')}>
-                        <Eye size={16} />
-                      </button>
                     </div>
                   </div>
                     <div className="flex-1 min-h-0 flex flex-col gap-1">
@@ -1393,14 +1394,6 @@ export function Clients() {
                   {client.notes && (
                     <p className="mt-4 text-sm text-gray-500 line-clamp-2">{client.notes}</p>
                   )}
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenClient(client.id)}
-                      className="w-full text-center text-blue-600 hover:text-blue-700 font-medium text-sm transition-colors">
-                      {t('viewDetails')}
-                    </button>
-                  </div>
                 </div>
               );
             })}
@@ -1413,8 +1406,6 @@ export function Clients() {
           onSubmit={handleSubmitClient}
           onDelete={handleDeleteClient}
           client={editingClient ?? undefined}
-          legalEntities={legalEntities}
-          clientStatuses={clientStatuses}
         />
 
         {caseModalOpen && (

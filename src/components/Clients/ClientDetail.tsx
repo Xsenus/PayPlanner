@@ -62,7 +62,6 @@ import { formatCurrencySmart } from '../../utils/formatters';
 import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
-import { ClientModal } from './ClientModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 
@@ -239,7 +238,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   );
   const [clientName, setClientName] = useState<string>('...');
   const [clientData, setClientData] = useState<Client | null>(null);
-  const [clientModalOpen, setClientModalOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
   const [clientFormSaving, setClientFormSaving] = useState(false);
   const [clientFormState, setClientFormState] = useState({
@@ -571,23 +569,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setContractPage(1);
   };
 
-  const openClientEdit = () => {
-    if (!clientPermissions.canEdit) {
-      showPermissionWarning('Недостаточно прав для редактирования клиента.');
-      return;
-    }
-    if (!clientData) {
-      void apiService
-        .getClient(clientId)
-        .then((client) => {
-          setClientData(client);
-          setClientName(client.name ?? `Client #${clientId}`);
-        })
-        .catch(() => {
-          /* ignore */
-        });
-    }
-    setClientModalOpen(true);
+  const openClientProfile = () => {
+    setActiveSection('profile');
   };
 
   const handleUpdateClient = async (payload: ClientInput) => {
@@ -1355,7 +1338,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             {clientPermissions.canEdit && (
               <button
                 type="button"
-                onClick={openClientEdit}
+                onClick={openClientProfile}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-600 shadow-sm transition-colors hover:bg-emerald-50"
                 title={editClientLabel}
                 aria-label={editClientLabel}
@@ -1442,19 +1425,67 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Основные данные</h2>
+                <h2 className="text-lg font-semibold text-gray-900">Карточка клиента</h2>
                 <p className="text-sm text-gray-500">
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={openClientEdit}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50"
-              >
-                <Edit size={16} />
-                Открыть в модальном окне
-              </button>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-slate-50 p-4 sm:p-5 mb-6">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Контакт</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">{clientData?.name ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Телефон</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.phone ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">E-mail</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.email ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Компания</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.company ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Юр. лицо</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.legalEntity?.shortName ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">ИНН</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.legalEntity?.inn ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Адрес</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.address ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Статус</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.clientStatus?.name ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Активность</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {clientData?.isActive ? 'Активен' : 'Неактивен'}
+                  </p>
+                </div>
+              </div>
             </div>
             {!clientPermissions.canEdit && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -2830,15 +2861,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
             onDelete={caseMode === 'edit' && clientPermissions.canDelete ? deleteCase : undefined}
           />
         )}
-
-        <ClientModal
-          isOpen={clientModalOpen}
-          onClose={() => setClientModalOpen(false)}
-          onSubmit={handleUpdateClient}
-          client={clientData ?? undefined}
-          legalEntities={legalEntities}
-          clientStatuses={clientStatuses}
-        />
 
         {error && (
           <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
