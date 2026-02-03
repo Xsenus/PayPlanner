@@ -317,6 +317,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
+  const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -352,6 +353,45 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
       expense,
       endBalance: startBalance + income - expense,
     };
+  }, [items]);
+
+  const totalRows = useMemo(() => {
+    const bySource = items.reduce<Record<MoneyOperationSource, { start: number; income: number; expense: number }>>(
+      (acc, item) => {
+        const bucket = acc[item.source] ?? { start: 0, income: 0, expense: 0 };
+        if (item.direction === 'Income') bucket.income += item.amount;
+        if (item.direction === 'Expense') bucket.expense += item.amount;
+        acc[item.source] = bucket;
+        return acc;
+      },
+      {
+        Bank: { start: 0, income: 0, expense: 0 },
+        Cash: { start: 0, income: 0, expense: 0 },
+        Card: { start: 0, income: 0, expense: 0 },
+      },
+    );
+
+    const rows = ([
+      { key: 'Cash', label: 'Касса' },
+      { key: 'Bank', label: 'Банк' },
+      { key: 'Card', label: 'E-money' },
+    ] as const).map((row) => {
+      const data = bySource[row.key];
+      const end = data.start + data.income - data.expense;
+      return { label: row.label, ...data, end };
+    });
+
+    const total = rows.reduce(
+      (acc, row) => ({
+        start: acc.start + row.start,
+        income: acc.income + row.income,
+        expense: acc.expense + row.expense,
+        end: acc.end + row.end,
+      }),
+      { start: 0, income: 0, expense: 0, end: 0 },
+    );
+
+    return { rows, total };
   }, [items]);
 
   const handleSave = async (payload: MoneyOperation) => {
@@ -397,6 +437,73 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
   return (
     <div className="px-6 py-6">
+      {source === 'Total' ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-6 border-b border-slate-200">
+            <button
+              onClick={() => setTotalTab('total')}
+              className={[
+                'px-1 py-3 text-sm font-medium',
+                totalTab === 'total' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500',
+              ].join(' ')}>
+              Итого
+            </button>
+            <button
+              onClick={() => setTotalTab('cashflow')}
+              className={[
+                'px-1 py-3 text-sm font-medium',
+                totalTab === 'cashflow' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500',
+              ].join(' ')}>
+              ОДДС
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-6 py-4">
+            <div className="text-lg font-semibold text-slate-900">Обороты</div>
+            <button
+              onClick={handleCurrentYear}
+              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Calendar className="h-4 w-4" />
+              Текущий год
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">Кошелёк</th>
+                    <th className="px-4 py-3 text-left font-medium">Баланс на начало периода</th>
+                    <th className="px-4 py-3 text-left font-medium">Приход</th>
+                    <th className="px-4 py-3 text-left font-medium">Расход</th>
+                    <th className="px-4 py-3 text-left font-medium">Баланс на конец периода</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {totalRows.rows.map((row) => (
+                    <tr key={row.label} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-800">{row.label}</td>
+                      <td className="px-4 py-3">{formatMoney(row.start)}</td>
+                      <td className="px-4 py-3">{formatMoney(row.income)}</td>
+                      <td className="px-4 py-3">{formatMoney(row.expense)}</td>
+                      <td className="px-4 py-3">{formatMoney(row.end)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-50 font-semibold">
+                    <td className="px-4 py-3 text-slate-900">Итого</td>
+                    <td className="px-4 py-3">{formatMoney(totalRows.total.start)}</td>
+                    <td className="px-4 py-3">{formatMoney(totalRows.total.income)}</td>
+                    <td className="px-4 py-3">{formatMoney(totalRows.total.expense)}</td>
+                    <td className="px-4 py-3">{formatMoney(totalRows.total.end)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Добавить счёт или кассу</h1>
@@ -671,6 +778,8 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         onSave={handleSave}
         isSaving={saving}
       />
+        </>
+      )}
     </div>
   );
 }
