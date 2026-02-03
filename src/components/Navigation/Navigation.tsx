@@ -20,6 +20,10 @@ import {
   TrendingDown,
   ChevronDown,
   CalendarRange,
+  Landmark,
+  CreditCard,
+  CircleDollarSign,
+  Wallet,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -167,6 +171,23 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         tab: 'installments' as Tab,
         label: t('installmentsNav') ?? 'Рассрочка',
         icon: CalendarRange,
+      });
+    }
+
+    if (permissions.payments.canView) {
+      const moneyChildren: SidebarChild[] = [
+        { id: 'moneyBank' as Tab, label: 'Банк', icon: Landmark },
+        { id: 'moneyCash' as Tab, label: 'Касса', icon: Wallet },
+        { id: 'moneyCards' as Tab, label: 'Карты', icon: CreditCard },
+        { id: 'moneyTotal' as Tab, label: 'Итого', icon: CircleDollarSign },
+      ];
+
+      items.push({
+        id: 'money',
+        tab: 'moneyBank' as Tab,
+        label: 'Деньги',
+        icon: CircleDollarSign,
+        children: moneyChildren,
       });
     }
 

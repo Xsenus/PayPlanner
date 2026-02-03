@@ -105,6 +105,36 @@ export interface DealType {
 }
 
 export type PaymentKind = 'Income' | 'Expense';
+
+export type MoneyOperationDirection = 'Income' | 'Expense' | 'Transfer';
+export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card';
+export type MoneyOperationAccountingType = 'Fact' | 'Plan';
+
+export interface MoneyOperation {
+  id: number;
+  source: MoneyOperationSource;
+  direction: MoneyOperationDirection;
+  accountingType: MoneyOperationAccountingType;
+  accountName?: string | null;
+  counterpartyName?: string | null;
+  categoryName?: string | null;
+  amount: number;
+  currency?: string | null;
+  paymentOrderNumber?: string | null;
+  date: string;
+  recognitionDate?: string | null;
+  isAdvancePayment: boolean;
+  purpose?: string | null;
+  paidInvoiceNumber?: string | null;
+  paidAmount?: number | null;
+  projectName?: string | null;
+  directionName?: string | null;
+  salesPointName?: string | null;
+  paymentPriority?: number | null;
+  paidAccountName?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
 export interface IncomeType {
   id: number;
   name: string;

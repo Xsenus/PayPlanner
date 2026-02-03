@@ -14,6 +14,8 @@ public class PaymentContext : DbContext
     /// </summary>
     public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
 
+    public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
+
     /// <summary>
     /// Выполняет конфигурацию сущностей, связей и индексов.
     /// </summary>
@@ -186,6 +188,36 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Type, e.Status, e.Date }).HasDatabaseName("IX_Payments_Type_Status_Date");
             entity.HasIndex(e => new { e.ClientId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientCaseId_Date_Type_Status");
+        });
+
+        // ------------------ MoneyOperation ------------------
+        modelBuilder.Entity<MoneyOperation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Source).HasConversion<string>();
+            entity.Property(e => e.Direction).HasConversion<string>();
+            entity.Property(e => e.AccountingType).HasConversion<string>();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Currency).HasMaxLength(12);
+            entity.Property(e => e.AccountName).HasMaxLength(200);
+            entity.Property(e => e.CounterpartyName).HasMaxLength(200);
+            entity.Property(e => e.CategoryName).HasMaxLength(200);
+            entity.Property(e => e.PaymentOrderNumber).HasMaxLength(100);
+            entity.Property(e => e.Purpose).HasMaxLength(1000);
+            entity.Property(e => e.PaidInvoiceNumber).HasMaxLength(120);
+            entity.Property(e => e.ProjectName).HasMaxLength(200);
+            entity.Property(e => e.DirectionName).HasMaxLength(200);
+            entity.Property(e => e.SalesPointName).HasMaxLength(200);
+            entity.Property(e => e.PaidAccountName).HasMaxLength(200);
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.RecognitionDate).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_MoneyOperations_Date");
+            entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyOperations_Source");
+            entity.HasIndex(e => e.Direction).HasDatabaseName("IX_MoneyOperations_Direction");
+            entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
         });
 
         // ------------------ Client ------------------

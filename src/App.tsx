@@ -16,6 +16,7 @@ import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
 import { Payments } from './components/Payments/Payments';
+import { MoneyOperations } from './components/Money/MoneyOperations';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -45,6 +46,10 @@ function AppContent() {
     paymentsIncome: 'Доходные платежи',
     paymentsExpense: 'Расходные платежи',
     payments: 'Платежи',
+    moneyBank: 'Деньги: Банк',
+    moneyCash: 'Деньги: Касса',
+    moneyCards: 'Деньги: Карты',
+    moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
     users: 'Пользователи',
     roles: 'Роли',
@@ -107,6 +112,10 @@ function AppContent() {
         { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
         { tab: 'payments' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyBank' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyCash' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyCards' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
@@ -139,6 +148,11 @@ function AppContent() {
         case 'paymentsIncome':
         case 'paymentsExpense':
         case 'payments':
+          return permissions.payments.canView;
+        case 'moneyBank':
+        case 'moneyCash':
+        case 'moneyCards':
+        case 'moneyTotal':
           return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
@@ -352,6 +366,22 @@ function AppContent() {
         return permissions.payments.canView
           ? <Payments onOpenClient={handleOpenClient} />
           : renderNoAccess('Журнал платежей недоступен для вашей роли.');
+      case 'moneyBank':
+        return permissions.payments.canView
+          ? <MoneyOperations source="Bank" />
+          : renderNoAccess('Раздел денег недоступен для вашей роли.');
+      case 'moneyCash':
+        return permissions.payments.canView
+          ? <MoneyOperations source="Cash" />
+          : renderNoAccess('Раздел денег недоступен для вашей роли.');
+      case 'moneyCards':
+        return permissions.payments.canView
+          ? <MoneyOperations source="Card" />
+          : renderNoAccess('Раздел денег недоступен для вашей роли.');
+      case 'moneyTotal':
+        return permissions.payments.canView
+          ? <MoneyOperations source="Total" />
+          : renderNoAccess('Раздел денег недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
           ? <Contracts />

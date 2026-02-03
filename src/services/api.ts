@@ -779,6 +779,37 @@ export class ApiService {
     return this.request<SummaryStats>(`/v2/stats/summary${q}`);
   }
 
+  // ===== Money operations =====
+  async getMoneyOperations(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    direction?: MoneyOperationDirection;
+    accountingType?: MoneyOperationAccountingType;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyOperation[]>(`/money-operations${q}`);
+  }
+
+  async createMoneyOperation(payload: MoneyOperation) {
+    return this.request<MoneyOperation>('/money-operations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateMoneyOperation(id: number, payload: MoneyOperation) {
+    return this.request<MoneyOperation>(`/money-operations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteMoneyOperation(id: number) {
+    return this.request<void>(`/money-operations/${id}`, { method: 'DELETE' });
+  }
+
   async getUserActivityLogs(params?: {
     page?: number;
     pageSize?: number;
@@ -863,6 +894,10 @@ import type {
   SummaryStats,
   PeriodKey,
   SummaryStatus,
+  MoneyOperation,
+  MoneyOperationAccountingType,
+  MoneyOperationDirection,
+  MoneyOperationSource,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';
