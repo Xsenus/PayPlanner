@@ -27,6 +27,7 @@ import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 type AuthView = 'login' | 'register' | 'awaiting';
+const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 
 function AppContent() {
   const { user, loading, signOut } = useAuth();
@@ -58,7 +59,17 @@ function AppContent() {
     userActivity: 'Пользовательский контроль',
   }), []);
 
-  const [activeTab, setActiveTab] = useState<Tab>('calendar');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') {
+      return 'calendar';
+    }
+    try {
+      const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY) as Tab | null;
+      return stored ?? 'calendar';
+    } catch {
+      return 'calendar';
+    }
+  });
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -218,6 +229,14 @@ function AppContent() {
     },
     [canViewTab],
   );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
+    } catch {
+      /** */
+    }
+  }, [activeTab]);
 
   if (loading) {
     return (
