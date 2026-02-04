@@ -86,7 +86,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
             </button>
 
             {userMenuOpen && (
-              <div className="absolute right-0 mt-3 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+              <div className="absolute right-0 mt-3 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                 <div className="border-b border-slate-100 px-4 py-3">
                   <div className="text-sm font-semibold text-slate-900">{user?.fullName ?? 'Пользователь'}</div>
                   <div className="text-xs text-slate-500">{user?.email ?? '—'}</div>

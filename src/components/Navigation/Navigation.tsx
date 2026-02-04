@@ -366,7 +366,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                 childItems.some((child) => child.id === activeTab) ||
                 (item.id === 'acts' && activeTab === 'payments');
               const isActive = isParentActive || isChildActive;
-              const isExpanded = expandedSections[item.id] ?? true;
+              const isExpanded = expandedSections[item.id] ?? false;
 
               return (
                 <li key={item.id} className="space-y-1">
@@ -462,7 +462,6 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           </ul>
         </nav>
 
-        <div className="border-t border-slate-700/50 p-4 bg-slate-900/50" />
       </aside>
     </>
   );
