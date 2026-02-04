@@ -17,18 +17,21 @@ import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
 import { Payments } from './components/Payments/Payments';
 import { MoneyOperations } from './components/Money/MoneyOperations';
+import { CompanyProfile } from './components/CompanyProfile/CompanyProfile';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
+import TopBar from './components/TopBar/TopBar';
 import type { Tab } from './types/tabs';
 import { useRolePermissions } from './hooks/useRolePermissions';
 import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 type AuthView = 'login' | 'register' | 'awaiting';
+const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const logActivity = useActivityLogger();
   const tabNames: Record<Tab, string> = useMemo(() => ({
@@ -51,13 +54,24 @@ function AppContent() {
     moneyCards: 'Деньги: Карты',
     moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
+    companyProfile: 'Профиль компании',
     users: 'Пользователи',
     roles: 'Роли',
     dictionaries: 'Справочники',
     userActivity: 'Пользовательский контроль',
   }), []);
 
-  const [activeTab, setActiveTab] = useState<Tab>('calendar');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') {
+      return 'calendar';
+    }
+    try {
+      const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY) as Tab | null;
+      return stored ?? 'calendar';
+    } catch {
+      return 'calendar';
+    }
+  });
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -156,6 +170,8 @@ function AppContent() {
           return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
+        case 'companyProfile':
+          return true;
         case 'dictionaries':
           return permissions.dictionaries.canView;
         case 'users':
@@ -217,6 +233,14 @@ function AppContent() {
     },
     [canViewTab],
   );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
+    } catch {
+      /** */
+    }
+  }, [activeTab]);
 
   if (loading) {
     return (
@@ -386,6 +410,8 @@ function AppContent() {
         return permissions.contracts.canView
           ? <Contracts />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
+      case 'companyProfile':
+        return <CompanyProfile />;
       case 'roles':
         return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
       case 'userActivity':
@@ -405,7 +431,10 @@ function AppContent() {
     <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
       <div className="min-h-screen bg-gray-50">
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
-        {renderContent()}
+        <div className="flex min-h-screen flex-col">
+          <TopBar title={tabNames[activeTab] ?? ''} onSignOut={signOut} />
+          <main className="flex-1">{renderContent()}</main>
+        </div>
       </div>
     </TabProvider>
   );
