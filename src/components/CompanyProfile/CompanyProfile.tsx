@@ -1,8 +1,18 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Building2, Check, Globe, Landmark, Mail, Phone, Plus } from 'lucide-react';
+import {
+  Building2,
+  Check,
+  Globe,
+  Landmark,
+  Mail,
+  Phone,
+  Plus,
+  X,
+} from 'lucide-react';
 
 type ProfileTab = 'general' | 'settings' | 'edo';
-type FinanceTab = 'bank' | 'cash' | 'cards' | 'emoney' | 'warehouses' | 'points' | 'directions';
+type FinanceTab = 'bank' | 'cash' | 'cards';
+type RequisiteTab = 'base' | 'english' | 'tax' | 'treasury';
 
 const profileTabs: Array<{ id: ProfileTab; label: string }> = [
   { id: 'general', label: 'Общие' },
@@ -14,10 +24,13 @@ const financeTabs: Array<{ id: FinanceTab; label: string }> = [
   { id: 'bank', label: 'Банковские счета' },
   { id: 'cash', label: 'Кассы' },
   { id: 'cards', label: 'Карты' },
-  { id: 'emoney', label: 'E-money' },
-  { id: 'warehouses', label: 'Склады' },
-  { id: 'points', label: 'Точки продаж' },
-  { id: 'directions', label: 'Направления' },
+];
+
+const requisiteTabs: Array<{ id: RequisiteTab; label: string }> = [
+  { id: 'base', label: 'Реквизиты' },
+  { id: 'english', label: 'Реквизиты на английском' },
+  { id: 'tax', label: 'Реквизиты налоговой' },
+  { id: 'treasury', label: 'Реквизиты ЕНС' },
 ];
 
 function SectionCard({ title, children }: { title?: string; children: ReactNode }) {
@@ -109,9 +122,66 @@ function RadioField({
   );
 }
 
+function StatItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-2 text-sm font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function UploadCard({
+  title,
+  description,
+  accent,
+}: {
+  title: string;
+  description: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-sm font-semibold text-slate-700">{title}</div>
+      <div
+        className={[
+          'mt-4 rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm',
+          accent ? 'border-blue-500 text-blue-600' : 'border-slate-200 text-slate-400',
+        ].join(' ')}>
+        <div className="font-semibold">Выберите файлы</div>
+        <div className="text-xs text-slate-400">или перетащите сюда.</div>
+      </div>
+      <div className="mt-4 text-xs text-slate-400">{description}</div>
+    </div>
+  );
+}
+
+function ModalShell({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-8">
+      <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-200 p-2 text-slate-400 hover:text-slate-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function CompanyProfile() {
   const [activeTab, setActiveTab] = useState<ProfileTab>('general');
   const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
+  const [requisiteTab, setRequisiteTab] = useState<RequisiteTab>('base');
+  const [bankModalOpen, setBankModalOpen] = useState(false);
+  const [cashModalOpen, setCashModalOpen] = useState(false);
+  const [cardModalOpen, setCardModalOpen] = useState(false);
 
   const financeActionLabel = useMemo(() => {
     switch (financeTab) {
@@ -121,14 +191,6 @@ export function CompanyProfile() {
         return 'Добавить кассу';
       case 'cards':
         return 'Добавить карту';
-      case 'emoney':
-        return 'Добавить E-money';
-      case 'warehouses':
-        return 'Добавить склад';
-      case 'points':
-        return 'Добавить точку продаж';
-      case 'directions':
-        return 'Добавить направление';
       default:
         return 'Добавить';
     }
@@ -361,12 +423,135 @@ export function CompanyProfile() {
             </div>
             <div className="px-4 py-6 text-sm text-slate-500">Ничего не найдено.</div>
           </div>
-          <button className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
+          <button
+            type="button"
+            onClick={() => {
+              if (financeTab === 'bank') setBankModalOpen(true);
+              if (financeTab === 'cash') setCashModalOpen(true);
+              if (financeTab === 'cards') setCardModalOpen(true);
+            }}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
             <Plus className="h-4 w-4" />
             {financeActionLabel}
           </button>
         </div>
       </div>
+
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap gap-4 border-b border-slate-200 px-6 pt-4">
+          {requisiteTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setRequisiteTab(tab.id)}
+              className={`pb-3 text-sm font-semibold transition ${
+                requisiteTab === tab.id
+                  ? 'border-b-2 border-blue-600 text-blue-600'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="p-6">
+          {requisiteTab === 'base' && (
+            <div className="space-y-6">
+              <div className="grid gap-6 md:grid-cols-5">
+                <StatItem label="ИНН" value="7722011847" />
+                <StatItem label="КПП" value="771501001" />
+                <StatItem label="ОГРН" value="1027700538403" />
+                <StatItem label="ОКВЭД" value="62.02" />
+                <StatItem label="ОКПО" value="12345678" />
+              </div>
+              <div className="grid gap-6 md:grid-cols-2">
+                <StatItem label="Юридический адрес" value="127566, г. Москва, Алтуфьевское шоссе, д 44, помещ 8" />
+                <StatItem label="Фактический адрес" value="127566, г. Москва, Алтуфьевское шоссе, д 44, помещ 8" />
+              </div>
+              <div className="grid gap-6 md:grid-cols-5">
+                <StatItem label="ОКАТО" value="45 286 555 000" />
+                <StatItem label="ОКТМО" value="45382000" />
+                <StatItem label="ОКОГУ" value="4210014" />
+                <StatItem label="ОКФС" value="16" />
+                <StatItem label="ОКОПФ" value="12247" />
+              </div>
+              <div className="grid gap-6 md:grid-cols-4">
+                <StatItem label="ПФР" value="087-123-000000" />
+                <StatItem label="ФСС" value="7712345678" />
+                <StatItem label="Уставный капитал" value="0,00" />
+                <StatItem label="Дата постановки на учет в налоговом органе" value="02.07.1996" />
+              </div>
+            </div>
+          )}
+
+          {requisiteTab === 'english' && (
+            <div className="grid gap-6 md:grid-cols-3">
+              <StatItem label="Название организации" value="ALAN-89 JSC" />
+              <StatItem label="Полное наименование" value="Joint Stock Company ALAN-89" />
+              <StatItem label="Форма" value="JSC" />
+              <StatItem label="Юридический адрес" value="Altyufyevskoye highway, 44, Moscow, 127566" />
+              <StatItem label="Фактический адрес" value="Altyufyevskoye highway, 44, Moscow, 127566" />
+              <StatItem label="Должность" value="General Director" />
+              <StatItem label="Фамилия" value="Shvydchenko" />
+              <StatItem label="Имя" value="Sergey" />
+              <StatItem label="Отчество" value="Nikolaevich" />
+            </div>
+          )}
+
+          {requisiteTab === 'tax' && (
+            <div className="grid gap-6 md:grid-cols-4">
+              <StatItem label="ИНН" value="7722011847" />
+              <StatItem label="КПП" value="771501001" />
+              <StatItem label="ОГРН" value="1027700538403" />
+              <StatItem label="ОКВЭД" value="62.02" />
+              <StatItem label="ОКПО" value="12345678" />
+              <StatItem label="Код налоговой" value="7701" />
+              <StatItem label="Регион" value="Москва" />
+              <StatItem label="ИНФНС" value="ИФНС России № 1 по г. Москве" />
+              <StatItem label="Телефон налоговой" value="+7 (495) 000-00-00" />
+              <StatItem label="ПФР" value="087-123-000000" />
+              <StatItem label="ФСС" value="7712345678" />
+              <StatItem label="ОКТМО" value="45382000" />
+            </div>
+          )}
+
+          {requisiteTab === 'treasury' && (
+            <div className="grid gap-6 md:grid-cols-3">
+              <StatItem label="ИНН получателя" value="7727406020" />
+              <StatItem label="КПП получателя" value="770701001" />
+              <StatItem label="Полное наименование" value="Казначейство России (ФНС России)" />
+              <StatItem label="БИК банка получателя" value="017003983" />
+              <StatItem label="Банк получателя" value="Отделение Тула Банка России // УФК по Тульской области" />
+              <StatItem label="Номер счета получателя" value="03100643000000018500" />
+              <StatItem label="Кор. счет получателя" value="40102810445370000059" />
+              <StatItem label="КБК" value="18201061201010000510" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <UploadCard
+          title="Логотип компании"
+          description="Рекомендуемый размер для загрузки: 545x185. Форматы: JPG, JPEG, PNG."
+          accent
+        />
+        <UploadCard
+          title="Печать компании"
+          description="Рекомендуемый размер для загрузки: 200x200. Форматы: JPG, JPEG, PNG."
+        />
+        <UploadCard
+          title="Подпись руководителя"
+          description="Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG."
+        />
+      </div>
+
+      <SectionCard>
+        <p className="text-sm text-slate-600">
+          Не получается загрузить логотип, печать или подпись?{' '}
+          <span className="text-blue-600">Посмотрите видеоинструкцию</span> или пришлите нам ваши файлы на{' '}
+          <span className="text-blue-600">help@kub-24.ru</span> и мы самостоятельно загрузим их.
+        </p>
+      </SectionCard>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <SectionCard title="Руководитель (для документов)">
@@ -407,6 +592,90 @@ export function CompanyProfile() {
           Отменить
         </button>
       </div>
+
+      {bankModalOpen && (
+        <ModalShell title="Добавить банковский счет" onClose={() => setBankModalOpen(false)}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Счет №" required />
+            <SelectField label="Валюта" options={['RUB', 'USD', 'EUR']} required />
+            <Field label="БИК" />
+            <Field label="Банк" />
+            <Field label="Название, которое будет отображаться" />
+            <Field label="Корреспондентский счет" />
+            <Field label="Город" />
+            <div className="space-y-2">
+              <CheckboxField label="Иностранный банк" />
+              <CheckboxField label="Указать начальный остаток" />
+              <CheckboxField label="Основной" />
+            </div>
+          </div>
+          <div className="mt-6 flex items-center justify-between">
+            <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
+              Сохранить
+            </button>
+            <button
+              type="button"
+              onClick={() => setBankModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              Отменить
+            </button>
+          </div>
+        </ModalShell>
+      )}
+
+      {cashModalOpen && (
+        <ModalShell title="Добавить кассу" onClose={() => setCashModalOpen(false)}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Название, которое будет отображаться" required />
+            <SelectField label="Валюта" options={['RUB', 'USD', 'EUR']} required />
+            <SelectField label="Доступна" options={['Руководитель', 'Учредитель', 'ФинДиректор']} />
+            <CheckboxField label="Основная" />
+            <CheckboxField label="Указать начальный остаток" />
+            <CheckboxField label="Для учета в бухгалтерии" />
+          </div>
+          <div className="mt-6 flex items-center justify-between">
+            <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
+              Сохранить
+            </button>
+            <button
+              type="button"
+              onClick={() => setCashModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              Отменить
+            </button>
+          </div>
+        </ModalShell>
+      )}
+
+      {cardModalOpen && (
+        <ModalShell title="Добавить карту" onClose={() => setCardModalOpen(false)}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Счет или номер карты" required />
+            <SelectField label="Валюта" options={['RUB', 'USD', 'EUR']} required />
+            <Field label="БИК" />
+            <Field label="Банк" />
+            <Field label="Название, которое будет отображаться" placeholder="Карта" />
+            <Field label="Корреспондентский счет" />
+            <Field label="Город" />
+            <SelectField
+              label="Доступна"
+              options={['Руководитель, Учредитель, ФинДиректор', 'Для всех']}
+            />
+            <CheckboxField label="Для учета в бухгалтерии" />
+          </div>
+          <div className="mt-6 flex items-center justify-between">
+            <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
+              Сохранить
+            </button>
+            <button
+              type="button"
+              onClick={() => setCardModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              Отменить
+            </button>
+          </div>
+        </ModalShell>
+      )}
     </div>
   );
 }
