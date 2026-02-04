@@ -7,7 +7,6 @@ import {
   Settings,
   UserCog,
   Shield,
-  LogOut,
   Menu,
   X,
   WalletCards,
@@ -43,7 +42,7 @@ const EXPANDED_KEY = 'pp.sidebar_expanded';
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
-  const { signOut, user, isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -106,12 +105,6 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       /** */
     }
   }, [collapsed]);
-
-  const handleSignOut = async () => {
-    if (confirm('Вы действительно хотите выйти из системы?')) {
-      await signOut();
-    }
-  };
 
   type SidebarChild = { id: Tab; label: string; icon: typeof Calendar };
   type SidebarItem = {
@@ -469,49 +462,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           </ul>
         </nav>
 
-        <div className="border-t border-slate-700/50 p-4 bg-slate-900/50">
-          {!collapsed ? (
-            <div className="mb-4 flex items-center gap-3 px-2">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center font-semibold text-white shadow-lg shrink-0">
-                {(user?.fullName ?? 'U')
-                  .split(' ')
-                  .map((p) => p.trim()[0])
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white truncate">{user?.fullName}</div>
-                <div className="text-xs text-slate-400 truncate">{user?.role?.name}</div>
-              </div>
-            </div>
-          ) : (
-            <div className="mb-4 flex justify-center">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center font-semibold text-white shadow-lg text-xs">
-                {(user?.fullName ?? 'U')
-                  .split(' ')
-                  .map((p) => p.trim()[0])
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase()}
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={handleSignOut}
-            className={[
-              'w-full flex items-center rounded-lg text-sm transition-all duration-200 group',
-              'text-slate-300 hover:bg-red-500/10 hover:text-red-400 border border-slate-700/50 hover:border-red-500/30',
-              collapsed ? 'justify-center p-2.5' : 'justify-center gap-2 px-3 py-2.5',
-            ].join(' ')}
-            title="Выйти">
-            <LogOut className="h-4 w-4 group-hover:scale-110 transition-transform" />
-            {!collapsed && <span className="font-medium">Выйти</span>}
-          </button>
-        </div>
+        <div className="border-t border-slate-700/50 p-4 bg-slate-900/50" />
       </aside>
     </>
   );

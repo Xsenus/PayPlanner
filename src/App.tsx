@@ -20,6 +20,7 @@ import { MoneyOperations } from './components/Money/MoneyOperations';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
+import TopBar from './components/TopBar/TopBar';
 import type { Tab } from './types/tabs';
 import { useRolePermissions } from './hooks/useRolePermissions';
 import { TabProvider } from './contexts/TabContext';
@@ -28,7 +29,7 @@ import { useActivityLogger } from './hooks/useActivityLogger';
 type AuthView = 'login' | 'register' | 'awaiting';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const logActivity = useActivityLogger();
   const tabNames: Record<Tab, string> = useMemo(() => ({
@@ -405,7 +406,10 @@ function AppContent() {
     <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
       <div className="min-h-screen bg-gray-50">
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
-        {renderContent()}
+        <div className="flex min-h-screen flex-col">
+          <TopBar title={tabNames[activeTab] ?? ''} onSignOut={signOut} />
+          <main className="flex-1">{renderContent()}</main>
+        </div>
       </div>
     </TabProvider>
   );
