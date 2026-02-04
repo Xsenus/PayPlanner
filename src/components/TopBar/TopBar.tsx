@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Building2, IdCard, LogOut, User } from 'lucide-react';
+import { BadgeCheck, Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
 type TopBarProps = {
@@ -103,7 +103,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
                     type="button"
                     onClick={() => setUserMenuOpen(false)}
                     className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
-                    <IdCard className="h-4 w-4 text-slate-400" />
+                    <BadgeCheck className="h-4 w-4 text-slate-400" />
                     Визитка Компании
                   </button>
                   <button
