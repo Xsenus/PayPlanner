@@ -17,6 +17,7 @@ import { UserActivity } from './components/UserActivity/UserActivity';
 import { Dictionaries } from './components/Dictionaries/Dictionaries';
 import { Payments } from './components/Payments/Payments';
 import { MoneyOperations } from './components/Money/MoneyOperations';
+import { CompanyProfile } from './components/CompanyProfile/CompanyProfile';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -53,6 +54,7 @@ function AppContent() {
     moneyCards: 'Деньги: Карты',
     moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
+    companyProfile: 'Профиль компании',
     users: 'Пользователи',
     roles: 'Роли',
     dictionaries: 'Справочники',
@@ -168,6 +170,8 @@ function AppContent() {
           return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
+        case 'companyProfile':
+          return true;
         case 'dictionaries':
           return permissions.dictionaries.canView;
         case 'users':
@@ -406,6 +410,8 @@ function AppContent() {
         return permissions.contracts.canView
           ? <Contracts />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
+      case 'companyProfile':
+        return <CompanyProfile />;
       case 'roles':
         return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
       case 'userActivity':

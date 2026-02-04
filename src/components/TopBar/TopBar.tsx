@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BadgeCheck, Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTabNavigation } from '../../contexts/TabContext';
 
 type TopBarProps = {
   title: string;
@@ -18,6 +19,7 @@ const getInitials = (fullName?: string | null) =>
 
 export default function TopBar({ title, onSignOut }: TopBarProps) {
   const { user } = useAuth();
+  const { setActiveTab } = useTabNavigation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -94,7 +96,10 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
                 <div className="py-2">
                   <button
                     type="button"
-                    onClick={() => setUserMenuOpen(false)}
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setActiveTab('companyProfile');
+                    }}
                     className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
                     <Building2 className="h-4 w-4 text-slate-400" />
                     Профиль компании
