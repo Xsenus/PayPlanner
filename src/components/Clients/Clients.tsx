@@ -354,13 +354,17 @@ export function Clients() {
         phone: 'phone',
         address: 'address',
         notes: 'notes',
+        createdAt: 'createdAt',
+        isActive: 'isActive',
         legalEntityId: 'legalEntityId',
         legalEntityShortName: 'legalEntityShortName',
         legalEntityFullName: 'legalEntityFullName',
         legalEntityInn: 'legalEntityInn',
         legalEntityOgrn: 'legalEntityOgrn',
         legalEntityKpp: 'legalEntityKpp',
-      }) satisfies Record<string, string>,
+        casesCount: 'casesCount',
+        contractsCount: 'contractsCount',
+      }) satisfies Record<ColumnId, string>,
     [],
   );
 

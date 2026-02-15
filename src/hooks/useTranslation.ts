@@ -1,9 +1,14 @@
 import { useCallback } from 'react';
-import { ru, TranslationKey } from '../locales/ru';
+import { ru } from '../locales/ru';
 
 export function useTranslation() {
-  const t = useCallback((key: TranslationKey): string => {
-    return ru[key] || key;
+  const t = useCallback((key: string, params?: Record<string, string | number>): string => {
+    const template = ru[key as keyof typeof ru] ?? key;
+    if (!params) return template;
+
+    return Object.entries(params).reduce((acc, [paramKey, paramValue]) => {
+      return acc.split(`{{${paramKey}}}`).join(String(paramValue));
+    }, template);
   }, []);
 
   const formatCurrency = useCallback((amount: number): string => {
