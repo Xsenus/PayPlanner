@@ -3,6 +3,7 @@ import { Loader2, Mail, MapPin, Phone, Users } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { Client, LegalEntityDetail, LegalEntityInput } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useDialog } from '../../hooks/useDialog';
 
 interface Props {
   initial?: LegalEntityDetail | null;
@@ -52,6 +53,7 @@ export function LegalEntityInlineEditor({
   onCancel,
 }: Props) {
   const { t } = useTranslation();
+  const { confirm } = useDialog();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [clientSearch, setClientSearch] = useState('');
@@ -137,7 +139,7 @@ export function LegalEntityInlineEditor({
 
   const handleDelete = async () => {
     if (!onDelete || !initial) return;
-    if (!confirm(t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       setDeleting(true);
       setError(null);

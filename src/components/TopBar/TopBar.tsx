@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BadgeCheck, Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
+import { useDialog } from '../../hooks/useDialog';
 
 type TopBarProps = {
   title: string;
@@ -22,6 +23,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
   const { setActiveTab } = useTabNavigation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const { confirm } = useDialog();
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
 
@@ -43,7 +45,14 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
 
   const handleSignOut = async () => {
     setUserMenuOpen(false);
-    if (confirm('Вы действительно хотите выйти из системы?')) {
+    const accepted = await confirm({
+      title: 'Выход из системы',
+      description: 'Вы действительно хотите выйти из системы?',
+      confirmLabel: 'Выйти',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (accepted) {
       await onSignOut();
     }
   };

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
@@ -48,6 +49,7 @@ type SortState = {
 
 export function Acts() {
   const { user } = useAuth();
+  const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const actsPermissions = permissions.acts;
   const canCreate = actsPermissions.canCreate;
@@ -235,11 +237,11 @@ export function Acts() {
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
-    if (!window.confirm(confirmText)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmText, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteAct(act.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Не удалось удалить акт');
+      await alert(err instanceof Error ? err.message : 'Не удалось удалить акт');
     }
   };
 

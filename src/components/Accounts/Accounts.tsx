@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -158,6 +159,7 @@ function safeWrite<T>(key: string, value: T) {
 
 export function Accounts({ defaultType, lockType = false }: AccountsProps) {
   const { user } = useAuth();
+  const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
 
@@ -447,11 +449,11 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
 
   const removeInvoice = async (invoice: Invoice) => {
     if (!canDelete) return;
-    if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteInvoice(invoice.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Не удалось удалить счёт');
+      await alert(err instanceof Error ? err.message : 'Не удалось удалить счёт');
     }
   };
 

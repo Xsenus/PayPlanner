@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search, Trash2, Filter } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { apiService } from '../../services/api';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type {
@@ -70,6 +71,7 @@ export const UserActivity = () => {
   const [clearing, setClearing] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const { confirm, alert } = useDialog();
 
   const debouncedSearch = useDebouncedValue(search, 500);
 
@@ -122,23 +124,27 @@ export const UserActivity = () => {
     if (password === null) return;
 
     if (password !== 'Qwerty!@#') {
-      alert('Неверный пароль, журнал не был очищен.');
+      await alert('Неверный пароль, журнал не был очищен.');
       return;
     }
 
-    const confirmDelete = window.confirm(
-      'Вы уверены, что хотите безвозвратно удалить все записи пользовательского контроля?',
-    );
+    const confirmDelete = await confirm({
+      title: 'Подтверждение удаления',
+      description: 'Вы уверены, что хотите безвозвратно удалить все записи пользовательского контроля?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
     if (!confirmDelete) return;
 
     try {
       setClearing(true);
       await apiService.deleteUserActivityLogs(password);
       setRefreshToken((token) => token + 1);
-      alert('История контроля успешно очищена.');
+      await alert('История контроля успешно очищена.');
     } catch (error) {
       console.error('Не удалось очистить журнал контроля', error);
-      alert('Не удалось очистить историю. Попробуйте позже или проверьте подключение.');
+      await alert('Не удалось очистить историю. Попробуйте позже или проверьте подключение.');
     } finally {
       setClearing(false);
     }

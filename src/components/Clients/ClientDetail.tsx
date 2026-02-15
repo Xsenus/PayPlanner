@@ -34,6 +34,7 @@ import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDialog } from '../../hooks/useDialog';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
@@ -336,6 +337,7 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
@@ -648,11 +650,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       showPermissionWarning('Недостаточно прав для удаления счетов.');
       return;
     }
-    if (!window.confirm(t('invoiceDeleteConfirm') ?? 'Удалить счёт?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteClientInvoice(invoice.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Не удалось удалить счёт');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить счёт', variant: 'error' });
     }
   };
 
@@ -704,7 +706,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       setClientName(updated.name ?? `Client #${clientId}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось обновить клиента';
-      window.alert(message);
+      await alert({ title: 'Ошибка', description: message, variant: 'error' });
       throw err instanceof Error ? err : new Error(message);
     }
   };
@@ -781,7 +783,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       '{{number}}',
       contract.number || contract.title || String(contract.id),
     );
-    if (!window.confirm(confirmMessage)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmMessage, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     setContractActionError(null);
     try {
       await deleteContract(contract.id);
@@ -828,8 +830,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
 
   const showPermissionWarning = useCallback((message: string) => {
-    window.alert(message || 'Недостаточно прав для выполнения действия.');
-  }, []);
+    void alert({ title: 'Недостаточно прав', description: message || 'Недостаточно прав для выполнения действия.', variant: 'error' });
+  }, [alert]);
 
   useEffect(() => {
     let alive = true;
@@ -1233,7 +1235,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       showPermissionWarning(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
       return;
     }
-    if (!window.confirm('Удалить платёж?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: 'Удалить платёж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     await deletePayment(id);
     await refreshPayments();
     bumpStats();
@@ -1283,11 +1285,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       showPermissionWarning('Недостаточно прав для удаления актов.');
       return;
     }
-    if (!window.confirm(`Удалить акт №${act.number}?`)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: `Удалить акт №${act.number}?`, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteAct(act.id);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Не удалось удалить акт');
+      await alert({ title: 'Ошибка', description: error instanceof Error ? error.message : 'Не удалось удалить акт', variant: 'error' });
     }
   };
 
@@ -1440,7 +1442,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       const normalizedEmails = normalizeList(profile.emails);
       const normalizedAddresses = normalizeList(profile.addresses);
       if (profile.kind === 'legal' && !clientFormState.legalEntityId) {
-        window.alert('Для карточки юридического лица выберите юридическое лицо из списка.');
+        await alert({ title: 'Проверка данных', description: 'Для карточки юридического лица выберите юридическое лицо из списка.', variant: 'error' });
         return;
       }
       await handleUpdateClient({

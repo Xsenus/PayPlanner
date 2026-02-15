@@ -8,6 +8,7 @@ import type { Payment, PaymentStatus, ClientCase, PaymentPayload } from '../../t
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useDialog } from '../../hooks/useDialog';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
@@ -57,6 +58,7 @@ export function PaymentModal({
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
+  const { confirm, alert } = useDialog();
 
   const [loading, setLoading] = useState(false);
   const [cases, setCases] = useState<ClientCase[]>([]);
@@ -490,7 +492,7 @@ export function PaymentModal({
     e.preventDefault();
     const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
     if (pickedCat && pickedCat.paymentType !== formData.type) {
-      alert(
+      await alert(
         t('invalidCategoryForDirection') ?? 'Тип категории не соответствует направлению платежа',
       );
       return;
@@ -525,7 +527,7 @@ export function PaymentModal({
     const normalizedRescheduleDate = rescheduleDate ? fromInputToApiDate(rescheduleDate) : undefined;
 
     if (rescheduleRemainder && remainder > 0 && !normalizedRescheduleDate) {
-      alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
+      await alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
       setLoading(false);
       return;
     }
@@ -1436,7 +1438,7 @@ export function PaymentModal({
                   type="button"
                   onClick={async () => {
                     if (!payment) return;
-                    const ok = confirm(t('confirmDeletePayment') ?? 'Удалить платеж?');
+                    const ok = await confirm({ title: 'Подтверждение удаления', description: t('confirmDeletePayment') ?? 'Удалить платеж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
                     if (!ok) return;
                     await onDelete!(payment.id);
                     onClose();

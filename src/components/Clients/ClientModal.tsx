@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useDialog } from '../../hooks/useDialog';
 import type { Client, ClientInput } from '../../types';
 
 interface ClientModalProps {
@@ -20,6 +21,7 @@ export function ClientModal({
   client,
 }: ClientModalProps) {
   const { t } = useTranslation();
+  const { confirm } = useDialog();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
@@ -95,9 +97,13 @@ export function ClientModal({
 
   const handleDelete = async () => {
     if (!client || !onDelete) return;
-    const ok = window.confirm(
-      t('confirmDeleteClient') || 'Удалить клиента? Это действие необратимо.',
-    );
+    const ok = await confirm({
+      title: 'Подтверждение удаления',
+      description: t('confirmDeleteClient') || 'Удалить клиента? Это действие необратимо.',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
     if (!ok) return;
 
     try {
