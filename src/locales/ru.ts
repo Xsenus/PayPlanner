@@ -254,6 +254,8 @@ export const ru = {
   contractCreateTitle: 'Новый договор',
   contractEditTitle: 'Редактировать договор',
   contractModalSubtitle: 'Укажите ключевую информацию и выберите клиентов.',
+  contractFormClear: 'Очистить форму',
+  savedSuccessfully: 'Успешно сохранено',
   contractNoClients: 'Нет доступных клиентов для выбора.',
   contractDeleteConfirm: 'Удалить договор «{{number}}»?',
   allClients: 'Все клиенты',
