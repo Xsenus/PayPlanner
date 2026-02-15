@@ -762,8 +762,11 @@ export function PaymentModal({
                 <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('amount')}</p>
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-semibold text-gray-900">{amountNum.toFixed(2)}</span>
-                  <span className="text-xs text-gray-500">{t('plannedScheduleDate') ?? 'План'}</span>
+                  <span className="text-xs text-gray-500" title={t('plannedScheduleDate') ?? 'Плановая дата по графику'}>
+                    {toRuDate(formData.plannedDate) || t('notSpecified') || 'Не указана'}
+                  </span>
                 </div>
+                <p className="mt-1 text-xs text-gray-500">{t('plannedScheduleDate') ?? 'Плановая дата по графику'}</p>
               </div>
               <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
                 <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('paidAmount') ?? 'Получено'}</p>
@@ -1427,7 +1430,7 @@ export function PaymentModal({
               </div>
             )}
 
-            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-gray-200 bg-white/95 py-3 backdrop-blur sm:flex-row">
+            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-gray-200 bg-white/95 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
               {canDelete && (
                 <button
                   type="button"
@@ -1438,17 +1441,17 @@ export function PaymentModal({
                     await onDelete!(payment.id);
                     onClose();
                   }}
-                  className="sm:w-auto w-full inline-flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-50 px-4 py-2 font-medium text-red-700 transition-colors hover:bg-red-100 sm:w-auto sm:min-w-40">
                   <Trash2 className="h-4 w-4" />
                   {t('delete')}
                 </button>
               )}
 
-              <div className="flex-1 flex gap-3">
+              <div className="flex w-full gap-3 sm:w-auto sm:justify-end">
                 <button
                   type="submit"
                   disabled={loading}
-                  className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                  className={`flex-1 rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 sm:flex-none ${
                     formData.type === 'Income'
                       ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                       : 'bg-red-600 text-white hover:bg-red-700'
@@ -1465,7 +1468,7 @@ export function PaymentModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 py-2 px-4 bg-gray-200 text-gray-800 rounded-lg font-medium hover:bg-gray-300 transition-colors">
+                  className="flex-1 rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300 sm:min-w-40 sm:flex-none">
                   {t('cancel')}
                 </button>
               </div>
