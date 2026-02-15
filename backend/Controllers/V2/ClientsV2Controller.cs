@@ -126,6 +126,8 @@ public class ClientsV2Controller : ControllerBase
     {
         var client = await _db.Clients
             .Include(c => c.Cases)
+            .Include(c => c.LegalEntity)
+            .Include(c => c.ClientStatus)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is not null ? Ok(client) : NotFound();
@@ -152,6 +154,8 @@ public class ClientsV2Controller : ControllerBase
         e.Address = model.Address;
         e.Notes = model.Notes;
         e.IsActive = model.IsActive;
+        e.LegalEntityId = model.LegalEntityId;
+        e.ClientStatusId = model.ClientStatusId;
 
         await _db.SaveChangesAsync();
         return Ok(e);
