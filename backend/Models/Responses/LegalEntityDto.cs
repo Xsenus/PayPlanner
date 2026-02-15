@@ -24,6 +24,12 @@ public class LegalEntityListItemDto
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Director { get; set; }
+    public string? Country { get; set; }
+    public string? BaseCurrency { get; set; }
+    public string? ServiceLanguage { get; set; }
+    public string? OrganizationForm { get; set; }
+    public string? Timezone { get; set; }
+    public string? TaxSystem { get; set; }
     public string? Notes { get; set; }
     public int ClientsCount { get; set; }
     public DateTime CreatedAt { get; set; }

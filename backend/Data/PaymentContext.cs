@@ -100,6 +100,12 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Phone).HasMaxLength(100);
             entity.Property(e => e.Email).HasMaxLength(200);
             entity.Property(e => e.Director).HasMaxLength(200);
+            entity.Property(e => e.Country).HasMaxLength(100);
+            entity.Property(e => e.BaseCurrency).HasMaxLength(16);
+            entity.Property(e => e.ServiceLanguage).HasMaxLength(32);
+            entity.Property(e => e.OrganizationForm).HasMaxLength(64);
+            entity.Property(e => e.Timezone).HasMaxLength(100);
+            entity.Property(e => e.TaxSystem).HasMaxLength(64);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 

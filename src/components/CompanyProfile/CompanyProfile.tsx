@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Building2,
   Check,
@@ -8,7 +8,12 @@ import {
   Phone,
   Plus,
   X,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
+
+import { useLegalEntities } from '../../hooks/useLegalEntities';
+import type { LegalEntityInput } from '../../types';
 
 type ProfileTab = 'general' | 'settings' | 'edo';
 type FinanceTab = 'bank' | 'cash' | 'cards';
@@ -47,11 +52,17 @@ function Field({
   placeholder,
   icon,
   required,
+  value,
+  onChange,
+  disabled,
 }: {
   label: string;
   placeholder?: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   required?: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="block text-sm text-slate-600">
@@ -63,7 +74,10 @@ function Field({
       <input
         type="text"
         placeholder={placeholder}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+        value={value ?? ''}
+        onChange={(e) => onChange?.(e.target.value)}
+        disabled={disabled}
+        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100"
       />
     </label>
   );
@@ -74,11 +88,17 @@ function SelectField({
   options,
   icon,
   required,
+  value,
+  onChange,
+  disabled,
 }: {
   label: string;
   options: string[];
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   required?: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="block text-sm text-slate-600">
@@ -87,9 +107,14 @@ function SelectField({
         {label}
         {required ? <span className="text-rose-500">*</span> : null}
       </span>
-      <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange?.(e.target.value)}
+        disabled={disabled}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100">
+        {!value && <option value="">Не выбрано</option>}
         {options.map((option) => (
-          <option key={option}>{option}</option>
+          <option key={option} value={option}>{option}</option>
         ))}
       </select>
     </label>
@@ -182,6 +207,75 @@ export function CompanyProfile() {
   const [bankModalOpen, setBankModalOpen] = useState(false);
   const [cashModalOpen, setCashModalOpen] = useState(false);
   const [cardModalOpen, setCardModalOpen] = useState(false);
+  const {
+    legalEntities,
+    loading: legalEntitiesLoading,
+    error: legalEntitiesError,
+    getLegalEntity,
+    updateLegalEntity,
+  } = useLegalEntities();
+  const [profileLegalEntityId, setProfileLegalEntityId] = useState<number | null>(null);
+  const [legalEntityForm, setLegalEntityForm] = useState<LegalEntityInput>({ shortName: '', clientIds: [] });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (legalEntities.length === 0) return;
+    if (profileLegalEntityId !== null) return;
+    setProfileLegalEntityId(legalEntities[0].id);
+  }, [legalEntities, profileLegalEntityId]);
+
+  useEffect(() => {
+    if (profileLegalEntityId === null) return;
+    void (async () => {
+      try {
+        const detail = await getLegalEntity(profileLegalEntityId);
+        setLegalEntityForm({
+          shortName: detail.shortName ?? '',
+          fullName: detail.fullName ?? '',
+          inn: detail.inn ?? '',
+          kpp: detail.kpp ?? '',
+          ogrn: detail.ogrn ?? '',
+          address: detail.address ?? '',
+          phone: detail.phone ?? '',
+          email: detail.email ?? '',
+          director: detail.director ?? '',
+          country: detail.country ?? '',
+          baseCurrency: detail.baseCurrency ?? '',
+          serviceLanguage: detail.serviceLanguage ?? '',
+          organizationForm: detail.organizationForm ?? '',
+          timezone: detail.timezone ?? '',
+          taxSystem: detail.taxSystem ?? '',
+          notes: detail.notes ?? '',
+          clientIds: (detail.clients ?? []).map((item) => item.id),
+        });
+        setProfileMessage(null);
+      } catch (error) {
+        setProfileMessage(error instanceof Error ? error.message : 'Не удалось загрузить юридическое лицо.');
+      }
+    })();
+  }, [profileLegalEntityId, getLegalEntity]);
+
+  const setLegalEntityField = (key: keyof LegalEntityInput, value: string) => {
+    setLegalEntityForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleProfileSave = async () => {
+    if (profileLegalEntityId === null) {
+      setProfileMessage('Для сохранения выберите юридическое лицо.');
+      return;
+    }
+    try {
+      setProfileSaving(true);
+      setProfileMessage(null);
+      await updateLegalEntity(profileLegalEntityId, legalEntityForm);
+      setProfileMessage('Профиль компании синхронизирован с юридическим лицом.');
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : 'Не удалось сохранить профиль компании.');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const financeActionLabel = useMemo(() => {
     switch (financeTab) {
@@ -206,21 +300,92 @@ export function CompanyProfile() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-            Отменить
+          <button
+            type="button"
+            onClick={() => setProfileMessage(null)}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+            Сбросить сообщение
           </button>
-          <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700">
-            Сохранить
+          <button
+            type="button"
+            onClick={handleProfileSave}
+            disabled={profileSaving || profileLegalEntityId === null}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:bg-blue-300">
+            {profileSaving ? "Сохраняем..." : "Сохранить"}
           </button>
         </div>
       </div>
 
-      <SectionCard>
-        <div className="grid gap-4 md:grid-cols-4">
-          <Field label="ИНН" placeholder="7722011847" icon={<Building2 className="h-4 w-4" />} required />
-          <SelectField label="Страна" options={['Россия', 'Казахстан']} icon={<Globe className="h-4 w-4" />} />
-          <SelectField label="Базовая валюта" options={['Рубль', 'USD', 'EUR']} icon={<Landmark className="h-4 w-4" />} />
-          <SelectField label="Язык сервиса" options={['Русский', 'English']} />
+      <SectionCard title="Связь профиля с юридическим лицом">
+        <div className="space-y-4">
+          <label className="block text-sm text-slate-600">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Юридическое лицо</span>
+            <select
+              value={profileLegalEntityId ?? ''}
+              onChange={(e) => setProfileLegalEntityId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
+              <option value="">Выберите юридическое лицо</option>
+              {legalEntities.map((entity) => (
+                <option key={entity.id} value={entity.id}>{entity.shortName}</option>
+              ))}
+            </select>
+          </label>
+
+          {legalEntitiesLoading && <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700"><Loader2 className="h-4 w-4 animate-spin" />Загрузка юридических лиц...</div>}
+          {legalEntitiesError && <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="h-4 w-4" />{legalEntitiesError}</div>}
+          {profileMessage && <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">{profileMessage}</div>}
+
+          <div className="grid gap-4 md:grid-cols-4">
+            <Field
+              label="ИНН"
+              value={legalEntityForm.inn ?? ''}
+              onChange={(value) => setLegalEntityField('inn', value)}
+              icon={<Building2 className="h-4 w-4" />}
+              required
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <Field
+              label="КПП"
+              value={legalEntityForm.kpp ?? ''}
+              onChange={(value) => setLegalEntityField('kpp', value)}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <Field
+              label="ОГРН"
+              value={legalEntityForm.ogrn ?? ''}
+              onChange={(value) => setLegalEntityField('ogrn', value)}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <Field
+              label="Руководитель"
+              value={legalEntityForm.director ?? ''}
+              onChange={(value) => setLegalEntityField('director', value)}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <SelectField
+              label="Страна"
+              options={['Россия', 'Казахстан']}
+              value={legalEntityForm.country ?? ''}
+              onChange={(value) => setLegalEntityField('country', value)}
+              icon={<Globe className="h-4 w-4" />}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <SelectField
+              label="Базовая валюта"
+              options={['Рубль', 'USD', 'EUR']}
+              value={legalEntityForm.baseCurrency ?? ''}
+              onChange={(value) => setLegalEntityField('baseCurrency', value)}
+              icon={<Landmark className="h-4 w-4" />}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+            <SelectField
+              label="Язык сервиса"
+              options={['Русский', 'English']}
+              value={legalEntityForm.serviceLanguage ?? ''}
+              onChange={(value) => setLegalEntityField('serviceLanguage', value)}
+              disabled={legalEntitiesLoading || profileLegalEntityId === null}
+            />
+          </div>
         </div>
       </SectionCard>
 
@@ -245,13 +410,28 @@ export function CompanyProfile() {
           {activeTab === 'general' && (
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-3">
-                <Field label="Название организации" placeholder='АО "АЛАН-89"' />
-                <Field label="Полное наименование организации" placeholder="Акционерное общество" />
-                <SelectField label="Форма" options={['АО', 'ООО', 'ИП']} />
+                <Field label="Название организации" value={legalEntityForm.shortName} onChange={(value) => setLegalEntityField('shortName', value)} disabled={profileLegalEntityId === null} />
+                <Field label="Полное наименование организации" value={legalEntityForm.fullName ?? ''} onChange={(value) => setLegalEntityField('fullName', value)} disabled={profileLegalEntityId === null} />
+                <SelectField
+                  label="Форма"
+                  options={['АО', 'ООО', 'ИП']}
+                  value={legalEntityForm.organizationForm ?? ''}
+                  onChange={(value) => setLegalEntityField('organizationForm', value)}
+                  disabled={profileLegalEntityId === null}
+                />
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
+                  <div className="mb-4">
+                    <SelectField
+                      label="Система налогообложения"
+                      options={['ОСНО', 'УСН Доход', 'УСН Доход-Расход', 'Патент']}
+                      value={legalEntityForm.taxSystem ?? ''}
+                      onChange={(value) => setLegalEntityField('taxSystem', value)}
+                      disabled={profileLegalEntityId === null}
+                    />
+                  </div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                     Система налогообложения
                   </p>
@@ -297,11 +477,14 @@ export function CompanyProfile() {
                 </div>
 
                 <div className="grid gap-4">
-                  <Field label="Телефон" placeholder="+7 (913) 014-93-49" icon={<Phone className="h-4 w-4" />} />
-                  <Field label="Электронная почта" placeholder="ilel@list.ru" icon={<Mail className="h-4 w-4" />} />
+                  <Field label="Телефон" value={legalEntityForm.phone ?? ''} onChange={(value) => setLegalEntityField('phone', value)} icon={<Phone className="h-4 w-4" />} disabled={profileLegalEntityId === null} />
+                  <Field label="Электронная почта" value={legalEntityForm.email ?? ''} onChange={(value) => setLegalEntityField('email', value)} icon={<Mail className="h-4 w-4" />} disabled={profileLegalEntityId === null} />
                   <SelectField
                     label="Часовой пояс"
                     options={['(UTC+03:00) Москва', '(UTC+05:00) Екатеринбург']}
+                    value={legalEntityForm.timezone ?? ''}
+                    onChange={(value) => setLegalEntityField('timezone', value)}
+                    disabled={profileLegalEntityId === null}
                   />
                 </div>
               </div>

@@ -23,6 +23,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from './LegalEntityModal';
+import { LegalEntityInlineEditor } from './LegalEntityInlineEditor';
 
 function matches(entity: LegalEntitySummary, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -78,6 +79,7 @@ export function LegalEntities() {
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<LegalEntityDetail | null>(null);
+  const [inlineOpen, setInlineOpen] = useState(false);
   const [modalBusy, setModalBusy] = useState(false);
   const [readOnlyMode, setReadOnlyMode] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export function LegalEntities() {
   const handleCreate = () => {
     setEditing(null);
     setReadOnlyMode(false);
-    setModalOpen(true);
+    setInlineOpen(true);
   };
 
   const openDetail = async (id: number, allowEditing: boolean) => {
@@ -107,6 +109,24 @@ export function LegalEntities() {
       const detail = await getLegalEntity(id);
       setEditing(detail);
       setReadOnlyMode(!allowEditing);
+      setInlineOpen(allowEditing);
+      setModalOpen(!allowEditing);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : t('legalEntityLoadError') || 'Не удалось загрузить данные юр. лица',
+      );
+    } finally {
+      setModalBusy(false);
+    }
+  };
+
+  const openModalEditor = async (id: number) => {
+    try {
+      setModalBusy(true);
+      const detail = await getLegalEntity(id);
+      setEditing(detail);
+      setReadOnlyMode(false);
+      setInlineOpen(false);
       setModalOpen(true);
     } catch (err) {
       setActionError(
@@ -126,7 +146,15 @@ export function LegalEntities() {
 
   const handleSubmit = async (payload: LegalEntityInput) => {
     if (editing) {
-      const updated = await updateLegalEntity(editing.id, payload);
+      const updated = await updateLegalEntity(editing.id, {
+        ...payload,
+        country: payload.country ?? editing.country ?? null,
+        baseCurrency: payload.baseCurrency ?? editing.baseCurrency ?? null,
+        serviceLanguage: payload.serviceLanguage ?? editing.serviceLanguage ?? null,
+        organizationForm: payload.organizationForm ?? editing.organizationForm ?? null,
+        timezone: payload.timezone ?? editing.timezone ?? null,
+        taxSystem: payload.taxSystem ?? editing.taxSystem ?? null,
+      });
       setEditing(updated);
       return updated;
     }
@@ -144,6 +172,7 @@ export function LegalEntities() {
 
   const handleCloseModal = () => {
     setModalOpen(false);
+    setInlineOpen(false);
     setEditing(null);
     setReadOnlyMode(false);
     setActionError(null);
@@ -228,6 +257,19 @@ export function LegalEntities() {
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>{t('loading') || 'Загрузка данных...'}</span>
         </div>
+      )}
+
+      {inlineOpen && (
+        <LegalEntityInlineEditor
+          initial={editing}
+          clients={clientsList}
+          loading={modalBusy}
+          allowEdit={allowModalEdit}
+          allowDelete={allowModalDelete}
+          onSubmit={handleSubmit}
+          onDelete={handleDelete}
+          onCancel={handleCloseModal}
+        />
       )}
 
       {sortedFiltered.length === 0 && !loading ? (
@@ -353,6 +395,14 @@ export function LegalEntities() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => openModalEditor(entity.id)}
+                  disabled={!canEdit}
+                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
+                  <Edit size={14} />
+                  {t('edit')} (modal)
+                </button>
+                <button
+                  type="button"
                   onClick={() => openDetail(entity.id, true)}
                   disabled={!canDelete}
                   className="ml-auto inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300">
@@ -449,6 +499,13 @@ export function LegalEntities() {
                         onClick={() => openDetail(entity.id, true)}
                         disabled={!canEdit}
                         className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-600 hover:border-blue-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
+                        <Edit size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openModalEditor(entity.id)}
+                        disabled={!canEdit}
+                        className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
                         <Edit size={14} />
                       </button>
                       <button
