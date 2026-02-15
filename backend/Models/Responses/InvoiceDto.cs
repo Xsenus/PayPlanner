@@ -32,4 +32,13 @@ public class InvoiceDto
     public string? CounterpartyName { get; set; }
     public string? PaymentStatusName { get; set; }
     public DateTime CreatedAt { get; set; }
+    public List<InvoiceLineItemDto> LineItems { get; set; } = new();
+}
+
+public class InvoiceLineItemDto
+{
+    public string Name { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "шт";
+    public decimal Price { get; set; }
 }

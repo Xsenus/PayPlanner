@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Search, X } from 'lucide-react';
-import type { Act, ActStatus, Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
+import { ChevronDown, Loader2, Search, X } from 'lucide-react';
+import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -23,6 +23,36 @@ type FormState = {
   paidDate: string;
   counterpartyName: string;
 };
+
+type LineItem = {
+  id: string;
+  name: string;
+  quantity: string;
+  unit: string;
+  price: string;
+};
+
+function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
+  if (source && source.length > 0) {
+    return source.map((item, index) => ({
+      id: `${Date.now()}-${index}`,
+      name: item.name ?? '',
+      quantity: String(item.quantity ?? 0),
+      unit: item.unit ?? 'шт',
+      price: String(item.price ?? 0),
+    }));
+  }
+
+  return [
+    {
+      id: `${Date.now()}-base`,
+      name: '',
+      quantity: '1',
+      unit: 'шт',
+      price: fallbackAmount !== undefined && fallbackAmount !== null ? String(fallbackAmount) : '',
+    },
+  ];
+}
 
 type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'status'>;
 
@@ -122,7 +152,24 @@ export function InvoiceModal({
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [extraOpen, setExtraOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const parseMoney = useCallback((value: string): number => {
+    const normalized = value.replace(',', '.').trim();
+    if (!normalized) return 0;
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, []);
+
+  const calculateLineItemsTotal = useCallback(
+    (items: LineItem[]) => {
+      const total = items.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
+      return total.toFixed(2);
+    },
+    [parseMoney],
+  );
 
   const initialAct = useMemo<ActOption | null>(() => {
     if (!invoice?.actId) return null;
@@ -157,6 +204,7 @@ export function InvoiceModal({
   useEffect(() => {
     if (open) {
       setForm(normalizeInvoiceToForm(invoice, defaultClientId, defaultType));
+      setLineItems(normalizeLineItems(invoice?.lineItems, invoice?.amount));
       const nextInitial = invoice?.actId ? {
         id: invoice.actId,
         number: invoice.actNumber ?? invoice.number,
@@ -173,6 +221,36 @@ export function InvoiceModal({
       setLocalError(null);
     }
   }, [open, invoice, defaultClientId, defaultType]);
+
+  const updateLineItem = (id: string, patch: Partial<LineItem>) => {
+    setLineItems((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, ...patch } : item));
+      setForm((current) => ({ ...current, amount: calculateLineItemsTotal(next) }));
+      return next;
+    });
+  };
+
+  const addLineItem = () => {
+    setLineItems((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length}`,
+        name: '',
+        quantity: '1',
+        unit: 'шт',
+        price: '',
+      },
+    ]);
+  };
+
+  const removeLineItem = (id: string) => {
+    setLineItems((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((item) => item.id !== id);
+      setForm((current) => ({ ...current, amount: calculateLineItemsTotal(next) }));
+      return next;
+    });
+  };
 
   const fetchActs = useCallback(async () => {
     if (form.type !== 'Income') {
@@ -297,6 +375,14 @@ export function InvoiceModal({
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       counterpartyName: counterparty ? counterparty : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
+      lineItems: lineItems
+        .map((item) => ({
+          name: item.name.trim(),
+          quantity: Number.parseFloat(item.quantity.replace(',', '.')),
+          unit: item.unit.trim() || 'шт',
+          price: Number.parseFloat(item.price.replace(',', '.')),
+        }))
+        .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
     };
 
     try {
@@ -330,7 +416,7 @@ export function InvoiceModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
-      <div className="relative w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
@@ -439,11 +525,11 @@ export function InvoiceModal({
                     )}
                   </span>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={form.amount}
                     onChange={handleChange('amount')}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="0.00"
                   />
                 </label>
@@ -464,17 +550,53 @@ export function InvoiceModal({
                 </label>
               </div>
 
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
-                <textarea
-                  value={form.description}
-                  onChange={handleChange('description')}
-                  rows={3}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
-                />
-              </label>
+              <button
+                type="button"
+                onClick={() => setExtraOpen((prev) => !prev)}
+                className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+              >
+                {t('invoiceExtraParams') ?? 'Дополнительные параметры'}
+                <ChevronDown className={`h-4 w-4 transition-transform ${extraOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {extraOpen && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                  <textarea
+                    value={form.description}
+                    onChange={handleChange('description')}
+                    rows={3}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                  />
+                </label>
+              )}
             </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <header className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
+              <button
+                type="button"
+                onClick={addLineItem}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                + Добавить
+              </button>
+            </header>
+            <div className="space-y-2">
+              {lineItems.map((item) => (
+                <div key={item.id} className="grid grid-cols-12 gap-2">
+                  <input type="text" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} placeholder="Наименование" className="col-span-5 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" inputMode="decimal" value={item.price} onChange={(event) => updateLineItem(item.id, { price: event.target.value })} placeholder="Цена" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <button type="button" onClick={() => removeLineItem(item.id)} className="col-span-1 rounded-lg border border-slate-200 px-2 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
           </section>
 
           <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">

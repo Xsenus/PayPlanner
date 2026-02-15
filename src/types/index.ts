@@ -333,7 +333,15 @@ export interface Invoice {
   counterpartyInn?: string | null;
   counterpartyName?: string | null;
   paymentStatusName?: string | null;
+  lineItems?: InvoiceLineItem[];
   createdAt: string;
+}
+
+export interface InvoiceLineItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  price: number;
 }
 
 export interface InvoiceInput {
@@ -353,6 +361,7 @@ export interface InvoiceInput {
   dealTypeId?: number | null;
   paymentStatusEntityId?: number | null;
   paidDate?: string | null;
+  lineItems?: InvoiceLineItem[];
 }
 
 export interface InvoiceSummaryBucket {
