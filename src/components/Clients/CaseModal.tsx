@@ -79,7 +79,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete }: CaseM
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    const ok = window.confirm('Удалить это дело? Действие необратимо.');
+    const ok = await confirm({ title: 'Подтверждение удаления', description: 'Удалить это дело? Действие необратимо.', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
     if (!ok) return;
     setSaving(true);
     setError(null);

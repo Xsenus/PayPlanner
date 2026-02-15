@@ -2,6 +2,7 @@ import { CalendarRange, FileSignature, Loader2, Pencil, RefreshCcw, Search, Tras
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -44,6 +45,7 @@ export function Contracts() {
   const canDelete = contractsPermissions.canDelete;
 
   const { t } = useTranslation();
+  const { confirm } = useDialog();
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -180,7 +182,7 @@ export function Contracts() {
     const confirmMessage =
       t('contractDeleteConfirm')?.replace('{{number}}', contract.number ?? '') ??
       `Удалить договор «${contract.number}»?`;
-    if (!confirm(confirmMessage)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmMessage, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
 
     setDeletingId(contract.id);
     setActionError(null);

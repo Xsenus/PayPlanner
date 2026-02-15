@@ -10,6 +10,7 @@ import type { Payment, PaymentPayload } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
@@ -51,6 +52,7 @@ function ymEnd(ym: string): string {
 
 export function Calendar({ onOpenClient }: CalendarProps) {
   const { user } = useAuth();
+  const { confirm } = useDialog();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
@@ -219,9 +221,13 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       );
       return;
     }
-    const ok = window.confirm(
-      t('confirmDeletePayment') ?? 'Вы уверены, что хотите удалить этот платёж?',
-    );
+    const ok = await confirm({
+      title: 'Подтверждение удаления',
+      description: t('confirmDeletePayment') ?? 'Вы уверены, что хотите удалить этот платёж?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
     if (!ok) return;
     await deletePayment(payment.id);
     await refreshPayments();

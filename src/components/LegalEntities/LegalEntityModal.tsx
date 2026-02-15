@@ -19,6 +19,7 @@ import type {
   LegalEntitySuggestion,
 } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useDialog } from '../../hooks/useDialog';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -70,6 +71,7 @@ export function LegalEntityModal({
   allowDelete,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
+  const { confirm } = useDialog();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -248,7 +250,7 @@ export function LegalEntityModal({
 
   const handleDelete = async () => {
     if (!onDelete || !initial) return;
-    if (!confirm(t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?')) {
+    if (!(await confirm({ title: 'Подтверждение удаления', description: t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) {
       return;
     }
     try {

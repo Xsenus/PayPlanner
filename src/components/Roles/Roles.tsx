@@ -6,6 +6,7 @@ import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
 import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
 import { MENU_SECTION_KEYS } from '../../types/permissions';
+import { useDialog } from '../../hooks/useDialog';
 
 const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {
   calendar: 'Календарь',
@@ -36,6 +37,7 @@ export const Roles = () => {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [permissionRole, setPermissionRole] = useState<Role | null>(null);
   const [, forcePermissionsTick] = useState(0);
+  const { confirm, alert } = useDialog();
 
   useEffect(() => {
     fetchRoles();
@@ -61,12 +63,12 @@ export const Roles = () => {
   };
 
   const handleDelete = async (roleId: number) => {
-    if (!confirm('Удалить роль?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: 'Удалить роль?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await authService.deleteRole(roleId);
       await fetchRoles();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Не удалось удалить роль');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить роль', variant: 'error' });
     }
   };
 
