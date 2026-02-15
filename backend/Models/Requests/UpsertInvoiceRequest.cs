@@ -46,4 +46,21 @@ public class UpsertInvoiceRequest
     public int? DealTypeId { get; set; }
 
     public int? PaymentStatusEntityId { get; set; }
+
+    public List<InvoiceLineItemRequest>? LineItems { get; set; }
+}
+
+public class InvoiceLineItemRequest
+{
+    [MaxLength(300)]
+    public string? Name { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal Quantity { get; set; }
+
+    [MaxLength(32)]
+    public string? Unit { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal Price { get; set; }
 }

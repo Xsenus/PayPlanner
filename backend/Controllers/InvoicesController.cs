@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ namespace PayPlanner.Api.Controllers;
 public class InvoicesController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private const string InvoiceItemsMarker = "[pp:invoice-items]";
 
     public InvoicesController(PaymentContext db) => _db = db;
 
@@ -45,11 +47,13 @@ public class InvoicesController : ControllerBase
         var total = await query.CountAsync(ct);
         var skip = (page - 1) * pageSize;
 
-        var items = await query
+        var rawItems = await query
             .Skip(skip)
             .Take(pageSize)
-            .Select(Projection)
+            .Select(ProjectionRaw)
             .ToListAsync(ct);
+
+        var items = rawItems.Select(MapFromRaw).ToList();
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -148,15 +152,19 @@ public class InvoicesController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
+        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
+
         ApplyPaidFlags(payment, request.PaidDate);
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
-        var dto = await BuildInvoiceQuery()
+        var raw = await BuildInvoiceQuery()
             .Where(x => x.Payment.Id == payment.Id)
-            .Select(Projection)
+            .Select(ProjectionRaw)
             .FirstAsync(ct);
+
+        var dto = MapFromRaw(raw);
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -201,15 +209,18 @@ public class InvoicesController : ControllerBase
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
         payment.CounterpartyName = Normalize(request.CounterpartyName);
+        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
         ApplyPaidFlags(payment, request.PaidDate);
 
         await _db.SaveChangesAsync(ct);
 
-        var dto = await BuildInvoiceQuery()
+        var raw = await BuildInvoiceQuery()
             .Where(x => x.Payment.Id == payment.Id)
-            .Select(Projection)
+            .Select(ProjectionRaw)
             .FirstAsync(ct);
+
+        var dto = MapFromRaw(raw);
 
         return Ok(dto);
     }
@@ -389,7 +400,7 @@ public class InvoicesController : ControllerBase
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static readonly Expression<Func<InvoiceQueryItem, InvoiceDto>> Projection = x => new InvoiceDto
+    private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw
     {
         Id = x.Payment.Id,
         Number = x.Payment.Account ?? string.Empty,
@@ -433,7 +444,141 @@ public class InvoicesController : ControllerBase
         CounterpartyName = x.Payment.CounterpartyName,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
         CreatedAt = x.Payment.CreatedAt,
+        SystemNotes = x.Payment.SystemNotes,
     };
+
+    private static InvoiceDto MapFromRaw(InvoiceProjectionRaw raw)
+    {
+        return new InvoiceDto
+        {
+            Id = raw.Id,
+            Number = raw.Number,
+            Date = raw.Date,
+            DueDate = raw.DueDate,
+            Amount = raw.Amount,
+            Type = raw.Type,
+            Status = raw.Status,
+            IsPaid = raw.IsPaid,
+            PaidDate = raw.PaidDate,
+            ClientId = raw.ClientId,
+            ClientName = raw.ClientName,
+            ClientCompany = raw.ClientCompany,
+            ClientStatusId = raw.ClientStatusId,
+            ClientStatus = raw.ClientStatus,
+            ClientCaseId = raw.ClientCaseId,
+            ClientCaseTitle = raw.ClientCaseTitle,
+            Description = raw.Description,
+            ActReference = raw.ActReference,
+            ActId = raw.ActId,
+            ActNumber = raw.ActNumber,
+            ActTitle = raw.ActTitle,
+            ActStatus = raw.ActStatus,
+            ResponsibleId = raw.ResponsibleId,
+            ResponsibleName = raw.ResponsibleName,
+            CounterpartyInn = raw.CounterpartyInn,
+            CounterpartyName = raw.CounterpartyName,
+            PaymentStatusName = raw.PaymentStatusName,
+            CreatedAt = raw.CreatedAt,
+            LineItems = ExtractInvoiceItems(raw.SystemNotes),
+        };
+    }
+
+    private static List<InvoiceLineItemDto> ExtractInvoiceItems(string? systemNotes)
+    {
+        if (string.IsNullOrWhiteSpace(systemNotes)) return new();
+
+        var markerLine = systemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(markerLine)) return new();
+
+        var json = markerLine[InvoiceItemsMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json)) return new();
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<List<InvoiceLineItemDto>>(json);
+            return parsed?
+                .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
+                .Select(item => new InvoiceLineItemDto
+                {
+                    Name = item.Name.Trim(),
+                    Quantity = item.Quantity,
+                    Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
+                    Price = item.Price,
+                })
+                .ToList() ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static string MergeInvoiceItemsIntoSystemNotes(string? existingSystemNotes, List<InvoiceLineItemRequest>? lineItems)
+    {
+        if (lineItems is null)
+        {
+            return existingSystemNotes ?? string.Empty;
+        }
+
+        var baseLines = (existingSystemNotes ?? string.Empty)
+            .Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal))
+            .ToList();
+
+        var normalizedItems = lineItems
+            .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
+            .Select(item => new InvoiceLineItemDto
+            {
+                Name = item.Name!.Trim(),
+                Quantity = Math.Max(item.Quantity, 0),
+                Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
+                Price = Math.Max(item.Price, 0),
+            })
+            .ToList();
+
+        if (normalizedItems.Count > 0)
+        {
+            var json = JsonSerializer.Serialize(normalizedItems);
+            baseLines.Add($"{InvoiceItemsMarker} {json}");
+        }
+
+        return string.Join("\n", baseLines);
+    }
+
+    private sealed class InvoiceProjectionRaw
+    {
+        public int Id { get; init; }
+        public string Number { get; init; } = string.Empty;
+        public DateTime Date { get; init; }
+        public DateTime? DueDate { get; init; }
+        public decimal Amount { get; init; }
+        public PaymentType Type { get; init; }
+        public PaymentStatus Status { get; init; }
+        public bool IsPaid { get; init; }
+        public DateTime? PaidDate { get; init; }
+        public int? ClientId { get; init; }
+        public string? ClientName { get; init; }
+        public string? ClientCompany { get; init; }
+        public int? ClientStatusId { get; init; }
+        public ClientStatusDto? ClientStatus { get; init; }
+        public int? ClientCaseId { get; init; }
+        public string? ClientCaseTitle { get; init; }
+        public string? Description { get; init; }
+        public string? ActReference { get; init; }
+        public int? ActId { get; init; }
+        public string? ActNumber { get; init; }
+        public string? ActTitle { get; init; }
+        public ActStatus? ActStatus { get; init; }
+        public int? ResponsibleId { get; init; }
+        public string? ResponsibleName { get; init; }
+        public string? CounterpartyInn { get; init; }
+        public string? CounterpartyName { get; init; }
+        public string? PaymentStatusName { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public string? SystemNotes { get; init; }
+    }
 
     private sealed class InvoiceQueryItem
     {
