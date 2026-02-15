@@ -24,50 +24,240 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search,
         CancellationToken ct)
     {
-        var q = _db.MoneyOperations.AsQueryable();
+        var customQuery = ApplyMoneyOperationFilters(
+            _db.MoneyOperations.AsNoTracking().AsQueryable(),
+            from,
+            to,
+            source,
+            direction,
+            accountingType,
+            search);
 
+        var customOperations = (await customQuery
+            .OrderByDescending(o => o.Date)
+            .ThenByDescending(o => o.Id)
+            .ToListAsync(ct))
+            .Select(MapManualOperationToListItem)
+            .ToList();
+
+        var paymentsQuery = ApplyPaymentFilters(
+            _db.Payments
+                .AsNoTracking()
+                .Include(p => p.PaymentSource)
+                .Include(p => p.ClientCase)
+                .AsQueryable(),
+            from,
+            to,
+            direction,
+            accountingType,
+            search);
+
+        var paymentOperations = (await paymentsQuery.ToListAsync(ct))
+            .Select(MapPaymentToListItem)
+            .Where(o => !source.HasValue || o.Source == source.Value)
+            .ToList();
+
+        var list = customOperations
+            .Concat(paymentOperations)
+            .OrderByDescending(o => o.Date)
+            .ThenByDescending(o => o.Id)
+            .ToList();
+
+        return Ok(list);
+    }
+
+    private static IQueryable<MoneyOperation> ApplyMoneyOperationFilters(
+        IQueryable<MoneyOperation> query,
+        DateTime? from,
+        DateTime? to,
+        MoneyOperationSource? source,
+        MoneyOperationDirection? direction,
+        MoneyOperationAccountingType? accountingType,
+        string? search)
+    {
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            q = q.Where(o => o.Date >= fromDate);
+            query = query.Where(o => o.Date >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            q = q.Where(o => o.Date <= toDate);
+            query = query.Where(o => o.Date <= toDate);
         }
 
         if (source.HasValue)
         {
-            q = q.Where(o => o.Source == source.Value);
+            query = query.Where(o => o.Source == source.Value);
         }
 
         if (direction.HasValue)
         {
-            q = q.Where(o => o.Direction == direction.Value);
+            query = query.Where(o => o.Direction == direction.Value);
         }
 
         if (accountingType.HasValue)
         {
-            q = q.Where(o => o.AccountingType == accountingType.Value);
+            query = query.Where(o => o.AccountingType == accountingType.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var query = search.Trim().ToLower();
-            q = q.Where(o =>
-                (o.CounterpartyName ?? string.Empty).ToLower().Contains(query) ||
-                (o.Purpose ?? string.Empty).ToLower().Contains(query) ||
-                (o.CategoryName ?? string.Empty).ToLower().Contains(query));
+            var term = search.Trim().ToLower();
+            query = query.Where(o =>
+                (o.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
+                (o.Purpose ?? string.Empty).ToLower().Contains(term) ||
+                (o.CategoryName ?? string.Empty).ToLower().Contains(term));
         }
 
-        var list = await q.AsNoTracking()
-            .OrderByDescending(o => o.Date)
-            .ThenByDescending(o => o.Id)
-            .ToListAsync(ct);
+        return query;
+    }
 
-        return Ok(list);
+    private static IQueryable<Payment> ApplyPaymentFilters(
+        IQueryable<Payment> query,
+        DateTime? from,
+        DateTime? to,
+        MoneyOperationDirection? direction,
+        MoneyOperationAccountingType? accountingType,
+        string? search)
+    {
+        if (from.HasValue)
+        {
+            var fromDate = from.Value.Date;
+            query = query.Where(p => p.Date >= fromDate);
+        }
+
+        if (to.HasValue)
+        {
+            var toDate = to.Value.Date;
+            query = query.Where(p => p.Date <= toDate);
+        }
+
+        if (direction.HasValue)
+        {
+            var mappedType = direction.Value == MoneyOperationDirection.Income
+                ? PaymentType.Income
+                : direction.Value == MoneyOperationDirection.Expense
+                    ? PaymentType.Expense
+                    : (PaymentType?)null;
+            if (mappedType.HasValue)
+            {
+                query = query.Where(p => p.Type == mappedType.Value);
+            }
+            else
+            {
+                query = query.Where(_ => false);
+            }
+        }
+
+        if (accountingType.HasValue)
+        {
+            if (accountingType.Value == MoneyOperationAccountingType.Fact)
+            {
+                query = query.Where(p => p.Status == PaymentStatus.Completed);
+            }
+            else
+            {
+                query = query.Where(p => p.Status != PaymentStatus.Completed);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(p =>
+                (p.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
+                (p.Description ?? string.Empty).ToLower().Contains(term) ||
+                (p.Account ?? string.Empty).ToLower().Contains(term));
+        }
+
+        return query;
+    }
+
+    private static MoneyOperationListItem MapManualOperationToListItem(MoneyOperation operation) => new()
+    {
+        Id = operation.Id,
+        Source = operation.Source,
+        Direction = operation.Direction,
+        AccountingType = operation.AccountingType,
+        AccountName = operation.AccountName,
+        CounterpartyName = operation.CounterpartyName,
+        CategoryName = operation.CategoryName,
+        Amount = operation.Amount,
+        Currency = operation.Currency,
+        PaymentOrderNumber = operation.PaymentOrderNumber,
+        Date = operation.Date,
+        RecognitionDate = operation.RecognitionDate,
+        IsAdvancePayment = operation.IsAdvancePayment,
+        Purpose = operation.Purpose,
+        PaidInvoiceNumber = operation.PaidInvoiceNumber,
+        PaidAmount = operation.PaidAmount,
+        ProjectName = operation.ProjectName,
+        DirectionName = operation.DirectionName,
+        SalesPointName = operation.SalesPointName,
+        PaymentPriority = operation.PaymentPriority,
+        PaidAccountName = operation.PaidAccountName,
+        CreatedAt = operation.CreatedAt,
+        UpdatedAt = operation.UpdatedAt,
+        IsReadonly = false,
+        RelatedPaymentId = null,
+    };
+
+    private static MoneyOperationListItem MapPaymentToListItem(Payment payment)
+    {
+        var paymentSource = (payment.PaymentSource?.Name ?? string.Empty).Trim().ToLowerInvariant();
+        var source = paymentSource.Contains("кас")
+            ? MoneyOperationSource.Cash
+            : paymentSource.Contains("карт")
+                ? MoneyOperationSource.Card
+                : MoneyOperationSource.Bank;
+
+        var accountingType = payment.Status == PaymentStatus.Completed
+            ? MoneyOperationAccountingType.Fact
+            : MoneyOperationAccountingType.Plan;
+
+        var operationDate = payment.Status == PaymentStatus.Completed
+            ? (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date)
+            : payment.Date;
+
+        var amount = accountingType == MoneyOperationAccountingType.Fact && payment.PaidAmount > 0m
+            ? payment.PaidAmount
+            : payment.Amount;
+
+        return new MoneyOperationListItem
+        {
+            Id = -payment.Id,
+            Source = source,
+            Direction = payment.Type == PaymentType.Income ? MoneyOperationDirection.Income : MoneyOperationDirection.Expense,
+            AccountingType = accountingType,
+            AccountName = payment.Account,
+            CounterpartyName = payment.CounterpartyName,
+            CategoryName = payment.ClientCase?.Title,
+            Amount = amount,
+            Currency = "RUB",
+            Date = operationDate,
+            RecognitionDate = payment.Date,
+            IsAdvancePayment = false,
+            Purpose = payment.Description,
+            PaidInvoiceNumber = payment.Account,
+            PaidAmount = payment.PaidAmount,
+            ProjectName = payment.ClientCase?.Title,
+            DirectionName = payment.PaymentSource?.Name,
+            SalesPointName = null,
+            PaymentPriority = null,
+            PaidAccountName = payment.Account,
+            CreatedAt = payment.CreatedAt,
+            UpdatedAt = null,
+            IsReadonly = true,
+            RelatedPaymentId = payment.Id,
+        };
+    }
+
+    private sealed class MoneyOperationListItem : MoneyOperation
+    {
+        public bool IsReadonly { get; init; }
+        public int? RelatedPaymentId { get; init; }
     }
 
     [HttpGet("{id:int}")]

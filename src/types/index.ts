@@ -134,6 +134,8 @@ export interface MoneyOperation {
   paidAccountName?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  isReadonly?: boolean;
+  relatedPaymentId?: number | null;
 }
 export interface IncomeType {
   id: number;
