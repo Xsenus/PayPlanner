@@ -2,14 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
-  Building2,
   CheckCircle2,
   Loader2,
   Mail,
   MapPin,
   Phone,
   Search,
-  Users,
+  Plus,
   X,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -82,7 +81,8 @@ export function LegalEntityModal({
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clientSearch, setClientSearch] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
   const [dadataQuery, setDadataQuery] = useState('');
   const [suggestions, setSuggestions] = useState<LegalEntitySuggestion[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
@@ -130,24 +130,28 @@ export function LegalEntityModal({
     setSuggestions([]);
     setSuggestError(null);
     setDadataQuery('');
+    setPickerOpen(false);
+    setPickerSearch('');
   }, [initial, isOpen]);
 
-  const filteredClients = useMemo(() => {
-    const term = clientSearch.trim().toLowerCase();
-    if (!term) return clients;
-    return clients.filter((client) => {
-      const name = (client.name ?? '').toLowerCase();
-      const email = (client.email ?? '').toLowerCase();
-      const phone = (client.phone ?? '').toLowerCase();
-      const company = (client.company ?? '').toLowerCase();
-      return (
-        name.includes(term) ||
-        email.includes(term) ||
-        phone.includes(term) ||
-        company.includes(term)
-      );
-    });
-  }, [clientSearch, clients]);
+  const selectedClients = useMemo(
+    () => clients.filter((client) => clientIds.includes(client.id)),
+    [clientIds, clients],
+  );
+
+  const availableClients = useMemo(() => {
+    const selected = new Set(clientIds);
+    const term = pickerSearch.trim().toLowerCase();
+
+    return clients
+      .filter((client) => !selected.has(client.id))
+      .filter((client) => {
+        if (!term) return true;
+        return `${client.name ?? ''} ${client.company ?? ''} ${client.phone ?? ''} ${client.email ?? ''}`
+          .toLowerCase()
+          .includes(term);
+      });
+  }, [clientIds, clients, pickerSearch]);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -156,10 +160,12 @@ export function LegalEntityModal({
     setFormState((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleToggleClient = (id: number) => {
-    setClientIds((prev) =>
-      prev.includes(id) ? prev.filter((cid) => cid !== id) : [...prev, id],
-    );
+  const handleAddClient = (id: number) => {
+    setClientIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  const handleRemoveClient = (id: number) => {
+    setClientIds((prev) => prev.filter((clientId) => clientId !== id));
   };
 
   const handleSuggest = async () => {
@@ -282,7 +288,7 @@ export function LegalEntityModal({
               <button
                 type="button"
                 onClick={onBack}
-                className="mb-3 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600">
+                className="mb-3 inline-flex items-center gap-2 rounded border px-3 py-2 text-sm">
                 <ArrowLeft size={16} />
                 {t('back') || 'Назад'}
               </button>
@@ -470,111 +476,67 @@ export function LegalEntityModal({
 
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="rounded-xl border border-gray-200 p-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900">
                     {t('legalEntityClients') || 'Клиенты юридического лица'}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    {t('legalEntityClientsHint') || 'Отметьте клиентов, которые относятся к этому юридическому лицу.'}
+                    {t('legalEntityClientsHint') || 'Выберите клиентов, которые относятся к этому юридическому лицу.'}
                   </p>
                 </div>
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
-                  {`${t('selectedCount') || 'Выбрано'}: ${clientIds.length}`}
-                </span>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={clientSearch}
-                    onChange={(e) => setClientSearch(e.target.value)}
-                    placeholder={t('searchClientsPlaceholder') || 'Поиск клиентов'}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
                 <button
                   type="button"
-                  onClick={() => setClientIds(clients.map((c) => c.id))}
+                  onClick={() => setPickerOpen(true)}
                   disabled={readOnly}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40">
-                  {t('selectAll') || 'Выбрать всех'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setClientIds([])}
-                  disabled={readOnly}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40">
-                  {t('clear') || 'Очистить'}
+                  className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
+                  <Plus className="h-4 w-4" />
+                  {t('addClient') || 'Добавить клиента'}
                 </button>
               </div>
-              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-2">
-                {filteredClients.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
-                    {t('nothingFound') || 'Ничего не найдено'}
-                  </div>
-                ) : (
-                  filteredClients.map((client) => {
-                    const checked = clientIds.includes(client.id);
-                    const assignedEntity = client.legalEntity?.shortName;
-                    const assignedToOther = Boolean(
-                      client.legalEntity && initial && client.legalEntity.id !== initial.id,
-                    );
-                    return (
-                      <label
-                        key={client.id}
-                        className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 transition-colors ${
-                          checked ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-blue-300'
-                        } ${readOnly ? 'pointer-events-none opacity-60' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={readOnly}
-                          onChange={() => handleToggleClient(client.id)}
-                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                            <Users size={16} className="text-blue-500" />
-                            <span>{client.name}</span>
-                            <ClientStatusBadge status={client.clientStatus} />
-                            {!client.isActive && (
-                              <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-                                {t('inactive') || 'неактивен'}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-1 space-y-1 text-xs text-gray-600">
-                            {client.phone && (
-                              <div className="flex items-center gap-1">
-                                <Phone size={12} />
-                                <span>{client.phone}</span>
-                              </div>
-                            )}
-                            {client.email && (
-                              <div className="flex items-center gap-1">
-                                <Mail size={12} />
-                                <span>{client.email}</span>
-                              </div>
-                            )}
-                            {assignedEntity && (
-                              <div
-                                className={`flex items-center gap-1 ${
-                                  assignedToOther ? 'text-amber-600' : 'text-gray-500'
-                                }`}>
-                                <Building2 size={12} />
-                                <span>
-                                  {`${assignedToOther ? t('legalEntityAssignedOther') || 'Уже привязан к' : t('legalEntityAssignedCurrent') || 'Привязан к'}: ${assignedEntity}`}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })
-                )}
+
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full divide-y text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">ФИО</th>
+                      <th className="px-3 py-2 text-left">Компания</th>
+                      <th className="px-3 py-2 text-left">Контакты</th>
+                      <th className="px-3 py-2 text-right">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {selectedClients.map((client) => (
+                      <tr key={client.id}>
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-gray-900">{client.name}</div>
+                          <div className="mt-1"><ClientStatusBadge status={client.clientStatus} /></div>
+                        </td>
+                        <td className="px-3 py-2">{client.company || '—'}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600">
+                          <div>{client.phone || '—'}</div>
+                          <div>{client.email || '—'}</div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveClient(client.id)}
+                            disabled={readOnly}
+                            className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {selectedClients.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                          {t('nothingFound') || 'Ничего не найдено'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
             <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
@@ -678,6 +640,66 @@ export function LegalEntityModal({
             </div>
           </div>
         </form>
+
+        {pickerOpen && (
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <h3 className="text-lg font-semibold">Выбор клиента</h3>
+                <button className="rounded border px-2 py-1 text-sm" onClick={() => setPickerOpen(false)}>
+                  Закрыть
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3"
+                    placeholder={t('searchClientsPlaceholder') || 'Поиск клиентов'}
+                  />
+                </div>
+
+                <div className="max-h-80 overflow-auto rounded border">
+                  <table className="min-w-full divide-y text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">ФИО</th>
+                        <th className="px-3 py-2 text-left">Компания</th>
+                        <th className="px-3 py-2 text-right">Действие</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {availableClients.map((client) => (
+                        <tr key={client.id}>
+                          <td className="px-3 py-2">{client.name}</td>
+                          <td className="px-3 py-2">{client.company || '—'}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              type="button"
+                              className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
+                              onClick={() => handleAddClient(client.id)}>
+                              Добавить
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {availableClients.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
+                            Нет доступных клиентов
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
 
