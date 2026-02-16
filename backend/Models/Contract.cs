@@ -24,9 +24,14 @@ public class Contract
     public string? Title { get; set; }
 
     /// <summary>
-    /// Дата подписания договора.
+    /// Дата договора (подписания).
     /// </summary>
     public DateTime Date { get; set; }
+
+    /// <summary>
+    /// Дата начала действия договора.
+    /// </summary>
+    public DateTime? StartDate { get; set; }
 
     /// <summary>
     /// Расширенное описание условий договора.
@@ -42,6 +47,11 @@ public class Contract
     /// Дата окончания действия договора (если задана).
     /// </summary>
     public DateTime? ValidUntil { get; set; }
+
+    /// <summary>
+    /// Дата расторжения договора.
+    /// </summary>
+    public DateTime? TerminationDate { get; set; }
 
     /// <summary>
     /// Дата и время создания записи.
@@ -62,4 +72,19 @@ public class Contract
     /// Клиенты, привязанные к договору.
     /// </summary>
     public ICollection<Client> Clients { get; set; } = new List<Client>();
+
+    /// <summary>
+    /// Ручные привязки актов к договору.
+    /// </summary>
+    public ICollection<ContractAct> ContractActs { get; set; } = new List<ContractAct>();
+
+    /// <summary>
+    /// Ручные привязки счетов к договору.
+    /// </summary>
+    public ICollection<ContractInvoice> ContractInvoices { get; set; } = new List<ContractInvoice>();
+
+    /// <summary>
+    /// Ручные привязки начислений к договору.
+    /// </summary>
+    public ICollection<ContractPayment> ContractPayments { get; set; } = new List<ContractPayment>();
 }

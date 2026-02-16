@@ -212,6 +212,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int>("ClientId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("ContractId", "ClientId");
 
                     b.HasIndex("ClientId")
@@ -287,6 +291,12 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("StartDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("TerminationDate")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -299,9 +309,6 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedAt")
-                        .HasDatabaseName("IX_Contracts_CreatedAt");
-
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_Contracts_Date");
 
@@ -309,6 +316,54 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_Contracts_Number");
 
                     b.ToTable("Contracts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractAct", b =>
+                {
+                    b.Property<int>("ContractId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ActId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ContractId", "ActId");
+
+                    b.HasIndex("ActId")
+                        .HasDatabaseName("IX_ContractActs_ActId");
+
+                    b.ToTable("ContractActs", (string)null);
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractInvoice", b =>
+                {
+                    b.Property<int>("ContractId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("InvoiceId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ContractId", "InvoiceId");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_ContractInvoices_InvoiceId");
+
+                    b.ToTable("ContractInvoices", (string)null);
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractPayment", b =>
+                {
+                    b.Property<int>("ContractId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ContractId", "PaymentId");
+
+                    b.HasIndex("PaymentId")
+                        .HasDatabaseName("IX_ContractPayments_PaymentId");
+
+                    b.ToTable("ContractPayments", (string)null);
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
@@ -1252,6 +1307,63 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractAct", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Act", "Act")
+                        .WithMany()
+                        .HasForeignKey("ActId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("ContractActs")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Act");
+
+                    b.Navigation("Contract");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractInvoice", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("ContractInvoices")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Contract");
+
+                    b.Navigation("Invoice");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ContractPayment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("ContractPayments")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Contract");
+
+                    b.Navigation("Payment");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -1371,6 +1483,12 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
                 {
                     b.Navigation("ClientContracts");
+
+                    b.Navigation("ContractActs");
+
+                    b.Navigation("ContractInvoices");
+
+                    b.Navigation("ContractPayments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>

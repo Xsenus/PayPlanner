@@ -1,51 +1,30 @@
-import { CalendarRange, FileSignature, Loader2, Pencil, RefreshCcw, Search, Trash2, Users as UsersIcon } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FileSignature, Loader2, Pencil, RefreshCcw, Search, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-// import { useTabNavigation } from '../../contexts/TabContext';
+import { useTabNavigation } from '../../contexts/TabContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
-import type { Client, Contract, ContractInput } from '../../types';
+import type { Client, Contract } from '../../types';
 import { toDateInputValue, toRuDate } from '../../utils/dateUtils';
-import { ContractModal } from './ContractModal';
-import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
-import { ContractCreateForm } from './ContractCreateForm';
 
-type SortState = {
-  key: ContractsSortKey;
-  direction: 'asc' | 'desc';
-};
+type SortState = { key: ContractsSortKey; direction: 'asc' | 'desc' };
 
-function formatMoney(value?: number | null): string {
-  if (value === undefined || value === null) {
-    return '—';
-  }
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: 'RUB',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+interface ContractsProps {
+  onOpenContract?: (id: number) => void;
+  onOpenClient?: (id: number) => void;
 }
 
-function formatDate(value?: string | null): string {
-  if (!value) return '—';
-  const formatted = toRuDate(value);
-  return formatted || value;
-}
+const formatDate = (value?: string | null) => (value ? (toRuDate(value) || value) : '—');
 
-export function Contracts() {
+
+export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const { user } = useAuth();
-  // const { setActiveTab } = useTabNavigation();
-  const permissions = useRolePermissions(user?.role?.id);
-  const contractsPermissions = permissions.contracts;
-  const canCreate = contractsPermissions.canCreate;
-  const canEdit = contractsPermissions.canEdit;
-  const canDelete = contractsPermissions.canDelete;
-
+  const { setActiveTab } = useTabNavigation();
+  const permissions = useRolePermissions(user?.role?.id).contracts;
   const { t } = useTranslation();
   const { confirm } = useDialog();
 
@@ -53,501 +32,251 @@ export function Contracts() {
   const [to, setTo] = useState('');
   const [clientFilter, setClientFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
 
-  const clientIdFilter = useMemo(() => {
-    if (clientFilter === 'all') return undefined;
-    const parsed = Number(clientFilter);
-    return Number.isNaN(parsed) ? undefined : parsed;
-  }, [clientFilter]);
+  const debouncedSearch = useDebouncedValue(search.trim(), 350);
+  const clientIdFilter = clientFilter === 'all' ? undefined : Number(clientFilter);
 
-  const {
-    contracts,
-    loading,
-    refreshing,
-    error,
-    pagination,
-    refresh,
-    updateContract,
-    deleteContract,
-  } = useContracts({
+  const { contracts, loading, refreshing, error, pagination, refresh, deleteContract } = useContracts({
     from: from || undefined,
     to: to || undefined,
-    clientId: clientIdFilter,
+    clientId: Number.isNaN(clientIdFilter) ? undefined : clientIdFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
-    pageSize,
+    pageSize: 20,
   });
-
-  const [clients, setClients] = useState<Client[]>([]);
-  const [clientsLoading, setClientsLoading] = useState(false);
-  const [clientsError, setClientsError] = useState<string | null>(null);
-
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [modalError, setModalError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-
-  const totalPages = useMemo(() => {
-    if (!pagination.pageSize) return 1;
-    return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
-  }, [pagination.pageSize, pagination.total]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, from, to, clientIdFilter, sortState.key, sortState.direction]);
-
-  const loadClients = useCallback(async () => {
-    setClientsLoading(true);
-    try {
-      const data = await apiService.getClientsV1({
-        sortBy: 'name',
-        sortDir: 'asc',
-      });
-      const normalized = (data ?? []).map((client) => ({
-        ...client,
-        clientStatusId: client.clientStatusId ?? null,
-        clientStatus: client.clientStatus ?? null,
-      }));
-      setClients(normalized);
-      setClientsError(null);
-    } catch (err) {
-      setClientsError(
-        err instanceof Error ? err.message : (t('contractsClientsLoadError') ?? 'Не удалось загрузить клиентов'),
-      );
-    } finally {
-      setClientsLoading(false);
-    }
-  }, [t]);
+  }, [from, to, clientFilter, debouncedSearch, sortState]);
 
   useEffect(() => {
-    void loadClients();
-  }, [loadClients]);
+    void apiService
+      .getClientsV1({ sortBy: 'name', sortDir: 'asc' })
+      .then((data) => setClients(data ?? []))
+      .catch(() => setClients([]));
+  }, []);
 
-  const selectedFilterClient = useMemo(() => {
-    if (clientFilter === 'all') return null;
-    return clients.find((client) => String(client.id) === clientFilter) ?? null;
-  }, [clientFilter, clients]);
+  const totalPages = Math.max(1, Math.ceil((pagination.total || 0) / (pagination.pageSize || 20)));
 
-  const openEditModal = (contract: Contract) => {
-    if (!canEdit) return;
-    setSelectedContract(contract);
-    setModalOpen(true);
-    setModalError(null);
-  };
-
-  const handleEditSubmit = async (payload: ContractInput) => {
-    setEditSubmitting(true);
-    setModalError(null);
-    setActionError(null);
-    try {
-      if (selectedContract) {
-        await updateContract(selectedContract.id, payload);
+  const handleDelete = useCallback(
+    async (contract: Contract) => {
+      if (!permissions.canDelete) return;
+      const ok = await confirm({
+        title: 'Подтверждение удаления',
+        description: `Удалить договор «${contract.number}»?`,
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      });
+      if (!ok) return;
+      setDeletingId(contract.id);
+      try {
+        await deleteContract(contract.id);
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : 'Не удалось удалить договор');
+      } finally {
+        setDeletingId(null);
       }
-      setModalOpen(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : (t('failedToSave') ?? 'Не удалось сохранить');
-      setModalError(message);
-    } finally {
-      setEditSubmitting(false);
-    }
-  };
+    },
+    [confirm, deleteContract, permissions.canDelete],
+  );
 
-  const handleCreateSubmit = async (payload: ContractInput): Promise<boolean> => {
-    setCreateSubmitting(true);
-    setCreateError(null);
-    setActionError(null);
-    try {
-      await createContract(payload);
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : (t('failedToSave') ?? 'Не удалось сохранить');
-      setCreateError(message);
-      return false;
-    } finally {
-      setCreateSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (contract: Contract) => {
-    if (!canDelete) return;
-    const confirmMessage =
-      t('contractDeleteConfirm')?.replace('{{number}}', contract.number ?? '') ??
-      `Удалить договор «${contract.number}»?`;
-    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmMessage, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
-
-    setDeletingId(contract.id);
-    setActionError(null);
-    try {
-      await deleteContract(contract.id);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : (t('failedToDelete') ?? 'Не удалось удалить');
-      setActionError(message);
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const changeSort = (key: ContractsSortKey) => {
-    setSortState((prev) => {
-      if (prev.key === key) {
-        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-      }
-      return { key, direction: key === 'date' ? 'desc' : 'asc' };
-    });
-  };
-
-  const renderSortIndicator = (key: ContractsSortKey) => {
-    if (sortState.key !== key) return <span className="text-slate-300">↕</span>;
-    return sortState.direction === 'asc' ? <span>↑</span> : <span>↓</span>;
-  };
+  const renderSort = (key: ContractsSortKey) =>
+    sortState.key !== key ? '↕' : sortState.direction === 'asc' ? '↑' : '↓';
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 pt-8 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-3 text-slate-900">
-              <FileSignature className="h-9 w-9 text-emerald-500" />
-              <div>
-                <h1 className="text-2xl font-bold">
-                  {t('contracts') ?? 'Договоры'}
-                </h1>
-                <p className="text-sm text-slate-600">
-                  {t('contractsSubtitle') ?? 'Управляйте договорами и связями с клиентами.'}
-                </p>
-              </div>
-            </div>
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <FileSignature className="h-9 w-9 text-emerald-500" />
+            <h1 className="text-2xl font-bold text-slate-900">{t('contracts') ?? 'Договоры'}</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-2">
+            {permissions.canCreate && (
+              <button
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white"
+                onClick={() => setActiveTab('contractCreate')}
+              >
+                Создать
+              </button>
+            )}
             <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
-                void refresh();
-              }}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              disabled={loading || refreshing}
+              className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
+              onClick={() => void refresh()}
             >
               {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              <span>{t('update') ?? 'Обновить'}</span>
             </button>
           </div>
         </div>
 
-        {canCreate && (
-          <ContractCreateForm
-            onSubmit={handleCreateSubmit}
-            submitting={createSubmitting}
-            errorMessage={createError}
-          />
-        )}
-
-        <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <label className="flex flex-col gap-2 text-sm text-slate-600">
-              <span className="flex items-center gap-2 font-medium text-slate-700">
-                <CalendarRange className="h-4 w-4" />
-                {t('contractsFrom') ?? 'С даты'}
-              </span>
+        <div className="mb-4 grid gap-4 rounded-2xl border bg-white p-4 md:grid-cols-4">
+          <label className="text-sm text-slate-700">
+            С даты
+            <input
+              type="date"
+              value={toDateInputValue(from)}
+              onChange={(e) => setFrom(e.target.value)}
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-slate-700">
+            По дату
+            <input
+              type="date"
+              value={toDateInputValue(to)}
+              onChange={(e) => setTo(e.target.value)}
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-slate-700">
+            Клиент
+            <select
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+            >
+              <option value="all">Все клиенты</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Поиск
+            <div className="relative mt-1">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
               <input
-                type="date"
-                value={toDateInputValue(from)}
-                onChange={(event) => setFrom(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm text-slate-600">
-              <span className="flex items-center gap-2 font-medium text-slate-700">
-                <CalendarRange className="h-4 w-4" />
-                {t('contractsTo') ?? 'По дату'}
-              </span>
-              <input
-                type="date"
-                value={toDateInputValue(to)}
-                onChange={(event) => setTo(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm text-slate-600">
-              <span className="flex items-center gap-2 font-medium text-slate-700">
-                <UsersIcon className="h-4 w-4" />
-                {t('contractsClientFilter') ?? 'Клиент'}
-              </span>
-              <select
-                value={clientFilter}
-                onChange={(event) => setClientFilter(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                disabled={clientsLoading && clients.length === 0}
-              >
-                <option value="all">{t('allClients') ?? 'Все клиенты'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                    {client.company ? ` — ${client.company}` : ''}
-                  </option>
-                ))}
-              </select>
-              {selectedFilterClient?.clientStatus ? (
-                <ClientStatusBadge status={selectedFilterClient.clientStatus} className="mt-1 inline-flex" />
-              ) : null}
-              {clientsError && (
-                <span className="text-xs text-rose-600">{clientsError}</span>
-              )}
-            </label>
-            <label className="flex flex-col gap-2 text-sm text-slate-600">
-              <span className="font-medium text-slate-700">{t('contractsSortHint') ?? 'Сортировка'}</span>
-              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
-                {t('contractsSortDescription') ?? 'Используйте заголовки таблицы для изменения сортировки.'}
-              </div>
-            </label>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="search"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('contractsSearchPlaceholder') ?? 'Поиск по номеру или описанию'}
-                className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-4 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-lg border py-2 pl-8 pr-3"
+                placeholder="Поиск по номеру, названию или описанию"
               />
             </div>
-            {actionError && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                {actionError}
-              </div>
-            )}
-            {error && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                {t('contractsLoadError') ?? 'Не удалось загрузить договоры'}
-                {': '}
-                {error}
-              </div>
-            )}
-          </div>
+          </label>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {actionError && (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+            {actionError}
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+
+        <div className="overflow-hidden rounded-2xl border bg-white">
           {loading ? (
-            <div className="flex items-center justify-center gap-3 py-16 text-slate-500">
+            <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin" />
-              <span>{t('loading') ?? 'Загрузка...'}</span>
-            </div>
-          ) : contracts.length === 0 ? (
-            <div className="py-16 text-center">
-              <p className="text-lg font-semibold text-slate-900">
-                {t('contractsEmptyTitle') ?? 'Договоры отсутствуют'}
-              </p>
-              <p className="text-sm text-slate-600">
-                {t('contractsEmptyDescription') ?? 'Создайте первый договор, чтобы видеть его в списке.'}
-              </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th
-                      scope="col"
-                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                    >
+            <table className="min-w-full divide-y">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'number', direction: s.key === 'number' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Номер договора {renderSort('number')}</button></th>
+                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'date', direction: s.key === 'date' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Дата договора {renderSort('date')}</button></th>
+                  <th className="px-3 py-2 text-left">Дата начала действия</th>
+                  <th className="px-3 py-2 text-left">Дата окончания действия</th>
+                  <th className="px-3 py-2 text-left">Дата расторжения</th>
+                  <th className="px-3 py-2 text-left">Описание</th>
+                  <th className="px-3 py-2 text-left">Клиенты</th>
+                  <th className="px-3 py-2 text-right">Действия</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {contracts.map((contract) => (
+                  <tr key={contract.id} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}>
+                    <td className="px-3 py-2">
                       <button
-                        type="button"
-                        onClick={() => changeSort('number')}
-                        className="inline-flex items-center gap-1 text-slate-600"
+                        className="text-left text-emerald-700 hover:underline"
+                        onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
                       >
-                        {t('contractNumber') ?? 'Номер'}
-                        {renderSortIndicator('number')}
-                      </button>
-                    </th>
-                    <th
-                      scope="col"
-                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => changeSort('date')}
-                        className="inline-flex items-center gap-1 text-slate-600"
-                      >
-                        {t('contractDate') ?? 'Дата'}
-                        {renderSortIndicator('date')}
-                      </button>
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {t('contractClients') ?? 'Клиенты'}
-                    </th>
-                    <th
-                      scope="col"
-                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => changeSort('amount')}
-                        className="inline-flex items-center gap-1 text-slate-600"
-                      >
-                        {t('contractAmount') ?? 'Сумма'}
-                        {renderSortIndicator('amount')}
-                      </button>
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {t('contractValidUntil') ?? 'Действует до'}
-                    </th>
-                    <th
-                      scope="col"
-                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => changeSort('createdAt')}
-                        className="inline-flex items-center gap-1 text-slate-600"
-                      >
-                        {t('contractCreatedAt') ?? 'Создано'}
-                        {renderSortIndicator('createdAt')}
-                      </button>
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {t('contractDescription') ?? 'Описание'}
-                    </th>
-                    {(canEdit || canDelete) && (
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {t('actions') ?? 'Действия'}
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {contracts.map((contract) => (
-                    <tr key={contract.id} className="hover:bg-slate-50/70">
-                      <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-900">
                         {contract.number}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {formatDate(contract.date)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-600">
-                        {contract.clients && contract.clients.length > 0
-                          ? contract.clients
-                              .map((client) =>
-                                client.clientStatus?.name
-                                  ? `${client.name} (${client.clientStatus.name})`
-                                  : client.name
-                              )
-                              .join(', ')
-                          : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {formatMoney(contract.amount)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {formatDate(contract.validUntil)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {formatDate(contract.createdAt)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-500">
-                        {contract.description ?? '—'}
-                      </td>
-                      {(canEdit || canDelete) && (
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            {canEdit && (
-                              <button
-                                type="button"
-                                onClick={() => openEditModal(contract)}
-                                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"
-                                title={t('edit') ?? 'Редактировать'}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">{formatDate(contract.date)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.startDate)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.validUntil)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.terminationDate)}</td>
+                    <td className="px-3 py-2">{contract.description || '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {contract.clients.map((c) => (
+                          <button
+                            key={c.id}
+                            className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                            onClick={(e) => { e.stopPropagation(); onOpenClient?.(c.id); }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
+                          className="rounded border p-1 text-slate-700 hover:bg-slate-100"
+                          title="Редактировать договор"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        {permissions.canDelete && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); void handleDelete(contract); }}
+                            className="rounded border p-1 text-rose-600"
+                            title="Удалить"
+                          >
+                            {deletingId === contract.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
                             )}
-                            {canDelete && (
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(contract)}
-                                className="rounded-lg border border-slate-200 p-2 text-rose-600 hover:bg-rose-50"
-                                title={t('delete') ?? 'Удалить'}
-                                disabled={deletingId === contract.id}
-                              >
-                                {deletingId === contract.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
 
-        {contracts.length > 0 && (
-          <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm md:flex-row">
-            <div>
-              {t('paginationSummary', {
-                start: (pagination.page - 1) * pagination.pageSize + 1,
-                end: Math.min(pagination.page * pagination.pageSize, pagination.total),
-                total: pagination.total,
-              }) ??
-                `Показано ${(pagination.page - 1) * pagination.pageSize + 1}-${Math.min(
-                  pagination.page * pagination.pageSize,
-                  pagination.total,
-                )} из ${pagination.total}`}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 disabled:opacity-50"
-              >
-                {t('prev') ?? 'Назад'}
-              </button>
-              <span className="text-sm text-slate-500">
-                {t('pageOf', { page, totalPages }) ?? `Страница ${page} из ${totalPages}`}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 disabled:opacity-50"
-              >
-                {t('next') ?? 'Вперёд'}
-              </button>
-            </div>
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span>{pagination.total || 0} записей</span>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              className="rounded border px-2 py-1"
+            >
+              Назад
+            </button>
+            <span>
+              {page}/{totalPages}
+            </span>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded border px-2 py-1"
+            >
+              Вперёд
+            </button>
           </div>
-        )}
         </div>
-
-        <ContractModal
-          open={modalOpen}
-          mode="edit"
-          contract={selectedContract}
-          onClose={() => {
-            if (editSubmitting) return;
-            setModalOpen(false);
-          }}
-          onSubmit={handleEditSubmit}
-          submitting={editSubmitting}
-          errorMessage={modalError}
-        />
       </div>
     </div>
   );

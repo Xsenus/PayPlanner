@@ -12,6 +12,7 @@ import { Installments } from './components/Accounts/Installments';
 import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
 import { ContractCreatePage } from './components/Contracts/ContractCreatePage';
+import { ContractDetailPage } from './components/Contracts/ContractDetailPage';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
@@ -57,6 +58,7 @@ function AppContent() {
     moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
     contractCreate: 'Новый договор',
+    contractDetail: 'Договор',
     companyProfile: 'Профиль компании',
     users: 'Пользователи',
     roles: 'Роли',
@@ -78,11 +80,18 @@ function AppContent() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
+  const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
+  const [clientReturnTab, setClientReturnTab] = useState<{ tab: Tab; contractId?: number | null } | null>(null);
 
-  const handleOpenClient = (clientId: number, caseId?: number) => {
+  const handleOpenClient = (
+    clientId: number,
+    caseId?: number,
+    options?: { returnTo?: { tab: Tab; contractId?: number | null } },
+  ) => {
     if (!permissions.clients.canView) {
       return;
     }
+    setClientReturnTab(options?.returnTo ?? { tab: 'clients' });
     setSelectedClientId(clientId);
     setInitialCaseId(typeof caseId === 'number' ? caseId : 'all');
     setActiveTab('clientDetail');
@@ -135,6 +144,7 @@ function AppContent() {
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
+        { tab: 'contractDetail' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
         .filter((entry) => entry.allowed)
@@ -176,6 +186,8 @@ function AppContent() {
           return permissions.contracts.canView;
         case 'contractCreate':
           return permissions.contracts.canCreate;
+        case 'contractDetail':
+          return permissions.contracts.canView;
         case 'companyProfile':
           return true;
         case 'dictionaries':
@@ -328,13 +340,18 @@ function AppContent() {
             clientId={selectedClientId}
             initialCaseId={initialCaseId}
             onBack={() => {
-              setActiveTab('clients');
+              const target = clientReturnTab?.tab ?? 'clients';
+              if (target === 'contractDetail' && clientReturnTab?.contractId) {
+                setSelectedContractId(clientReturnTab.contractId);
+              }
+              setActiveTab(target);
               setSelectedClientId(null);
+              setClientReturnTab(null);
               logActivity({
                 category: 'clients',
                 action: 'back_to_list',
-                section: 'clients',
-                description: 'Возврат к списку клиентов',
+                section: target,
+                description: 'Возврат к предыдущему разделу',
                 status: 'Info',
               });
             }}
@@ -370,7 +387,10 @@ function AppContent() {
         return permissions.payments.canView
           ? (
               <Payments
-                onOpenClient={handleOpenClient}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
+                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
+                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Income"
                 lockType
                 titleKey="paymentsIncomeTitle"
@@ -383,7 +403,10 @@ function AppContent() {
         return permissions.payments.canView
           ? (
               <Payments
-                onOpenClient={handleOpenClient}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
+                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
+                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Expense"
                 lockType
                 titleKey="paymentsExpenseTitle"
@@ -414,7 +437,7 @@ function AppContent() {
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
-          ? <Contracts />
+          ? <Contracts onOpenContract={(id) => { setSelectedContractId(id); setActiveTab('contractDetail'); }} onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contracts' } })} />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'contractCreate':
         return permissions.contracts.canCreate
@@ -425,6 +448,19 @@ function AppContent() {
               />
             )
           : renderNoAccess('Создание договоров недоступно для вашей роли.');
+      case 'contractDetail':
+        return permissions.contracts.canView && selectedContractId
+          ? (
+              <ContractDetailPage
+                contractId={selectedContractId}
+                onBack={() => setActiveTab('contracts')}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
+                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
+                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
+              />
+            )
+          : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'companyProfile':
         return <CompanyProfile />;
       case 'roles':

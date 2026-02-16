@@ -79,12 +79,59 @@ public class PaymentContext : DbContext
                       {
                           join.HasKey(cc => new { cc.ContractId, cc.ClientId });
                           join.ToTable("ClientContracts");
+                          join.Property(cc => cc.Comment).HasMaxLength(1000);
                           join.HasIndex(cc => cc.ClientId).HasDatabaseName("IX_ClientContracts_ClientId");
                       });
 
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Contracts_Number");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Contracts_Date");
-            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_Contracts_CreatedAt");
+            entity.HasMany(e => e.ContractActs)
+                  .WithOne(x => x.Contract)
+                  .HasForeignKey(x => x.ContractId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.ContractInvoices)
+                  .WithOne(x => x.Contract)
+                  .HasForeignKey(x => x.ContractId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.ContractPayments)
+                  .WithOne(x => x.Contract)
+                  .HasForeignKey(x => x.ContractId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContractAct>(entity =>
+        {
+            entity.HasKey(x => new { x.ContractId, x.ActId });
+            entity.ToTable("ContractActs");
+            entity.HasOne(x => x.Act)
+                .WithMany()
+                .HasForeignKey(x => x.ActId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ActId).HasDatabaseName("IX_ContractActs_ActId");
+        });
+
+        modelBuilder.Entity<ContractInvoice>(entity =>
+        {
+            entity.HasKey(x => new { x.ContractId, x.InvoiceId });
+            entity.ToTable("ContractInvoices");
+            entity.HasOne(x => x.Invoice)
+                .WithMany()
+                .HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_ContractInvoices_InvoiceId");
+        });
+
+        modelBuilder.Entity<ContractPayment>(entity =>
+        {
+            entity.HasKey(x => new { x.ContractId, x.PaymentId });
+            entity.ToTable("ContractPayments");
+            entity.HasOne(x => x.Payment)
+                .WithMany()
+                .HasForeignKey(x => x.PaymentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.PaymentId).HasDatabaseName("IX_ContractPayments_PaymentId");
         });
 
         // ------------------ LegalEntity ------------------
@@ -536,6 +583,12 @@ public class PaymentContext : DbContext
     /// Связи клиентов и договоров.
     /// </summary>
     public DbSet<ClientContract> ClientContracts { get; set; }
+
+    public DbSet<ContractAct> ContractActs { get; set; }
+
+    public DbSet<ContractInvoice> ContractInvoices { get; set; }
+
+    public DbSet<ContractPayment> ContractPayments { get; set; }
 
     /// <summary>
     /// Типы сделок.

@@ -3,40 +3,29 @@ using System.Collections.Generic;
 
 namespace PayPlanner.Api.Models.Responses;
 
-/// <summary>
-/// DTO договора с расширенной информацией по клиентам.
-/// </summary>
 public class ContractDto
 {
     public int Id { get; set; }
-
     public string Number { get; set; } = string.Empty;
-
     public string? Title { get; set; }
-
     public DateTime Date { get; set; }
-
+    public DateTime? StartDate { get; set; }
     public string? Description { get; set; }
-
     public decimal? Amount { get; set; }
-
     public DateTime? ValidUntil { get; set; }
-
+    public DateTime? TerminationDate { get; set; }
     public DateTime CreatedAt { get; set; }
-
     public DateTime? UpdatedAt { get; set; }
-
     public IReadOnlyCollection<ContractClientDto> Clients { get; set; } = Array.Empty<ContractClientDto>();
+    public IReadOnlyCollection<int> ActIds { get; set; } = Array.Empty<int>();
+    public IReadOnlyCollection<int> InvoiceIds { get; set; } = Array.Empty<int>();
+    public IReadOnlyCollection<int> PaymentIds { get; set; } = Array.Empty<int>();
 }
 
-/// <summary>
-/// DTO клиента в контексте договора.
-/// </summary>
 public class ContractClientDto
 {
     public int Id { get; set; }
-
     public string Name { get; set; } = string.Empty;
-
     public string? Company { get; set; }
+    public string? Comment { get; set; }
 }

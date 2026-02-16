@@ -427,6 +427,27 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setModalOpen(true);
   };
 
+
+  useEffect(() => {
+    if (!canEdit || invoices.length === 0) return;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem('pp.openInvoiceId');
+    } catch {
+      raw = null;
+    }
+    if (!raw) return;
+    const targetId = Number(raw);
+    if (Number.isNaN(targetId)) {
+      try { localStorage.removeItem('pp.openInvoiceId'); } catch { /** */ }
+      return;
+    }
+    const target = invoices.find((invoice) => invoice.id === targetId);
+    if (!target) return;
+    openEditModal(target);
+    try { localStorage.removeItem('pp.openInvoiceId'); } catch { /** */ }
+  }, [canEdit, invoices]);
+
   const closeModal = () => {
     setModalOpen(false);
     setSelectedInvoice(null);
