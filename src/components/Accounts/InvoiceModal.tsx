@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, Loader2, Plus, Search, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Search, UserRoundSearch, X } from 'lucide-react';
 import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -72,6 +72,7 @@ interface InvoiceModalProps {
   invoice: Invoice | null;
   onClose: () => void;
   onBack?: () => void;
+  onOpenClient?: (clientId: number) => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
@@ -144,6 +145,7 @@ export function InvoiceModal({
   invoice,
   onClose,
   onBack,
+  onOpenClient,
   onSubmit,
   submitting,
   errorMessage,
@@ -167,7 +169,6 @@ export function InvoiceModal({
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
-  const [extraOpen, setExtraOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<ClientPickerMode>('client');
@@ -630,7 +631,7 @@ export function InvoiceModal({
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                   <input
@@ -681,27 +682,16 @@ export function InvoiceModal({
                 </label>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setExtraOpen((prev) => !prev)}
-                className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
-              >
-                {t('invoiceExtraParams') ?? 'Дополнительные параметры'}
-                <ChevronDown className={`h-4 w-4 transition-transform ${extraOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {extraOpen && (
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
-                  <textarea
-                    value={form.description}
-                    onChange={handleChange('description')}
-                    rows={3}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
-                  />
-                </label>
-              )}
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                <textarea
+                  value={form.description}
+                  onChange={handleChange('description')}
+                  rows={3}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                />
+              </label>
             </div>
           </section>
 
@@ -754,10 +744,9 @@ export function InvoiceModal({
                   <button
                     type="button"
                     onClick={() => openClientPicker('client')}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
                   >
                     <UserRoundSearch className="h-4 w-4" />
-                    {t('select') ?? 'Выбрать'}
                   </button>
                 </div>
                 {lookupsLoading && (
@@ -774,6 +763,15 @@ export function InvoiceModal({
                     )}
                   </div>
                 )}
+                {selectedClient && onOpenClient && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient(selectedClient.id)}
+                    className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                  >
+                    Открыть карточку клиента
+                  </button>
+                )}
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
@@ -789,10 +787,9 @@ export function InvoiceModal({
                   <button
                     type="button"
                     onClick={() => openClientPicker('counterparty')}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
                   >
                     <UserRoundSearch className="h-4 w-4" />
-                    {t('select') ?? 'Выбрать'}
                   </button>
                 </div>
                 <span className="text-xs text-slate-500">

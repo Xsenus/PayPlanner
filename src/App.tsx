@@ -365,15 +365,15 @@ function AppContent() {
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
       case 'accounts':
         return permissions.accounts.canView
-          ? <Accounts onOpenClient={handleOpenClient} />
+          ? <Accounts onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'accountsIncome':
         return permissions.accounts.canView
-          ? <Accounts defaultType="Income" lockType onOpenClient={handleOpenClient} />
+          ? <Accounts defaultType="Income" lockType onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'accountsExpense':
         return permissions.accounts.canView
-          ? <Accounts defaultType="Expense" lockType onOpenClient={handleOpenClient} />
+          ? <Accounts defaultType="Expense" lockType onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'installments':
         return permissions.accounts.canView
