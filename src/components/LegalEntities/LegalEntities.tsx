@@ -543,7 +543,6 @@ export function LegalEntities() {
             </tbody>
           </table>
         </div>
-      )
       )}
 
       <LegalEntityModal
