@@ -76,7 +76,6 @@ export function LegalEntities() {
 
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [search, setSearch] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
   const [detailPageOpen, setDetailPageOpen] = useState(false);
   const [editing, setEditing] = useState<LegalEntityDetail | null>(null);
   const [modalBusy, setModalBusy] = useState(false);
@@ -100,7 +99,6 @@ export function LegalEntities() {
     setEditing(null);
     setReadOnlyMode(false);
     setDetailPageOpen(true);
-    setModalOpen(false);
     setActionError(null);
   };
 
@@ -111,25 +109,6 @@ export function LegalEntities() {
       setEditing(detail);
       setReadOnlyMode(!allowEditing);
       setDetailPageOpen(true);
-      setModalOpen(false);
-      setActionError(null);
-    } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : t('legalEntityLoadError') || 'Не удалось загрузить данные юр. лица',
-      );
-    } finally {
-      setModalBusy(false);
-    }
-  };
-
-  const openModalEditor = async (id: number) => {
-    try {
-      setModalBusy(true);
-      const detail = await getLegalEntity(id);
-      setEditing(detail);
-      setReadOnlyMode(false);
-      setDetailPageOpen(false);
-      setModalOpen(true);
       setActionError(null);
     } catch (err) {
       setActionError(
@@ -144,8 +123,6 @@ export function LegalEntities() {
   const canEdit = legalPermissions.canEdit;
   const canDelete = legalPermissions.canDelete;
 
-  const allowModalEdit = canEdit;
-  const allowModalDelete = false;
   const allowDetailEdit = editing ? (!readOnlyMode && canEdit) : false;
   const allowDetailDelete = editing ? (!readOnlyMode && canDelete) : false;
 
@@ -167,7 +144,7 @@ export function LegalEntities() {
     return created;
   };
 
-  const handleDelete = editing && (allowDetailDelete || allowModalDelete)
+  const handleDelete = editing && allowDetailDelete
     ? async () => {
         await deleteLegalEntity(editing.id);
         setEditing(null);
@@ -175,11 +152,6 @@ export function LegalEntities() {
         setDetailPageOpen(false);
       }
     : undefined;
-
-  const handleCloseModal = () => {
-    setModalOpen(false);
-    setActionError(null);
-  };
 
   const handleCloseDetailPage = () => {
     setDetailPageOpen(false);
@@ -414,14 +386,6 @@ export function LegalEntities() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openModalEditor(entity.id)}
-                  disabled={!canEdit}
-                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
-                  <Edit size={14} />
-                  {t('edit')} (modal)
-                </button>
-                <button
-                  type="button"
                   onClick={() => openDetailPage(entity.id, true)}
                   disabled={!canDelete}
                   title={t('delete') || 'Удалить'}
@@ -526,13 +490,6 @@ export function LegalEntities() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => openModalEditor(entity.id)}
-                        disabled={!canEdit}
-                        className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
-                        <Edit size={14} />
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => openDetailPage(entity.id, true)}
                         disabled={!canDelete}
                         className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
@@ -546,17 +503,6 @@ export function LegalEntities() {
           </table>
         </div>
       ))}
-
-      <LegalEntityModal
-        isOpen={modalOpen}
-        onClose={handleCloseModal}
-        onSubmit={handleSubmit}
-        initial={editing}
-        clients={clientsList}
-        suggest={suggestLegalEntities}
-        allowEdit={allowModalEdit}
-        allowDelete={allowModalDelete}
-      />
     </div>
   );
 }
