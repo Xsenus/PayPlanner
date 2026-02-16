@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowLeft,
   Building2,
   CheckCircle2,
   Loader2,
@@ -30,6 +31,8 @@ interface LegalEntityModalProps {
   suggest: (payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>;
   allowEdit: boolean;
   allowDelete: boolean;
+  mode?: 'modal' | 'page';
+  onBack?: () => void;
 }
 
 interface FormState {
@@ -68,6 +71,8 @@ export function LegalEntityModal({
   suggest,
   allowEdit,
   allowDelete,
+  mode = 'modal',
+  onBack,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
@@ -82,6 +87,7 @@ export function LegalEntityModal({
   const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const readOnly = !allowEdit && !!initial;
+  const isPageMode = mode === 'page';
 
   useEffect(() => {
     if (!isOpen) {
@@ -241,7 +247,9 @@ export function LegalEntityModal({
         notes: saved.notes ?? formState.notes,
       });
       setClientIds((saved.clients ?? []).map((c) => c.id));
-      onClose();
+      if (!isPageMode) {
+        onClose();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('saveError') || 'Не удалось сохранить');
     } finally {
@@ -267,11 +275,19 @@ export function LegalEntityModal({
 
   if (!isOpen) return null;
 
-  const modalContent = (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
+  const content = (
+    <div className={isPageMode ? 'rounded-2xl border border-gray-200 bg-white shadow-sm' : 'w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl'}>
         <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
           <div>
+            {isPageMode && onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-3 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600">
+                <ArrowLeft size={16} />
+                {t('back') || 'Назад'}
+              </button>
+            )}
             <h2 className="text-xl font-semibold text-gray-900">
               {initial
                 ? t('editLegalEntity') || 'Редактирование юридического лица'
@@ -290,7 +306,7 @@ export function LegalEntityModal({
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-            aria-label={t('cancel') || 'Закрыть'}>
+            aria-label={isPageMode ? (t('back') || 'Назад') : (t('cancel') || 'Закрыть')}>
             <X size={20} />
           </button>
         </div>
@@ -650,7 +666,7 @@ export function LegalEntityModal({
                   type="button"
                   onClick={onClose}
                   className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:border-gray-400 hover:text-gray-700">
-                  {t('cancel') || 'Отмена'}
+                  {isPageMode ? (t('back') || 'Назад') : (t('cancel') || 'Отмена')}
                 </button>
                 <button
                   type="submit"
@@ -664,8 +680,16 @@ export function LegalEntityModal({
           </div>
         </form>
       </div>
-    </div>
   );
 
-  return createPortal(modalContent, document.body);
+  if (isPageMode) {
+    return content;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4">
+      {content}
+    </div>,
+    document.body,
+  );
 }
