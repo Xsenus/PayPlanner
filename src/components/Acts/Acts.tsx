@@ -211,6 +211,27 @@ export function Acts() {
     setModalError(null);
   };
 
+
+  useEffect(() => {
+    if (!canEdit || acts.length === 0) return;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem('pp.openActId');
+    } catch {
+      raw = null;
+    }
+    if (!raw) return;
+    const targetId = Number(raw);
+    if (Number.isNaN(targetId)) {
+      try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
+      return;
+    }
+    const target = acts.find((act) => act.id === targetId);
+    if (!target) return;
+    openEditModal(target);
+    try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
+  }, [acts, canEdit]);
+
   const closeModal = () => {
     if (submitting) return;
     setModalOpen(false);

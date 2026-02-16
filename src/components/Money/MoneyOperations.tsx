@@ -460,6 +460,27 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     setModalOpen(true);
   };
 
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem('pp.openMoneyOperationId');
+    } catch {
+      raw = null;
+    }
+    if (!raw) return;
+    const targetId = Number(raw);
+    if (Number.isNaN(targetId)) {
+      try { localStorage.removeItem('pp.openMoneyOperationId'); } catch { /** */ }
+      return;
+    }
+    const target = items.find((item) => item.id === targetId);
+    if (!target) return;
+    handleEdit(target);
+    try { localStorage.removeItem('pp.openMoneyOperationId'); } catch { /** */ }
+  }, [items]);
+
   const handleDelete = (item: MoneyOperation) => {
     if (item.isReadonly || item.id <= 0) return;
     setConfirmDelete(item);

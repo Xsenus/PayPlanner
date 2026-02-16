@@ -18,19 +18,8 @@ interface ContractsProps {
   onOpenClient?: (id: number) => void;
 }
 
-const formatMoney = (value?: number | null) =>
-  value == null
-    ? '—'
-    : new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(value);
-
 const formatDate = (value?: string | null) => (value ? (toRuDate(value) || value) : '—');
 
-const SORT_LABELS: Record<ContractsSortKey, string> = {
-  number: 'Номер договора',
-  date: 'Дата договора',
-  amount: 'Сумма договора',
-  createdAt: 'Дата создания',
-};
 
 export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const { user } = useAuth();
@@ -116,7 +105,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white"
                 onClick={() => setActiveTab('contractCreate')}
               >
-                Создать договор
+                Создать
               </button>
             )}
             <button
@@ -124,7 +113,6 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
               onClick={() => void refresh()}
             >
               {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Обновить
             </button>
           </div>
         </div>
@@ -197,57 +185,49 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             <table className="min-w-full divide-y">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  {(['number', 'date', 'amount', 'createdAt'] as ContractsSortKey[]).map((k) => (
-                    <th key={k} className="px-3 py-2 text-left">
-                      <button
-                        onClick={() =>
-                          setSortState((s) => ({
-                            key: k,
-                            direction: s.key === k && s.direction === 'asc' ? 'desc' : 'asc',
-                          }))
-                        }
-                      >
-                        {SORT_LABELS[k]} {renderSort(k)}
-                      </button>
-                    </th>
-                  ))}
-                  <th className="px-3 py-2 text-left">Клиенты</th>
+                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'number', direction: s.key === 'number' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Номер договора {renderSort('number')}</button></th>
+                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'date', direction: s.key === 'date' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Дата договора {renderSort('date')}</button></th>
+                  <th className="px-3 py-2 text-left">Дата начала действия</th>
+                  <th className="px-3 py-2 text-left">Дата окончания действия</th>
+                  <th className="px-3 py-2 text-left">Дата расторжения</th>
                   <th className="px-3 py-2 text-left">Описание</th>
+                  <th className="px-3 py-2 text-left">Клиенты</th>
                   <th className="px-3 py-2 text-right">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {contracts.map((contract) => (
-                  <tr key={contract.id} className="hover:bg-slate-50">
+                  <tr key={contract.id} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}>
                     <td className="px-3 py-2">
                       <button
                         className="text-left text-emerald-700 hover:underline"
-                        onClick={() => onOpenContract?.(contract.id)}
+                        onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
                       >
                         {contract.number}
                       </button>
                     </td>
                     <td className="px-3 py-2">{formatDate(contract.date)}</td>
-                    <td className="px-3 py-2">{formatMoney(contract.amount)}</td>
-                    <td className="px-3 py-2">{formatDate(contract.createdAt)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.startDate)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.validUntil)}</td>
+                    <td className="px-3 py-2">{formatDate(contract.terminationDate)}</td>
+                    <td className="px-3 py-2">{contract.description || '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-2">
                         {contract.clients.map((c) => (
                           <button
                             key={c.id}
                             className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
-                            onClick={() => onOpenClient?.(c.id)}
+                            onClick={(e) => { e.stopPropagation(); onOpenClient?.(c.id); }}
                           >
                             {c.name}
                           </button>
                         ))}
                       </div>
                     </td>
-                    <td className="px-3 py-2">{contract.description || '—'}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex justify-end gap-1">
                         <button
-                          onClick={() => onOpenContract?.(contract.id)}
+                          onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
                           className="rounded border p-1 text-slate-700 hover:bg-slate-100"
                           title="Редактировать договор"
                         >
@@ -255,7 +235,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                         </button>
                         {permissions.canDelete && (
                           <button
-                            onClick={() => void handleDelete(contract)}
+                            onClick={(e) => { e.stopPropagation(); void handleDelete(contract); }}
                             className="rounded border p-1 text-rose-600"
                             title="Удалить"
                           >

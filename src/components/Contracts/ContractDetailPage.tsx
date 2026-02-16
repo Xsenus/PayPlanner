@@ -8,6 +8,9 @@ interface Props {
   contractId: number;
   onBack: () => void;
   onOpenClient?: (clientId: number) => void;
+  onOpenInvoiceEditor?: (invoiceId: number) => void;
+  onOpenActEditor?: (actId: number) => void;
+  onOpenMoneyEditor?: (paymentId: number) => void;
 }
 
 type Tab = 'clients' | 'invoices' | 'acts' | 'money';
@@ -21,7 +24,7 @@ const tabLabels: Record<Tab, string> = {
 
 const formatDate = (value?: string | null) => (value ? (toRuDate(value) || value) : '—');
 
-export function ContractDetailPage({ contractId, onBack, onOpenClient }: Props) {
+export function ContractDetailPage({ contractId, onBack, onOpenClient, onOpenInvoiceEditor, onOpenActEditor, onOpenMoneyEditor }: Props) {
   const [contract, setContract] = useState<Contract | null>(null);
   const [clientsDirectory, setClientsDirectory] = useState<Client[]>([]);
   const [acts, setActs] = useState<Act[]>([]);
@@ -334,7 +337,7 @@ export function ContractDetailPage({ contractId, onBack, onOpenClient }: Props) 
             <tbody className="divide-y">
               {invoices.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-3 py-2">{item.number}</td>
+                  <td className="px-3 py-2"><button className="text-blue-700 hover:underline" onClick={() => onOpenInvoiceEditor?.(item.id)}>{item.number}</button></td>
                   <td className="px-3 py-2">{item.clientName || '—'}</td>
                   <td className="px-3 py-2">{formatDate(item.date)}</td>
                   <td className="px-3 py-2">{item.amount}</td>
@@ -370,7 +373,7 @@ export function ContractDetailPage({ contractId, onBack, onOpenClient }: Props) 
             <tbody className="divide-y">
               {acts.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-3 py-2">{item.number}</td>
+                  <td className="px-3 py-2"><button className="text-blue-700 hover:underline" onClick={() => onOpenActEditor?.(item.id)}>{item.number}</button></td>
                   <td className="px-3 py-2">{item.clientName || '—'}</td>
                   <td className="px-3 py-2">{formatDate(item.date)}</td>
                   <td className="px-3 py-2">{item.amount}</td>
@@ -406,7 +409,7 @@ export function ContractDetailPage({ contractId, onBack, onOpenClient }: Props) 
             <tbody className="divide-y">
               {payments.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-3 py-2">{item.id}</td>
+                  <td className="px-3 py-2"><button className="text-blue-700 hover:underline" onClick={() => onOpenMoneyEditor?.(item.id)}>{item.id}</button></td>
                   <td className="px-3 py-2">{formatDate(item.date)}</td>
                   <td className="px-3 py-2">{item.client?.name || '—'}</td>
                   <td className="px-3 py-2">{item.description || '—'}</td>
