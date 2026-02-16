@@ -62,6 +62,12 @@ public class LegalEntitiesController : ControllerBase
             Phone = entity.Phone,
             Email = entity.Email,
             Director = entity.Director,
+            Country = entity.Country,
+            BaseCurrency = entity.BaseCurrency,
+            ServiceLanguage = entity.ServiceLanguage,
+            OrganizationForm = entity.OrganizationForm,
+            Timezone = entity.Timezone,
+            TaxSystem = entity.TaxSystem,
             Notes = entity.Notes,
             ClientsCount = entity.Clients.Count,
             CreatedAt = entity.CreatedAt,
@@ -78,6 +84,9 @@ public class LegalEntitiesController : ControllerBase
                 })
                 .ToList(),
         };
+
+    private static string? NormalizeOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private async Task<(IReadOnlyCollection<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
@@ -181,6 +190,11 @@ public class LegalEntitiesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(request.ShortName))
+        {
+            return BadRequest("Необходимо указать краткое название");
+        }
+
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
@@ -189,16 +203,22 @@ public class LegalEntitiesController : ControllerBase
 
         var entity = new LegalEntity
         {
-            ShortName = request.ShortName,
-            FullName = request.FullName,
-            Inn = request.Inn,
-            Kpp = request.Kpp,
-            Ogrn = request.Ogrn,
-            Address = request.Address,
-            Phone = request.Phone,
-            Email = request.Email,
-            Director = request.Director,
-            Notes = request.Notes,
+            ShortName = request.ShortName.Trim(),
+            FullName = NormalizeOptional(request.FullName),
+            Inn = NormalizeOptional(request.Inn),
+            Kpp = NormalizeOptional(request.Kpp),
+            Ogrn = NormalizeOptional(request.Ogrn),
+            Address = NormalizeOptional(request.Address),
+            Phone = NormalizeOptional(request.Phone),
+            Email = NormalizeOptional(request.Email),
+            Director = NormalizeOptional(request.Director),
+            Country = NormalizeOptional(request.Country),
+            BaseCurrency = NormalizeOptional(request.BaseCurrency),
+            ServiceLanguage = NormalizeOptional(request.ServiceLanguage),
+            OrganizationForm = NormalizeOptional(request.OrganizationForm),
+            Timezone = NormalizeOptional(request.Timezone),
+            TaxSystem = NormalizeOptional(request.TaxSystem),
+            Notes = NormalizeOptional(request.Notes),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -305,6 +325,12 @@ public class LegalEntitiesController : ControllerBase
                 Phone = le.Phone,
                 Email = le.Email,
                 Director = le.Director,
+                Country = le.Country,
+                BaseCurrency = le.BaseCurrency,
+                ServiceLanguage = le.ServiceLanguage,
+                OrganizationForm = le.OrganizationForm,
+                Timezone = le.Timezone,
+                TaxSystem = le.TaxSystem,
                 Notes = le.Notes,
                 ClientsCount = le.Clients.Count,
                 CreatedAt = le.CreatedAt,
@@ -374,6 +400,11 @@ public class LegalEntitiesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<LegalEntityDetailDto>> Update(int id, [FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(request.ShortName))
+        {
+            return BadRequest("Необходимо указать краткое название");
+        }
+
         var entity = await _db.LegalEntities.Include(le => le.Clients).FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
@@ -386,16 +417,22 @@ public class LegalEntitiesController : ControllerBase
             return errorResult;
         }
 
-        entity.ShortName = request.ShortName;
-        entity.FullName = request.FullName;
-        entity.Inn = request.Inn;
-        entity.Kpp = request.Kpp;
-        entity.Ogrn = request.Ogrn;
-        entity.Address = request.Address;
-        entity.Phone = request.Phone;
-        entity.Email = request.Email;
-        entity.Director = request.Director;
-        entity.Notes = request.Notes;
+        entity.ShortName = request.ShortName.Trim();
+        entity.FullName = NormalizeOptional(request.FullName);
+        entity.Inn = NormalizeOptional(request.Inn);
+        entity.Kpp = NormalizeOptional(request.Kpp);
+        entity.Ogrn = NormalizeOptional(request.Ogrn);
+        entity.Address = NormalizeOptional(request.Address);
+        entity.Phone = NormalizeOptional(request.Phone);
+        entity.Email = NormalizeOptional(request.Email);
+        entity.Director = NormalizeOptional(request.Director);
+        entity.Country = NormalizeOptional(request.Country);
+        entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
+        entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);
+        entity.OrganizationForm = NormalizeOptional(request.OrganizationForm);
+        entity.Timezone = NormalizeOptional(request.Timezone);
+        entity.TaxSystem = NormalizeOptional(request.TaxSystem);
+        entity.Notes = NormalizeOptional(request.Notes);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);

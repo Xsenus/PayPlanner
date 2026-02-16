@@ -36,6 +36,24 @@ public class LegalEntity
     [MaxLength(200)]
     public string? Director { get; set; }
 
+    [MaxLength(100)]
+    public string? Country { get; set; }
+
+    [MaxLength(16)]
+    public string? BaseCurrency { get; set; }
+
+    [MaxLength(32)]
+    public string? ServiceLanguage { get; set; }
+
+    [MaxLength(64)]
+    public string? OrganizationForm { get; set; }
+
+    [MaxLength(100)]
+    public string? Timezone { get; set; }
+
+    [MaxLength(64)]
+    public string? TaxSystem { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 

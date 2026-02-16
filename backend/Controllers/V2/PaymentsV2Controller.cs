@@ -138,7 +138,7 @@ public class PaymentsV2Controller : ControllerBase
         e.PaidDate = model.PaidDate;
         e.PaidAmount = model.PaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
-        e.SystemNotes = originalSystemNotes;
+        e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
         PaymentDomainService.Normalize(e);
 
@@ -201,6 +201,28 @@ public class PaymentsV2Controller : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(e);
+    }
+
+    private static string MergeSystemNotes(string original, string? incoming)
+    {
+        var lines = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void AppendLines(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source)) return;
+            foreach (var line in source.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+                if (seen.Add(trimmed)) lines.Add(trimmed);
+            }
+        }
+
+        AppendLines(original);
+        AppendLines(incoming ?? string.Empty);
+
+        return string.Join("\n", lines);
     }
 
     [HttpDelete("{id:int}")]

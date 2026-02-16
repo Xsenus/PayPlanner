@@ -19,6 +19,12 @@ export interface LegalEntitySummary {
   phone?: string | null;
   email?: string | null;
   director?: string | null;
+  country?: string | null;
+  baseCurrency?: string | null;
+  serviceLanguage?: string | null;
+  organizationForm?: string | null;
+  timezone?: string | null;
+  taxSystem?: string | null;
   notes?: string | null;
   clientsCount: number;
   createdAt: string;
@@ -52,6 +58,12 @@ export interface LegalEntityInput {
   phone?: string | null;
   email?: string | null;
   director?: string | null;
+  country?: string | null;
+  baseCurrency?: string | null;
+  serviceLanguage?: string | null;
+  organizationForm?: string | null;
+  timezone?: string | null;
+  taxSystem?: string | null;
   notes?: string | null;
   clientIds: number[];
 }
@@ -134,6 +146,8 @@ export interface MoneyOperation {
   paidAccountName?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  isReadonly?: boolean;
+  relatedPaymentId?: number | null;
 }
 export interface IncomeType {
   id: number;
@@ -333,7 +347,15 @@ export interface Invoice {
   counterpartyInn?: string | null;
   counterpartyName?: string | null;
   paymentStatusName?: string | null;
+  lineItems?: InvoiceLineItem[];
   createdAt: string;
+}
+
+export interface InvoiceLineItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  price: number;
 }
 
 export interface InvoiceInput {
@@ -353,6 +375,7 @@ export interface InvoiceInput {
   dealTypeId?: number | null;
   paymentStatusEntityId?: number | null;
   paidDate?: string | null;
+  lineItems?: InvoiceLineItem[];
 }
 
 export interface InvoiceSummaryBucket {

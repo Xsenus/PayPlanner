@@ -371,17 +371,17 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
   const summary = useMemo(() => {
     const startBalance = 0;
-    const income = items
-      .filter((item) => item.direction === 'Income' && item.accountingType === 'Fact')
-      .reduce((sum, item) => sum + item.amount, 0);
-    const expense = items
-      .filter((item) => item.direction === 'Expense' && item.accountingType === 'Fact')
-      .reduce((sum, item) => sum + item.amount, 0);
+    const factIncomeOperations = items.filter((item) => item.direction === 'Income' && item.accountingType === 'Fact');
+    const factExpenseOperations = items.filter((item) => item.direction === 'Expense' && item.accountingType === 'Fact');
+    const income = factIncomeOperations.reduce((sum, item) => sum + item.amount, 0);
+    const expense = factExpenseOperations.reduce((sum, item) => sum + item.amount, 0);
     return {
       startBalance,
       income,
       expense,
       endBalance: startBalance + income - expense,
+      incomeCount: factIncomeOperations.length,
+      expenseCount: factExpenseOperations.length,
     };
   }, [items]);
 
@@ -455,11 +455,13 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   };
 
   const handleEdit = (item: MoneyOperation) => {
+    if (item.isReadonly || item.id <= 0) return;
     setEditingOperation(item);
     setModalOpen(true);
   };
 
   const handleDelete = (item: MoneyOperation) => {
+    if (item.isReadonly || item.id <= 0) return;
     setConfirmDelete(item);
   };
 
@@ -566,13 +568,13 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             <div className="text-sm text-slate-500">Приход Факт</div>
             <div className="text-lg font-semibold text-cyan-500">{formatMoney(summary.income)} ₽</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-cyan-400"></div>
-            <div className="mt-2 text-xs text-slate-400">Всего поступлений: {items.length}</div>
+            <div className="mt-2 text-xs text-slate-400">Всего поступлений: {summary.incomeCount}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Расход Факт</div>
             <div className="text-lg font-semibold text-red-500">{formatMoney(summary.expense)} ₽</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-red-400"></div>
-            <div className="mt-2 text-xs text-slate-400">Всего списаний: {items.length}</div>
+            <div className="mt-2 text-xs text-slate-400">Всего списаний: {summary.expenseCount}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Баланс на конец</div>
@@ -804,15 +806,20 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                     <td className="px-3 py-2">{item.categoryName ?? '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
+                        {item.isReadonly && (
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">Из графика</span>
+                        )}
                         <button
                           onClick={() => handleEdit(item)}
-                          className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                          disabled={Boolean(item.isReadonly) || item.id <= 0}
+                          className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                           aria-label="Изменить">
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(item)}
-                          className="rounded-md border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                          disabled={Boolean(item.isReadonly) || item.id <= 0}
+                          className="rounded-md border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                           aria-label="Удалить">
                           <Trash2 className="h-4 w-4" />
                         </button>

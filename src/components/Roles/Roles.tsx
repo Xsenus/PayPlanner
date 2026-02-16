@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { authService } from '../../services/authService';
+import { authService, type Role as AuthRole } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { Shield, ShieldPlus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
 import { getRolePermissions, subscribeOnPermissionsChange } from '../../services/permissionsService';
 import { MENU_SECTION_KEYS } from '../../types/permissions';
+import { useDialog } from '../../hooks/useDialog';
 
 const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = {
   calendar: 'Календарь',
@@ -20,22 +21,19 @@ const MENU_SECTION_LABELS: Record<(typeof MENU_SECTION_KEYS)[number], string> = 
   dictionaries: 'Справочники',
 };
 
-export interface Role {
-  id: number;
-  name: string;
-  description: string;
-  createdAt: string;
-}
+type UiRole = AuthRole & { createdAt?: string };
+export type Role = UiRole;
 
 export const Roles = () => {
   const { isAdmin } = useAuth();
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<UiRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-  const [permissionRole, setPermissionRole] = useState<Role | null>(null);
+  const [selectedRole, setSelectedRole] = useState<UiRole | null>(null);
+  const [permissionRole, setPermissionRole] = useState<UiRole | null>(null);
   const [, forcePermissionsTick] = useState(0);
+  const { confirm, alert } = useDialog();
 
   useEffect(() => {
     fetchRoles();
@@ -61,16 +59,16 @@ export const Roles = () => {
   };
 
   const handleDelete = async (roleId: number) => {
-    if (!confirm('Удалить роль?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: 'Удалить роль?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await authService.deleteRole(roleId);
       await fetchRoles();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Не удалось удалить роль');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить роль', variant: 'error' });
     }
   };
 
-  const handleEdit = (role: Role) => {
+  const handleEdit = (role: UiRole) => {
     setSelectedRole(role);
     setShowModal(true);
   };
@@ -80,7 +78,7 @@ export const Roles = () => {
     setShowModal(true);
   };
 
-  const openPermissions = (role: Role) => {
+  const openPermissions = (role: UiRole) => {
     setPermissionRole(role);
   };
 
@@ -172,7 +170,7 @@ export const Roles = () => {
                       </td>
                       <td className="px-6 py-4 text-slate-600">{role.description || '—'}</td>
                       <td className="px-6 py-4 text-slate-600 text-sm">
-                        {new Date(role.createdAt).toLocaleDateString()}
+                        {role.createdAt ? new Date(role.createdAt).toLocaleDateString() : '—'}
                       </td>
                       <td className="px-6 py-4">
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -13,6 +13,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { UserModal } from './UserModal';
+import { useDialog } from '../../hooks/useDialog';
 
 type FilterTab = 'all' | 'pending' | 'approved';
 
@@ -24,6 +25,7 @@ export const Users = () => {
   const [showModal, setShowModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
+  const { confirm, alert } = useDialog();
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -43,12 +45,12 @@ export const Users = () => {
   }, [fetchUsers]);
 
   const handleApprove = async (userId: number) => {
-    if (!confirm('Подтвердить одобрение пользователя?')) return;
+    if (!(await confirm({ title: 'Подтвердите действие', description: 'Подтвердить одобрение пользователя?', confirmLabel: 'Одобрить', cancelLabel: 'Отмена' }))) return;
     try {
       await authService.approveUser(userId);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Не удалось одобрить пользователя');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось одобрить пользователя', variant: 'error' });
     }
   };
 
@@ -59,17 +61,17 @@ export const Users = () => {
       await authService.rejectUser(userId, reason || undefined);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Не удалось отклонить пользователя');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось отклонить пользователя', variant: 'error' });
     }
   };
 
   const handleDelete = async (userId: number) => {
-    if (!confirm('Удалить пользователя?')) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: 'Удалить пользователя?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await authService.deleteUser(userId);
       await fetchUsers();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Не удалось удалить пользователя');
+      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить пользователя', variant: 'error' });
     }
   };
 

@@ -23,6 +23,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from './LegalEntityModal';
+import { LegalEntityInlineEditor } from './LegalEntityInlineEditor';
 
 function matches(entity: LegalEntitySummary, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -79,6 +80,7 @@ export function LegalEntities() {
   const [modalOpen, setModalOpen] = useState(false);
   const [detailPageOpen, setDetailPageOpen] = useState(false);
   const [editing, setEditing] = useState<LegalEntityDetail | null>(null);
+  const [inlineOpen, setInlineOpen] = useState(false);
   const [modalBusy, setModalBusy] = useState(false);
   const [readOnlyMode, setReadOnlyMode] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export function LegalEntities() {
   const handleCreate = () => {
     setEditing(null);
     setReadOnlyMode(false);
-    setModalOpen(true);
+    setInlineOpen(true);
   };
 
   const openDetailPage = async (id: number, allowEditing: boolean) => {
@@ -108,7 +110,25 @@ export function LegalEntities() {
       const detail = await getLegalEntity(id);
       setEditing(detail);
       setReadOnlyMode(!allowEditing);
-      setDetailPageOpen(true);
+      setInlineOpen(allowEditing);
+      setModalOpen(!allowEditing);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : t('legalEntityLoadError') || 'Не удалось загрузить данные юр. лица',
+      );
+    } finally {
+      setModalBusy(false);
+    }
+  };
+
+  const openModalEditor = async (id: number) => {
+    try {
+      setModalBusy(true);
+      const detail = await getLegalEntity(id);
+      setEditing(detail);
+      setReadOnlyMode(false);
+      setInlineOpen(false);
+      setModalOpen(true);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : t('legalEntityLoadError') || 'Не удалось загрузить данные юр. лица',
@@ -129,7 +149,15 @@ export function LegalEntities() {
 
   const handleSubmit = async (payload: LegalEntityInput) => {
     if (editing) {
-      const updated = await updateLegalEntity(editing.id, payload);
+      const updated = await updateLegalEntity(editing.id, {
+        ...payload,
+        country: payload.country ?? editing.country ?? null,
+        baseCurrency: payload.baseCurrency ?? editing.baseCurrency ?? null,
+        serviceLanguage: payload.serviceLanguage ?? editing.serviceLanguage ?? null,
+        organizationForm: payload.organizationForm ?? editing.organizationForm ?? null,
+        timezone: payload.timezone ?? editing.timezone ?? null,
+        taxSystem: payload.taxSystem ?? editing.taxSystem ?? null,
+      });
       setEditing(updated);
       return updated;
     }
@@ -148,6 +176,7 @@ export function LegalEntities() {
 
   const handleCloseModal = () => {
     setModalOpen(false);
+    setInlineOpen(false);
     setEditing(null);
     setReadOnlyMode(false);
     setActionError(null);
@@ -241,22 +270,20 @@ export function LegalEntities() {
         </div>
       )}
 
-      {detailPageOpen && editing ? (
-        <LegalEntityModal
-          isOpen={detailPageOpen}
-          onClose={handleCloseDetailPage}
-          onBack={handleCloseDetailPage}
-          mode="page"
-          onSubmit={handleSubmit}
-          onDelete={handleDelete}
+      {inlineOpen && (
+        <LegalEntityInlineEditor
           initial={editing}
           clients={clientsList}
-          suggest={suggestLegalEntities}
-          allowEdit={allowDetailEdit}
-          allowDelete={allowDetailDelete}
+          loading={modalBusy}
+          allowEdit={allowModalEdit}
+          allowDelete={allowModalDelete}
+          onSubmit={handleSubmit}
+          onDelete={handleDelete}
+          onCancel={handleCloseModal}
         />
-      ) : (
-      sortedFiltered.length === 0 && !loading ? (
+      )}
+
+      {sortedFiltered.length === 0 && !loading ? (
         <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
             <Factory className="h-8 w-8 text-gray-400" />
@@ -385,7 +412,15 @@ export function LegalEntities() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openDetailPage(entity.id, true)}
+                  onClick={() => openModalEditor(entity.id)}
+                  disabled={!canEdit}
+                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
+                  <Edit size={14} />
+                  {t('edit')} (modal)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openDetail(entity.id, true)}
                   disabled={!canDelete}
                   title={t('delete') || 'Удалить'}
                   aria-label={t('delete') || 'Удалить'}
@@ -489,7 +524,14 @@ export function LegalEntities() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => openDetailPage(entity.id, true)}
+                        onClick={() => openModalEditor(entity.id)}
+                        disabled={!canEdit}
+                        className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs text-indigo-600 hover:border-indigo-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
+                        <Edit size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openDetail(entity.id, true)}
                         disabled={!canDelete}
                         className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
                         <Trash2 size={14} />

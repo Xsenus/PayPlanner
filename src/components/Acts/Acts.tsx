@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
@@ -41,6 +42,8 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+type ActColumnKey = ActsSortKey | 'actions';
+
 type SortState = {
   key: ActsSortKey;
   direction: 'asc' | 'desc';
@@ -48,6 +51,7 @@ type SortState = {
 
 export function Acts() {
   const { user } = useAuth();
+  const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const actsPermissions = permissions.acts;
   const canCreate = actsPermissions.canCreate;
@@ -235,11 +239,11 @@ export function Acts() {
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
-    if (!window.confirm(confirmText)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmText, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteAct(act.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Не удалось удалить акт');
+      await alert(err instanceof Error ? err.message : 'Не удалось удалить акт');
     }
   };
 
@@ -405,15 +409,15 @@ export function Acts() {
               <thead className="bg-slate-50">
                 <tr>
                   {[
-                    { key: 'date' as ActsSortKey, label: t('actDate') ?? 'Дата', sortable: true },
-                    { key: 'number' as ActsSortKey, label: t('actNumber') ?? '№', sortable: true },
-                    { key: 'amount' as ActsSortKey, label: t('actAmount') ?? 'Сумма', sortable: true },
-                    { key: 'invoiceNumber' as ActsSortKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
-                    { key: 'client' as ActsSortKey, label: t('actClient') ?? 'Контрагент', sortable: true },
-                    { key: 'counterpartyInn' as ActsSortKey, label: t('actInn') ?? 'ИНН', sortable: true },
-                    { key: 'status' as ActsSortKey, label: t('actStatus') ?? 'Статус', sortable: true },
-                    { key: 'responsible' as ActsSortKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
-                    { key: 'actions' as ActsSortKey, label: t('actions') ?? 'Действия', sortable: false },
+                    { key: 'date' as ActColumnKey, label: t('actDate') ?? 'Дата', sortable: true },
+                    { key: 'number' as ActColumnKey, label: t('actNumber') ?? '№', sortable: true },
+                    { key: 'amount' as ActColumnKey, label: t('actAmount') ?? 'Сумма', sortable: true },
+                    { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
+                    { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
+                    { key: 'counterpartyInn' as ActColumnKey, label: t('actInn') ?? 'ИНН', sortable: true },
+                    { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
+                    { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
+                    { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
                   ]
                     .filter((column) =>
                       column.key !== 'actions' || canEdit || canDelete ? true : false,
@@ -430,7 +434,7 @@ export function Acts() {
                           {isSortable ? (
                             <button
                               type="button"
-                              onClick={() => changeSort(column.key)}
+                              onClick={() => changeSort(column.key as ActsSortKey)}
                               className="inline-flex items-center gap-1 text-slate-700">
                               <span>{column.label}</span>
                               {isActive && (

@@ -20,6 +20,7 @@ import type {
   LegalEntitySuggestion,
 } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useDialog } from '../../hooks/useDialog';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -75,6 +76,7 @@ export function LegalEntityModal({
   onBack,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
+  const { confirm } = useDialog();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -207,31 +209,28 @@ export function LegalEntityModal({
     setError(null);
     setLoading(true);
     try {
+      const shortName = formState.shortName.trim();
+      const normalize = (value: string) => {
+        const trimmed = value.trim();
+        return trimmed || null;
+      };
       const payload: LegalEntityInput = {
-        shortName: formState.shortName.trim(),
-        clientIds: clientIds,
+        shortName,
+        fullName: normalize(formState.fullName),
+        inn: normalize(formState.inn),
+        kpp: normalize(formState.kpp),
+        ogrn: normalize(formState.ogrn),
+        address: normalize(formState.address),
+        phone: normalize(formState.phone),
+        email: normalize(formState.email),
+        director: normalize(formState.director),
+        notes: normalize(formState.notes),
+        clientIds,
       };
       if (!payload.shortName) {
         setError(t('legalEntityShortNameRequired') || 'Укажите краткое название');
         setLoading(false);
         return;
-      }
-      const optionalFields: Array<[keyof FormState, keyof LegalEntityInput]> = [
-        ['fullName', 'fullName'],
-        ['inn', 'inn'],
-        ['kpp', 'kpp'],
-        ['ogrn', 'ogrn'],
-        ['address', 'address'],
-        ['phone', 'phone'],
-        ['email', 'email'],
-        ['director', 'director'],
-        ['notes', 'notes'],
-      ];
-      for (const [stateKey, payloadKey] of optionalFields) {
-        const value = formState[stateKey].trim();
-        if (value) {
-          (payload as Record<string, unknown>)[payloadKey] = value;
-        }
       }
       const saved = await onSubmit(payload);
       setFormState({
@@ -259,7 +258,7 @@ export function LegalEntityModal({
 
   const handleDelete = async () => {
     if (!onDelete || !initial) return;
-    if (!confirm(t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?')) {
+    if (!(await confirm({ title: 'Подтверждение удаления', description: t('deleteLegalEntityConfirm') || 'Удалить юридическое лицо?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) {
       return;
     }
     try {

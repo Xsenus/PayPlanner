@@ -27,6 +27,7 @@ import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDialog } from '../../hooks/useDialog';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 
@@ -296,6 +297,7 @@ export function Clients() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const { alert } = useDialog();
   const clientPermissions = permissions.clients;
   const canViewClients = clientPermissions.canView;
   const canCreateClients = clientPermissions.canCreate;
@@ -352,13 +354,17 @@ export function Clients() {
         phone: 'phone',
         address: 'address',
         notes: 'notes',
+        createdAt: 'createdAt',
+        isActive: 'isActive',
         legalEntityId: 'legalEntityId',
         legalEntityShortName: 'legalEntityShortName',
         legalEntityFullName: 'legalEntityFullName',
         legalEntityInn: 'legalEntityInn',
         legalEntityOgrn: 'legalEntityOgrn',
         legalEntityKpp: 'legalEntityKpp',
-      }) satisfies Record<string, string>,
+        casesCount: 'casesCount',
+        contractsCount: 'contractsCount',
+      }) satisfies Record<ColumnId, string>,
     [],
   );
 
@@ -439,7 +445,7 @@ export function Clients() {
     });
 
   const showPermissionWarning = (message: string) => {
-    window.alert(message || 'Недостаточно прав для выполнения действия.');
+    void alert({ title: 'Недостаточно прав', description: message || 'Недостаточно прав для выполнения действия.', variant: 'error' });
   };
 
   const handleAddClient = () => {

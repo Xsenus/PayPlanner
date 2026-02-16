@@ -1,18 +1,9 @@
-import {
-  CalendarRange,
-  FileSignature,
-  Loader2,
-  Pencil,
-  Plus,
-  RefreshCcw,
-  Search,
-  Trash2,
-  Users as UsersIcon,
-} from 'lucide-react';
+import { CalendarRange, FileSignature, Loader2, Pencil, RefreshCcw, Search, Trash2, Users as UsersIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -21,6 +12,7 @@ import type { Client, Contract, ContractInput } from '../../types';
 import { toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { ContractModal } from './ContractModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { ContractCreateForm } from './ContractCreateForm';
 
 type SortState = {
   key: ContractsSortKey;
@@ -55,6 +47,7 @@ export function Contracts() {
   const canDelete = contractsPermissions.canDelete;
 
   const { t } = useTranslation();
+  const { confirm } = useDialog();
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -97,7 +90,9 @@ export function Contracts() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -143,11 +138,6 @@ export function Contracts() {
     return clients.find((client) => String(client.id) === clientFilter) ?? null;
   }, [clientFilter, clients]);
 
-  const openCreatePage = () => {
-    if (!canCreate) return;
-    setActiveTab('contractCreate');
-  };
-
   const openEditModal = (contract: Contract) => {
     if (!canEdit) return;
     setSelectedContract(contract);
@@ -155,8 +145,8 @@ export function Contracts() {
     setModalError(null);
   };
 
-  const handleSubmit = async (payload: ContractInput) => {
-    setSubmitting(true);
+  const handleEditSubmit = async (payload: ContractInput) => {
+    setEditSubmitting(true);
     setModalError(null);
     setActionError(null);
     try {
@@ -168,7 +158,23 @@ export function Contracts() {
       const message = err instanceof Error ? err.message : (t('failedToSave') ?? 'Не удалось сохранить');
       setModalError(message);
     } finally {
-      setSubmitting(false);
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleCreateSubmit = async (payload: ContractInput): Promise<boolean> => {
+    setCreateSubmitting(true);
+    setCreateError(null);
+    setActionError(null);
+    try {
+      await createContract(payload);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (t('failedToSave') ?? 'Не удалось сохранить');
+      setCreateError(message);
+      return false;
+    } finally {
+      setCreateSubmitting(false);
     }
   };
 
@@ -177,7 +183,7 @@ export function Contracts() {
     const confirmMessage =
       t('contractDeleteConfirm')?.replace('{{number}}', contract.number ?? '') ??
       `Удалить договор «${contract.number}»?`;
-    if (!confirm(confirmMessage)) return;
+    if (!(await confirm({ title: 'Подтверждение удаления', description: confirmMessage, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
 
     setDeletingId(contract.id);
     setActionError(null);
@@ -236,18 +242,16 @@ export function Contracts() {
               {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               <span>{t('update') ?? 'Обновить'}</span>
             </button>
-            {canCreate && (
-              <button
-                type="button"
-                onClick={openCreatePage}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
-              >
-                <Plus className="h-4 w-4" />
-                <span>{t('contractsCreate') ?? 'Новый договор'}</span>
-              </button>
-            )}
           </div>
         </div>
+
+        {canCreate && (
+          <ContractCreateForm
+            onSubmit={handleCreateSubmit}
+            submitting={createSubmitting}
+            errorMessage={createError}
+          />
+        )}
 
         <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -537,11 +541,11 @@ export function Contracts() {
           mode="edit"
           contract={selectedContract}
           onClose={() => {
-            if (submitting) return;
+            if (editSubmitting) return;
             setModalOpen(false);
           }}
-          onSubmit={handleSubmit}
-          submitting={submitting}
+          onSubmit={handleEditSubmit}
+          submitting={editSubmitting}
           errorMessage={modalError}
         />
       </div>

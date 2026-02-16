@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { ChevronDown, Lock, Plus, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePayments } from '../../hooks/usePayments';
@@ -174,6 +175,7 @@ export function Payments({
   lockedTypeMessageKey,
 }: PaymentsProps) {
   const { user } = useAuth();
+  const { confirm } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
   const { t } = useTranslation();
@@ -670,14 +672,14 @@ export function Payments({
         showPermissionNotice(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
         return;
       }
-      const confirmed = window.confirm(t('confirmDeletePayment') ?? 'Удалить платёж?');
+      const confirmed = await confirm({ title: 'Подтверждение удаления', description: t('confirmDeletePayment') ?? 'Удалить платёж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
       if (!confirmed) {
         return;
       }
       await deletePayment(payment.id);
       await refresh();
     },
-    [deletePayment, paymentsPermissions.canDelete, refresh, showPermissionNotice, t],
+    [confirm, deletePayment, paymentsPermissions.canDelete, refresh, showPermissionNotice, t],
   );
 
   const handleSubmit = useCallback(

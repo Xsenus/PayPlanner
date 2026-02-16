@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Trash2 } from 'lucide-react';
 import type { ClientCase } from '../../types';
+import { useDialog } from '../../hooks/useDialog';
 
 interface CaseModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ const STATUS_OPTIONS: Array<{ value: StatusValue; label: string }> = [
 ];
 
 export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete }: CaseModalProps) {
+  const { confirm } = useDialog();
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
   const [status, setStatus] = useState<StatusValue>((caseData.status as StatusValue) ?? 'Open');
@@ -79,7 +81,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete }: CaseM
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    const ok = window.confirm('Удалить это дело? Действие необратимо.');
+    const ok = await confirm({ title: 'Подтверждение удаления', description: 'Удалить это дело? Действие необратимо.', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
     if (!ok) return;
     setSaving(true);
     setError(null);

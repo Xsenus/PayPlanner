@@ -7,6 +7,7 @@ import type { InstallmentRequest, InstallmentResponse, ClientCase } from '../../
 import { toDateInputValue, fromInputToApiDate } from '../../utils/dateUtils';
 import { consumeInstallmentDraft } from '../../utils/installmentBridge';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { useDialog } from '../../hooks/useDialog';
 
 type AccountOption = { account: string; accountDate?: string | null };
 
@@ -54,6 +55,7 @@ function isAccountWithDate(x: unknown, acc: string): x is { account: string; acc
 
 export function Calculator() {
   const { t, formatCurrency } = useTranslation();
+  const { confirm, alert } = useDialog();
   const { clients } = useClients();
 
   const [formData, setFormData] = useState<InstallmentRequest>({
@@ -295,7 +297,7 @@ export function Calculator() {
 
   const handleSavePayments = async () => {
     if (!editableResults || !selectedClientId) return;
-    const confirmed = window.confirm(t('confirmSaveAllPayments') ?? 'Сохранить все платежи?');
+    const confirmed = await confirm({ title: 'Подтверждение', description: t('confirmSaveAllPayments') ?? 'Сохранить все платежи?', confirmLabel: t('confirm') ?? 'Подтвердить', cancelLabel: t('cancel') ?? 'Отмена' });
     if (!confirmed) return;
 
     setSavingPayments(true);
@@ -321,10 +323,10 @@ export function Calculator() {
           payload as unknown as Parameters<typeof apiService.createPayment>[0],
         );
       }
-      alert(t('paymentsSaved'));
+      await alert(t('paymentsSaved'));
     } catch (err) {
       console.error('Failed to save payments:', err);
-      alert(t('saveError') ?? 'Ошибка сохранения платежей');
+      await alert(t('saveError') ?? 'Ошибка сохранения платежей');
     } finally {
       setSavingPayments(false);
     }

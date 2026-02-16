@@ -27,6 +27,7 @@ import type { Tab } from './types/tabs';
 import { useRolePermissions } from './hooks/useRolePermissions';
 import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
+import { DialogProvider } from './contexts/DialogContext';
 
 type AuthView = 'login' | 'register' | 'awaiting';
 const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
@@ -457,7 +458,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <DialogProvider>
+        <AppContent />
+      </DialogProvider>
     </AuthProvider>
   );
 }
