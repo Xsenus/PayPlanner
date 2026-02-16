@@ -455,6 +455,19 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setModalError(null);
   };
 
+  const openClientFromEditor = (clientId: number) => {
+    if (!pageEditingInvoice) {
+      onOpenClient?.(clientId);
+      return;
+    }
+    try {
+      localStorage.setItem('pp.openInvoiceId', String(pageEditingInvoice.id));
+    } catch {
+      /** */
+    }
+    onOpenClient?.(clientId);
+  };
+
   const submitInvoice = async (payload: InvoiceInput) => {
     setSubmitting(true);
     setModalError(null);
@@ -777,7 +790,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           invoice={pageEditingInvoice}
           onClose={closeEditPage}
           onBack={closeEditPage}
-          onOpenClient={onOpenClient}
+          onOpenClient={openClientFromEditor}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}

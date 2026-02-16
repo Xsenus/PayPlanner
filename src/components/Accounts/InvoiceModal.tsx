@@ -173,6 +173,7 @@ export function InvoiceModal({
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<ClientPickerMode>('client');
   const [clientPickerSearch, setClientPickerSearch] = useState('');
+  const [counterpartyClientId, setCounterpartyClientId] = useState<number | null>(null);
   const [selectedAct, setSelectedAct] = useState<ActOption | null>(null);
   const [createActOpen, setCreateActOpen] = useState(false);
   const [creatingAct, setCreatingAct] = useState(false);
@@ -228,6 +229,15 @@ export function InvoiceModal({
     [clients, form.clientId],
   );
 
+  const selectedCounterpartyClient = useMemo(() => {
+    if (counterpartyClientId) {
+      return clients.find((client) => client.id === counterpartyClientId) ?? null;
+    }
+    const value = form.counterpartyName.trim().toLowerCase();
+    if (!value) return null;
+    return clients.find((client) => client.name.trim().toLowerCase() === value) ?? null;
+  }, [clients, counterpartyClientId, form.counterpartyName]);
+
   const filteredClients = useMemo(() => {
     const query = clientPickerSearch.trim().toLowerCase();
     if (!query) return clients;
@@ -257,6 +267,7 @@ export function InvoiceModal({
         clientName: invoice.clientName ?? undefined,
         status: (invoice.actStatus ?? 'Created') as ActStatus,
       } : null;
+      setCounterpartyClientId(null);
       setSelectedAct(nextInitial);
       setActSearch(actLabel(nextInitial));
       setActsError(null);
@@ -386,6 +397,7 @@ export function InvoiceModal({
     if (clientPickerMode === 'client') {
       setForm((prev) => ({ ...prev, clientId: String(client.id) }));
     } else {
+      setCounterpartyClientId(client.id);
       setForm((prev) => ({ ...prev, counterpartyName: client.name }));
     }
     setClientPickerOpen(false);
@@ -489,7 +501,7 @@ export function InvoiceModal({
       clientId: Number(form.clientId),
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
-      actId: selectedAct?.id ?? undefined,
+      actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       lineItems: lineItems
@@ -780,7 +792,10 @@ export function InvoiceModal({
                   <input
                     type="text"
                     value={form.counterpartyName}
-                    onChange={handleChange('counterpartyName')}
+                    onChange={(event) => {
+                      setCounterpartyClientId(null);
+                      setForm((prev) => ({ ...prev, counterpartyName: event.target.value }));
+                    }}
                     className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
                   />
@@ -795,6 +810,15 @@ export function InvoiceModal({
                 <span className="text-xs text-slate-500">
                   {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
                 </span>
+                {selectedCounterpartyClient && onOpenClient && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient(selectedCounterpartyClient.id)}
+                    className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                  >
+                    Открыть карточку контрагента
+                  </button>
+                )}
               </label>
             </div>
           </section>
