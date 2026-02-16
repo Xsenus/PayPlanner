@@ -1,7 +1,7 @@
 import { CalendarRange, FileSignature, Loader2, Pencil, RefreshCcw, Search, Trash2, Users as UsersIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useTabNavigation } from '../../contexts/TabContext';
+// import { useTabNavigation } from '../../contexts/TabContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -39,7 +39,7 @@ function formatDate(value?: string | null): string {
 
 export function Contracts() {
   const { user } = useAuth();
-  const { setActiveTab } = useTabNavigation();
+  // const { setActiveTab } = useTabNavigation();
   const permissions = useRolePermissions(user?.role?.id);
   const contractsPermissions = permissions.contracts;
   const canCreate = contractsPermissions.canCreate;

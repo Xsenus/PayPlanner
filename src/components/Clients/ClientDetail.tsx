@@ -84,20 +84,21 @@ type ClientDetailSection =
   | 'contracts'
   | 'settlement';
 
-type ProfileTabKey =
-  | 'phone'
-  | 'email'
-  | 'address'
-  | 'passport'
-  | 'birthCertificate'
-  | 'militaryId'
-  | 'notes';
+// Временно закомментировано: вкладки/документы профиля, чтобы не ломать lint до возвращения UI.
+// type ProfileTabKey =
+//   | 'phone'
+//   | 'email'
+//   | 'address'
+//   | 'passport'
+//   | 'birthCertificate'
+//   | 'militaryId'
+//   | 'notes';
 
-type ProfileDocumentsState = {
-  passport: string;
-  birthCertificate: string;
-  militaryId: string;
-};
+// type ProfileDocumentsState = {
+//   passport: string;
+//   birthCertificate: string;
+//   militaryId: string;
+// };
 
 const SECTION_ORDER: ClientDetailSection[] = [
   'profile',
@@ -368,12 +369,13 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [clientData, setClientData] = useState<Client | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
   const [clientFormSaving, setClientFormSaving] = useState(false);
-  const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
-  const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
-    passport: '',
-    birthCertificate: '',
-    militaryId: '',
-  });
+  // Временно закомментировано: будет возвращено при реинтеграции табов профиля.
+  // const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
+  // const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
+  //   passport: '',
+  //   birthCertificate: '',
+  //   militaryId: '',
+  // });
   const [clientFormState, setClientFormState] = useState({
     kind: 'individual' as ClientKind,
     lastName: '',
@@ -896,11 +898,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
-    setProfileDocuments({
-      passport: profile.passports[0] ?? '',
-      birthCertificate: profile.birthCertificates[0] ?? '',
-      militaryId: profile.militaryIds[0] ?? '',
-    });
+    // setProfileDocuments({
+    //   passport: profile.passports[0] ?? '',
+    //   birthCertificate: profile.birthCertificates[0] ?? '',
+    //   militaryId: profile.militaryIds[0] ?? '',
+    // });
   }, [clientData]);
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
