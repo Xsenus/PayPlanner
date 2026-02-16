@@ -9,6 +9,7 @@ export type Tab =
   | 'accountsExpense'
   | 'installments'
   | 'acts'
+  | 'actDetail'
   | 'paymentsIncome'
   | 'paymentsExpense'
   | 'payments'

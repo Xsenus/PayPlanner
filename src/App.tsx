@@ -10,6 +10,7 @@ import { ClientDetail } from './components/Clients/ClientDetail';
 import { Accounts } from './components/Accounts/Accounts';
 import { Installments } from './components/Accounts/Installments';
 import { Acts } from './components/Acts/Acts';
+import { ActDetailPage } from './components/Acts/ActDetailPage';
 import { Contracts } from './components/Contracts/Contracts';
 import { ContractCreatePage } from './components/Contracts/ContractCreatePage';
 import { ContractDetailPage } from './components/Contracts/ContractDetailPage';
@@ -49,6 +50,7 @@ function AppContent() {
     accountsExpense: 'Расходные счета',
     installments: 'Рассрочка',
     acts: 'Акты',
+    actDetail: 'Акт',
     paymentsIncome: 'Доходные платежи',
     paymentsExpense: 'Расходные платежи',
     payments: 'Платежи',
@@ -81,12 +83,13 @@ function AppContent() {
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
-  const [clientReturnTab, setClientReturnTab] = useState<{ tab: Tab; contractId?: number | null } | null>(null);
+  const [selectedActId, setSelectedActId] = useState<number | null>(null);
+  const [clientReturnTab, setClientReturnTab] = useState<{ tab: Tab; contractId?: number | null; actId?: number | null } | null>(null);
 
   const handleOpenClient = (
     clientId: number,
     caseId?: number,
-    options?: { returnTo?: { tab: Tab; contractId?: number | null } },
+    options?: { returnTo?: { tab: Tab; contractId?: number | null; actId?: number | null } },
   ) => {
     if (!permissions.clients.canView) {
       return;
@@ -135,6 +138,7 @@ function AppContent() {
         { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
         { tab: 'installments' as Tab, allowed: permissions.accounts.canView },
         { tab: 'acts' as Tab, allowed: permissions.acts.canView },
+        { tab: 'actDetail' as Tab, allowed: permissions.acts.canView },
         { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
         { tab: 'payments' as Tab, allowed: permissions.payments.canView },
@@ -172,6 +176,7 @@ function AppContent() {
         case 'installments':
           return permissions.accounts.canView;
         case 'acts':
+        case 'actDetail':
           return permissions.acts.canView;
         case 'paymentsIncome':
         case 'paymentsExpense':
@@ -344,6 +349,9 @@ function AppContent() {
               if (target === 'contractDetail' && clientReturnTab?.contractId) {
                 setSelectedContractId(clientReturnTab.contractId);
               }
+              if (target === 'actDetail' && clientReturnTab?.actId) {
+                setSelectedActId(clientReturnTab.actId);
+              }
               setActiveTab(target);
               setSelectedClientId(null);
               setClientReturnTab(null);
@@ -381,7 +389,23 @@ function AppContent() {
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'acts':
         return permissions.acts.canView
-          ? <Acts />
+          ? (
+              <Acts
+                onOpenAct={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'acts' } })}
+                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
+              />
+            )
+          : renderNoAccess('Раздел актов недоступен для вашей роли.');
+      case 'actDetail':
+        return permissions.acts.canView && selectedActId
+          ? (
+              <ActDetailPage
+                actId={selectedActId}
+                onBack={() => setActiveTab('acts')}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actDetail', actId: selectedActId } })}
+              />
+            )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
       case 'paymentsIncome':
         return permissions.payments.canView
@@ -389,7 +413,7 @@ function AppContent() {
               <Payments
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
                 onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
                 onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Income"
                 lockType
@@ -405,7 +429,7 @@ function AppContent() {
               <Payments
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
                 onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
                 onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Expense"
                 lockType
@@ -456,7 +480,7 @@ function AppContent() {
                 onBack={() => setActiveTab('contracts')}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
                 onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { try { localStorage.setItem('pp.openActId', String(id)); } catch { /** */ } setActiveTab('acts'); }}
+                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
                 onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
               />
             )

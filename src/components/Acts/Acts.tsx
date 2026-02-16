@@ -49,7 +49,13 @@ type SortState = {
   direction: 'asc' | 'desc';
 };
 
-export function Acts() {
+interface ActsProps {
+  onOpenAct?: (actId: number) => void;
+  onOpenClient?: (clientId: number) => void;
+  onOpenInvoiceEditor?: (invoiceId: number) => void;
+}
+
+export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
@@ -86,7 +92,6 @@ export function Acts() {
     pagination,
     refresh,
     createAct,
-    updateAct,
     deleteAct,
   } = useActs({
     from: from || undefined,
@@ -100,7 +105,6 @@ export function Acts() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -198,39 +202,10 @@ export function Acts() {
   }, [modalOpen, ensureLookups]);
 
   const openCreateModal = () => {
-    setModalMode('create');
     setSelectedAct(null);
     setModalOpen(true);
     setModalError(null);
   };
-
-  const openEditModal = (act: Act) => {
-    setModalMode('edit');
-    setSelectedAct(act);
-    setModalOpen(true);
-    setModalError(null);
-  };
-
-
-  useEffect(() => {
-    if (!canEdit || acts.length === 0) return;
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem('pp.openActId');
-    } catch {
-      raw = null;
-    }
-    if (!raw) return;
-    const targetId = Number(raw);
-    if (Number.isNaN(targetId)) {
-      try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
-      return;
-    }
-    const target = acts.find((act) => act.id === targetId);
-    if (!target) return;
-    openEditModal(target);
-    try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
-  }, [acts, canEdit]);
 
   const closeModal = () => {
     if (submitting) return;
@@ -243,11 +218,7 @@ export function Acts() {
     setSubmitting(true);
     setModalError(null);
     try {
-      if (modalMode === 'create') {
-        await createAct(payload);
-      } else if (selectedAct) {
-        await updateAct(selectedAct.id, payload);
-      }
+      await createAct(payload);
       setModalOpen(false);
       setSelectedAct(null);
     } catch (err) {
@@ -257,6 +228,23 @@ export function Acts() {
       setSubmitting(false);
     }
   };
+
+
+  const openInvoiceFromAct = useCallback(async (act: Act) => {
+    if (!act.invoiceNumber || !onOpenInvoiceEditor) return;
+    try {
+      const response = await apiService.getInvoices({ search: act.invoiceNumber, page: 1, pageSize: 100 });
+      const normalized = act.invoiceNumber.trim().toLowerCase();
+      const invoice = (response.items ?? []).find((item) => String(item.number ?? '').trim().toLowerCase() === normalized);
+      if (invoice) {
+        onOpenInvoiceEditor(invoice.id);
+      } else {
+        await alert('Счёт не найден');
+      }
+    } catch (err) {
+      await alert(err instanceof Error ? err.message : 'Не удалось открыть счёт');
+    }
+  }, [alert, onOpenInvoiceEditor]);
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
@@ -506,7 +494,11 @@ export function Acts() {
                   </tr>
                 ) : (
                   acts.map((act) => (
-                    <tr key={act.id} className="hover:bg-slate-50/80">
+                    <tr
+                      key={act.id}
+                      className={`hover:bg-slate-50/80 ${canEdit ? 'cursor-pointer' : ''}`}
+                      onClick={() => { if (canEdit) onOpenAct?.(act.id); }}
+                    >
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">
                         {formatDate(act.date)}
                       </td>
@@ -517,12 +509,34 @@ export function Acts() {
                         {formatMoney(act.amount || 0)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {act.invoiceNumber || '—'}
+                        {act.invoiceNumber ? (
+                          <button
+                            type="button"
+                            className="text-indigo-600 hover:underline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openInvoiceFromAct(act);
+                            }}
+                          >
+                            {act.invoiceNumber}
+                          </button>
+                        ) : '—'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div className="flex flex-col">
                           <span className="font-medium text-slate-900">
-                            {act.clientName || t('actClientUnknown') || 'Без контрагента'}
+                            {act.clientId && act.clientName ? (
+                              <button
+                                type="button"
+                                className="text-indigo-600 hover:underline"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onOpenClient?.(act.clientId as number);
+                                }}
+                              >
+                                {act.clientName}
+                              </button>
+                            ) : (act.clientName || t('actClientUnknown') || 'Без контрагента')}
                           </span>
                           {act.title && (
                             <span className="text-xs text-slate-500">{act.title}</span>
@@ -546,7 +560,7 @@ export function Acts() {
                             {canEdit && (
                               <button
                                 type="button"
-                                onClick={() => openEditModal(act)}
+                                onClick={(event) => { event.stopPropagation(); onOpenAct?.(act.id); }}
                                 className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
                                 title={t('edit') ?? 'Редактировать'}>
                                 <Pencil className="h-4 w-4" />
@@ -555,7 +569,7 @@ export function Acts() {
                             {canDelete && (
                               <button
                                 type="button"
-                                onClick={() => void handleDelete(act)}
+                                onClick={(event) => { event.stopPropagation(); void handleDelete(act); }}
                                 className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
                                 title={t('delete') ?? 'Удалить'}>
                                 <Trash2 className="h-4 w-4" />
@@ -601,7 +615,7 @@ export function Acts() {
 
       <ActModal
         open={modalOpen}
-        mode={modalMode}
+        mode="create"
         act={selectedAct}
         onClose={closeModal}
         onSubmit={handleSubmit}
