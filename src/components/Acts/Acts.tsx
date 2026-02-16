@@ -42,6 +42,8 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+type ActColumnKey = ActsSortKey | 'actions';
+
 type SortState = {
   key: ActsSortKey;
   direction: 'asc' | 'desc';
@@ -407,15 +409,15 @@ export function Acts() {
               <thead className="bg-slate-50">
                 <tr>
                   {[
-                    { key: 'date' as ActsSortKey, label: t('actDate') ?? 'Дата', sortable: true },
-                    { key: 'number' as ActsSortKey, label: t('actNumber') ?? '№', sortable: true },
-                    { key: 'amount' as ActsSortKey, label: t('actAmount') ?? 'Сумма', sortable: true },
-                    { key: 'invoiceNumber' as ActsSortKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
-                    { key: 'client' as ActsSortKey, label: t('actClient') ?? 'Контрагент', sortable: true },
-                    { key: 'counterpartyInn' as ActsSortKey, label: t('actInn') ?? 'ИНН', sortable: true },
-                    { key: 'status' as ActsSortKey, label: t('actStatus') ?? 'Статус', sortable: true },
-                    { key: 'responsible' as ActsSortKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
-                    { key: 'actions' as ActsSortKey, label: t('actions') ?? 'Действия', sortable: false },
+                    { key: 'date' as ActColumnKey, label: t('actDate') ?? 'Дата', sortable: true },
+                    { key: 'number' as ActColumnKey, label: t('actNumber') ?? '№', sortable: true },
+                    { key: 'amount' as ActColumnKey, label: t('actAmount') ?? 'Сумма', sortable: true },
+                    { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
+                    { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
+                    { key: 'counterpartyInn' as ActColumnKey, label: t('actInn') ?? 'ИНН', sortable: true },
+                    { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
+                    { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
+                    { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
                   ]
                     .filter((column) =>
                       column.key !== 'actions' || canEdit || canDelete ? true : false,
@@ -432,7 +434,7 @@ export function Acts() {
                           {isSortable ? (
                             <button
                               type="button"
-                              onClick={() => changeSort(column.key)}
+                              onClick={() => changeSort(column.key as ActsSortKey)}
                               className="inline-flex items-center gap-1 text-slate-700">
                               <span>{column.label}</span>
                               {isActive && (

@@ -73,8 +73,9 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
     setLoading(true);
 
     try {
+      const normalizedFullName = fullName.trim();
       const updateData: UpdateUserDto = {
-        fullName: fullName.trim() || undefined,
+        fullName: normalizedFullName || undefined,
         firstName: firstName.trim() || undefined,
         lastName: lastName.trim() || undefined,
         middleName: middleName.trim() || undefined,
@@ -90,13 +91,19 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
         employmentStartDate: employmentStartDate || undefined,
         employmentEndDate: employmentEndDate || undefined,
         roleId,
-        isActive
+        isActive,
       };
 
       if (user) {
         await authService.updateUser(user.id, updateData);
       } else {
-        await authService.createUser({ ...updateData, email, password });
+        await authService.createUser({
+          email,
+          password,
+          fullName: normalizedFullName,
+          roleId,
+          isActive,
+        });
       }
       onClose();
     } catch (err) {

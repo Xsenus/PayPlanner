@@ -27,10 +27,10 @@ interface PaymentModalProps {
   type?: PaymentKind;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<void>;
+  onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<unknown>;
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
-  onCreateRemainder?: (payment: PaymentPayload) => Promise<void>;
+  onCreateRemainder?: (payment: PaymentPayload) => Promise<unknown>;
 }
 
 export function PaymentModal({
@@ -567,7 +567,7 @@ export function PaymentModal({
 
       const paymentData: PaymentPayload = {
         date: normalizedDate,
-        plannedDate: normalizedPlannedDate,
+        plannedDate: normalizedPlannedDate ?? normalizedDate,
         amount: baseAmount,
         paidAmount: Number(safePaidAmount.toFixed(2)),
         lastPaymentDate: primaryLastPaymentDate,

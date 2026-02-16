@@ -115,9 +115,9 @@ export function useClients(options?: ClientsListOptions) {
                     normalized.legalEntity ?? (c.legalEntity as LegalEntitySummary | null) ?? null,
                   clientStatus: normalized.clientStatus ?? (c.clientStatus as ClientStatus | null) ?? null,
                   cases:
-                    normalized.cases.length === 0 && (c.cases?.length ?? 0) > 0
+                    (normalized.cases?.length ?? 0) === 0 && (c.cases?.length ?? 0) > 0
                       ? (c.cases as ClientCase[])
-                      : normalized.cases,
+                      : (normalized.cases ?? []),
                   contracts:
                     (normalized.contracts?.length ?? 0) === 0 && (c.contracts?.length ?? 0) > 0
                       ? c.contracts
