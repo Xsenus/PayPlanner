@@ -15,6 +15,7 @@ import {
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
 import { apiService } from '../../services/api';
+import { useTabNavigation } from '../../contexts/TabContext';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import type {
   MoneyOperation,
@@ -64,9 +65,33 @@ function formatMoney(value: number) {
 
 function formatDate(value: string) {
   if (!value) return '—';
-  const [year, month, day] = value.split('-');
-  if (!year || !month || !day) return value;
-  return `${day}.${month}.${year}`;
+
+  const isoDateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDateMatch) {
+    return `${isoDateMatch[3]}.${isoDateMatch[2]}.${isoDateMatch[1]}`;
+  }
+
+  const dotIsoDateMatch = value.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
+  if (dotIsoDateMatch) {
+    return `${dotIsoDateMatch[3]}.${dotIsoDateMatch[2]}.${dotIsoDateMatch[1]}`;
+  }
+
+  const malformedDateMatch = value.match(/^(\d{2})T\d{2}:\d{2}:\d{2}\.(\d{2})\.(\d{4})$/);
+  if (malformedDateMatch) {
+    return `${malformedDateMatch[1]}.${malformedDateMatch[2]}.${malformedDateMatch[3]}`;
+  }
+
+  const ruDateMatch = value.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (ruDateMatch) {
+    return `${ruDateMatch[1]}.${ruDateMatch[2]}.${ruDateMatch[3]}`;
+  }
+
+  const parsedDate = new Date(value);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate.toLocaleDateString('ru-RU');
+  }
+
+  return value;
 }
 
 function MoneyOperationModal({
@@ -314,6 +339,7 @@ function MoneyOperationModal({
 }
 
 export function MoneyOperations({ source }: { source: MoneyTab }) {
+  const { setActiveTab } = useTabNavigation();
   const [showFilters, setShowFilters] = useState(false);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [search, setSearch] = useState('');
@@ -745,9 +771,31 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                       {item.direction === 'Expense' ? `${formatMoney(item.amount)} ₽` : '—'}
                     </td>
                     <td className="px-3 py-2">{item.currency ?? 'RUB'}</td>
-                    <td className="px-3 py-2">{item.accountName ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      {item.accountName ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('accounts')}
+                          className="text-blue-600 underline-offset-2 hover:underline">
+                          {item.accountName}
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-3 py-2">{item.counterpartyName ?? '—'}</td>
-                    <td className="px-3 py-2">{item.projectName ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      {item.projectName ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('clients')}
+                          className="text-blue-600 underline-offset-2 hover:underline">
+                          {item.projectName}
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-3 py-2">{item.salesPointName ?? '—'}</td>
                     <td className="px-3 py-2">{item.directionName ?? '—'}</td>
                     <td className="px-3 py-2">{item.paymentPriority ?? '—'}</td>
