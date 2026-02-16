@@ -78,6 +78,7 @@ export function LegalEntities() {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailPageOpen, setDetailPageOpen] = useState(false);
   const [editing, setEditing] = useState<LegalEntityDetail | null>(null);
   const [inlineOpen, setInlineOpen] = useState(false);
   const [modalBusy, setModalBusy] = useState(false);
@@ -103,7 +104,7 @@ export function LegalEntities() {
     setInlineOpen(true);
   };
 
-  const openDetail = async (id: number, allowEditing: boolean) => {
+  const openDetailPage = async (id: number, allowEditing: boolean) => {
     try {
       setModalBusy(true);
       const detail = await getLegalEntity(id);
@@ -141,8 +142,10 @@ export function LegalEntities() {
   const canEdit = legalPermissions.canEdit;
   const canDelete = legalPermissions.canDelete;
 
-  const allowModalEdit = editing ? (!readOnlyMode && canEdit) : canCreate;
-  const allowModalDelete = editing ? (!readOnlyMode && canDelete) : false;
+  const allowModalEdit = canCreate;
+  const allowModalDelete = false;
+  const allowDetailEdit = editing ? (!readOnlyMode && canEdit) : false;
+  const allowDetailDelete = editing ? (!readOnlyMode && canDelete) : false;
 
   const handleSubmit = async (payload: LegalEntityInput) => {
     if (editing) {
@@ -162,17 +165,25 @@ export function LegalEntities() {
     return created;
   };
 
-  const handleDelete = editing && allowModalDelete
+  const handleDelete = editing && (allowDetailDelete || allowModalDelete)
     ? async () => {
         await deleteLegalEntity(editing.id);
         setEditing(null);
         setReadOnlyMode(false);
+        setDetailPageOpen(false);
       }
     : undefined;
 
   const handleCloseModal = () => {
     setModalOpen(false);
     setInlineOpen(false);
+    setEditing(null);
+    setReadOnlyMode(false);
+    setActionError(null);
+  };
+
+  const handleCloseDetailPage = () => {
+    setDetailPageOpen(false);
     setEditing(null);
     setReadOnlyMode(false);
     setActionError(null);
@@ -293,9 +304,12 @@ export function LegalEntities() {
               className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:border-blue-400 hover:shadow-lg">
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">
+                  <button
+                    type="button"
+                    onClick={() => openDetailPage(entity.id, canEdit)}
+                    className="text-left text-lg font-semibold text-gray-900 transition hover:text-blue-600">
                     {highlight(entity.shortName, search)}
-                  </h3>
+                  </button>
                   {entity.fullName && (
                     <p className="mt-1 text-sm text-gray-500">
                       {highlight(entity.fullName, search)}
@@ -344,10 +358,11 @@ export function LegalEntities() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => openDetail(entity.id, canEdit)}
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
+                    onClick={() => openDetailPage(entity.id, canEdit)}
+                    title={t('details') || 'Подробнее'}
+                    aria-label={t('details') || 'Подробнее'}
+                    className="rounded-md p-1 text-blue-600 hover:bg-blue-50 hover:text-blue-700">
                     <Eye size={14} />
-                    {t('details') || 'Подробнее'}
                   </button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1 text-xs text-gray-500">
@@ -380,18 +395,20 @@ export function LegalEntities() {
               <div className="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3 text-sm">
                 <button
                   type="button"
-                  onClick={() => openDetail(entity.id, false)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-gray-600 hover:border-blue-400 hover:text-blue-600">
+                  onClick={() => openDetailPage(entity.id, false)}
+                  title={t('view') || 'Просмотр'}
+                  aria-label={t('view') || 'Просмотр'}
+                  className="inline-flex items-center rounded-lg border border-gray-200 p-2 text-gray-600 hover:border-blue-400 hover:text-blue-600">
                   <Eye size={14} />
-                  {t('view') || 'Просмотр'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => openDetail(entity.id, true)}
+                  onClick={() => openDetailPage(entity.id, true)}
                   disabled={!canEdit}
-                  className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-blue-600 hover:border-blue-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
+                  title={t('edit') || 'Редактировать'}
+                  aria-label={t('edit') || 'Редактировать'}
+                  className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-600 hover:border-blue-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
                   <Edit size={14} />
-                  {t('edit') || 'Редактировать'}
                 </button>
                 <button
                   type="button"
@@ -405,9 +422,10 @@ export function LegalEntities() {
                   type="button"
                   onClick={() => openDetail(entity.id, true)}
                   disabled={!canDelete}
-                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300">
+                  title={t('delete') || 'Удалить'}
+                  aria-label={t('delete') || 'Удалить'}
+                  className="ml-auto inline-flex items-center rounded-lg border border-red-200 bg-red-50 p-2 text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300">
                   <Trash2 size={14} />
-                  {t('delete') || 'Удалить'}
                 </button>
               </div>
             </div>
@@ -439,9 +457,12 @@ export function LegalEntities() {
               {sortedFiltered.map((entity) => (
                 <tr key={entity.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
-                    <div className="font-medium text-gray-900">
+                    <button
+                      type="button"
+                      onClick={() => openDetailPage(entity.id, canEdit)}
+                      className="font-medium text-gray-900 transition hover:text-blue-600">
                       {highlight(entity.shortName, search)}
-                    </div>
+                    </button>
                     {entity.fullName && (
                       <div className="text-xs text-gray-500">{highlight(entity.fullName, search)}</div>
                     )}
@@ -490,13 +511,13 @@ export function LegalEntities() {
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => openDetail(entity.id, false)}
+                        onClick={() => openDetailPage(entity.id, false)}
                         className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-400 hover:text-blue-600">
                         <Eye size={14} />
                       </button>
                       <button
                         type="button"
-                        onClick={() => openDetail(entity.id, true)}
+                        onClick={() => openDetailPage(entity.id, true)}
                         disabled={!canEdit}
                         className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-600 hover:border-blue-400 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
                         <Edit size={14} />
@@ -522,14 +543,14 @@ export function LegalEntities() {
             </tbody>
           </table>
         </div>
+      )
       )}
 
       <LegalEntityModal
         isOpen={modalOpen}
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
-        onDelete={handleDelete}
-        initial={editing}
+        initial={null}
         clients={clientsList}
         suggest={suggestLegalEntities}
         allowEdit={allowModalEdit}

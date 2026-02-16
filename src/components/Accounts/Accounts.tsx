@@ -44,6 +44,7 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 interface AccountsProps {
   defaultType?: PaymentKind;
   lockType?: boolean;
+  onOpenClient?: (clientId: number) => void;
 }
 
 type FilterType = PaymentKind | 'All';
@@ -157,7 +158,7 @@ function safeWrite<T>(key: string, value: T) {
   }
 }
 
-export function Accounts({ defaultType, lockType = false }: AccountsProps) {
+export function Accounts({ defaultType, lockType = false, onOpenClient }: AccountsProps) {
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
@@ -322,6 +323,8 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+
+  const canOpenClientFromAccounts = useMemo(() => typeof onOpenClient === 'function', [onOpenClient]);
 
   const headingTitle =
     typeFilter === 'Expense'
@@ -1005,6 +1008,7 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                     const actsForInvoice = invoiceKey ? actsByInvoice[invoiceKey] ?? [] : [];
                     const primaryName =
                       invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
+                    const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
                     const colSpan = visibleColumns.length + (canEdit || canDelete ? 1 : 0);
 
@@ -1041,7 +1045,18 @@ export function Accounts({ defaultType, lockType = false }: AccountsProps) {
                             <td className="px-4 py-3">
                               <div className="flex flex-col gap-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-medium text-gray-900">{primaryName}</span>
+                                  {clientId && canOpenClientFromAccounts ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenClient?.(clientId)}
+                                      className="font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
+                                      title="Открыть карточку клиента"
+                                    >
+                                      {primaryName}
+                                    </button>
+                                  ) : (
+                                    <span className="font-medium text-gray-900">{primaryName}</span>
+                                  )}
                                   <ClientStatusBadge status={invoice?.clientStatus} />
                                   <span
                                     className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}

@@ -84,6 +84,21 @@ type ClientDetailSection =
   | 'contracts'
   | 'settlement';
 
+type ProfileTabKey =
+  | 'phone'
+  | 'email'
+  | 'address'
+  | 'passport'
+  | 'birthCertificate'
+  | 'militaryId'
+  | 'notes';
+
+type ProfileDocumentsState = {
+  passport: string;
+  birthCertificate: string;
+  militaryId: string;
+};
+
 const SECTION_ORDER: ClientDetailSection[] = [
   'profile',
   'payments',
@@ -353,6 +368,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [clientData, setClientData] = useState<Client | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
   const [clientFormSaving, setClientFormSaving] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
+  const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
+    passport: '',
+    birthCertificate: '',
+    militaryId: '',
+  });
   const [clientFormState, setClientFormState] = useState({
     kind: 'individual' as ClientKind,
     lastName: '',
@@ -875,6 +896,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
+    setProfileDocuments(parsedNotes.docs);
   }, [clientData]);
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
@@ -1974,7 +1996,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </>
         ) : null}
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        {activeSection !== 'profile' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-6 border-b border-gray-100">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900">
@@ -2910,7 +2933,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               })()
             )}
           </div>
-        </div>
+          </div>
+        )}
 
         <InvoiceModal
           open={invoiceModalOpen}
