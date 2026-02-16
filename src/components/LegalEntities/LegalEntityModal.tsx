@@ -290,7 +290,7 @@ export function LegalEntityModal({
                 onClick={onBack}
                 className="mb-3 inline-flex items-center gap-2 rounded border px-3 py-2 text-sm">
                 <ArrowLeft size={16} />
-                {t('back') || 'Назад'}
+                {t('previous') || 'Назад'}
               </button>
             )}
             <h2 className="text-xl font-semibold text-gray-900">
@@ -311,7 +311,7 @@ export function LegalEntityModal({
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-            aria-label={isPageMode ? (t('back') || 'Назад') : (t('cancel') || 'Закрыть')}>
+            aria-label={isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Закрыть')}>
             <X size={20} />
           </button>
         </div>
@@ -627,7 +627,7 @@ export function LegalEntityModal({
                   type="button"
                   onClick={onClose}
                   className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:border-gray-400 hover:text-gray-700">
-                  {isPageMode ? (t('back') || 'Назад') : (t('cancel') || 'Отмена')}
+                  {isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Отмена')}
                 </button>
                 <button
                   type="submit"
