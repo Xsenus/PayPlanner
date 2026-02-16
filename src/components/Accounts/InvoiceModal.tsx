@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Search, UserRoundSearch, X } from 'lucide-react';
 import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -32,6 +32,16 @@ type LineItem = {
   price: string;
 };
 
+type DraftActForm = {
+  number: string;
+  title: string;
+  date: string;
+  amount: string;
+  comment: string;
+};
+
+type ClientPickerMode = 'client' | 'counterparty';
+
 function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
   if (source && source.length > 0) {
     return source.map((item, index) => ({
@@ -61,6 +71,8 @@ interface InvoiceModalProps {
   mode: 'create' | 'edit';
   invoice: Invoice | null;
   onClose: () => void;
+  onBack?: () => void;
+  onOpenClient?: (clientId: number) => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
@@ -70,6 +82,7 @@ interface InvoiceModalProps {
   defaultClientId?: number;
   defaultType?: PaymentKind;
   lockType?: boolean;
+  presentation?: 'modal' | 'page';
 }
 
 function normalizeInvoiceToForm(
@@ -131,6 +144,8 @@ export function InvoiceModal({
   mode,
   invoice,
   onClose,
+  onBack,
+  onOpenClient,
   onSubmit,
   submitting,
   errorMessage,
@@ -140,6 +155,7 @@ export function InvoiceModal({
   defaultClientId,
   defaultType,
   lockType = false,
+  presentation = 'modal',
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { setActiveTab } = useTabNavigation();
@@ -153,8 +169,22 @@ export function InvoiceModal({
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
-  const [extraOpen, setExtraOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientPickerMode, setClientPickerMode] = useState<ClientPickerMode>('client');
+  const [clientPickerSearch, setClientPickerSearch] = useState('');
+  const [counterpartyClientId, setCounterpartyClientId] = useState<number | null>(null);
+  const [selectedAct, setSelectedAct] = useState<ActOption | null>(null);
+  const [createActOpen, setCreateActOpen] = useState(false);
+  const [creatingAct, setCreatingAct] = useState(false);
+  const [createActError, setCreateActError] = useState<string | null>(null);
+  const [draftAct, setDraftAct] = useState<DraftActForm>({
+    number: '',
+    title: '',
+    date: formatLocalYMD(new Date()),
+    amount: '',
+    comment: '',
+  });
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -199,6 +229,27 @@ export function InvoiceModal({
     [clients, form.clientId],
   );
 
+  const selectedCounterpartyClient = useMemo(() => {
+    if (counterpartyClientId) {
+      return clients.find((client) => client.id === counterpartyClientId) ?? null;
+    }
+    const value = form.counterpartyName.trim().toLowerCase();
+    if (!value) return null;
+    return clients.find((client) => client.name.trim().toLowerCase() === value) ?? null;
+  }, [clients, counterpartyClientId, form.counterpartyName]);
+
+  const filteredClients = useMemo(() => {
+    const query = clientPickerSearch.trim().toLowerCase();
+    if (!query) return clients;
+    return clients.filter((client) => {
+      const statusName = client.clientStatus?.name ?? '';
+      return [client.name, client.company ?? '', statusName]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [clientPickerSearch, clients]);
+
   const isIncome = form.type === 'Income';
 
   useEffect(() => {
@@ -216,8 +267,11 @@ export function InvoiceModal({
         clientName: invoice.clientName ?? undefined,
         status: (invoice.actStatus ?? 'Created') as ActStatus,
       } : null;
+      setCounterpartyClientId(null);
+      setSelectedAct(nextInitial);
       setActSearch(actLabel(nextInitial));
       setActsError(null);
+      setCreateActError(null);
       setLocalError(null);
     }
   }, [open, invoice, defaultClientId, defaultType]);
@@ -299,6 +353,7 @@ export function InvoiceModal({
   }, [fetchActs, open]);
 
   const handleActSelect = (act: ActOption) => {
+    setSelectedAct(act);
     setActSearch(actLabel(act));
     setActSuggestions([]);
     setActDropdownOpen(false);
@@ -314,6 +369,7 @@ export function InvoiceModal({
   };
 
   const clearSelectedAct = () => {
+    setSelectedAct(null);
     setActSearch('');
   };
 
@@ -325,8 +381,80 @@ export function InvoiceModal({
     }));
 
     if (nextType === 'Expense') {
+      setSelectedAct(null);
       setActSearch('');
       setActSuggestions([]);
+    }
+  };
+
+  const openClientPicker = (mode: ClientPickerMode) => {
+    setClientPickerMode(mode);
+    setClientPickerSearch('');
+    setClientPickerOpen(true);
+  };
+
+  const handleClientPick = (client: Client) => {
+    if (clientPickerMode === 'client') {
+      setForm((prev) => ({ ...prev, clientId: String(client.id) }));
+    } else {
+      setCounterpartyClientId(client.id);
+      setForm((prev) => ({ ...prev, counterpartyName: client.name }));
+    }
+    setClientPickerOpen(false);
+  };
+
+  const handleCreateAct = async () => {
+    if (!draftAct.number.trim()) {
+      setCreateActError(t('actNumber') ?? 'Номер акта обязателен');
+      return;
+    }
+
+    const actAmount = Number.parseFloat((draftAct.amount || form.amount).replace(',', '.'));
+    if (!Number.isFinite(actAmount) || actAmount < 0) {
+      setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      return;
+    }
+
+    setCreatingAct(true);
+    setCreateActError(null);
+    try {
+      const created = await apiService.createAct({
+        number: draftAct.number.trim(),
+        title: draftAct.title.trim() || undefined,
+        date: fromInputToApiDate(draftAct.date) ?? draftAct.date,
+        amount: actAmount,
+        invoiceNumber: form.number.trim() || undefined,
+        clientId: form.clientId ? Number(form.clientId) : undefined,
+        status: 'Created',
+        comment: draftAct.comment.trim() || undefined,
+      });
+
+      const option: ActOption = {
+        id: created.id,
+        number: created.number,
+        title: created.title ?? undefined,
+        date: created.date,
+        amount: created.amount,
+        invoiceNumber: created.invoiceNumber ?? undefined,
+        clientId: created.clientId ?? undefined,
+        clientName: created.clientName ?? undefined,
+        status: created.status,
+      };
+
+      setSelectedAct(option);
+      setActSearch(actLabel(option));
+      setCreateActOpen(false);
+      setDraftAct({
+        number: '',
+        title: '',
+        date: form.date || formatLocalYMD(new Date()),
+        amount: form.amount,
+        comment: '',
+      });
+    } catch (err) {
+      setCreateActError(err instanceof Error ? err.message : 'Не удалось создать акт');
+    } finally {
+      setCreatingAct(false);
     }
   };
 
@@ -373,6 +501,7 @@ export function InvoiceModal({
       clientId: Number(form.clientId),
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
+      actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       lineItems: lineItems
@@ -414,10 +543,22 @@ export function InvoiceModal({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+  const isPageMode = presentation === 'page';
+
+  const content = (
+    <div className={`relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
+      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center gap-3">
+          {isPageMode && (
+            <button
+              type="button"
+              onClick={onBack ?? onClose}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Назад
+            </button>
+          )}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
               {mode === 'edit'
@@ -428,6 +569,8 @@ export function InvoiceModal({
               {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
             </p>
           </div>
+        </div>
+        {!isPageMode && (
           <button
             type="button"
             onClick={onClose}
@@ -436,9 +579,10 @@ export function InvoiceModal({
           >
             <X className="h-5 w-5" />
           </button>
-        </div>
+        )}
+      </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-6">
+      <form onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
           <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -499,7 +643,7 @@ export function InvoiceModal({
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                   <input
@@ -550,27 +694,16 @@ export function InvoiceModal({
                 </label>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setExtraOpen((prev) => !prev)}
-                className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
-              >
-                {t('invoiceExtraParams') ?? 'Дополнительные параметры'}
-                <ChevronDown className={`h-4 w-4 transition-transform ${extraOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {extraOpen && (
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
-                  <textarea
-                    value={form.description}
-                    onChange={handleChange('description')}
-                    rows={3}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
-                  />
-                </label>
-              )}
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                <textarea
+                  value={form.description}
+                  onChange={handleChange('description')}
+                  rows={3}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                />
+              </label>
             </div>
           </section>
 
@@ -599,6 +732,7 @@ export function InvoiceModal({
             <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
           </section>
 
+          <div className="grid gap-6 xl:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -611,19 +745,22 @@ export function InvoiceModal({
             <div className="mt-4 grid grid-cols-1 gap-4">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Контрагент'}</span>
-                <select
-                  value={form.clientId}
-                  onChange={handleChange('clientId')}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                >
-                  <option value="">{t('invoiceClientPlaceholder') ?? 'Выберите клиента'}</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                      {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={selectedClient?.name ?? ''}
+                    readOnly
+                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50"
+                    placeholder={t('invoiceClientPlaceholder') ?? 'Выберите клиента'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openClientPicker('client')}
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <UserRoundSearch className="h-4 w-4" />
+                  </button>
+                </div>
                 {lookupsLoading && (
                   <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
                 )}
@@ -638,20 +775,50 @@ export function InvoiceModal({
                     )}
                   </div>
                 )}
+                {selectedClient && onOpenClient && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient(selectedClient.id)}
+                    className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                  >
+                    Открыть карточку клиента
+                  </button>
+                )}
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-slate-700">{t('invoiceCounterparty') ?? 'От кого счёт'}</span>
-                <input
-                  type="text"
-                  value={form.counterpartyName}
-                  onChange={handleChange('counterpartyName')}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={form.counterpartyName}
+                    onChange={(event) => {
+                      setCounterpartyClientId(null);
+                      setForm((prev) => ({ ...prev, counterpartyName: event.target.value }));
+                    }}
+                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openClientPicker('counterparty')}
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <UserRoundSearch className="h-4 w-4" />
+                  </button>
+                </div>
                 <span className="text-xs text-slate-500">
                   {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
                 </span>
+                {selectedCounterpartyClient && onOpenClient && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient(selectedCounterpartyClient.id)}
+                    className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                  >
+                    Открыть карточку контрагента
+                  </button>
+                )}
               </label>
             </div>
           </section>
@@ -698,6 +865,7 @@ export function InvoiceModal({
               </label>
             </div>
           </section>
+        </div>
 
           <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
@@ -710,8 +878,31 @@ export function InvoiceModal({
             </header>
             <div className="mt-4 space-y-4">
               {isIncome && (
-                <div className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
+                <div className="flex flex-col gap-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftAct((prev) => ({
+                          ...prev,
+                          date: form.date || prev.date,
+                          amount: form.amount || prev.amount,
+                        }));
+                        setCreateActError(null);
+                        setCreateActOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {t('actCreate') ?? 'Создать акт'}
+                    </button>
+                  </div>
+                  {selectedAct && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      {t('invoiceSelectedAct') ?? 'Выбран акт'}: {actLabel(selectedAct)}
+                    </div>
+                  )}
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
@@ -806,8 +997,97 @@ export function InvoiceModal({
               {mode === 'edit' ? t('invoiceEdit') ?? 'Сохранить изменения' : t('invoiceCreate') ?? 'Создать счёт'}
             </button>
           </div>
-        </form>
-      </div>
+      </form>
+
+      {clientPickerOpen && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-slate-900">
+                {clientPickerMode === 'client'
+                  ? (t('invoicePickClientTitle') ?? 'Выбор контрагента')
+                  : (t('invoicePickCounterpartyTitle') ?? 'Выбор отправителя счёта')}
+              </h3>
+              <button type="button" onClick={() => setClientPickerOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={clientPickerSearch}
+              onChange={(event) => setClientPickerSearch(event.target.value)}
+              placeholder={t('search') ?? 'Поиск'}
+              className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <div className="max-h-72 overflow-auto rounded-lg border border-slate-200">
+              {filteredClients.map((client) => (
+                <button
+                  key={client.id}
+                  type="button"
+                  onClick={() => handleClientPick(client)}
+                  className="flex w-full items-center justify-between border-b border-slate-100 px-3 py-2 text-left last:border-0 hover:bg-slate-50"
+                >
+                  <span className="font-medium text-slate-800">{client.name}</span>
+                  {client.clientStatus?.name && <span className="text-xs text-slate-500">{client.clientStatus.name}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createActOpen && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-slate-900">{t('actCreate') ?? 'Создать акт'}</h3>
+              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
+                <input value={draftAct.number} onChange={(e) => setDraftAct((prev) => ({ ...prev, number: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
+                <input type="date" value={draftAct.date} onChange={(e) => setDraftAct((prev) => ({ ...prev, date: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
+                <input value={draftAct.title} onChange={(e) => setDraftAct((prev) => ({ ...prev, title: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'Сумма'}</span>
+                <input value={draftAct.amount} onChange={(e) => setDraftAct((prev) => ({ ...prev, amount: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
+                <textarea value={draftAct.comment} onChange={(e) => setDraftAct((prev) => ({ ...prev, comment: e.target.value }))} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+            </div>
+            {createActError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{createActError}</div>}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'Отмена'}</button>
+              <button type="button" onClick={() => void handleCreateAct()} disabled={creatingAct} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+                {creatingAct && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t('actCreate') ?? 'Создать акт'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (isPageMode) {
+    return <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">{content}</div>;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
+      {content}
     </div>
   );
 }

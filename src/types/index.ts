@@ -381,6 +381,7 @@ export interface InvoiceInput {
   clientCaseId?: number | null;
   description?: string | null;
   actReference?: string | null;
+  actId?: number | null;
   counterpartyName?: string | null;
   paymentSourceId?: number | null;
   incomeTypeId?: number | null;
