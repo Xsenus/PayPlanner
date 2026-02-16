@@ -896,7 +896,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
-    setProfileDocuments(parsedNotes.docs);
+    setProfileDocuments({
+      passport: profile.passports[0] ?? '',
+      birthCertificate: profile.birthCertificates[0] ?? '',
+      militaryId: profile.militaryIds[0] ?? '',
+    });
   }, [clientData]);
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
