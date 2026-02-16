@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2, Pencil, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Pencil, Save, Search, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
@@ -9,6 +9,7 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 interface ActDetailPageProps {
   actId: number;
   onBack: () => void;
+  onOpenClient?: (clientId: number) => void;
 }
 
 type FormState = {
@@ -41,7 +42,7 @@ function normalizeActToForm(act: Act): FormState {
   };
 }
 
-export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
+export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProps) {
   const { t } = useTranslation();
   const [act, setAct] = useState<Act | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -51,6 +52,8 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +69,7 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
         if (cancelled) return;
         const target = (actsData.items ?? []).find((item) => item.id === actId) ?? null;
         if (!target) {
-          setError(t('actNotFound') ?? 'Акт не найден');
+          setError('Акт не найден');
           setAct(null);
           setForm(null);
           return;
@@ -77,7 +80,7 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
         setResponsibles(responsiblesData ?? []);
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : (t('failedToLoad') ?? 'Не удалось загрузить данные'));
+          setError(e instanceof Error ? e.message : 'Не удалось загрузить данные');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -88,12 +91,20 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [actId, t]);
+  }, [actId]);
 
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === String(form?.clientId ?? '')) ?? null,
     [clients, form?.clientId],
   );
+
+  const filteredClients = useMemo(() => {
+    const searchValue = clientSearch.trim().toLowerCase();
+    return clients.filter((client) => {
+      if (!searchValue) return true;
+      return `${client.name} ${client.company ?? ''}`.toLowerCase().includes(searchValue);
+    });
+  }, [clientSearch, clients]);
 
   const statusOptions = useMemo(
     () =>
@@ -120,18 +131,18 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
     if (!form || !act) return;
 
     if (!form.number.trim()) {
-      setError(t('actNumber') ?? 'Номер акта обязателен');
+      setError('Номер акта обязателен');
       return;
     }
 
     if (!form.date) {
-      setError(t('actDate') ?? 'Дата акта обязательна');
+      setError('Дата акта обязательна');
       return;
     }
 
     const parsedAmount = Number(String(form.amount).replace(/\s+/g, '').replace(',', '.'));
     if (Number.isNaN(parsedAmount)) {
-      setError(t('actAmount') ?? 'Введите корректную сумму');
+      setError('Введите корректную сумму');
       return;
     }
 
@@ -156,7 +167,7 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
       setForm(normalizeActToForm(updated));
       setEditMode(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : (t('failedToSave') ?? 'Не удалось сохранить'));
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить');
     } finally {
       setSaving(false);
     }
@@ -180,7 +191,7 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
           >
             <ArrowLeft className="h-4 w-4" />
-            {t('back') ?? 'Назад'}
+            Назад
           </button>
 
           <div className="flex items-center gap-2">
@@ -203,7 +214,7 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
                 }}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
               >
-                {t('cancel') ?? 'Отмена'}
+                Отмена
               </button>
             )}
 
@@ -214,15 +225,15 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {t('save') ?? 'Сохранить'}
+              Сохранить
             </button>
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-5">
-            <h1 className="text-2xl font-bold text-slate-900">{t('actEdit') ?? 'Редактировать акт'}</h1>
-            <p className="text-sm text-slate-500">{t('actModalSubtitle') ?? 'Создайте или обновите данные по акту'}</p>
+            <h1 className="text-2xl font-bold text-slate-900">Редактировать акт</h1>
+            <p className="text-sm text-slate-500">Создайте или обновите данные по акту</p>
           </div>
 
           {error ? (
@@ -231,49 +242,65 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
+              <span className="font-medium text-slate-700">Номер акта</span>
               <input type="text" value={form.number} onChange={handleChange('number')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
+              <span className="font-medium text-slate-700">Дата</span>
               <input type="date" value={form.date} onChange={handleChange('date')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actAmount') ?? 'Сумма'}</span>
+              <span className="font-medium text-slate-700">Сумма</span>
               <input type="number" step="0.01" value={form.amount} onChange={handleChange('amount')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actInvoice') ?? 'Счёт'}</span>
+              <span className="font-medium text-slate-700">Счёт</span>
               <input type="text" value={form.invoiceNumber} onChange={handleChange('invoiceNumber')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
             <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
+              <span className="font-medium text-slate-700">Название</span>
               <input type="text" value={form.title} onChange={handleChange('title')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actClient') ?? 'Контрагент'}</span>
-              <select value={form.clientId} onChange={handleChange('clientId')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50">
-                <option value="">{t('selectClient') ?? 'Выберите клиента'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                    {client.company ? ` — ${client.company}` : ''}
-                  </option>
-                ))}
-              </select>
+
+            <div className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Контрагент</span>
+              <div className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700">
+                {selectedClient?.name ?? 'Клиент не выбран'}
+              </div>
               {selectedClient?.clientStatus ? (
                 <div className="mt-1">
                   <ClientStatusBadge status={selectedClient.clientStatus} />
                 </div>
               ) : null}
-            </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!editMode}
+                  onClick={() => setClientPickerOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Search className="h-4 w-4" />
+                  Выбрать из справочника
+                </button>
+                {selectedClient?.id ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient?.(selectedClient.id)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm text-indigo-700 hover:bg-indigo-100"
+                  >
+                    <UserRound className="h-4 w-4" />
+                    Открыть карточку
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actInn') ?? 'ИНН контрагента'}</span>
+              <span className="font-medium text-slate-700">ИНН контрагента</span>
               <input type="text" value={form.counterpartyInn} onChange={handleChange('counterpartyInn')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actStatus') ?? 'Статус'}</span>
+              <span className="font-medium text-slate-700">Статус</span>
               <select value={form.status} onChange={handleChange('status')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50">
                 {statusOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -281,21 +308,73 @@ export function ActDetailPage({ actId, onBack }: ActDetailPageProps) {
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actResponsible') ?? 'Ответственный'}</span>
+              <span className="font-medium text-slate-700">Ответственный</span>
               <select value={form.responsibleId} onChange={handleChange('responsibleId')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50">
-                <option value="">{t('selectResponsible') ?? 'Выберите ответственного'}</option>
+                <option value="">Выберите ответственного</option>
                 {responsibles.map((responsible) => (
-                  <option key={responsible.id} value={responsible.id}>{responsible.name}</option>
+                  <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="font-medium text-slate-700">{t('comment') ?? 'Комментарий'}</span>
+              <span className="font-medium text-slate-700">Комментарий</span>
               <textarea value={form.comment} onChange={handleChange('comment')} disabled={!editMode} className="min-h-[96px] rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
           </div>
         </div>
       </div>
+
+      {clientPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => setClientPickerOpen(false)}>
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-slate-900">Выберите контрагента</h3>
+            <div className="mt-3">
+              <input
+                type="text"
+                value={clientSearch}
+                onChange={(event) => setClientSearch(event.target.value)}
+                placeholder="Поиск по имени или компании"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="mt-3 max-h-[360px] overflow-auto rounded-lg border border-slate-200">
+              {filteredClients.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-slate-500">Клиенты не найдены</div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {filteredClients.map((client) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      className="flex w-full items-start justify-between px-4 py-3 text-left hover:bg-slate-50"
+                      onClick={() => {
+                        setForm((prev) => (prev ? { ...prev, clientId: String(client.id) } : prev));
+                        setClientPickerOpen(false);
+                        setClientSearch('');
+                      }}
+                    >
+                      <div>
+                        <div className="font-medium text-slate-900">{client.name}</div>
+                        {client.company ? <div className="text-xs text-slate-500">{client.company}</div> : null}
+                      </div>
+                      {client.clientStatus?.name ? <div className="text-xs text-slate-500">{client.clientStatus.name}</div> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setClientPickerOpen(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

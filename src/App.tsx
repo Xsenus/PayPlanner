@@ -84,12 +84,12 @@ function AppContent() {
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
   const [selectedActId, setSelectedActId] = useState<number | null>(null);
-  const [clientReturnTab, setClientReturnTab] = useState<{ tab: Tab; contractId?: number | null } | null>(null);
+  const [clientReturnTab, setClientReturnTab] = useState<{ tab: Tab; contractId?: number | null; actId?: number | null } | null>(null);
 
   const handleOpenClient = (
     clientId: number,
     caseId?: number,
-    options?: { returnTo?: { tab: Tab; contractId?: number | null } },
+    options?: { returnTo?: { tab: Tab; contractId?: number | null; actId?: number | null } },
   ) => {
     if (!permissions.clients.canView) {
       return;
@@ -349,6 +349,9 @@ function AppContent() {
               if (target === 'contractDetail' && clientReturnTab?.contractId) {
                 setSelectedContractId(clientReturnTab.contractId);
               }
+              if (target === 'actDetail' && clientReturnTab?.actId) {
+                setSelectedActId(clientReturnTab.actId);
+              }
               setActiveTab(target);
               setSelectedClientId(null);
               setClientReturnTab(null);
@@ -386,7 +389,13 @@ function AppContent() {
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'acts':
         return permissions.acts.canView
-          ? <Acts onOpenAct={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }} />
+          ? (
+              <Acts
+                onOpenAct={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'acts' } })}
+                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
+              />
+            )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
       case 'actDetail':
         return permissions.acts.canView && selectedActId
@@ -394,6 +403,7 @@ function AppContent() {
               <ActDetailPage
                 actId={selectedActId}
                 onBack={() => setActiveTab('acts')}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actDetail', actId: selectedActId } })}
               />
             )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');

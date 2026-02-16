@@ -51,9 +51,11 @@ type SortState = {
 
 interface ActsProps {
   onOpenAct?: (actId: number) => void;
+  onOpenClient?: (clientId: number) => void;
+  onOpenInvoiceEditor?: (invoiceId: number) => void;
 }
 
-export function Acts({ onOpenAct }: ActsProps) {
+export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
@@ -226,6 +228,23 @@ export function Acts({ onOpenAct }: ActsProps) {
       setSubmitting(false);
     }
   };
+
+
+  const openInvoiceFromAct = useCallback(async (act: Act) => {
+    if (!act.invoiceNumber || !onOpenInvoiceEditor) return;
+    try {
+      const response = await apiService.getInvoices({ search: act.invoiceNumber, page: 1, pageSize: 100 });
+      const normalized = act.invoiceNumber.trim().toLowerCase();
+      const invoice = (response.items ?? []).find((item) => String(item.number ?? '').trim().toLowerCase() === normalized);
+      if (invoice) {
+        onOpenInvoiceEditor(invoice.id);
+      } else {
+        await alert('Счёт не найден');
+      }
+    } catch (err) {
+      await alert(err instanceof Error ? err.message : 'Не удалось открыть счёт');
+    }
+  }, [alert, onOpenInvoiceEditor]);
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
@@ -475,7 +494,11 @@ export function Acts({ onOpenAct }: ActsProps) {
                   </tr>
                 ) : (
                   acts.map((act) => (
-                    <tr key={act.id} className="hover:bg-slate-50/80">
+                    <tr
+                      key={act.id}
+                      className={`hover:bg-slate-50/80 ${canEdit ? 'cursor-pointer' : ''}`}
+                      onClick={() => { if (canEdit) onOpenAct?.(act.id); }}
+                    >
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">
                         {formatDate(act.date)}
                       </td>
@@ -486,12 +509,34 @@ export function Acts({ onOpenAct }: ActsProps) {
                         {formatMoney(act.amount || 0)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {act.invoiceNumber || '—'}
+                        {act.invoiceNumber ? (
+                          <button
+                            type="button"
+                            className="text-indigo-600 hover:underline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openInvoiceFromAct(act);
+                            }}
+                          >
+                            {act.invoiceNumber}
+                          </button>
+                        ) : '—'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div className="flex flex-col">
                           <span className="font-medium text-slate-900">
-                            {act.clientName || t('actClientUnknown') || 'Без контрагента'}
+                            {act.clientId && act.clientName ? (
+                              <button
+                                type="button"
+                                className="text-indigo-600 hover:underline"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onOpenClient?.(act.clientId as number);
+                                }}
+                              >
+                                {act.clientName}
+                              </button>
+                            ) : (act.clientName || t('actClientUnknown') || 'Без контрагента')}
                           </span>
                           {act.title && (
                             <span className="text-xs text-slate-500">{act.title}</span>
@@ -515,7 +560,7 @@ export function Acts({ onOpenAct }: ActsProps) {
                             {canEdit && (
                               <button
                                 type="button"
-                                onClick={() => onOpenAct?.(act.id)}
+                                onClick={(event) => { event.stopPropagation(); onOpenAct?.(act.id); }}
                                 className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
                                 title={t('edit') ?? 'Редактировать'}>
                                 <Pencil className="h-4 w-4" />
@@ -524,7 +569,7 @@ export function Acts({ onOpenAct }: ActsProps) {
                             {canDelete && (
                               <button
                                 type="button"
-                                onClick={() => void handleDelete(act)}
+                                onClick={(event) => { event.stopPropagation(); void handleDelete(act); }}
                                 className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
                                 title={t('delete') ?? 'Удалить'}>
                                 <Trash2 className="h-4 w-4" />
