@@ -25,7 +25,11 @@ public class UpsertContractRequest
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? Amount { get; set; }
 
+    public DateTime? StartDate { get; set; }
+
     public DateTime? ValidUntil { get; set; }
+
+    public DateTime? TerminationDate { get; set; }
 
     [MinLength(1, ErrorMessage = "Необходимо выбрать хотя бы одного клиента.")]
     public List<UpsertContractClientRequest> Clients { get; set; } = new();

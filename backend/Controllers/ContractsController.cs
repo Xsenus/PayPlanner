@@ -55,7 +55,9 @@ public class ContractsController : ControllerBase
             Description = Normalize(request.Description),
             Amount = request.Amount,
             Date = request.Date.Date,
+            StartDate = request.StartDate?.Date,
             ValidUntil = request.ValidUntil?.Date,
+            TerminationDate = request.TerminationDate?.Date,
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -89,7 +91,9 @@ public class ContractsController : ControllerBase
         contract.Description = Normalize(request.Description);
         contract.Amount = request.Amount;
         contract.Date = request.Date.Date;
+        contract.StartDate = request.StartDate?.Date;
         contract.ValidUntil = request.ValidUntil?.Date;
+        contract.TerminationDate = request.TerminationDate?.Date;
         contract.UpdatedAt = DateTime.UtcNow;
 
         SyncClientLinks(contract, normalized.Clients);
@@ -126,7 +130,9 @@ public class ContractsController : ControllerBase
         Description = contract.Description,
         Amount = contract.Amount,
         Date = contract.Date,
+        StartDate = contract.StartDate,
         ValidUntil = contract.ValidUntil,
+        TerminationDate = contract.TerminationDate,
         CreatedAt = contract.CreatedAt,
         UpdatedAt = contract.UpdatedAt,
         Clients = contract.ClientContracts.Where(link => link.Client != null).Select(link => new ContractClientDto

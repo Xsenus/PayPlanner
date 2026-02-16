@@ -252,9 +252,11 @@ export interface Contract {
   number: string;
   title?: string | null;
   date: string;
+  startDate?: string | null;
   description?: string | null;
   amount?: number | null;
   validUntil?: string | null;
+  terminationDate?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   clients: ContractClient[];
@@ -268,9 +270,11 @@ export interface ContractInput {
   number: string;
   title?: string | null;
   date: string;
+  startDate?: string | null;
   description?: string | null;
   amount?: number | null;
   validUntil?: string | null;
+  terminationDate?: string | null;
   clients: Array<{ clientId: number; comment?: string | null }>;
   actIds?: number[];
   invoiceIds?: number[];

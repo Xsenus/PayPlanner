@@ -420,7 +420,7 @@ function AppContent() {
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
-          ? <Contracts onOpenContract={(id) => { setSelectedContractId(id); setActiveTab('contractDetail'); }} />
+          ? <Contracts onOpenContract={(id) => { setSelectedContractId(id); setActiveTab('contractDetail'); }} onOpenClient={handleOpenClient} />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'contractCreate':
         return permissions.contracts.canCreate
@@ -437,6 +437,7 @@ function AppContent() {
               <ContractDetailPage
                 contractId={selectedContractId}
                 onBack={() => setActiveTab('contracts')}
+                onOpenClient={handleOpenClient}
               />
             )
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');

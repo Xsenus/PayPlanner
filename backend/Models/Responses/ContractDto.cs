@@ -9,9 +9,11 @@ public class ContractDto
     public string Number { get; set; } = string.Empty;
     public string? Title { get; set; }
     public DateTime Date { get; set; }
+    public DateTime? StartDate { get; set; }
     public string? Description { get; set; }
     public decimal? Amount { get; set; }
     public DateTime? ValidUntil { get; set; }
+    public DateTime? TerminationDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public IReadOnlyCollection<ContractClientDto> Clients { get; set; } = Array.Empty<ContractClientDto>();

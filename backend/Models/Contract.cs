@@ -24,9 +24,14 @@ public class Contract
     public string? Title { get; set; }
 
     /// <summary>
-    /// Дата подписания договора.
+    /// Дата договора (подписания).
     /// </summary>
     public DateTime Date { get; set; }
+
+    /// <summary>
+    /// Дата начала действия договора.
+    /// </summary>
+    public DateTime? StartDate { get; set; }
 
     /// <summary>
     /// Расширенное описание условий договора.
@@ -42,6 +47,11 @@ public class Contract
     /// Дата окончания действия договора (если задана).
     /// </summary>
     public DateTime? ValidUntil { get; set; }
+
+    /// <summary>
+    /// Дата расторжения договора.
+    /// </summary>
+    public DateTime? TerminationDate { get; set; }
 
     /// <summary>
     /// Дата и время создания записи.
