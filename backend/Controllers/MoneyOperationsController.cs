@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
@@ -12,7 +13,13 @@ namespace PayPlanner.Api.Controllers;
 public class MoneyOperationsController : ControllerBase
 {
     private readonly PaymentContext _db;
-    public MoneyOperationsController(PaymentContext db) => _db = db;
+    private readonly ILogger<MoneyOperationsController> _logger;
+
+    public MoneyOperationsController(PaymentContext db, ILogger<MoneyOperationsController> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -24,44 +31,47 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search,
         CancellationToken ct)
     {
-        var customQuery = ApplyMoneyOperationFilters(
-            _db.MoneyOperations.AsNoTracking().AsQueryable(),
-            from,
-            to,
-            source,
-            direction,
-            accountingType,
-            search);
+        var list = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        {
+            var customQuery = ApplyMoneyOperationFilters(
+                _db.MoneyOperations.AsNoTracking().AsQueryable(),
+                from,
+                to,
+                source,
+                direction,
+                accountingType,
+                search);
 
-        var customOperations = (await customQuery
-            .OrderByDescending(o => o.Date)
-            .ThenByDescending(o => o.Id)
-            .ToListAsync(ct))
-            .Select(MapManualOperationToListItem)
-            .ToList();
+            var customOperations = (await customQuery
+                .OrderByDescending(o => o.Date)
+                .ThenByDescending(o => o.Id)
+                .ToListAsync(cancellationToken))
+                .Select(MapManualOperationToListItem)
+                .ToList();
 
-        var paymentsQuery = ApplyPaymentFilters(
-            _db.Payments
-                .AsNoTracking()
-                .Include(p => p.PaymentSource)
-                .Include(p => p.ClientCase)
-                .AsQueryable(),
-            from,
-            to,
-            direction,
-            accountingType,
-            search);
+            var paymentsQuery = ApplyPaymentFilters(
+                _db.Payments
+                    .AsNoTracking()
+                    .Include(p => p.PaymentSource)
+                    .Include(p => p.ClientCase)
+                    .AsQueryable(),
+                from,
+                to,
+                direction,
+                accountingType,
+                search);
 
-        var paymentOperations = (await paymentsQuery.ToListAsync(ct))
-            .Select(MapPaymentToListItem)
-            .Where(o => !source.HasValue || o.Source == source.Value)
-            .ToList();
+            var paymentOperations = (await paymentsQuery.ToListAsync(cancellationToken))
+                .Select(MapPaymentToListItem)
+                .Where(o => !source.HasValue || o.Source == source.Value)
+                .ToList();
 
-        var list = customOperations
-            .Concat(paymentOperations)
-            .OrderByDescending(o => o.Date)
-            .ThenByDescending(o => o.Id)
-            .ToList();
+            return customOperations
+                .Concat(paymentOperations)
+                .OrderByDescending(o => o.Date)
+                .ThenByDescending(o => o.Id)
+                .ToList();
+        }, _logger, ct);
 
         return Ok(list);
     }
