@@ -11,6 +11,7 @@ import { Accounts } from './components/Accounts/Accounts';
 import { Installments } from './components/Accounts/Installments';
 import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
+import { ContractCreatePage } from './components/Contracts/ContractCreatePage';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
@@ -54,6 +55,7 @@ function AppContent() {
     moneyCards: 'Деньги: Карты',
     moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
+    contractCreate: 'Новый договор',
     companyProfile: 'Профиль компании',
     users: 'Пользователи',
     roles: 'Роли',
@@ -131,6 +133,7 @@ function AppContent() {
         { tab: 'moneyCards' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
+        { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
         .filter((entry) => entry.allowed)
@@ -170,6 +173,8 @@ function AppContent() {
           return permissions.payments.canView;
         case 'contracts':
           return permissions.contracts.canView;
+        case 'contractCreate':
+          return permissions.contracts.canCreate;
         case 'companyProfile':
           return true;
         case 'dictionaries':
@@ -410,6 +415,15 @@ function AppContent() {
         return permissions.contracts.canView
           ? <Contracts />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
+      case 'contractCreate':
+        return permissions.contracts.canCreate
+          ? (
+              <ContractCreatePage
+                onBack={() => setActiveTab('contracts')}
+                onCreated={() => setActiveTab('contracts')}
+              />
+            )
+          : renderNoAccess('Создание договоров недоступно для вашей роли.');
       case 'companyProfile':
         return <CompanyProfile />;
       case 'roles':

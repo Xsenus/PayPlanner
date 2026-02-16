@@ -17,6 +17,7 @@ export type Tab =
   | 'moneyCards'
   | 'moneyTotal'
   | 'contracts'
+  | 'contractCreate'
   | 'clientDetail'
   | 'companyProfile'
   | 'users'

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTabNavigation } from '../../contexts/TabContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
@@ -46,6 +47,7 @@ function formatDate(value?: string | null): string {
 
 export function Contracts() {
   const { user } = useAuth();
+  const { setActiveTab } = useTabNavigation();
   const permissions = useRolePermissions(user?.role?.id);
   const contractsPermissions = permissions.contracts;
   const canCreate = contractsPermissions.canCreate;
@@ -76,7 +78,6 @@ export function Contracts() {
     error,
     pagination,
     refresh,
-    createContract,
     updateContract,
     deleteContract,
   } = useContracts({
@@ -95,7 +96,6 @@ export function Contracts() {
   const [clientsError, setClientsError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -143,17 +143,13 @@ export function Contracts() {
     return clients.find((client) => String(client.id) === clientFilter) ?? null;
   }, [clientFilter, clients]);
 
-  const openCreateModal = () => {
+  const openCreatePage = () => {
     if (!canCreate) return;
-    setModalMode('create');
-    setSelectedContract(null);
-    setModalOpen(true);
-    setModalError(null);
+    setActiveTab('contractCreate');
   };
 
   const openEditModal = (contract: Contract) => {
     if (!canEdit) return;
-    setModalMode('edit');
     setSelectedContract(contract);
     setModalOpen(true);
     setModalError(null);
@@ -164,9 +160,7 @@ export function Contracts() {
     setModalError(null);
     setActionError(null);
     try {
-      if (modalMode === 'create') {
-        await createContract(payload);
-      } else if (selectedContract) {
+      if (selectedContract) {
         await updateContract(selectedContract.id, payload);
       }
       setModalOpen(false);
@@ -245,7 +239,7 @@ export function Contracts() {
             {canCreate && (
               <button
                 type="button"
-                onClick={openCreateModal}
+                onClick={openCreatePage}
                 className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
               >
                 <Plus className="h-4 w-4" />
@@ -540,7 +534,7 @@ export function Contracts() {
 
         <ContractModal
           open={modalOpen}
-          mode={modalMode}
+          mode="edit"
           contract={selectedContract}
           onClose={() => {
             if (submitting) return;
