@@ -342,15 +342,15 @@ function AppContent() {
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
       case 'accounts':
         return permissions.accounts.canView
-          ? <Accounts />
+          ? <Accounts onOpenClient={handleOpenClient} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'accountsIncome':
         return permissions.accounts.canView
-          ? <Accounts defaultType="Income" lockType />
+          ? <Accounts defaultType="Income" lockType onOpenClient={handleOpenClient} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'accountsExpense':
         return permissions.accounts.canView
-          ? <Accounts defaultType="Expense" lockType />
+          ? <Accounts defaultType="Expense" lockType onOpenClient={handleOpenClient} />
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
       case 'installments':
         return permissions.accounts.canView
