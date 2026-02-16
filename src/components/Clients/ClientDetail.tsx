@@ -83,6 +83,21 @@ type ClientDetailSection =
   | 'contracts'
   | 'settlement';
 
+type ProfileTabKey =
+  | 'phone'
+  | 'email'
+  | 'address'
+  | 'passport'
+  | 'birthCertificate'
+  | 'militaryId'
+  | 'notes';
+
+type ProfileDocumentsState = {
+  passport: string;
+  birthCertificate: string;
+  militaryId: string;
+};
+
 const SECTION_ORDER: ClientDetailSection[] = [
   'profile',
   'payments',
@@ -222,6 +237,61 @@ function toRuPaymentStatus(status?: string, fallback: string = '—'): string {
 const MIN_DATE = '1900-01-01';
 const MAX_DATE = '2100-12-31';
 
+const PROFILE_DOCS_MARKER = '[PP_CLIENT_PROFILE_DOCS]';
+
+function parseClientNotes(rawNotes?: string | null): {
+  notes: string;
+  docs: ProfileDocumentsState;
+} {
+  const fallbackDocs: ProfileDocumentsState = {
+    passport: '',
+    birthCertificate: '',
+    militaryId: '',
+  };
+  const source = (rawNotes ?? '').trim();
+  if (!source) {
+    return { notes: '', docs: fallbackDocs };
+  }
+
+  const markerIndex = source.indexOf(PROFILE_DOCS_MARKER);
+  if (markerIndex === -1) {
+    return { notes: source, docs: fallbackDocs };
+  }
+
+  const noteText = source.slice(0, markerIndex).trim();
+  const payload = source.slice(markerIndex + PROFILE_DOCS_MARKER.length).trim();
+
+  try {
+    const parsed = JSON.parse(payload) as Partial<ProfileDocumentsState>;
+    return {
+      notes: noteText,
+      docs: {
+        passport: parsed.passport?.trim() ?? '',
+        birthCertificate: parsed.birthCertificate?.trim() ?? '',
+        militaryId: parsed.militaryId?.trim() ?? '',
+      },
+    };
+  } catch {
+    return { notes: source, docs: fallbackDocs };
+  }
+}
+
+function serializeClientNotes(notes: string, docs: ProfileDocumentsState): string {
+  const noteText = notes.trim();
+  const normalizedDocs: ProfileDocumentsState = {
+    passport: docs.passport.trim(),
+    birthCertificate: docs.birthCertificate.trim(),
+    militaryId: docs.militaryId.trim(),
+  };
+
+  if (!normalizedDocs.passport && !normalizedDocs.birthCertificate && !normalizedDocs.militaryId) {
+    return noteText;
+  }
+
+  const docsPayload = JSON.stringify(normalizedDocs);
+  return noteText ? `${noteText}\n\n${PROFILE_DOCS_MARKER}${docsPayload}` : `${PROFILE_DOCS_MARKER}${docsPayload}`;
+}
+
 export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -240,6 +310,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [clientData, setClientData] = useState<Client | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | 'all'>(initialCaseId ?? 'all');
   const [clientFormSaving, setClientFormSaving] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
+  const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
+    passport: '',
+    birthCertificate: '',
+    militaryId: '',
+  });
   const [clientFormState, setClientFormState] = useState({
     name: '',
     email: '',
@@ -732,17 +808,19 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     if (!clientData) return;
+    const parsedNotes = parseClientNotes(clientData.notes ?? '');
     setClientFormState({
       name: clientData.name ?? '',
       email: clientData.email ?? '',
       phone: clientData.phone ?? '',
       company: clientData.company ?? '',
       address: clientData.address ?? '',
-      notes: clientData.notes ?? '',
+      notes: parsedNotes.notes,
       legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
+    setProfileDocuments(parsedNotes.docs);
   }, [clientData]);
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
@@ -1266,7 +1344,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
         phone: clientFormState.phone.trim(),
         company: clientFormState.company.trim(),
         address: clientFormState.address.trim(),
-        notes: clientFormState.notes.trim(),
+        notes: serializeClientNotes(clientFormState.notes, profileDocuments),
         isActive: clientFormState.isActive,
         legalEntityId: clientFormState.legalEntityId
           ? Number(clientFormState.legalEntityId)
@@ -1511,28 +1589,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')}</label>
-                <input
-                  type="email"
-                  name="email"
-                  value={clientFormState.email}
-                  onChange={handleClientFormChange}
-                  disabled={!clientPermissions.canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')}</label>
-                <input
-                  type="tel"
-                  name="phone"
-                  value={clientFormState.phone}
-                  onChange={handleClientFormChange}
-                  disabled={!clientPermissions.canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('company')}</label>
                 <input
                   type="text"
@@ -1580,28 +1636,147 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
                   </div>
                 )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('address')}</label>
-                <input
-                  type="text"
-                  name="address"
-                  value={clientFormState.address}
-                  onChange={handleClientFormChange}
-                  disabled={!clientPermissions.canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                />
+              <div className="md:col-span-2">
+                <div className="mb-3 flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+                  {[
+                    { key: 'phone' as ProfileTabKey, label: 'Телефоны' },
+                    { key: 'email' as ProfileTabKey, label: 'Email' },
+                    { key: 'address' as ProfileTabKey, label: 'Адреса' },
+                    { key: 'passport' as ProfileTabKey, label: 'Паспортные данные' },
+                    { key: 'birthCertificate' as ProfileTabKey, label: 'Свидетельства о рождении' },
+                    { key: 'militaryId' as ProfileTabKey, label: 'Военные билеты' },
+                    { key: 'notes' as ProfileTabKey, label: 'Заметки' },
+                  ].map((tab) => {
+                    const isActive = activeProfileTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setActiveProfileTab(tab.key)}
+                        className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                          isActive
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-white text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {activeProfileTab === 'phone' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Телефоны</label>
+                    <input
+                      type="tel"
+                      name="phone"
+                      value={clientFormState.phone}
+                      onChange={handleClientFormChange}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Укажите основной телефон"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'email' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={clientFormState.email}
+                      onChange={handleClientFormChange}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Укажите основной email"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'address' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Адреса</label>
+                    <input
+                      type="text"
+                      name="address"
+                      value={clientFormState.address}
+                      onChange={handleClientFormChange}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Укажите адрес"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'passport' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Паспортные данные</label>
+                    <textarea
+                      value={profileDocuments.passport}
+                      onChange={(event) =>
+                        setProfileDocuments((prev) => ({ ...prev, passport: event.target.value }))
+                      }
+                      rows={3}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Серия, номер, кем и когда выдан"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'birthCertificate' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Свидетельства о рождении
+                    </label>
+                    <textarea
+                      value={profileDocuments.birthCertificate}
+                      onChange={(event) =>
+                        setProfileDocuments((prev) => ({
+                          ...prev,
+                          birthCertificate: event.target.value,
+                        }))
+                      }
+                      rows={3}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Номер, дата выдачи, орган выдачи"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'militaryId' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Военные билеты</label>
+                    <textarea
+                      value={profileDocuments.militaryId}
+                      onChange={(event) =>
+                        setProfileDocuments((prev) => ({ ...prev, militaryId: event.target.value }))
+                      }
+                      rows={3}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder="Серия, номер, категория"
+                    />
+                  </div>
+                )}
+                {activeProfileTab === 'notes' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
+                    <textarea
+                      name="notes"
+                      value={clientFormState.notes}
+                      onChange={handleClientFormChange}
+                      rows={3}
+                      disabled={!clientPermissions.canEdit}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                      placeholder={t('additionalInfo')}
+                    />
+                  </div>
+                )}
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
-                <textarea
-                  name="notes"
-                  value={clientFormState.notes}
-                  onChange={handleClientFormChange}
-                  rows={3}
-                  disabled={!clientPermissions.canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                  placeholder={t('additionalInfo')}
-                />
+                <p className="text-xs text-gray-500">
+                  Паспортные данные, свидетельства о рождении и военные билеты сохраняются внутри карточки
+                  клиента и доступны на соответствующих вкладках.
+                </p>
               </div>
               <div className="md:col-span-2 flex items-center gap-3">
                 <input
@@ -1823,7 +1998,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           </>
         ) : null}
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        {activeSection !== 'profile' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-6 border-b border-gray-100">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900">
@@ -2759,7 +2935,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
               })()
             )}
           </div>
-        </div>
+          </div>
+        )}
 
         <InvoiceModal
           open={invoiceModalOpen}
