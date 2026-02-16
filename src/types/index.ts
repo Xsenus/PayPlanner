@@ -244,6 +244,7 @@ export interface ContractClient {
   company?: string | null;
   clientStatusId?: number | null;
   clientStatus?: ClientStatus | null;
+  comment?: string | null;
 }
 
 export interface Contract {
@@ -257,7 +258,11 @@ export interface Contract {
   createdAt: string;
   updatedAt?: string | null;
   clients: ContractClient[];
+  actIds?: number[];
+  invoiceIds?: number[];
+  paymentIds?: number[];
 }
+
 
 export interface ContractInput {
   number: string;
@@ -266,7 +271,10 @@ export interface ContractInput {
   description?: string | null;
   amount?: number | null;
   validUntil?: string | null;
-  clientIds: number[];
+  clients: Array<{ clientId: number; comment?: string | null }>;
+  actIds?: number[];
+  invoiceIds?: number[];
+  paymentIds?: number[];
 }
 
 export interface Payment {

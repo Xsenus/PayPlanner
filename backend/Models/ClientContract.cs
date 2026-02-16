@@ -24,4 +24,9 @@ public class ClientContract
     /// Навигационное свойство договора.
     /// </summary>
     public Contract Contract { get; set; } = null!;
+
+    /// <summary>
+    /// Комментарий к связи клиента с договором.
+    /// </summary>
+    public string? Comment { get; set; }
 }

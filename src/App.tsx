@@ -12,6 +12,7 @@ import { Installments } from './components/Accounts/Installments';
 import { Acts } from './components/Acts/Acts';
 import { Contracts } from './components/Contracts/Contracts';
 import { ContractCreatePage } from './components/Contracts/ContractCreatePage';
+import { ContractDetailPage } from './components/Contracts/ContractDetailPage';
 import { Users } from './components/Users/Users';
 import { Roles } from './components/Roles/Roles';
 import { UserActivity } from './components/UserActivity/UserActivity';
@@ -57,6 +58,7 @@ function AppContent() {
     moneyTotal: 'Деньги: Итого',
     contracts: 'Договоры',
     contractCreate: 'Новый договор',
+    contractDetail: 'Договор',
     companyProfile: 'Профиль компании',
     users: 'Пользователи',
     roles: 'Роли',
@@ -78,6 +80,7 @@ function AppContent() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
+  const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
 
   const handleOpenClient = (clientId: number, caseId?: number) => {
     if (!permissions.clients.canView) {
@@ -135,6 +138,7 @@ function AppContent() {
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
+        { tab: 'contractDetail' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
       ]
         .filter((entry) => entry.allowed)
@@ -176,6 +180,8 @@ function AppContent() {
           return permissions.contracts.canView;
         case 'contractCreate':
           return permissions.contracts.canCreate;
+        case 'contractDetail':
+          return permissions.contracts.canView;
         case 'companyProfile':
           return true;
         case 'dictionaries':
@@ -414,7 +420,7 @@ function AppContent() {
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
       case 'contracts':
         return permissions.contracts.canView
-          ? <Contracts />
+          ? <Contracts onOpenContract={(id) => { setSelectedContractId(id); setActiveTab('contractDetail'); }} />
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'contractCreate':
         return permissions.contracts.canCreate
@@ -425,6 +431,15 @@ function AppContent() {
               />
             )
           : renderNoAccess('Создание договоров недоступно для вашей роли.');
+      case 'contractDetail':
+        return permissions.contracts.canView && selectedContractId
+          ? (
+              <ContractDetailPage
+                contractId={selectedContractId}
+                onBack={() => setActiveTab('contracts')}
+              />
+            )
+          : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'companyProfile':
         return <CompanyProfile />;
       case 'roles':

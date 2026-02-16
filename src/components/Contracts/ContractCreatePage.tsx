@@ -136,7 +136,10 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
       amount: amountValue,
       description: form.description.trim() ? form.description.trim() : undefined,
       validUntil: form.validUntil ? fromInputToApiDate(form.validUntil) : undefined,
-      clientIds: selectedClients.map((client) => client.id),
+      clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      actIds: [],
+      invoiceIds: [],
+      paymentIds: [],
     };
 
     setSubmitting(true);

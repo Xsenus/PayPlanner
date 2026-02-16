@@ -188,7 +188,10 @@ export function ContractModal({
       description: form.description.trim() ? form.description.trim() : undefined,
       amount: amountValue,
       validUntil: form.validUntil ? fromInputToApiDate(form.validUntil) ?? form.validUntil : undefined,
-      clientIds: selectedClients.map((client) => client.id),
+      clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      actIds: [],
+      invoiceIds: [],
+      paymentIds: [],
     };
 
     try {

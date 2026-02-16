@@ -62,4 +62,19 @@ public class Contract
     /// Клиенты, привязанные к договору.
     /// </summary>
     public ICollection<Client> Clients { get; set; } = new List<Client>();
+
+    /// <summary>
+    /// Ручные привязки актов к договору.
+    /// </summary>
+    public ICollection<ContractAct> ContractActs { get; set; } = new List<ContractAct>();
+
+    /// <summary>
+    /// Ручные привязки счетов к договору.
+    /// </summary>
+    public ICollection<ContractInvoice> ContractInvoices { get; set; } = new List<ContractInvoice>();
+
+    /// <summary>
+    /// Ручные привязки начислений к договору.
+    /// </summary>
+    public ICollection<ContractPayment> ContractPayments { get; set; } = new List<ContractPayment>();
 }
