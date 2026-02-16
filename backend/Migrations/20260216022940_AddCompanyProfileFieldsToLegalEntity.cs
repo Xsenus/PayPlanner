@@ -56,12 +56,29 @@ namespace PayPlanner.Api.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(name: "BaseCurrency", table: "LegalEntities");
-            migrationBuilder.DropColumn(name: "Country", table: "LegalEntities");
-            migrationBuilder.DropColumn(name: "OrganizationForm", table: "LegalEntities");
-            migrationBuilder.DropColumn(name: "ServiceLanguage", table: "LegalEntities");
-            migrationBuilder.DropColumn(name: "TaxSystem", table: "LegalEntities");
-            migrationBuilder.DropColumn(name: "Timezone", table: "LegalEntities");
+            migrationBuilder.DropColumn(
+                name: "BaseCurrency",
+                table: "LegalEntities");
+
+            migrationBuilder.DropColumn(
+                name: "Country",
+                table: "LegalEntities");
+
+            migrationBuilder.DropColumn(
+                name: "OrganizationForm",
+                table: "LegalEntities");
+
+            migrationBuilder.DropColumn(
+                name: "ServiceLanguage",
+                table: "LegalEntities");
+
+            migrationBuilder.DropColumn(
+                name: "TaxSystem",
+                table: "LegalEntities");
+
+            migrationBuilder.DropColumn(
+                name: "Timezone",
+                table: "LegalEntities");
         }
     }
 }
