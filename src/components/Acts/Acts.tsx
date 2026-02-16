@@ -49,7 +49,11 @@ type SortState = {
   direction: 'asc' | 'desc';
 };
 
-export function Acts() {
+interface ActsProps {
+  onOpenAct?: (actId: number) => void;
+}
+
+export function Acts({ onOpenAct }: ActsProps) {
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
@@ -86,7 +90,6 @@ export function Acts() {
     pagination,
     refresh,
     createAct,
-    updateAct,
     deleteAct,
   } = useActs({
     from: from || undefined,
@@ -100,7 +103,6 @@ export function Acts() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -198,39 +200,10 @@ export function Acts() {
   }, [modalOpen, ensureLookups]);
 
   const openCreateModal = () => {
-    setModalMode('create');
     setSelectedAct(null);
     setModalOpen(true);
     setModalError(null);
   };
-
-  const openEditModal = (act: Act) => {
-    setModalMode('edit');
-    setSelectedAct(act);
-    setModalOpen(true);
-    setModalError(null);
-  };
-
-
-  useEffect(() => {
-    if (!canEdit || acts.length === 0) return;
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem('pp.openActId');
-    } catch {
-      raw = null;
-    }
-    if (!raw) return;
-    const targetId = Number(raw);
-    if (Number.isNaN(targetId)) {
-      try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
-      return;
-    }
-    const target = acts.find((act) => act.id === targetId);
-    if (!target) return;
-    openEditModal(target);
-    try { localStorage.removeItem('pp.openActId'); } catch { /** */ }
-  }, [acts, canEdit]);
 
   const closeModal = () => {
     if (submitting) return;
@@ -243,11 +216,7 @@ export function Acts() {
     setSubmitting(true);
     setModalError(null);
     try {
-      if (modalMode === 'create') {
-        await createAct(payload);
-      } else if (selectedAct) {
-        await updateAct(selectedAct.id, payload);
-      }
+      await createAct(payload);
       setModalOpen(false);
       setSelectedAct(null);
     } catch (err) {
@@ -546,7 +515,7 @@ export function Acts() {
                             {canEdit && (
                               <button
                                 type="button"
-                                onClick={() => openEditModal(act)}
+                                onClick={() => onOpenAct?.(act.id)}
                                 className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
                                 title={t('edit') ?? 'Редактировать'}>
                                 <Pencil className="h-4 w-4" />
@@ -601,7 +570,7 @@ export function Acts() {
 
       <ActModal
         open={modalOpen}
-        mode={modalMode}
+        mode="create"
         act={selectedAct}
         onClose={closeModal}
         onSubmit={handleSubmit}
