@@ -157,7 +157,7 @@ export function ContractDetailPage({ contractId, onBack, onOpenClient, onOpenInv
           {!editMode ? (
             <button onClick={() => setEditMode(true)} className="inline-flex items-center gap-2 rounded border px-3 py-2">
               <Pencil className="h-4 w-4" />
-              Редактировать договор
+              Редактировать
             </button>
           ) : (
             <button onClick={() => setEditMode(false)} className="rounded border px-3 py-2">
