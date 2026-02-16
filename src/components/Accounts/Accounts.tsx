@@ -355,8 +355,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   };
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [pageEditingInvoice, setPageEditingInvoice] = useState<Invoice | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -365,7 +365,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
   const ensureClients = useCallback(async () => {
-    if (!modalOpen) return;
+    if (!modalOpen && !pageEditingInvoice) return;
     if (clients.length > 0 && !lookupsError) return;
     setLookupsLoading(true);
     try {
@@ -377,7 +377,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, clients.length, lookupsError]);
+  }, [modalOpen, pageEditingInvoice, clients.length, lookupsError]);
 
   const ensureActLookups = useCallback(async () => {
     if (!actModalOpen) return;
@@ -402,10 +402,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [actClients.length, actLookupsError, actModalOpen, actResponsibles.length, clients]);
 
   useEffect(() => {
-    if (modalOpen) {
+    if (modalOpen || pageEditingInvoice) {
       void ensureClients();
     }
-  }, [modalOpen, ensureClients]);
+  }, [modalOpen, pageEditingInvoice, ensureClients]);
 
   useEffect(() => {
     if (actModalOpen) {
@@ -414,19 +414,15 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [actModalOpen, ensureActLookups]);
 
   const openCreateModal = () => {
-    setModalMode('create');
     setSelectedInvoice(null);
     setModalError(null);
     setModalOpen(true);
   };
 
-  const openEditModal = (invoice: Invoice) => {
-    setModalMode('edit');
-    setSelectedInvoice(invoice);
+  const openEditPage = (invoice: Invoice) => {
+    setPageEditingInvoice(invoice);
     setModalError(null);
-    setModalOpen(true);
   };
-
 
   useEffect(() => {
     if (!canEdit || invoices.length === 0) return;
@@ -444,7 +440,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
     const target = invoices.find((invoice) => invoice.id === targetId);
     if (!target) return;
-    openEditModal(target);
+    openEditPage(target);
     try { localStorage.removeItem('pp.openInvoiceId'); } catch { /** */ }
   }, [canEdit, invoices]);
 
@@ -454,16 +450,22 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setModalError(null);
   };
 
+  const closeEditPage = () => {
+    setPageEditingInvoice(null);
+    setModalError(null);
+  };
+
   const submitInvoice = async (payload: InvoiceInput) => {
     setSubmitting(true);
     setModalError(null);
     try {
-      if (modalMode === 'edit' && selectedInvoice) {
-        await updateInvoice(selectedInvoice.id, payload);
+      if (pageEditingInvoice) {
+        await updateInvoice(pageEditingInvoice.id, payload);
+        closeEditPage();
       } else {
         await createInvoice(payload);
+        closeModal();
       }
-      closeModal();
     } catch (err) {
       setModalError(err instanceof Error ? err.message : 'Не удалось сохранить счёт');
     } finally {
@@ -764,6 +766,30 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       setActModalSubmitting(false);
     }
   };
+
+  if (pageEditingInvoice) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <InvoiceModal
+          open
+          mode="edit"
+          presentation="page"
+          invoice={pageEditingInvoice}
+          onClose={closeEditPage}
+          onBack={closeEditPage}
+          onSubmit={submitInvoice}
+          submitting={submitting}
+          errorMessage={modalError}
+          clients={clients}
+          lookupsLoading={lookupsLoading}
+          lookupsError={lookupsError}
+          defaultClientId={undefined}
+          defaultType={typeFilter === 'All' ? undefined : typeFilter}
+          lockType={lockType}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1189,7 +1215,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 {canEdit && invoice && (
                                   <button
                                     type="button"
-                                    onClick={() => openEditModal(invoice)}
+                                    onClick={() => openEditPage(invoice)}
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
                                     title={t('edit') ?? 'Редактировать'}
                                     aria-label={t('edit') ?? 'Редактировать'}
@@ -1327,7 +1353,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
         <InvoiceModal
           open={modalOpen}
-          mode={modalMode}
+          mode="create"
           invoice={selectedInvoice}
           onClose={closeModal}
           onSubmit={submitInvoice}

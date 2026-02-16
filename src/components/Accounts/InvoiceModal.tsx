@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2, Search, X } from 'lucide-react';
 import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -61,6 +61,7 @@ interface InvoiceModalProps {
   mode: 'create' | 'edit';
   invoice: Invoice | null;
   onClose: () => void;
+  onBack?: () => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
@@ -70,6 +71,7 @@ interface InvoiceModalProps {
   defaultClientId?: number;
   defaultType?: PaymentKind;
   lockType?: boolean;
+  presentation?: 'modal' | 'page';
 }
 
 function normalizeInvoiceToForm(
@@ -131,6 +133,7 @@ export function InvoiceModal({
   mode,
   invoice,
   onClose,
+  onBack,
   onSubmit,
   submitting,
   errorMessage,
@@ -140,6 +143,7 @@ export function InvoiceModal({
   defaultClientId,
   defaultType,
   lockType = false,
+  presentation = 'modal',
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { setActiveTab } = useTabNavigation();
@@ -414,10 +418,22 @@ export function InvoiceModal({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+  const isPageMode = presentation === 'page';
+
+  const content = (
+    <div className={`relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
+      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center gap-3">
+          {isPageMode && (
+            <button
+              type="button"
+              onClick={onBack ?? onClose}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {t('back') ?? 'Назад'}
+            </button>
+          )}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
               {mode === 'edit'
@@ -428,6 +444,8 @@ export function InvoiceModal({
               {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
             </p>
           </div>
+        </div>
+        {!isPageMode && (
           <button
             type="button"
             onClick={onClose}
@@ -436,9 +454,10 @@ export function InvoiceModal({
           >
             <X className="h-5 w-5" />
           </button>
-        </div>
+        )}
+      </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-6">
+      <form onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
           <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -806,8 +825,17 @@ export function InvoiceModal({
               {mode === 'edit' ? t('invoiceEdit') ?? 'Сохранить изменения' : t('invoiceCreate') ?? 'Создать счёт'}
             </button>
           </div>
-        </form>
-      </div>
+      </form>
+    </div>
+  );
+
+  if (isPageMode) {
+    return <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">{content}</div>;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
+      {content}
     </div>
   );
 }
