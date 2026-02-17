@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Loader2, Plus, Search, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Copy, Download, Info, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -9,6 +9,7 @@ import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
+import { useDialog } from '../../hooks/useDialog';
 
 type FormState = {
   number: string;
@@ -158,6 +159,7 @@ export function InvoiceModal({
   presentation = 'modal',
 }: InvoiceModalProps) {
   const { t } = useTranslation();
+  const { confirm, alert } = useDialog();
   const { setActiveTab } = useTabNavigation();
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
   const typeBadgeClasses: Record<PaymentKind, string> = {
@@ -176,6 +178,7 @@ export function InvoiceModal({
   const [counterpartyClientId, setCounterpartyClientId] = useState<number | null>(null);
   const [selectedAct, setSelectedAct] = useState<ActOption | null>(null);
   const [createActOpen, setCreateActOpen] = useState(false);
+  const [pageViewMode, setPageViewMode] = useState<boolean>(presentation === 'page' && mode === 'edit');
   const [creatingAct, setCreatingAct] = useState(false);
   const [createActError, setCreateActError] = useState<string | null>(null);
   const [draftAct, setDraftAct] = useState<DraftActForm>({
@@ -223,6 +226,14 @@ export function InvoiceModal({
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
 
   const debouncedActSearch = useDebouncedValue(actSearch.trim(), 300);
+
+  useEffect(() => {
+    if (presentation === 'page' && mode === 'edit') {
+      setPageViewMode(true);
+      return;
+    }
+    setPageViewMode(false);
+  }, [mode, presentation, invoice?.id]);
 
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
@@ -541,6 +552,53 @@ export function InvoiceModal({
     onClose();
   };
 
+  const invoiceLink = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const invoiceId = invoice?.id ? `/${invoice.id}` : '';
+    return `${window.location.origin}/invoices${invoiceId}`;
+  }, [invoice?.id]);
+
+  const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+    const actionMeta = {
+      send: { title: 'Отправить счёт', message: 'Отправить счёт клиенту?', confirmLabel: 'Отправить' },
+      print: { title: 'Печать счёта', message: 'Подготовить счёт к печати?', confirmLabel: 'Печать' },
+      download: { title: 'Скачать счёт', message: 'Скачать документ счёта?', confirmLabel: 'Скачать' },
+      copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
+      paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
+      cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
+      delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+    }[action];
+
+    const accepted = await confirm({
+      title: actionMeta.title,
+      description: actionMeta.message,
+      confirmLabel: actionMeta.confirmLabel,
+      cancelLabel: 'Отмена',
+      variant: action === 'cancel' || action === 'delete' ? 'danger' : 'primary',
+    });
+    if (!accepted) return;
+
+    if (action === 'paid') {
+      setForm((prev) => ({ ...prev, status: 'Completed' }));
+    }
+    if (action === 'cancel') {
+      setForm((prev) => ({ ...prev, status: 'Cancelled' }));
+    }
+
+    await alert({
+      title: 'Готово',
+      description: 'Действие зарегистрировано. Интеграцию с серверными операциями подключим на следующем шаге.',
+      confirmLabel: 'Понятно',
+      variant: 'success',
+    });
+  };
+
+
+
+  const amountValue = Number.parseFloat(form.amount.replace(',', '.')) || 0;
+  const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
+  const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
+  const printableAmount = formatCurrencySmart(amountValue).full;
   if (!open) return null;
 
   const isPageMode = presentation === 'page';
@@ -561,15 +619,29 @@ export function InvoiceModal({
           )}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
-              {mode === 'edit'
+              {isPageMode && pageViewMode
+                ? `Счёт №${form.number || '—'} от ${formatDate(form.date) || '—'}`
+                : mode === 'edit'
                 ? t('invoiceEdit') ?? 'Редактировать счёт'
                 : t('invoiceCreate') ?? 'Создать счёт'}
             </h2>
             <p className="text-sm text-slate-500">
-              {t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
+              {isPageMode && pageViewMode
+                ? 'Просмотр счёта с действиями и документом для печати/отправки'
+                : t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
             </p>
           </div>
         </div>
+        {isPageMode && mode === 'edit' && (
+          <button
+            type="button"
+            onClick={() => setPageViewMode((prev) => !prev)}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <Pencil className="h-4 w-4" />
+            {pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
+          </button>
+        )}
         {!isPageMode && (
           <button
             type="button"
@@ -582,6 +654,105 @@ export function InvoiceModal({
         )}
       </div>
 
+      {isPageMode && pageViewMode ? (
+        <div className="space-y-4 bg-slate-100 px-4 py-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="rounded-xl border border-slate-300 bg-white p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button type="button" className="rounded-md bg-blue-600 p-2 text-white"><Info className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setPageViewMode(false)} className="rounded-md bg-blue-500 p-2 text-white"><Pencil className="h-4 w-4" /></button>
+                </div>
+                <div className="text-sm font-semibold text-slate-700">{printableAmount}</div>
+              </div>
+
+              <div className="border border-slate-800 p-3 text-sm text-slate-900">
+                <div className="grid grid-cols-2 border border-slate-800">
+                  <div className="border-r border-slate-800 p-2">{form.counterpartyName || 'Поставщик'}</div>
+                  <div className="p-2">БИК / Счёт</div>
+                </div>
+                <h3 className="my-4 text-center text-2xl font-bold">Счет № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
+                <div className="space-y-1 border-t border-slate-800 pt-3 text-xs sm:text-sm">
+                  <p><span className="font-semibold">Поставщик:</span> {form.counterpartyName || '—'}</p>
+                  <p><span className="font-semibold">Покупатель:</span> {selectedClient?.name || '—'}</p>
+                  <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
+                </div>
+
+                <table className="mt-3 w-full border-collapse text-xs sm:text-sm">
+                  <thead>
+                    <tr>
+                      <th className="border border-slate-800 px-2 py-1 text-left">№</th>
+                      <th className="border border-slate-800 px-2 py-1 text-left">Товары (работы, услуги)</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Кол-во</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Ед.</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Цена</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Сумма</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lineItems.map((item, index) => {
+                      const qty = parseMoney(item.quantity);
+                      const price = parseMoney(item.price);
+                      const rowTotal = qty * price;
+                      return (
+                        <tr key={item.id}>
+                          <td className="border border-slate-800 px-2 py-1">{index + 1}</td>
+                          <td className="border border-slate-800 px-2 py-1">{item.name || '—'}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{qty.toFixed(2)}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{item.unit || 'шт'}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{price.toFixed(2)}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{rowTotal.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                <div className="mt-3 text-right text-sm">
+                  <p><span className="font-semibold">Итого:</span> {lineItemsTotal.toFixed(2)}</p>
+                  <p><span className="font-semibold">Всего к оплате:</span> {amountValue.toFixed(2)}</p>
+                </div>
+              </div>
+            </section>
+
+            <aside className="space-y-3">
+              <div className="rounded-lg border border-slate-300 bg-white p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xl font-semibold">{printableAmount}</span>
+                  <span className="rounded bg-blue-600 px-3 py-1 text-sm font-semibold text-white">{form.status === 'Completed' ? 'Оплачен' : form.status === 'Cancelled' ? 'Отменен' : 'Создан'}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Ссылка на счет для клиента</div>
+                <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <button type="button" className="flex w-full items-center justify-between rounded border border-slate-200 px-3 py-2 text-left">Товарная накладная <span>+</span></button>
+                <button type="button" className="mt-2 flex w-full items-center justify-between rounded border border-slate-200 px-3 py-2 text-left">УПД <span>+</span></button>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
+                <p><span className="text-slate-500">Покупатель:</span> <span className="text-blue-600">{selectedClient?.name || '—'}</span></p>
+                <p><span className="text-slate-500">Оплатить до:</span> {formatDate(form.dueDate) || '—'}</p>
+                <p><span className="text-slate-500">Комментарий:</span> {form.actReference || '—'}</p>
+                <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
+              </div>
+            </aside>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-7">
+            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
+            <button type="button" onClick={() => void handlePageAction('print')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <button type="button" onClick={() => void handlePageAction('download')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Download className="h-4 w-4" />Скачать</button>
+            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
+            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
+            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
+            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+          </div>
+        </div>
+      ) : (
       <form onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
           <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
@@ -732,8 +903,118 @@ export function InvoiceModal({
             <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
           </section>
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="space-y-6">
           <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
+              </span>
+              <p className="text-sm text-slate-500">
+                {t('invoiceDocumentsHint') ?? 'Прикрепите акт или оставьте комментарий.'}
+              </p>
+            </header>
+            <div className="mt-4 space-y-4">
+              {isIncome && (
+                <div className="flex flex-col gap-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftAct((prev) => ({
+                          ...prev,
+                          date: form.date || prev.date,
+                          amount: form.amount || prev.amount,
+                        }));
+                        setCreateActError(null);
+                        setCreateActOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {t('actCreate') ?? 'Создать акт'}
+                    </button>
+                  </div>
+                  {selectedAct && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      {t('invoiceSelectedAct') ?? 'Выбран акт'}: {actLabel(selectedAct)}
+                    </div>
+                  )}
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={actSearch}
+                      onChange={(event) => {
+                        setActSearch(event.target.value);
+                        setActDropdownOpen(true);
+                      }}
+                      onFocus={() => setActDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
+                      placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
+                      className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                    {actSearch && (
+                      <button
+                        type="button"
+                        onClick={clearSelectedAct}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                        aria-label={t('clear') ?? 'Очистить'}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
+                      <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        {actsLoading ? (
+                          <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
+                            <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                          </div>
+                        ) : actsError ? (
+                          <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
+                        ) : actSuggestions.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-slate-500">
+                            {t('nothingFound') ?? 'Ничего не найдено'}
+                          </div>
+                        ) : (
+                          actSuggestions.map((act) => (
+                            <button
+                              key={act.id}
+                              type="button"
+                              onClick={() => handleActSelect(act)}
+                              className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                            >
+                              <div className="font-medium text-slate-900">{actLabel(act)}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                <span>{formatDate(act.date)}</span>
+                                <span className="mx-2">·</span>
+                                <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
+                <textarea
+                  value={form.actReference}
+                  onChange={handleChange('actReference')}
+                  rows={2}
+                  placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+            </div>
+          </section>
+            </div>
+            <div className="space-y-6 xl:col-start-2">
+<section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {t('invoicePartiesTitle') ?? 'Контрагент и источник'}
@@ -866,114 +1147,7 @@ export function InvoiceModal({
             </div>
           </section>
         </div>
-
-          <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
-            <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
-              </span>
-              <p className="text-sm text-slate-500">
-                {t('invoiceDocumentsHint') ?? 'Прикрепите акт или оставьте комментарий.'}
-              </p>
-            </header>
-            <div className="mt-4 space-y-4">
-              {isIncome && (
-                <div className="flex flex-col gap-2 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDraftAct((prev) => ({
-                          ...prev,
-                          date: form.date || prev.date,
-                          amount: form.amount || prev.amount,
-                        }));
-                        setCreateActError(null);
-                        setCreateActOpen(true);
-                      }}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      {t('actCreate') ?? 'Создать акт'}
-                    </button>
-                  </div>
-                  {selectedAct && (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                      {t('invoiceSelectedAct') ?? 'Выбран акт'}: {actLabel(selectedAct)}
-                    </div>
-                  )}
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      value={actSearch}
-                      onChange={(event) => {
-                        setActSearch(event.target.value);
-                        setActDropdownOpen(true);
-                      }}
-                      onFocus={() => setActDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
-                      placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
-                      className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    />
-                    {actSearch && (
-                      <button
-                        type="button"
-                        onClick={clearSelectedAct}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                        aria-label={t('clear') ?? 'Очистить'}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
-                      <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                        {actsLoading ? (
-                          <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
-                            <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
-                          </div>
-                        ) : actsError ? (
-                          <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
-                        ) : actSuggestions.length === 0 ? (
-                          <div className="px-3 py-2 text-sm text-slate-500">
-                            {t('nothingFound') ?? 'Ничего не найдено'}
-                          </div>
-                        ) : (
-                          actSuggestions.map((act) => (
-                            <button
-                              key={act.id}
-                              type="button"
-                              onClick={() => handleActSelect(act)}
-                              className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
-                            >
-                              <div className="font-medium text-slate-900">{actLabel(act)}</div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                <span>{formatDate(act.date)}</span>
-                                <span className="mx-2">·</span>
-                                <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
-                <textarea
-                  value={form.actReference}
-                  onChange={handleChange('actReference')}
-                  rows={2}
-                  placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </label>
             </div>
-          </section>
           {(localError || errorMessage) && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {localError ?? errorMessage}
@@ -998,6 +1172,7 @@ export function InvoiceModal({
             </button>
           </div>
       </form>
+      )}
 
       {clientPickerOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
