@@ -2,145 +2,159 @@ using System.IO;
 using System.Net;
 using System.Net.Mail;
 
-namespace PayPlanner.Api.Services;
-
-public sealed class EmailService : IEmailService
+namespace PayPlanner.Api.Services
 {
-    private const string DefaultFromName = "PayPlanner";
-    private const int DefaultSmtpPort = 587;
+    public sealed class EmailService : IEmailService
+        private const string DefaultFromName = "PayPlanner";
+        private const int DefaultSmtpPort = 587;
 
-    private readonly IConfiguration _configuration;
-    private readonly bool _isEnabled;
-    private readonly ILogger<EmailService> _logger;
-
-    public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
-    {
-        _configuration = configuration;
-        _logger = logger;
-        _isEnabled = _configuration.GetValue<bool>("Email:Enabled", false);
-    }
-
-    public async Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
-    {
-        var subject = "Новая регистрация пользователя в системе PayPlanner";
-        var body = EmailTemplates.AdminNewRegistration(newUserFullName, newUserEmail);
-        await SendEmailCoreAsync(adminEmail, subject, body);
-    }
-
-    public async Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
-    {
-        var subject = "Ваша заявка одобрена. Доступ к PayPlanner открыт";
-        var body = EmailTemplates.RegistrationApproved(fullName);
-        await SendEmailCoreAsync(toEmail, subject, body);
-    }
-
-        var subject = "Заявка принята и находится на модерации";
-        await SendEmailCoreAsync(toEmail, subject, body);
-        var subject = "Регистрация отклонена";
-        await SendEmailCoreAsync(toEmail, subject, body);
-        await SendEmailCoreAsync(toEmail, subject, body, message =>
-
-    }
-
-    private async Task SendEmailCoreAsync(
-        string toEmail,
-        string subject,
-        string body,
-        Action<MailMessage>? configureMessage = null)
-                "Email disabled. Dry-run for {ToEmail}, subject: {Subject}.",
-                toEmail,
-                subject);
-            _logger.LogWarning("SMTP settings are invalid. Email to {ToEmail} skipped.", toEmail);
-                EnableSsl = settings.EnableSsl,
-                IsBodyHtml = false,
-            _logger.LogInformation("Email sent to {ToEmail}. Subject: {Subject}", toEmail, subject);
-            _logger.LogError(fex, "Invalid recipient email format: {ToEmail}", toEmail);
-            _logger.LogError(ex, "Email send failed to {ToEmail}. Subject: {Subject}", toEmail, subject);
-        var ok =
-            !string.IsNullOrWhiteSpace(host)
-            && !string.IsNullOrWhiteSpace(username)
-            && !string.IsNullOrWhiteSpace(password)
-            && !string.IsNullOrWhiteSpace(fromEmail);
-$@"Здравствуйте, {fullName}!
-Спасибо за регистрацию в PayPlanner.
-Ваша заявка принята и находится на модерации.
-После проверки вам придет уведомление на этот email.
-С уважением,
-Команда PayPlanner";
-$@"Здравствуйте, {fullName}!
-
-Ваша заявка одобрена, доступ к PayPlanner открыт.
-С уважением,
-Команда PayPlanner";
-            var reasonLine = string.IsNullOrWhiteSpace(reason) ? string.Empty : $"Причина: {reason}{Environment.NewLine}";
-$@"Здравствуйте, {fullName}!
-К сожалению, ваша регистрация не одобрена.
-{reasonLine}
-С уважением,
-Команда PayPlanner";
-
-$@"Здравствуйте!
-Поступила новая регистрация:
-Имя: {userFullName}
-С уважением,
-PayPlanner";
-        catch (FormatException fex)
-        {
-            _logger.LogError(fex, "Íåêîððåêòíûé àäðåñ ïîëó÷àòåëÿ: {ToEmail}", toEmail);
+        private readonly IConfiguration _configuration;
+        private readonly bool _isEnabled;
+        private readonly ILogger<EmailService> _logger;
+        public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
+            _configuration = configuration;
+            _logger = logger;
+            _isEnabled = _configuration.GetValue<bool>("Email:Enabled", false);
         }
-        catch (Exception ex)
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
         {
-            _logger.LogError(ex, "Íå óäàëîñü îòïðàâèòü ïèñüìî íà {ToEmail}: {Subject}", toEmail, subject);
+            var subject = "Заявка принята и находится на модерации";
+            var body = BuildRegistrationPendingBody(fullName);
+            return SendEmailCoreAsync(toEmail, subject, body);
+        }
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
+            var subject = "Ваша заявка одобрена. Доступ к PayPlanner открыт";
+            var body = BuildRegistrationApprovedBody(fullName);
+            return SendEmailCoreAsync(toEmail, subject, body);
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
+            var subject = "Регистрация отклонена";
+            var body = BuildRegistrationRejectedBody(fullName, reason);
+            return SendEmailCoreAsync(toEmail, subject, body);
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
+            var subject = "Новая регистрация пользователя в системе PayPlanner";
+            var body = BuildAdminNewRegistrationBody(newUserFullName, newUserEmail);
+            return SendEmailCoreAsync(adminEmail, subject, body);
+        }
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+        {
+            return SendEmailCoreAsync(toEmail, subject, body, message =>
+                if (attachmentBytes == null || attachmentBytes.Length == 0)
+                {
+                    return;
+                }
+
+                var stream = new MemoryStream(attachmentBytes);
+                var attachment = new Attachment(stream, attachmentFileName, attachmentContentType);
+                message.Attachments.Add(attachment);
+            });
+        }
+        private async Task SendEmailCoreAsync(
+            string toEmail,
+            string subject,
+            string body,
+            Action<MailMessage>? configureMessage = null)
+        {
+            if (!_isEnabled)
+                _logger.LogInformation(
+                    "Email disabled. Dry-run for {ToEmail}, subject: {Subject}.",
+                    toEmail,
+                    subject);
+                return;
+            }
+
+            if (!TryBuildSmtpSettings(out var settings))
+            {
+                _logger.LogWarning("SMTP settings are invalid. Email to {ToEmail} skipped.", toEmail);
+                return;
+            }
+            try
+            {
+                _ = new MailAddress(toEmail);
+
+                using var client = new SmtpClient(settings.Host, settings.Port)
+                {
+                    Credentials = new NetworkCredential(settings.Username, settings.Password),
+                    EnableSsl = settings.EnableSsl
+                };
+
+                using var message = new MailMessage
+                {
+                    From = new MailAddress(settings.FromEmail, settings.FromName),
+                    Subject = subject,
+                    Body = body,
+                    IsBodyHtml = false
+                };
+
+                message.To.Add(toEmail);
+                configureMessage?.Invoke(message);
+
+                await client.SendMailAsync(message);
+                _logger.LogInformation("Email sent to {ToEmail}. Subject: {Subject}", toEmail, subject);
+            }
+            catch (FormatException fex)
+            {
+                _logger.LogError(fex, "Invalid recipient email format: {ToEmail}", toEmail);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Email send failed to {ToEmail}. Subject: {Subject}", toEmail, subject);
+            }
+
+        private bool TryBuildSmtpSettings(out SmtpSettings settings)
+            var host = _configuration["Email:SmtpHost"]?.Trim();
+            var port = _configuration.GetValue<int?>("Email:SmtpPort") ?? DefaultSmtpPort;
+            var username = _configuration["Email:SmtpUsername"]?.Trim();
+            var password = _configuration["Email:SmtpPassword"];
+            var fromEmail = _configuration["Email:FromEmail"]?.Trim();
+            var fromName = string.IsNullOrWhiteSpace(_configuration["Email:FromName"])
+                ? DefaultFromName
+                : _configuration["Email:FromName"]!.Trim();
+            var enableSsl = _configuration.GetValue<bool?>("Email:EnableSsl") ?? true;
+
+            var ok =
+                !string.IsNullOrWhiteSpace(host) &&
+                !string.IsNullOrWhiteSpace(username) &&
+                !string.IsNullOrWhiteSpace(password) &&
+                !string.IsNullOrWhiteSpace(fromEmail);
+
+            settings = ok
+                ? new SmtpSettings(host!, port, username!, password!, fromEmail!, fromName, enableSsl)
+                : new SmtpSettings(string.Empty, DefaultSmtpPort, string.Empty, string.Empty, string.Empty, DefaultFromName, true);
+
+            return ok;
+        private static string BuildRegistrationPendingBody(string fullName) =>
+        private static string BuildRegistrationApprovedBody(string fullName) =>
+        private static string BuildRegistrationRejectedBody(string fullName, string? reason)
+        private static string BuildAdminNewRegistrationBody(string userFullName, string userEmail) =>
+        private sealed class SmtpSettings
+        {
+            public SmtpSettings(string host, int port, string username, string password, string fromEmail, string fromName, bool enableSsl)
+            {
+                Host = host;
+                Port = port;
+                Username = username;
+                Password = password;
+                FromEmail = fromEmail;
+                FromName = fromName;
+                EnableSsl = enableSsl;
+            }
+
+            public string Host { get; }
+            public int Port { get; }
+            public string Username { get; }
+            public string Password { get; }
+            public string FromEmail { get; }
+            public string FromName { get; }
+            public bool EnableSsl { get; }
         }
     }
-
-    /// <summary>
-    /// ×èòàåò è âàëèäèðóåò íàñòðîéêè SMTP èç êîíôèãóðàöèè.
-    /// </summary>
-    /// <param name="settings">Âûõîäíûå íàñòðîéêè SMTP.</param>
-    /// <returns><c>true</c>, åñëè íàñòðîéêè êîððåêòíû; èíà÷å <c>false</c>.</returns>
-    private bool TryBuildSmtpSettings(out SmtpSettings settings)
-    {
-        var host = _configuration["Email:SmtpHost"]?.Trim();
-        var port = _configuration.GetValue<int?>("Email:SmtpPort") ?? DefaultSmtpPort;
-        var username = _configuration["Email:SmtpUsername"]?.Trim();
-        var password = _configuration["Email:SmtpPassword"];
-        var fromEmail = _configuration["Email:FromEmail"]?.Trim();
-        var fromName = string.IsNullOrWhiteSpace(_configuration["Email:FromName"])
-            ? DefaultFromName
-            : _configuration["Email:FromName"]!.Trim();
-
-        var enableSsl = _configuration.GetValue<bool?>("Email:EnableSsl") ?? true;
-
-        var ok = !(string.IsNullOrWhiteSpace(host) ||
-                   string.IsNullOrWhiteSpace(username) ||
-                   string.IsNullOrWhiteSpace(password) ||
-                   string.IsNullOrWhiteSpace(fromEmail));
-
-        settings = ok
-            ? new SmtpSettings(host!, port, username!, password!, fromEmail!, fromName, enableSsl)
-            : default;
-
-        return ok;
-    }
-
-    #endregion
-
-    #region Helpers
-
-    /// <summary>
-    /// Íàáîð øàáëîíîâ òåì è òåêñòîâ ïèñåì.
-    /// </summary>
-    private static class EmailTemplates
-    {
-        public static string RegistrationPending(string fullName) =>
-$@"Çäðàâñòâóéòå, {fullName}!
-
-Ñïàñèáî çà ðåãèñòðàöèþ â PayPlanner.
-
-Âàøà ó÷¸òíàÿ çàïèñü ñîçäàíà è îæèäàåò îäîáðåíèÿ àäìèíèñòðàòîðîì.
-Êàê òîëüêî äîñòóï áóäåò îäîáðåí, âû ïîëó÷èòå äîïîëíèòåëüíîå ïèñüìî è ñìîæåòå âîéòè â ñèñòåìó.
-
 Åñëè ó âàñ åñòü âîïðîñû, îáðàòèòåñü ê àäìèíèñòðàòîðó ñèñòåìû.
 
 Ñ óâàæåíèåì,
