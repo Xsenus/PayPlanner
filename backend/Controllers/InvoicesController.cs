@@ -1,4 +1,7 @@
 using System.Linq.Expressions;
+using System.Text;
+using System.Net;
+using System.IO;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,9 +21,14 @@ namespace PayPlanner.Api.Controllers;
 public class InvoicesController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private readonly IEmailService _emailService;
     private const string InvoiceItemsMarker = "[pp:invoice-items]";
 
-    public InvoicesController(PaymentContext db) => _db = db;
+    public InvoicesController(PaymentContext db, IEmailService emailService)
+    {
+        _db = db;
+        _emailService = emailService;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -237,6 +245,90 @@ public class InvoicesController : ControllerBase
         _db.Payments.Remove(payment);
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+
+    [HttpGet("{id:int}/document")]
+    public async Task<IActionResult> GetDocument(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
+    {
+        var payment = await _db.Payments
+            .AsNoTracking()
+            .Include(p => p.Client)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(format);
+        var lineItems = ExtractInvoiceItems(payment.SystemNotes);
+        var documentHtml = BuildInvoiceHtml(payment, lineItems);
+        var bytes = Encoding.UTF8.GetBytes(documentHtml);
+        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
+        var fileName = $"invoice-{SanitizeFilePart(payment.Account)}.{ext}";
+
+        if (normalizedFormat == "pdf")
+        {
+            return BadRequest("PDF export is not configured on server yet. Use format=word.");
+        }
+
+        return File(bytes, "application/msword", fileName);
+    }
+
+    [HttpPost("{id:int}/send-email")]
+    public async Task<IActionResult> SendInvoiceEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var payment = await _db.Payments
+            .AsNoTracking()
+            .Include(p => p.Client)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var email = string.IsNullOrWhiteSpace(request.Email)
+            ? payment.Client?.Email?.Trim()
+            : request.Email.Trim();
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return BadRequest("Recipient email is required.");
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(request.Format);
+        if (normalizedFormat == "pdf")
+        {
+            return BadRequest("PDF export is not configured on server yet. Use format=word.");
+        }
+
+        var lineItems = ExtractInvoiceItems(payment.SystemNotes);
+        var documentHtml = BuildInvoiceHtml(payment, lineItems);
+        var bytes = Encoding.UTF8.GetBytes(documentHtml);
+        var fileName = $"invoice-{SanitizeFilePart(payment.Account)}.doc";
+        var subject = string.IsNullOrWhiteSpace(request.Subject)
+            ? $"Счёт №{payment.Account} от {payment.AccountDate?.Date:dd.MM.yyyy}"
+            : request.Subject.Trim();
+        var body = string.IsNullOrWhiteSpace(request.Message)
+            ? "Во вложении счёт."
+            : request.Message.Trim();
+
+        await _emailService.SendEmailWithAttachmentAsync(
+            email,
+            subject,
+            body,
+            fileName,
+            bytes,
+            "application/msword");
+
+        return Ok(new { sent = true, recipient = email, fileName, format = normalizedFormat });
     }
 
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
@@ -545,6 +637,84 @@ public class InvoicesController : ControllerBase
         }
 
         return string.Join("\n", baseLines);
+    }
+
+
+    private static string NormalizeDocumentFormat(string? format)
+    {
+        if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "pdf";
+        }
+
+        return "word";
+    }
+
+    private static string BuildInvoiceHtml(Payment payment, IReadOnlyCollection<InvoiceLineItemDto> lineItems)
+    {
+        var number = WebUtility.HtmlEncode(payment.Account ?? "—");
+        var date = (payment.AccountDate ?? payment.Date).ToString("dd.MM.yyyy");
+        var counterparty = WebUtility.HtmlEncode(payment.CounterpartyName ?? "—");
+        var clientName = WebUtility.HtmlEncode(payment.Client?.Name ?? "—");
+        var amount = payment.Amount.ToString("0.00");
+
+        var rowsBuilder = new StringBuilder();
+        var index = 1;
+        foreach (var item in lineItems)
+        {
+            var total = item.Quantity * item.Price;
+            rowsBuilder.Append("<tr>");
+            rowsBuilder.Append($"<td>{index}</td>");
+            rowsBuilder.Append($"<td>{WebUtility.HtmlEncode(item.Name)}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{item.Quantity:0.##}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{WebUtility.HtmlEncode(item.Unit)}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{item.Price:0.00}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{total:0.00}</td>");
+            rowsBuilder.Append("</tr>");
+            index++;
+        }
+
+        var html = new StringBuilder();
+        html.AppendLine("<!doctype html>");
+        html.AppendLine("<html lang=\"ru\">");
+        html.AppendLine("<head>");
+        html.AppendLine("  <meta charset=\"utf-8\" />");
+        html.AppendLine($"  <title>Счёт № {number}</title>");
+        html.AppendLine("  <style>");
+        html.AppendLine("    body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }");
+        html.AppendLine("    table { border-collapse: collapse; width: 100%; margin-top: 12px; }");
+        html.AppendLine("    th, td { border: 1px solid #1f2937; padding: 6px 8px; font-size: 12px; }");
+        html.AppendLine("    .num { text-align: right; }");
+        html.AppendLine("  </style>");
+        html.AppendLine("</head>");
+        html.AppendLine("<body>");
+        html.AppendLine($"  <h1>Счёт № {number} от {date}</h1>");
+        html.AppendLine($"  <p><b>От кого:</b> {counterparty}</p>");
+        html.AppendLine($"  <p><b>Кому:</b> {clientName}</p>");
+        html.AppendLine("  <table>");
+        html.AppendLine("    <thead>");
+        html.AppendLine("      <tr><th>№</th><th>Товары (работы, услуги)</th><th class=\"num\">Кол-во</th><th class=\"num\">Ед.</th><th class=\"num\">Цена</th><th class=\"num\">Сумма</th></tr>");
+        html.AppendLine("    </thead>");
+        html.AppendLine("    <tbody>");
+        html.AppendLine(rowsBuilder.ToString());
+        html.AppendLine("    </tbody>");
+        html.AppendLine("  </table>");
+        html.AppendLine($"  <p><b>Итого:</b> {amount}</p>");
+        html.AppendLine("</body>");
+        html.AppendLine("</html>");
+
+        return html.ToString();
+    }
+
+    private static string SanitizeFilePart(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "export";
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(c, '-');
+        }
+
+        return value.Trim();
     }
 
     private sealed class InvoiceProjectionRaw
