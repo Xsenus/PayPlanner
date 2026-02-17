@@ -604,7 +604,7 @@ export function InvoiceModal({
   const isPageMode = presentation === 'page';
 
   const content = (
-    <div className={`relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
+    <div className={`relative w-full max-w-none overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
         <div className="flex items-center gap-3">
           {isPageMode && (
@@ -728,15 +728,13 @@ export function InvoiceModal({
                 <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
               </div>
 
-              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
-                <button type="button" className="flex w-full items-center justify-between rounded border border-slate-200 px-3 py-2 text-left">Товарная накладная <span>+</span></button>
-                <button type="button" className="mt-2 flex w-full items-center justify-between rounded border border-slate-200 px-3 py-2 text-left">УПД <span>+</span></button>
-              </div>
-
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
-                <p><span className="text-slate-500">Покупатель:</span> <span className="text-blue-600">{selectedClient?.name || '—'}</span></p>
-                <p><span className="text-slate-500">Оплатить до:</span> {formatDate(form.dueDate) || '—'}</p>
-                <p><span className="text-slate-500">Комментарий:</span> {form.actReference || '—'}</p>
+                <p><span className="text-slate-500">От кого счёт:</span> {form.counterpartyName || '—'}</p>
+                <p><span className="text-slate-500">Кому счёт:</span> <span className="text-blue-600">{selectedClient?.name || '—'}</span></p>
+                <p><span className="text-slate-500">Акт:</span> {selectedAct ? actLabel(selectedAct) : (form.actReference || '—')}</p>
+                <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
+                <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
+                <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
                 <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
               </div>
             </aside>
@@ -876,31 +874,6 @@ export function InvoiceModal({
                 />
               </label>
             </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-            <header className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
-              <button
-                type="button"
-                onClick={addLineItem}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                + Добавить
-              </button>
-            </header>
-            <div className="space-y-2">
-              {lineItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-12 gap-2">
-                  <input type="text" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} placeholder="Наименование" className="col-span-5 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <input type="text" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <input type="text" inputMode="decimal" value={item.price} onChange={(event) => updateLineItem(item.id, { price: event.target.value })} placeholder="Цена" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <button type="button" onClick={() => removeLineItem(item.id)} className="col-span-1 rounded-lg border border-slate-200 px-2 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
           </section>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -1148,7 +1121,33 @@ export function InvoiceModal({
           </section>
         </div>
             </div>
-          {(localError || errorMessage) && (
+
+<section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <header className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
+              <button
+                type="button"
+                onClick={addLineItem}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                + Добавить
+              </button>
+            </header>
+            <div className="space-y-2">
+              {lineItems.map((item) => (
+                <div key={item.id} className="grid grid-cols-12 gap-2">
+                  <input type="text" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} placeholder="Наименование" className="col-span-5 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="text" inputMode="decimal" value={item.price} onChange={(event) => updateLineItem(item.id, { price: event.target.value })} placeholder="Цена" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <button type="button" onClick={() => removeLineItem(item.id)} className="col-span-1 rounded-lg border border-slate-200 px-2 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
+          </section>
+
+                    {(localError || errorMessage) && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {localError ?? errorMessage}
             </div>
@@ -1257,7 +1256,7 @@ export function InvoiceModal({
   );
 
   if (isPageMode) {
-    return <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">{content}</div>;
+    return <div className="w-full px-4 py-6 sm:px-6 lg:px-8">{content}</div>;
   }
 
   return (
