@@ -658,41 +658,52 @@ public class InvoicesController : ControllerBase
         var clientName = WebUtility.HtmlEncode(payment.Client?.Name ?? "—");
         var amount = payment.Amount.ToString("0.00");
 
-        var rows = string.Join(string.Empty, lineItems.Select((item, index) =>
+        var rowsBuilder = new StringBuilder();
+        var index = 1;
+        foreach (var item in lineItems)
         {
             var total = item.Quantity * item.Price;
-            return $"<tr><td>{index + 1}</td><td>{WebUtility.HtmlEncode(item.Name)}</td><td style='text-align:right'>{item.Quantity:0.##}</td><td style='text-align:right'>{WebUtility.HtmlEncode(item.Unit)}</td><td style='text-align:right'>{item.Price:0.00}</td><td style='text-align:right'>{total:0.00}</td></tr>";
-        }));
+            rowsBuilder.Append("<tr>");
+            rowsBuilder.Append($"<td>{index}</td>");
+            rowsBuilder.Append($"<td>{WebUtility.HtmlEncode(item.Name)}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{item.Quantity:0.##}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{WebUtility.HtmlEncode(item.Unit)}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{item.Price:0.00}</td>");
+            rowsBuilder.Append($"<td style='text-align:right'>{total:0.00}</td>");
+            rowsBuilder.Append("</tr>");
+            index++;
+        }
 
-        return $"""
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <title>Счёт № {number}</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; color: #111827; margin: 24px; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 12px; }}
-    th, td {{ border: 1px solid #1f2937; padding: 6px 8px; font-size: 12px; }}
-    .num {{ text-align: right; }}
-  </style>
-</head>
-<body>
-  <h1>Счёт № {number} от {date}</h1>
-  <p><b>От кого:</b> {counterparty}</p>
-  <p><b>Кому:</b> {clientName}</p>
-  <table>
-    <thead>
-      <tr><th>№</th><th>Товары (работы, услуги)</th><th class="num">Кол-во</th><th class="num">Ед.</th><th class="num">Цена</th><th class="num">Сумма</th></tr>
-    </thead>
-    <tbody>
-      {rows}
-    </tbody>
-  </table>
-  <p><b>Итого:</b> {amount}</p>
-</body>
-</html>
-""";
+        var html = new StringBuilder();
+        html.AppendLine("<!doctype html>");
+        html.AppendLine("<html lang=\"ru\">");
+        html.AppendLine("<head>");
+        html.AppendLine("  <meta charset=\"utf-8\" />");
+        html.AppendLine($"  <title>Счёт № {number}</title>");
+        html.AppendLine("  <style>");
+        html.AppendLine("    body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }");
+        html.AppendLine("    table { border-collapse: collapse; width: 100%; margin-top: 12px; }");
+        html.AppendLine("    th, td { border: 1px solid #1f2937; padding: 6px 8px; font-size: 12px; }");
+        html.AppendLine("    .num { text-align: right; }");
+        html.AppendLine("  </style>");
+        html.AppendLine("</head>");
+        html.AppendLine("<body>");
+        html.AppendLine($"  <h1>Счёт № {number} от {date}</h1>");
+        html.AppendLine($"  <p><b>От кого:</b> {counterparty}</p>");
+        html.AppendLine($"  <p><b>Кому:</b> {clientName}</p>");
+        html.AppendLine("  <table>");
+        html.AppendLine("    <thead>");
+        html.AppendLine("      <tr><th>№</th><th>Товары (работы, услуги)</th><th class=\"num\">Кол-во</th><th class=\"num\">Ед.</th><th class=\"num\">Цена</th><th class=\"num\">Сумма</th></tr>");
+        html.AppendLine("    </thead>");
+        html.AppendLine("    <tbody>");
+        html.AppendLine(rowsBuilder.ToString());
+        html.AppendLine("    </tbody>");
+        html.AppendLine("  </table>");
+        html.AppendLine($"  <p><b>Итого:</b> {amount}</p>");
+        html.AppendLine("</body>");
+        html.AppendLine("</html>");
+
+        return html.ToString();
     }
 
     private static string SanitizeFilePart(string? value)

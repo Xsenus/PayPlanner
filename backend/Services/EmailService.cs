@@ -1,12 +1,9 @@
+using System.IO;
 using System.Net;
 using System.Net.Mail;
 
 namespace PayPlanner.Api.Services;
 
-/// <summary>
-/// Cåðâèñ îòïðàâêè ïî÷òîâûõ óâåäîìëåíèé (ðåãèñòðàöèÿ, îäîáðåíèå/îòêëîíåíèå è óâåäîìëåíèå àäìèíèñòðàòîðà).
-/// Èñïîëüçóåò SMTP-ïðîâàéäåðà èç êîíôèãóðàöèè (<c>Email:*</c>).
-/// </summary>
 public sealed class EmailService : IEmailService
 {
     private const string DefaultFromName = "PayPlanner";
@@ -16,11 +13,6 @@ public sealed class EmailService : IEmailService
     private readonly bool _isEnabled;
     private readonly ILogger<EmailService> _logger;
 
-    /// <summary>
-    /// Ñîçäà¸ò ýêçåìïëÿð <see cref="EmailService"/>.
-    /// </summary>
-    /// <param name="configuration">Ïðîâàéäåð êîíôèãóðàöèè (èñïîëüçóåòñÿ ñåêöèÿ <c>Email</c>).</param>
-    /// <param name="logger">Ëîããåð.</param>
     public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
     {
         _configuration = configuration;
@@ -28,127 +20,70 @@ public sealed class EmailService : IEmailService
         _isEnabled = _configuration.GetValue<bool>("Email:Enabled", false);
     }
 
-    #region Public API
-
-    /// <summary>
-    /// Îòïðàâëÿåò àäìèíèñòðàòîðó óâåäîìëåíèå î íîâîé ðåãèñòðàöèè, òðåáóþùåé ðåøåíèÿ.
-    /// </summary>
-    /// <param name="adminEmail">E-mail àäìèíèñòðàòîðà.</param>
-    /// <param name="newUserFullName">ÔÈÎ çàðåãèñòðèðîâàâøåãîñÿ ïîëüçîâàòåëÿ.</param>
-    /// <param name="newUserEmail">E-mail çàðåãèñòðèðîâàâøåãîñÿ ïîëüçîâàòåëÿ.</param>
     public async Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
     {
-        var subject = "Íîâàÿ ðåãèñòðàöèÿ ïîëüçîâàòåëÿ — òðåáóåòñÿ îäîáðåíèå";
+        var subject = "Новая регистрация пользователя в системе PayPlanner";
         var body = EmailTemplates.AdminNewRegistration(newUserFullName, newUserEmail);
-        await SendEmailAsync(adminEmail, subject, body);
+        await SendEmailCoreAsync(adminEmail, subject, body);
     }
 
-    /// <summary>
-    /// Îòïðàâëÿåò ïèñüìî ïîëüçîâàòåëþ î òîì, ÷òî ó÷¸òíàÿ çàïèñü îäîáðåíà.
-    /// </summary>
-    /// <param name="toEmail">E-mail ïîëüçîâàòåëÿ.</param>
-    /// <param name="fullName">ÔÈÎ ïîëüçîâàòåëÿ.</param>
     public async Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
     {
-        var subject = "Ó÷¸òíàÿ çàïèñü îäîáðåíà — äîáðî ïîæàëîâàòü â PayPlanner";
+        var subject = "Ваша заявка одобрена. Доступ к PayPlanner открыт";
         var body = EmailTemplates.RegistrationApproved(fullName);
-        await SendEmailAsync(toEmail, subject, body);
+        await SendEmailCoreAsync(toEmail, subject, body);
     }
 
-    /// <summary>
-    public async Task SendEmailWithAttachmentAsync(
+        var subject = "Заявка принята и находится на модерации";
+        await SendEmailCoreAsync(toEmail, subject, body);
+        var subject = "Регистрация отклонена";
+        await SendEmailCoreAsync(toEmail, subject, body);
+        await SendEmailCoreAsync(toEmail, subject, body, message =>
+
+    }
+
+    private async Task SendEmailCoreAsync(
         string toEmail,
         string subject,
         string body,
-        string attachmentFileName,
-        byte[] attachmentBytes,
-        string attachmentContentType)
-    {
-        await SendEmailAsync(toEmail, subject, body, message =>
-        {
-            if (attachmentBytes.Length == 0) return;
-            var stream = new MemoryStream(attachmentBytes);
-            var attachment = new Attachment(stream, attachmentFileName, attachmentContentType);
-            message.Attachments.Add(attachment);
-        });
-    }
+        Action<MailMessage>? configureMessage = null)
+                "Email disabled. Dry-run for {ToEmail}, subject: {Subject}.",
+                toEmail,
+                subject);
+            _logger.LogWarning("SMTP settings are invalid. Email to {ToEmail} skipped.", toEmail);
+                EnableSsl = settings.EnableSsl,
+                IsBodyHtml = false,
+            _logger.LogInformation("Email sent to {ToEmail}. Subject: {Subject}", toEmail, subject);
+            _logger.LogError(fex, "Invalid recipient email format: {ToEmail}", toEmail);
+            _logger.LogError(ex, "Email send failed to {ToEmail}. Subject: {Subject}", toEmail, subject);
+        var ok =
+            !string.IsNullOrWhiteSpace(host)
+            && !string.IsNullOrWhiteSpace(username)
+            && !string.IsNullOrWhiteSpace(password)
+            && !string.IsNullOrWhiteSpace(fromEmail);
+$@"Здравствуйте, {fullName}!
+Спасибо за регистрацию в PayPlanner.
+Ваша заявка принята и находится на модерации.
+После проверки вам придет уведомление на этот email.
+С уважением,
+Команда PayPlanner";
+$@"Здравствуйте, {fullName}!
 
-    private async Task SendEmailAsync(string toEmail, string subject, string body, Action<MailMessage>? configureMessage = null)
-            configureMessage?.Invoke(message);
-    /// </summary>
-    /// <param name="toEmail">E-mail ïîëüçîâàòåëÿ.</param>
-    /// <param name="fullName">ÔÈÎ ïîëüçîâàòåëÿ.</param>
-    public async Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
-    {
-        var subject = "Ðåãèñòðàöèÿ ïîëó÷åíà — îæèäàåò îäîáðåíèÿ";
-        var body = EmailTemplates.RegistrationPending(fullName);
-        await SendEmailAsync(toEmail, subject, body);
-    }
+Ваша заявка одобрена, доступ к PayPlanner открыт.
+С уважением,
+Команда PayPlanner";
+            var reasonLine = string.IsNullOrWhiteSpace(reason) ? string.Empty : $"Причина: {reason}{Environment.NewLine}";
+$@"Здравствуйте, {fullName}!
+К сожалению, ваша регистрация не одобрена.
+{reasonLine}
+С уважением,
+Команда PayPlanner";
 
-    /// <summary>
-    /// Îòïðàâëÿåò ïèñüìî ïîëüçîâàòåëþ î òîì, ÷òî ðåãèñòðàöèÿ íå îäîáðåíà.
-    /// </summary>
-    /// <param name="toEmail">E-mail ïîëüçîâàòåëÿ.</param>
-    /// <param name="fullName">ÔÈÎ ïîëüçîâàòåëÿ.</param>
-    /// <param name="reason">Íåîáÿçàòåëüíàÿ ïðè÷èíà îòêëîíåíèÿ.</param>
-    public async Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
-    {
-        var subject = "Ðåãèñòðàöèÿ íå îäîáðåíà";
-        var body = EmailTemplates.RegistrationRejected(fullName, reason);
-        await SendEmailAsync(toEmail, subject, body);
-    }
-
-    #endregion
-
-    #region Core send
-
-    /// <summary>
-    /// Óíèâåðñàëüíàÿ îòïðàâêà ïèñüìà ÷åðåç SMTP ïî íàñòðîéêàì èç ñåêöèè <c>Email</c>.
-    /// Åñëè îòïðàâêà îòêëþ÷åíà (<c>Email:Enabled = false</c>), âûïîëíÿåòñÿ òîëüêî ëîãèðîâàíèå ("dry-run").
-    /// </summary>
-    /// <param name="toEmail">Ïîëó÷àòåëü.</param>
-    /// <param name="subject">Òåìà ïèñüìà.</param>
-    /// <param name="body">Òåêñò ïèñüìà (îáû÷íûé òåêñò, áåç HTML).</param>
-    private async Task SendEmailAsync(string toEmail, string subject, string body)
-    {
-        if (!_isEnabled)
-        {
-            _logger.LogInformation(
-                "Îòïðàâêà ïèñåì îòêëþ÷åíà. Ïèñüìî äëÿ {ToEmail} ñ òåìîé \"{Subject}\" íå îòïðàâëåíî (dry-run).",
-                toEmail, subject);
-            return;
-        }
-
-        if (!TryBuildSmtpSettings(out var settings))
-        {
-            _logger.LogWarning("Êîíôèãóðàöèÿ ïî÷òû íåïîëíàÿ — îòïðàâêà ïèñüìà {ToEmail} îòìåíåíà.", toEmail);
-            return;
-        }
-
-        try
-        {
-            // Äîï. âàëèäàöèÿ ôîðìàòà àäðåñà (ðàííèé ôèäáåê âìåñòî èñêëþ÷åíèÿ SMTP-ïðîâàéäåðà)
-            _ = new MailAddress(toEmail);
-
-            using var client = new SmtpClient(settings.Host, settings.Port)
-            {
-                Credentials = new NetworkCredential(settings.Username, settings.Password),
-                EnableSsl = settings.EnableSsl
-            };
-
-            using var message = new MailMessage
-            {
-                From = new MailAddress(settings.FromEmail, settings.FromName),
-                Subject = subject,
-                Body = body,
-                IsBodyHtml = false
-            };
-
-            message.To.Add(toEmail);
-
-            await client.SendMailAsync(message);
-            _logger.LogInformation("Ïèñüìî óñïåøíî îòïðàâëåíî íà {ToEmail}: {Subject}", toEmail, subject);
-        }
+$@"Здравствуйте!
+Поступила новая регистрация:
+Имя: {userFullName}
+С уважением,
+PayPlanner";
         catch (FormatException fex)
         {
             _logger.LogError(fex, "Íåêîððåêòíûé àäðåñ ïîëó÷àòåëÿ: {ToEmail}", toEmail);
