@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Download, Info, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -476,6 +476,35 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
+    const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
+    const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+    const counterparty = form.counterpartyName.trim();
+
+    return {
+      number: form.number.trim() || String(invoice?.number ?? ''),
+      date: fromInputToApiDate(form.date) ?? form.date,
+      dueDate: form.dueDate ? fromInputToApiDate(form.dueDate) ?? form.dueDate : undefined,
+      amount: safeAmount,
+      type: form.type,
+      status: statusOverride ?? form.status,
+      clientId: Number(form.clientId),
+      description: form.description.trim() ? form.description.trim() : undefined,
+      actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
+      actId: selectedAct ? selectedAct.id : null,
+      counterpartyName: counterparty ? counterparty : undefined,
+      paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
+      lineItems: lineItems
+        .map((item) => ({
+          name: item.name.trim(),
+          quantity: Number.parseFloat(item.quantity.replace(',', '.')),
+          unit: item.unit.trim() || 'шт',
+          price: Number.parseFloat(item.price.replace(',', '.')),
+        }))
+        .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
+    };
+  }, [form, invoice?.number, lineItems, selectedAct]);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLocalError(null);
@@ -500,30 +529,8 @@ export function InvoiceModal({
       return;
     }
 
-    const counterparty = form.counterpartyName.trim();
-
-    const payload: InvoiceInput = {
-      number,
-      date: fromInputToApiDate(form.date) ?? form.date,
-      dueDate: form.dueDate ? fromInputToApiDate(form.dueDate) ?? form.dueDate : undefined,
-      amount: parsedAmount,
-      type: form.type,
-      status: form.status,
-      clientId: Number(form.clientId),
-      description: form.description.trim() ? form.description.trim() : undefined,
-      actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
-      actId: selectedAct ? selectedAct.id : null,
-      counterpartyName: counterparty ? counterparty : undefined,
-      paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
-      lineItems: lineItems
-        .map((item) => ({
-          name: item.name.trim(),
-          quantity: Number.parseFloat(item.quantity.replace(',', '.')),
-          unit: item.unit.trim() || 'шт',
-          price: Number.parseFloat(item.price.replace(',', '.')),
-        }))
-        .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
-    };
+    const payload = buildInvoicePayload();
+    payload.number = number;
 
     try {
       await onSubmit(payload);
@@ -578,21 +585,72 @@ export function InvoiceModal({
     });
     if (!accepted) return;
 
-    if (action === 'paid') {
-      setForm((prev) => ({ ...prev, status: 'Completed' }));
-    }
-    if (action === 'cancel') {
-      setForm((prev) => ({ ...prev, status: 'Cancelled' }));
-    }
+    try {
+      if (action === 'send') {
+        if (invoiceLink && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(invoiceLink);
+        }
+        await alert({ title: 'Счёт готов к отправке', description: 'Ссылка на счёт скопирована в буфер обмена.', confirmLabel: 'ОК', variant: 'success' });
+        return;
+      }
 
-    await alert({
-      title: 'Готово',
-      description: 'Действие зарегистрировано. Интеграцию с серверными операциями подключим на следующем шаге.',
-      confirmLabel: 'Понятно',
-      variant: 'success',
-    });
+      if (action === 'print') {
+        if (typeof window !== 'undefined') {
+          window.print();
+        }
+        return;
+      }
+
+      if (action === 'download') {
+        if (typeof window !== 'undefined') {
+          const content = [
+            `Счёт № ${form.number || '—'} от ${formatDate(form.date) || '—'}`,
+            `От кого: ${form.counterpartyName || '—'}`,
+            `Кому: ${selectedClient?.name || '—'}`,
+            `Сумма: ${printableAmount}`,
+          ].join('\n');
+          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+          const href = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = href;
+          link.download = `invoice-${form.number || 'export'}.txt`;
+          link.click();
+          URL.revokeObjectURL(href);
+        }
+        return;
+      }
+
+      if (action === 'copy') {
+        const payload = buildInvoicePayload();
+        payload.number = `${form.number || 'Счёт'} (копия)`;
+        await apiService.createInvoice(payload);
+        await alert({ title: 'Копия создана', description: 'Создана копия текущего счёта.', confirmLabel: 'ОК', variant: 'success' });
+        return;
+      }
+
+      if ((action === 'paid' || action === 'cancel') && invoice?.id) {
+        const nextStatus: PaymentStatus = action === 'paid' ? 'Completed' : 'Cancelled';
+        const payload = buildInvoicePayload(nextStatus);
+        await apiService.updateInvoice(invoice.id, payload);
+        setForm((prev) => ({ ...prev, status: nextStatus }));
+        await alert({ title: 'Счёт обновлён', description: action === 'paid' ? 'Счёт отмечен как оплаченный.' : 'Счёт отменён.', confirmLabel: 'ОК', variant: 'success' });
+        return;
+      }
+
+      if (action === 'delete' && invoice?.id) {
+        await apiService.deleteInvoice(invoice.id);
+        onClose();
+        return;
+      }
+    } catch (err) {
+      await alert({
+        title: 'Ошибка',
+        description: err instanceof Error ? err.message : 'Не удалось выполнить действие по счёту.',
+        confirmLabel: 'ОК',
+        variant: 'error',
+      });
+    }
   };
-
 
 
   const amountValue = Number.parseFloat(form.amount.replace(',', '.')) || 0;
@@ -636,10 +694,11 @@ export function InvoiceModal({
           <button
             type="button"
             onClick={() => setPageViewMode((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+            aria-label={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
+            title={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
           >
             <Pencil className="h-4 w-4" />
-            {pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
           </button>
         )}
         {!isPageMode && (
@@ -658,13 +717,7 @@ export function InvoiceModal({
         <div className="space-y-4 bg-slate-100 px-4 py-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <section className="rounded-xl border border-slate-300 bg-white p-3">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button type="button" className="rounded-md bg-blue-600 p-2 text-white"><Info className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => setPageViewMode(false)} className="rounded-md bg-blue-500 p-2 text-white"><Pencil className="h-4 w-4" /></button>
-                </div>
-                <div className="text-sm font-semibold text-slate-700">{printableAmount}</div>
-              </div>
+              <div className="mb-3" />
 
               <div className="border border-slate-800 p-3 text-sm text-slate-900">
                 <div className="grid grid-cols-2 border border-slate-800">
