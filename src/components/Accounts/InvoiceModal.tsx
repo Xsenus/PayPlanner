@@ -729,8 +729,34 @@ export function InvoiceModal({
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
-                <p><span className="text-slate-500">От кого счёт:</span> {form.counterpartyName || '—'}</p>
-                <p><span className="text-slate-500">Кому счёт:</span> <span className="text-blue-600">{selectedClient?.name || '—'}</span></p>
+                <p>
+                  <span className="text-slate-500">От кого:</span>{' '}
+                  {selectedCounterpartyClient && onOpenClient ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClient(selectedCounterpartyClient.id)}
+                      className="text-blue-600 underline hover:text-blue-700"
+                    >
+                      {selectedCounterpartyClient.name}
+                    </button>
+                  ) : (
+                    form.counterpartyName || '—'
+                  )}
+                </p>
+                <p>
+                  <span className="text-slate-500">Кому:</span>{' '}
+                  {selectedClient && onOpenClient ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClient(selectedClient.id)}
+                      className="text-blue-600 underline hover:text-blue-700"
+                    >
+                      {selectedClient.name}
+                    </button>
+                  ) : (
+                    selectedClient?.name || '—'
+                  )}
+                </p>
                 <p><span className="text-slate-500">Акт:</span> {selectedAct ? actLabel(selectedAct) : (form.actReference || '—')}</p>
                 <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
                 <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
@@ -752,6 +778,8 @@ export function InvoiceModal({
         </div>
       ) : (
       <form onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="space-y-6">
           <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -876,8 +904,6 @@ export function InvoiceModal({
             </div>
           </section>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <div className="space-y-6">
           <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
             <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
