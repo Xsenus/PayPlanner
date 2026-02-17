@@ -831,11 +831,6 @@ export function InvoiceModal({
                                   })}
                                 </div>
                               )}
-                              <p className="text-xs text-slate-500">
-                                {isIncome
-                                  ? t('invoiceTypeIncomeHint') ?? 'Используйте для выставления счётов клиентам.'
-                                  : t('invoiceTypeExpenseHint') ?? 'Используйте для входящих счетов от поставщиков и подрядчиков.'}
-                              </p>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -1001,9 +996,6 @@ export function InvoiceModal({
                                   <UserRoundSearch className="h-4 w-4" />
                                 </button>
                               </div>
-                              <span className="text-xs text-slate-500">
-                                {t('invoiceCounterpartyHint') ?? 'Укажите поставщика или источник счёта, если это необходимо.'}
-                              </span>
                               {selectedCounterpartyClient && onOpenClient && (
                                 <button
                                   type="button"
@@ -1031,7 +1023,7 @@ export function InvoiceModal({
                                 type="date"
                                 value={form.date}
                                 onChange={handleChange('date')}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                 required
                               />
                             </label>
@@ -1042,7 +1034,7 @@ export function InvoiceModal({
                                 type="date"
                                 value={form.dueDate}
                                 onChange={handleChange('dueDate')}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                               />
                             </label>
 
@@ -1052,7 +1044,7 @@ export function InvoiceModal({
                                 type="date"
                                 value={form.paidDate}
                                 onChange={handleChange('paidDate')}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                               />
                             </label>
                           </div>
@@ -1063,9 +1055,6 @@ export function InvoiceModal({
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                               {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
                             </span>
-                            <p className="text-sm text-slate-500">
-                              {t('invoiceDocumentsHint') ?? 'Прикрепите акт или оставьте комментарий.'}
-                            </p>
                           </header>
                           <div className="mt-4 space-y-4">
                             {isIncome && (
@@ -1176,19 +1165,19 @@ export function InvoiceModal({
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              {t('cancel') ?? 'Отмена'}
-            </button>
-            <button
               type="submit"
               disabled={submitting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === 'edit' ? t('invoiceEdit') ?? 'Сохранить изменения' : t('invoiceCreate') ?? 'Создать счёт'}
+              {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              {t('cancel') ?? 'Отмена'}
             </button>
           </div>
       </form>
