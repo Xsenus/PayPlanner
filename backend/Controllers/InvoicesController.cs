@@ -661,7 +661,7 @@ public class InvoicesController : ControllerBase
         var rows = string.Join(string.Empty, lineItems.Select((item, index) =>
         {
             var total = item.Quantity * item.Price;
-            return $"<tr><td>{index + 1}</td><td>{WebUtility.HtmlEncode(item.Name)}</td><td style="text-align:right">{item.Quantity:0.##}</td><td style="text-align:right">{WebUtility.HtmlEncode(item.Unit)}</td><td style="text-align:right">{item.Price:0.00}</td><td style="text-align:right">{total:0.00}</td></tr>";
+            return $"<tr><td>{index + 1}</td><td>{WebUtility.HtmlEncode(item.Name)}</td><td style='text-align:right'>{item.Quantity:0.##}</td><td style='text-align:right'>{WebUtility.HtmlEncode(item.Unit)}</td><td style='text-align:right'>{item.Price:0.00}</td><td style='text-align:right'>{total:0.00}</td></tr>";
         }));
 
         return $"""
