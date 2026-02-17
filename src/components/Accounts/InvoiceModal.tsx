@@ -140,6 +140,15 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 export function InvoiceModal({
   open,
   mode,
@@ -565,11 +574,85 @@ export function InvoiceModal({
     return `${window.location.origin}/invoices${invoiceId}`;
   }, [invoice?.id]);
 
+  const downloadInvoiceFile = (filename: string, content: BlobPart, mimeType: string) => {
+    if (typeof window === 'undefined') return;
+    const blob = new Blob([content], { type: mimeType });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(href);
+  };
+
+  const buildInvoiceHtmlDocument = () => {
+    const safeNumber = escapeHtml(form.number || '—');
+    const safeDate = escapeHtml(formatDate(form.date) || '—');
+    const safeCounterparty = escapeHtml(form.counterpartyName || '—');
+    const safeClient = escapeHtml(selectedClient?.name || '—');
+    const safeAmount = escapeHtml(printableAmount);
+
+    const rows = lineItems
+      .map((item, index) => {
+        const qty = parseMoney(item.quantity);
+        const price = parseMoney(item.price);
+        const rowTotal = qty * price;
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.name || '—')}</td>
+          <td class="num">${qty.toFixed(2)}</td>
+          <td class="num">${escapeHtml(item.unit || 'шт')}</td>
+          <td class="num">${price.toFixed(2)}</td>
+          <td class="num">${rowTotal.toFixed(2)}</td>
+        </tr>`;
+      })
+      .join('');
+
+    return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Счёт № ${safeNumber}</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
+      h1 { font-size: 20px; margin-bottom: 8px; }
+      .meta { margin-bottom: 16px; line-height: 1.5; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { border: 1px solid #1f2937; padding: 6px 8px; font-size: 12px; }
+      th { text-align: left; }
+      .num { text-align: right; }
+      .total { margin-top: 12px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h1>Счёт № ${safeNumber} от ${safeDate}</h1>
+    <div class="meta">
+      <div><b>От кого:</b> ${safeCounterparty}</div>
+      <div><b>Кому:</b> ${safeClient}</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Товары (работы, услуги)</th>
+          <th class="num">Кол-во</th>
+          <th class="num">Ед.</th>
+          <th class="num">Цена</th>
+          <th class="num">Сумма</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="total">Итого: ${safeAmount}</div>
+  </body>
+</html>`;
+  };
+
   const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
-      send: { title: 'Отправить счёт', message: 'Отправить счёт клиенту?', confirmLabel: 'Отправить' },
-      print: { title: 'Печать счёта', message: 'Подготовить счёт к печати?', confirmLabel: 'Печать' },
-      download: { title: 'Скачать счёт', message: 'Скачать документ счёта?', confirmLabel: 'Скачать' },
+      send: { title: 'Отправить счёт', message: 'Сформировать документ счёта и открыть email-клиент?', confirmLabel: 'Отправить' },
+      print: { title: 'Печать счёта', message: 'Сформировать документ и открыть системное окно печати?', confirmLabel: 'Печать' },
+      download: { title: 'Скачать счёт', message: 'Скачать документ счёта в формате HTML?', confirmLabel: 'Скачать' },
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
       cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
@@ -587,36 +670,36 @@ export function InvoiceModal({
 
     try {
       if (action === 'send') {
-        if (invoiceLink && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(invoiceLink);
+        const html = buildInvoiceHtmlDocument();
+        const subject = encodeURIComponent(`Счёт №${form.number || 'без номера'} от ${formatDate(form.date) || ''}`);
+        const body = encodeURIComponent('Документ счёта сформирован и автоматически скачан. Прикрепите файл из загрузок к письму.');
+        downloadInvoiceFile(`invoice-${form.number || 'export'}.html`, html, 'text/html;charset=utf-8');
+        if (typeof window !== 'undefined') {
+          window.location.href = `mailto:?subject=${subject}&body=${body}`;
         }
-        await alert({ title: 'Счёт готов к отправке', description: 'Ссылка на счёт скопирована в буфер обмена.', confirmLabel: 'ОК', variant: 'success' });
+        await alert({ title: 'Документ подготовлен', description: 'HTML документ скачан. Открылся email-клиент для отправки.', confirmLabel: 'ОК', variant: 'success' });
         return;
       }
 
       if (action === 'print') {
         if (typeof window !== 'undefined') {
-          window.print();
+          const html = buildInvoiceHtmlDocument();
+          const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768');
+          if (!printWindow) {
+            throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
+          }
+          printWindow.document.open();
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          printWindow.print();
         }
         return;
       }
 
       if (action === 'download') {
-        if (typeof window !== 'undefined') {
-          const content = [
-            `Счёт № ${form.number || '—'} от ${formatDate(form.date) || '—'}`,
-            `От кого: ${form.counterpartyName || '—'}`,
-            `Кому: ${selectedClient?.name || '—'}`,
-            `Сумма: ${printableAmount}`,
-          ].join('\n');
-          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-          const href = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = href;
-          link.download = `invoice-${form.number || 'export'}.txt`;
-          link.click();
-          URL.revokeObjectURL(href);
-        }
+        const html = buildInvoiceHtmlDocument();
+        downloadInvoiceFile(`invoice-${form.number || 'export'}.html`, html, 'text/html;charset=utf-8');
         return;
       }
 
@@ -624,7 +707,7 @@ export function InvoiceModal({
         const payload = buildInvoicePayload();
         payload.number = `${form.number || 'Счёт'} (копия)`;
         await apiService.createInvoice(payload);
-        await alert({ title: 'Копия создана', description: 'Создана копия текущего счёта.', confirmLabel: 'ОК', variant: 'success' });
+        await alert({ title: 'Копия создана', description: 'Создана копия текущего счёта через API /invoices (POST).', confirmLabel: 'ОК', variant: 'success' });
         return;
       }
 
@@ -633,12 +716,13 @@ export function InvoiceModal({
         const payload = buildInvoicePayload(nextStatus);
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
-        await alert({ title: 'Счёт обновлён', description: action === 'paid' ? 'Счёт отмечен как оплаченный.' : 'Счёт отменён.', confirmLabel: 'ОК', variant: 'success' });
+        await alert({ title: 'Счёт обновлён', description: action === 'paid' ? 'Статус обновлён через API /invoices/:id (PUT): Оплачен.' : 'Статус обновлён через API /invoices/:id (PUT): Отменён.', confirmLabel: 'ОК', variant: 'success' });
         return;
       }
 
       if (action === 'delete' && invoice?.id) {
         await apiService.deleteInvoice(invoice.id);
+        await alert({ title: 'Счёт удалён', description: 'Счёт удалён через API /invoices/:id (DELETE).', confirmLabel: 'ОК', variant: 'success' });
         onClose();
         return;
       }
@@ -651,7 +735,6 @@ export function InvoiceModal({
       });
     }
   };
-
 
   const amountValue = Number.parseFloat(form.amount.replace(',', '.')) || 0;
   const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
