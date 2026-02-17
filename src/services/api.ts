@@ -264,6 +264,34 @@ export class ApiService {
     return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
   }
 
+  async downloadInvoiceDocument(id: number, format: 'word' | 'pdf' = 'word') {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/invoices/${id}/document?format=${format}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    return response.blob();
+  }
+
+  async sendInvoiceByEmail(
+    id: number,
+    payload?: { email?: string; subject?: string; message?: string; format?: 'word' | 'pdf' },
+  ) {
+    return this.request<{ sent: boolean; recipient: string; fileName: string; format: string }>(
+      `/invoices/${id}/send-email`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  }
+
   // ===== Role permissions =====
   async getRolePermissions(roleId: number) {
     return this.request<RolePermissions>(`/role-permissions/${roleId}`);

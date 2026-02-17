@@ -4,8 +4,8 @@ using System.Net.Mail;
 namespace PayPlanner.Api.Services;
 
 /// <summary>
-/// Cервис отправки почтовых уведомлений (регистрация, одобрение/отклонение и уведомление администратора).
-/// Использует SMTP-провайдера из конфигурации (<c>Email:*</c>).
+/// CГҐГ°ГўГЁГ± Г®ГІГЇГ°Г ГўГЄГЁ ГЇГ®Г·ГІГ®ГўГ»Гµ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГ© (Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї, Г®Г¤Г®ГЎГ°ГҐГ­ГЁГҐ/Г®ГІГЄГ«Г®Г­ГҐГ­ГЁГҐ ГЁ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г ).
+/// Г€Г±ГЇГ®Г«ГјГ§ГіГҐГІ SMTP-ГЇГ°Г®ГўГ Г©Г¤ГҐГ°Г  ГЁГ§ ГЄГ®Г­ГґГЁГЈГіГ°Г Г¶ГЁГЁ (<c>Email:*</c>).
 /// </summary>
 public sealed class EmailService : IEmailService
 {
@@ -17,10 +17,10 @@ public sealed class EmailService : IEmailService
     private readonly ILogger<EmailService> _logger;
 
     /// <summary>
-    /// Создаёт экземпляр <see cref="EmailService"/>.
+    /// Г‘Г®Г§Г¤Г ВёГІ ГЅГЄГ§ГҐГ¬ГЇГ«ГїГ° <see cref="EmailService"/>.
     /// </summary>
-    /// <param name="configuration">Провайдер конфигурации (используется секция <c>Email</c>).</param>
-    /// <param name="logger">Логгер.</param>
+    /// <param name="configuration">ГЏГ°Г®ГўГ Г©Г¤ГҐГ° ГЄГ®Г­ГґГЁГЈГіГ°Г Г¶ГЁГЁ (ГЁГ±ГЇГ®Г«ГјГ§ГіГҐГІГ±Гї Г±ГҐГЄГ¶ГЁГї <c>Email</c>).</param>
+    /// <param name="logger">Г‹Г®ГЈГЈГҐГ°.</param>
     public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
     {
         _configuration = configuration;
@@ -31,51 +31,69 @@ public sealed class EmailService : IEmailService
     #region Public API
 
     /// <summary>
-    /// Отправляет администратору уведомление о новой регистрации, требующей решения.
+    /// ГЋГІГЇГ°Г ГўГ«ГїГҐГІ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Гі ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г­Г®ГўГ®Г© Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГЁ, ГІГ°ГҐГЎГіГѕГ№ГҐГ© Г°ГҐГёГҐГ­ГЁГї.
     /// </summary>
-    /// <param name="adminEmail">E-mail администратора.</param>
-    /// <param name="newUserFullName">ФИО зарегистрировавшегося пользователя.</param>
-    /// <param name="newUserEmail">E-mail зарегистрировавшегося пользователя.</param>
+    /// <param name="adminEmail">E-mail Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г .</param>
+    /// <param name="newUserFullName">Г”Г€ГЋ Г§Г Г°ГҐГЈГЁГ±ГІГ°ГЁГ°Г®ГўГ ГўГёГҐГЈГ®Г±Гї ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
+    /// <param name="newUserEmail">E-mail Г§Г Г°ГҐГЈГЁГ±ГІГ°ГЁГ°Г®ГўГ ГўГёГҐГЈГ®Г±Гї ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
     public async Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
     {
-        var subject = "Новая регистрация пользователя — требуется одобрение";
+        var subject = "ГЌГ®ГўГ Гї Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї вЂ” ГІГ°ГҐГЎГіГҐГІГ±Гї Г®Г¤Г®ГЎГ°ГҐГ­ГЁГҐ";
         var body = EmailTemplates.AdminNewRegistration(newUserFullName, newUserEmail);
         await SendEmailAsync(adminEmail, subject, body);
     }
 
     /// <summary>
-    /// Отправляет письмо пользователю о том, что учётная запись одобрена.
+    /// ГЋГІГЇГ°Г ГўГ«ГїГҐГІ ГЇГЁГ±ГјГ¬Г® ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гѕ Г® ГІГ®Г¬, Г·ГІГ® ГіГ·ВёГІГ­Г Гї Г§Г ГЇГЁГ±Гј Г®Г¤Г®ГЎГ°ГҐГ­Г .
     /// </summary>
-    /// <param name="toEmail">E-mail пользователя.</param>
-    /// <param name="fullName">ФИО пользователя.</param>
+    /// <param name="toEmail">E-mail ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
+    /// <param name="fullName">Г”Г€ГЋ ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
     public async Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
     {
-        var subject = "Учётная запись одобрена — добро пожаловать в PayPlanner";
+        var subject = "Г“Г·ВёГІГ­Г Гї Г§Г ГЇГЁГ±Гј Г®Г¤Г®ГЎГ°ГҐГ­Г  вЂ” Г¤Г®ГЎГ°Г® ГЇГ®Г¦Г Г«Г®ГўГ ГІГј Гў PayPlanner";
         var body = EmailTemplates.RegistrationApproved(fullName);
         await SendEmailAsync(toEmail, subject, body);
     }
 
     /// <summary>
-    /// Отправляет письмо пользователю о том, что регистрация получена и ожидает одобрения администратора.
+    public async Task SendEmailWithAttachmentAsync(
+        string toEmail,
+        string subject,
+        string body,
+        string attachmentFileName,
+        byte[] attachmentBytes,
+        string attachmentContentType)
+    {
+        await SendEmailAsync(toEmail, subject, body, message =>
+        {
+            if (attachmentBytes.Length == 0) return;
+            var stream = new MemoryStream(attachmentBytes);
+            var attachment = new Attachment(stream, attachmentFileName, attachmentContentType);
+            message.Attachments.Add(attachment);
+        });
+    }
+
+    private async Task SendEmailAsync(string toEmail, string subject, string body, Action<MailMessage>? configureMessage = null)
+            configureMessage?.Invoke(message);
     /// </summary>
-    /// <param name="toEmail">E-mail пользователя.</param>
-    /// <param name="fullName">ФИО пользователя.</param>
+    /// <param name="toEmail">E-mail ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
+    /// <param name="fullName">Г”Г€ГЋ ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
     public async Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
     {
-        var subject = "Регистрация получена — ожидает одобрения";
+        var subject = "ГђГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї ГЇГ®Г«ГіГ·ГҐГ­Г  вЂ” Г®Г¦ГЁГ¤Г ГҐГІ Г®Г¤Г®ГЎГ°ГҐГ­ГЁГї";
         var body = EmailTemplates.RegistrationPending(fullName);
         await SendEmailAsync(toEmail, subject, body);
     }
 
     /// <summary>
-    /// Отправляет письмо пользователю о том, что регистрация не одобрена.
+    /// ГЋГІГЇГ°Г ГўГ«ГїГҐГІ ГЇГЁГ±ГјГ¬Г® ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гѕ Г® ГІГ®Г¬, Г·ГІГ® Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї Г­ГҐ Г®Г¤Г®ГЎГ°ГҐГ­Г .
     /// </summary>
-    /// <param name="toEmail">E-mail пользователя.</param>
-    /// <param name="fullName">ФИО пользователя.</param>
-    /// <param name="reason">Необязательная причина отклонения.</param>
+    /// <param name="toEmail">E-mail ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
+    /// <param name="fullName">Г”Г€ГЋ ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї.</param>
+    /// <param name="reason">ГЌГҐГ®ГЎГїГ§Г ГІГҐГ«ГјГ­Г Гї ГЇГ°ГЁГ·ГЁГ­Г  Г®ГІГЄГ«Г®Г­ГҐГ­ГЁГї.</param>
     public async Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
     {
-        var subject = "Регистрация не одобрена";
+        var subject = "ГђГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї Г­ГҐ Г®Г¤Г®ГЎГ°ГҐГ­Г ";
         var body = EmailTemplates.RegistrationRejected(fullName, reason);
         await SendEmailAsync(toEmail, subject, body);
     }
@@ -85,31 +103,31 @@ public sealed class EmailService : IEmailService
     #region Core send
 
     /// <summary>
-    /// Универсальная отправка письма через SMTP по настройкам из секции <c>Email</c>.
-    /// Если отправка отключена (<c>Email:Enabled = false</c>), выполняется только логирование ("dry-run").
+    /// Г“Г­ГЁГўГҐГ°Г±Г Г«ГјГ­Г Гї Г®ГІГЇГ°Г ГўГЄГ  ГЇГЁГ±ГјГ¬Г  Г·ГҐГ°ГҐГ§ SMTP ГЇГ® Г­Г Г±ГІГ°Г®Г©ГЄГ Г¬ ГЁГ§ Г±ГҐГЄГ¶ГЁГЁ <c>Email</c>.
+    /// Г…Г±Г«ГЁ Г®ГІГЇГ°Г ГўГЄГ  Г®ГІГЄГ«ГѕГ·ГҐГ­Г  (<c>Email:Enabled = false</c>), ГўГ»ГЇГ®Г«Г­ГїГҐГІГ±Гї ГІГ®Г«ГјГЄГ® Г«Г®ГЈГЁГ°Г®ГўГ Г­ГЁГҐ ("dry-run").
     /// </summary>
-    /// <param name="toEmail">Получатель.</param>
-    /// <param name="subject">Тема письма.</param>
-    /// <param name="body">Текст письма (обычный текст, без HTML).</param>
+    /// <param name="toEmail">ГЏГ®Г«ГіГ·Г ГІГҐГ«Гј.</param>
+    /// <param name="subject">Г’ГҐГ¬Г  ГЇГЁГ±ГјГ¬Г .</param>
+    /// <param name="body">Г’ГҐГЄГ±ГІ ГЇГЁГ±ГјГ¬Г  (Г®ГЎГ»Г·Г­Г»Г© ГІГҐГЄГ±ГІ, ГЎГҐГ§ HTML).</param>
     private async Task SendEmailAsync(string toEmail, string subject, string body)
     {
         if (!_isEnabled)
         {
             _logger.LogInformation(
-                "Отправка писем отключена. Письмо для {ToEmail} с темой \"{Subject}\" не отправлено (dry-run).",
+                "ГЋГІГЇГ°Г ГўГЄГ  ГЇГЁГ±ГҐГ¬ Г®ГІГЄГ«ГѕГ·ГҐГ­Г . ГЏГЁГ±ГјГ¬Г® Г¤Г«Гї {ToEmail} Г± ГІГҐГ¬Г®Г© \"{Subject}\" Г­ГҐ Г®ГІГЇГ°Г ГўГ«ГҐГ­Г® (dry-run).",
                 toEmail, subject);
             return;
         }
 
         if (!TryBuildSmtpSettings(out var settings))
         {
-            _logger.LogWarning("Конфигурация почты неполная — отправка письма {ToEmail} отменена.", toEmail);
+            _logger.LogWarning("ГЉГ®Г­ГґГЁГЈГіГ°Г Г¶ГЁГї ГЇГ®Г·ГІГ» Г­ГҐГЇГ®Г«Г­Г Гї вЂ” Г®ГІГЇГ°Г ГўГЄГ  ГЇГЁГ±ГјГ¬Г  {ToEmail} Г®ГІГ¬ГҐГ­ГҐГ­Г .", toEmail);
             return;
         }
 
         try
         {
-            // Доп. валидация формата адреса (ранний фидбек вместо исключения SMTP-провайдера)
+            // Г„Г®ГЇ. ГўГ Г«ГЁГ¤Г Г¶ГЁГї ГґГ®Г°Г¬Г ГІГ  Г Г¤Г°ГҐГ±Г  (Г°Г Г­Г­ГЁГ© ГґГЁГ¤ГЎГҐГЄ ГўГ¬ГҐГ±ГІГ® ГЁГ±ГЄГ«ГѕГ·ГҐГ­ГЁГї SMTP-ГЇГ°Г®ГўГ Г©Г¤ГҐГ°Г )
             _ = new MailAddress(toEmail);
 
             using var client = new SmtpClient(settings.Host, settings.Port)
@@ -129,23 +147,23 @@ public sealed class EmailService : IEmailService
             message.To.Add(toEmail);
 
             await client.SendMailAsync(message);
-            _logger.LogInformation("Письмо успешно отправлено на {ToEmail}: {Subject}", toEmail, subject);
+            _logger.LogInformation("ГЏГЁГ±ГјГ¬Г® ГіГ±ГЇГҐГёГ­Г® Г®ГІГЇГ°Г ГўГ«ГҐГ­Г® Г­Г  {ToEmail}: {Subject}", toEmail, subject);
         }
         catch (FormatException fex)
         {
-            _logger.LogError(fex, "Некорректный адрес получателя: {ToEmail}", toEmail);
+            _logger.LogError(fex, "ГЌГҐГЄГ®Г°Г°ГҐГЄГІГ­Г»Г© Г Г¤Г°ГҐГ± ГЇГ®Г«ГіГ·Г ГІГҐГ«Гї: {ToEmail}", toEmail);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Не удалось отправить письмо на {ToEmail}: {Subject}", toEmail, subject);
+            _logger.LogError(ex, "ГЌГҐ ГіГ¤Г Г«Г®Г±Гј Г®ГІГЇГ°Г ГўГЁГІГј ГЇГЁГ±ГјГ¬Г® Г­Г  {ToEmail}: {Subject}", toEmail, subject);
         }
     }
 
     /// <summary>
-    /// Читает и валидирует настройки SMTP из конфигурации.
+    /// Г—ГЁГІГ ГҐГІ ГЁ ГўГ Г«ГЁГ¤ГЁГ°ГіГҐГІ Г­Г Г±ГІГ°Г®Г©ГЄГЁ SMTP ГЁГ§ ГЄГ®Г­ГґГЁГЈГіГ°Г Г¶ГЁГЁ.
     /// </summary>
-    /// <param name="settings">Выходные настройки SMTP.</param>
-    /// <returns><c>true</c>, если настройки корректны; иначе <c>false</c>.</returns>
+    /// <param name="settings">Г‚Г»ГµГ®Г¤Г­Г»ГҐ Г­Г Г±ГІГ°Г®Г©ГЄГЁ SMTP.</param>
+    /// <returns><c>true</c>, ГҐГ±Г«ГЁ Г­Г Г±ГІГ°Г®Г©ГЄГЁ ГЄГ®Г°Г°ГҐГЄГІГ­Г»; ГЁГ­Г Г·ГҐ <c>false</c>.</returns>
     private bool TryBuildSmtpSettings(out SmtpSettings settings)
     {
         var host = _configuration["Email:SmtpHost"]?.Trim();
@@ -176,64 +194,64 @@ public sealed class EmailService : IEmailService
     #region Helpers
 
     /// <summary>
-    /// Набор шаблонов тем и текстов писем.
+    /// ГЌГ ГЎГ®Г° ГёГ ГЎГ«Г®Г­Г®Гў ГІГҐГ¬ ГЁ ГІГҐГЄГ±ГІГ®Гў ГЇГЁГ±ГҐГ¬.
     /// </summary>
     private static class EmailTemplates
     {
         public static string RegistrationPending(string fullName) =>
-$@"Здравствуйте, {fullName}!
+$@"Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ, {fullName}!
 
-Спасибо за регистрацию в PayPlanner.
+Г‘ГЇГ Г±ГЁГЎГ® Г§Г  Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГѕ Гў PayPlanner.
 
-Ваша учётная запись создана и ожидает одобрения администратором.
-Как только доступ будет одобрен, вы получите дополнительное письмо и сможете войти в систему.
+Г‚Г ГёГ  ГіГ·ВёГІГ­Г Гї Г§Г ГЇГЁГ±Гј Г±Г®Г§Г¤Г Г­Г  ГЁ Г®Г¦ГЁГ¤Г ГҐГІ Г®Г¤Г®ГЎГ°ГҐГ­ГЁГї Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г®Г¬.
+ГЉГ ГЄ ГІГ®Г«ГјГЄГ® Г¤Г®Г±ГІГіГЇ ГЎГіГ¤ГҐГІ Г®Г¤Г®ГЎГ°ГҐГ­, ГўГ» ГЇГ®Г«ГіГ·ГЁГІГҐ Г¤Г®ГЇГ®Г«Г­ГЁГІГҐГ«ГјГ­Г®ГҐ ГЇГЁГ±ГјГ¬Г® ГЁ Г±Г¬Г®Г¦ГҐГІГҐ ГўГ®Г©ГІГЁ Гў Г±ГЁГ±ГІГҐГ¬Гі.
 
-Если у вас есть вопросы, обратитесь к администратору системы.
+Г…Г±Г«ГЁ Гі ГўГ Г± ГҐГ±ГІГј ГўГ®ГЇГ°Г®Г±Г», Г®ГЎГ°Г ГІГЁГІГҐГ±Гј ГЄ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Гі Г±ГЁГ±ГІГҐГ¬Г».
 
-С уважением,
-Команда PayPlanner";
+Г‘ ГіГўГ Г¦ГҐГ­ГЁГҐГ¬,
+ГЉГ®Г¬Г Г­Г¤Г  PayPlanner";
 
         public static string RegistrationApproved(string fullName) =>
-$@"Здравствуйте, {fullName}!
+$@"Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ, {fullName}!
 
-Отличные новости — ваша учётная запись PayPlanner одобрена.
+ГЋГІГ«ГЁГ·Г­Г»ГҐ Г­Г®ГўГ®Г±ГІГЁ вЂ” ГўГ ГёГ  ГіГ·ВёГІГ­Г Гї Г§Г ГЇГЁГ±Гј PayPlanner Г®Г¤Г®ГЎГ°ГҐГ­Г .
 
-Теперь вы можете войти в систему, используя свой e-mail и пароль.
+Г’ГҐГЇГҐГ°Гј ГўГ» Г¬Г®Г¦ГҐГІГҐ ГўГ®Г©ГІГЁ Гў Г±ГЁГ±ГІГҐГ¬Гі, ГЁГ±ГЇГ®Г«ГјГ§ГіГї Г±ГўГ®Г© e-mail ГЁ ГЇГ Г°Г®Г«Гј.
 
-Добро пожаловать!
+Г„Г®ГЎГ°Г® ГЇГ®Г¦Г Г«Г®ГўГ ГІГј!
 
-С уважением,
-Команда PayPlanner";
+Г‘ ГіГўГ Г¦ГҐГ­ГЁГҐГ¬,
+ГЉГ®Г¬Г Г­Г¤Г  PayPlanner";
 
         public static string RegistrationRejected(string fullName, string? reason)
         {
-            var reasonLine = string.IsNullOrWhiteSpace(reason) ? string.Empty : $"Причина: {reason}{Environment.NewLine}";
+            var reasonLine = string.IsNullOrWhiteSpace(reason) ? string.Empty : $"ГЏГ°ГЁГ·ГЁГ­Г : {reason}{Environment.NewLine}";
             return
-$@"Здравствуйте, {fullName}!
+$@"Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ, {fullName}!
 
-К сожалению, ваша регистрация в PayPlanner не была одобрена.
-{reasonLine}Если вы считаете, что произошла ошибка, обратитесь к администратору системы.
+ГЉ Г±Г®Г¦Г Г«ГҐГ­ГЁГѕ, ГўГ ГёГ  Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї Гў PayPlanner Г­ГҐ ГЎГ»Г«Г  Г®Г¤Г®ГЎГ°ГҐГ­Г .
+{reasonLine}Г…Г±Г«ГЁ ГўГ» Г±Г·ГЁГІГ ГҐГІГҐ, Г·ГІГ® ГЇГ°Г®ГЁГ§Г®ГёГ«Г  Г®ГёГЁГЎГЄГ , Г®ГЎГ°Г ГІГЁГІГҐГ±Гј ГЄ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Гі Г±ГЁГ±ГІГҐГ¬Г».
 
-С уважением,
-Команда PayPlanner";
+Г‘ ГіГўГ Г¦ГҐГ­ГЁГҐГ¬,
+ГЉГ®Г¬Г Г­Г¤Г  PayPlanner";
         }
 
         public static string AdminNewRegistration(string userFullName, string userEmail) =>
-$@"Здравствуйте!
+$@"Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ!
 
-Поступила новая регистрация и ожидает вашего решения:
+ГЏГ®Г±ГІГіГЇГЁГ«Г  Г­Г®ГўГ Гї Г°ГҐГЈГЁГ±ГІГ°Г Г¶ГЁГї ГЁ Г®Г¦ГЁГ¤Г ГҐГІ ГўГ ГёГҐГЈГ® Г°ГҐГёГҐГ­ГЁГї:
 
-Имя: {userFullName}
+Г€Г¬Гї: {userFullName}
 E-mail: {userEmail}
 
-Пожалуйста, войдите в панель администратора, чтобы одобрить или отклонить заявку.
+ГЏГ®Г¦Г Г«ГіГ©Г±ГІГ , ГўГ®Г©Г¤ГЁГІГҐ Гў ГЇГ Г­ГҐГ«Гј Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г , Г·ГІГ®ГЎГ» Г®Г¤Г®ГЎГ°ГЁГІГј ГЁГ«ГЁ Г®ГІГЄГ«Г®Г­ГЁГІГј Г§Г ГїГўГЄГі.
 
-С уважением,
-Система PayPlanner";
+Г‘ ГіГўГ Г¦ГҐГ­ГЁГҐГ¬,
+Г‘ГЁГ±ГІГҐГ¬Г  PayPlanner";
     }
 
     /// <summary>
-    /// Иммутабельные настройки SMTP, собранные из конфигурации.
+    /// Г€Г¬Г¬ГіГІГ ГЎГҐГ«ГјГ­Г»ГҐ Г­Г Г±ГІГ°Г®Г©ГЄГЁ SMTP, Г±Г®ГЎГ°Г Г­Г­Г»ГҐ ГЁГ§ ГЄГ®Г­ГґГЁГЈГіГ°Г Г¶ГЁГЁ.
     /// </summary>
     private readonly record struct SmtpSettings(
         string Host,

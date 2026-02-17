@@ -6,4 +6,12 @@ public interface IEmailService
     Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName);
     Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason);
     Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail);
+
+    Task SendEmailWithAttachmentAsync(
+        string toEmail,
+        string subject,
+        string body,
+        string attachmentFileName,
+        byte[] attachmentBytes,
+        string attachmentContentType);
 }

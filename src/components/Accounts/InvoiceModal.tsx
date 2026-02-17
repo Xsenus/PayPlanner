@@ -140,14 +140,6 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 export function InvoiceModal({
   open,
@@ -574,9 +566,8 @@ export function InvoiceModal({
     return `${window.location.origin}/invoices${invoiceId}`;
   }, [invoice?.id]);
 
-  const downloadInvoiceFile = (filename: string, content: BlobPart, mimeType: string) => {
+  const downloadBlob = (filename: string, blob: Blob) => {
     if (typeof window === 'undefined') return;
-    const blob = new Blob([content], { type: mimeType });
     const href = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = href;
@@ -585,74 +576,28 @@ export function InvoiceModal({
     URL.revokeObjectURL(href);
   };
 
-  const buildInvoiceHtmlDocument = () => {
-    const safeNumber = escapeHtml(form.number || '—');
-    const safeDate = escapeHtml(formatDate(form.date) || '—');
-    const safeCounterparty = escapeHtml(form.counterpartyName || '—');
-    const safeClient = escapeHtml(selectedClient?.name || '—');
-    const safeAmount = escapeHtml(printableAmount);
-
-    const rows = lineItems
-      .map((item, index) => {
-        const qty = parseMoney(item.quantity);
-        const price = parseMoney(item.price);
-        const rowTotal = qty * price;
-        return `<tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(item.name || '—')}</td>
-          <td class="num">${qty.toFixed(2)}</td>
-          <td class="num">${escapeHtml(item.unit || 'шт')}</td>
-          <td class="num">${price.toFixed(2)}</td>
-          <td class="num">${rowTotal.toFixed(2)}</td>
-        </tr>`;
-      })
-      .join('');
-
-    return `<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Счёт № ${safeNumber}</title>
-    <style>
-      body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
-      h1 { font-size: 20px; margin-bottom: 8px; }
-      .meta { margin-bottom: 16px; line-height: 1.5; }
-      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-      th, td { border: 1px solid #1f2937; padding: 6px 8px; font-size: 12px; }
-      th { text-align: left; }
-      .num { text-align: right; }
-      .total { margin-top: 12px; font-weight: 700; }
-    </style>
-  </head>
-  <body>
-    <h1>Счёт № ${safeNumber} от ${safeDate}</h1>
-    <div class="meta">
-      <div><b>От кого:</b> ${safeCounterparty}</div>
-      <div><b>Кому:</b> ${safeClient}</div>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>№</th>
-          <th>Товары (работы, услуги)</th>
-          <th class="num">Кол-во</th>
-          <th class="num">Ед.</th>
-          <th class="num">Цена</th>
-          <th class="num">Сумма</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="total">Итого: ${safeAmount}</div>
-  </body>
-</html>`;
+  const printBlob = (blob: Blob) => {
+    if (typeof window === 'undefined') return;
+    const href = URL.createObjectURL(blob);
+    const printWindow = window.open(href, '_blank', 'noopener,noreferrer,width=1024,height=768');
+    if (!printWindow) {
+      URL.revokeObjectURL(href);
+      throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
+    }
+    const cleanup = () => URL.revokeObjectURL(href);
+    printWindow.addEventListener('load', () => {
+      printWindow.focus();
+      printWindow.print();
+      cleanup();
+    });
   };
+
 
   const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
-      send: { title: 'Отправить счёт', message: 'Сформировать документ счёта и открыть email-клиент?', confirmLabel: 'Отправить' },
-      print: { title: 'Печать счёта', message: 'Сформировать документ и открыть системное окно печати?', confirmLabel: 'Печать' },
-      download: { title: 'Скачать счёт', message: 'Скачать документ счёта в формате HTML?', confirmLabel: 'Скачать' },
+      send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
+      print: { title: 'Печать счёта', message: 'Сформировать документ WORD и отправить его на печать?', confirmLabel: 'Печать' },
+      download: { title: 'Скачать счёт', message: 'Скачать документ счёта в формате WORD?', confirmLabel: 'Скачать' },
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
       cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
@@ -670,36 +615,29 @@ export function InvoiceModal({
 
     try {
       if (action === 'send') {
-        const html = buildInvoiceHtmlDocument();
-        const subject = encodeURIComponent(`Счёт №${form.number || 'без номера'} от ${formatDate(form.date) || ''}`);
-        const body = encodeURIComponent('Документ счёта сформирован и автоматически скачан. Прикрепите файл из загрузок к письму.');
-        downloadInvoiceFile(`invoice-${form.number || 'export'}.html`, html, 'text/html;charset=utf-8');
-        if (typeof window !== 'undefined') {
-          window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        if (!invoice?.id) {
+          throw new Error('Сначала сохраните счёт, затем можно отправить документ.');
         }
-        await alert({ title: 'Документ подготовлен', description: 'HTML документ скачан. Открылся email-клиент для отправки.', confirmLabel: 'ОК', variant: 'success' });
+        await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
+        await alert({ title: 'Счёт отправлен', description: selectedClient?.email ? `Документ WORD отправлен на ${selectedClient.email}.` : 'Документ WORD отправлен клиенту по email.', confirmLabel: 'ОК', variant: 'success' });
         return;
       }
 
       if (action === 'print') {
-        if (typeof window !== 'undefined') {
-          const html = buildInvoiceHtmlDocument();
-          const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768');
-          if (!printWindow) {
-            throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
-          }
-          printWindow.document.open();
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.focus();
-          printWindow.print();
+        if (!invoice?.id) {
+          throw new Error('Сначала сохраните счёт, затем можно печатать документ.');
         }
+        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
+        printBlob(blob);
         return;
       }
 
       if (action === 'download') {
-        const html = buildInvoiceHtmlDocument();
-        downloadInvoiceFile(`invoice-${form.number || 'export'}.html`, html, 'text/html;charset=utf-8');
+        if (!invoice?.id) {
+          throw new Error('Сначала сохраните счёт, затем можно скачать документ.');
+        }
+        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
+        downloadBlob(`invoice-${form.number || 'export'}.doc`, blob);
         return;
       }
 
@@ -740,6 +678,13 @@ export function InvoiceModal({
   const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
   const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
   const printableAmount = formatCurrencySmart(amountValue).full;
+  const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
+    Pending: { label: 'Создан', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+    Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
+  };
+  const currentStatusMeta = statusMeta[form.status] ?? statusMeta.Pending;
   if (!open) return null;
 
   const isPageMode = presentation === 'page';
@@ -774,15 +719,18 @@ export function InvoiceModal({
           </div>
         </div>
         {isPageMode && mode === 'edit' && (
-          <button
-            type="button"
-            onClick={() => setPageViewMode((prev) => !prev)}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
-            aria-label={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
-            title={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+            <button
+              type="button"
+              onClick={() => setPageViewMode((prev) => !prev)}
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+              aria-label={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
+              title={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          </div>
         )}
         {!isPageMode && (
           <button
@@ -855,7 +803,7 @@ export function InvoiceModal({
               <div className="rounded-lg border border-slate-300 bg-white p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xl font-semibold">{printableAmount}</span>
-                  <span className="rounded bg-blue-600 px-3 py-1 text-sm font-semibold text-white">{form.status === 'Completed' ? 'Оплачен' : form.status === 'Cancelled' ? 'Отменен' : 'Создан'}</span>
+                  <span className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
                 </div>
               </div>
 
