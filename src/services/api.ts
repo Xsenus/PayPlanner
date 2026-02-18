@@ -43,6 +43,30 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface LegacyAddressMigrationDetail {
+  legalEntityId: number;
+  legalEntityName: string;
+  legacyAddress?: string | null;
+  normalizedAddress?: string | null;
+  action: 'Added' | 'Updated' | 'DuplicateSkipped' | 'SkippedEmpty' | 'Failed' | string;
+  addressRecordId?: number | null;
+  dadataMatched?: boolean | null;
+  message?: string | null;
+}
+
+export interface LegacyAddressMigrationResult {
+  scanned: number;
+  added: number;
+  updated: number;
+  duplicateSkipped: number;
+  emptySkipped: number;
+  failed: number;
+  dadataMatched: number;
+  dadataNotMatched: number;
+  validateWithDadata: boolean;
+  details: LegacyAddressMigrationDetail[];
+}
+
 type SortDir = 'asc' | 'desc';
 type ActsSortKey =
   | 'date'
@@ -501,6 +525,14 @@ export class ApiService {
     return this.request<LegalEntitySuggestion[]>(`/legal-entities/suggest`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    });
+  }
+
+
+  async migrateLegacyLegalEntityAddresses(validateWithDadata = true) {
+    return this.request<LegacyAddressMigrationResult>('/legal-entities/migrate-legacy-addresses', {
+      method: 'POST',
+      body: JSON.stringify({ validateWithDadata }),
     });
   }
 

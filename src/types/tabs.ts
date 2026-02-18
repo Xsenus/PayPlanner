@@ -25,4 +25,5 @@ export type Tab =
   | 'users'
   | 'roles'
   | 'userActivity'
-  | 'dictionaries';
+  | 'dictionaries'
+  | 'settings';

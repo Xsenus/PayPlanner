@@ -21,6 +21,7 @@ import { Dictionaries } from './components/Dictionaries/Dictionaries';
 import { Payments } from './components/Payments/Payments';
 import { MoneyOperations } from './components/Money/MoneyOperations';
 import { CompanyProfile } from './components/CompanyProfile/CompanyProfile';
+import { AppSettings } from './components/Settings/AppSettings';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
@@ -66,6 +67,7 @@ function AppContent() {
     roles: 'Роли',
     dictionaries: 'Справочники',
     userActivity: 'Пользовательский контроль',
+    settings: 'Настройки',
   }), []);
 
   const [activeTab, setActiveTab] = useState<Tab>(() => {
@@ -150,6 +152,7 @@ function AppContent() {
         { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
         { tab: 'contractDetail' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
+        { tab: 'settings' as Tab, allowed: isAdminRole },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
@@ -200,6 +203,7 @@ function AppContent() {
         case 'users':
         case 'roles':
         case 'userActivity':
+        case 'settings':
           return isAdminRole;
         default:
           return true;
@@ -495,6 +499,8 @@ function AppContent() {
         return permissions.dictionaries.canView
           ? <Dictionaries />
           : renderNoAccess('Справочники недоступны для вашей роли.');
+      case 'settings':
+        return isAdminRole ? <AppSettings /> : renderNoAccess('Нужны права администратора.');
       default:
         return permissions.calendar.canView
           ? <Calendar onOpenClient={handleOpenClient} />
