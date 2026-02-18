@@ -459,6 +459,22 @@ export class ApiService {
     });
   }
 
+
+  async cleanAddress(address: string) {
+    return this.request<CleanedAddress>(`/clients/dadata/clean-address`, {
+      method: 'POST',
+      body: JSON.stringify({ address }),
+    });
+  }
+
+
+  async suggestClientAddresses(query: string, limit = 7) {
+    return this.request<DadataAddressSuggestion[]>(`/clients/dadata/suggest-address`, {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    });
+  }
+
   // Доп: V1/V2 клиенты (на будущее, не ломает текущее)
   async getClientsV1(params?: {
     search?: string;
@@ -927,6 +943,8 @@ import type {
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  CleanedAddress,
+  DadataAddressSuggestion,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';

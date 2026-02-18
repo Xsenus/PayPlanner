@@ -76,6 +76,7 @@ export interface Client {
   company: string;
   address: string;
   notes: string;
+  profileJson?: string | null;
   createdAt: string;
   isActive: boolean;
   legalEntityId?: number | null;
@@ -93,9 +94,35 @@ export interface ClientInput {
   company: string;
   address: string;
   notes: string;
+  profileJson?: string | null;
   isActive: boolean;
   legalEntityId?: number | null;
   clientStatusId?: number | null;
+}
+
+export interface DadataAddressSuggestion {
+  value: string;
+  unrestrictedValue?: string | null;
+  postalCode?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
+}
+
+export interface CleanedAddress {
+  result: string;
+  postalCode?: string | null;
+  country?: string | null;
+  regionWithType?: string | null;
+  cityWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  flat?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
 }
 
 export interface ClientCase {

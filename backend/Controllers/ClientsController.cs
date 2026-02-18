@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -12,7 +13,13 @@ namespace PayPlanner.Api.Controllers;
 public class ClientsController : ControllerBase
 {
     private readonly PaymentContext _db;
-    public ClientsController(PaymentContext db) => _db = db;
+    private readonly ILegalEntityEnrichmentService _enrichment;
+
+    public ClientsController(PaymentContext db, ILegalEntityEnrichmentService enrichment)
+    {
+        _db = db;
+        _enrichment = enrichment;
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
@@ -86,6 +93,51 @@ public class ClientsController : ControllerBase
         return Ok(stats);
     }
 
+
+    [HttpPost("dadata/clean-address")]
+    public async Task<IActionResult> CleanAddress([FromBody] CleanAddressRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Address)) return BadRequest("Укажите Address");
+
+        var result = await _enrichment.CleanAddressAsync(request.Address, ct);
+        if (result is null) return NotFound();
+
+        return Ok(new
+        {
+            result = result.Result,
+            postalCode = result.PostalCode,
+            country = result.Country,
+            regionWithType = result.RegionWithType,
+            cityWithType = result.CityWithType,
+            streetWithType = result.StreetWithType,
+            house = result.House,
+            flat = result.Flat,
+            fiasId = result.FiasId,
+            kladrId = result.KladrId,
+            geoLat = result.GeoLat,
+            geoLon = result.GeoLon,
+        });
+    }
+
+    [HttpPost("dadata/suggest-address")]
+    public async Task<IActionResult> SuggestAddress([FromBody] SuggestAddressRequest request, CancellationToken ct)
+    {
+        var query = request.Query?.Trim();
+        if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<object>());
+
+        var suggestions = await _enrichment.SuggestAddressesAsync(query, request.Limit, ct);
+        return Ok(suggestions.Select(s => new
+        {
+            value = s.Value,
+            unrestrictedValue = s.UnrestrictedValue,
+            postalCode = s.PostalCode,
+            fiasId = s.FiasId,
+            kladrId = s.KladrId,
+            geoLat = s.GeoLat,
+            geoLon = s.GeoLon,
+        }));
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model)
     {
@@ -115,6 +167,7 @@ public class ClientsController : ControllerBase
             Company = model.Company,
             Address = model.Address,
             Notes = model.Notes,
+            ProfileJson = model.ProfileJson,
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
             ClientStatusId = model.ClientStatusId,
@@ -155,6 +208,7 @@ public class ClientsController : ControllerBase
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
+        e.ProfileJson = model.ProfileJson ?? e.ProfileJson;
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
         e.ClientStatusId = model.ClientStatusId;
@@ -179,3 +233,6 @@ public class ClientsController : ControllerBase
         return NoContent();
     }
 }
+
+public sealed record CleanAddressRequest(string Address);
+public sealed record SuggestAddressRequest(string Query, int Limit = 7);

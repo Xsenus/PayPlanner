@@ -3,22 +3,28 @@ namespace PayPlanner.Api.Services.LegalEntities
     public interface ILegalEntityEnrichmentService
     {
         /// <summary>
-        /// Стандартизация почтового адреса (clean/address).
+
+        Task<IReadOnlyList<DadataAddressSuggestion>> SuggestAddressesAsync(string query, int limit,
+            CancellationToken cancellationToken);
+    public sealed record DadataAddressSuggestion(string Value, string? UnrestrictedValue, string? PostalCode,
+        string? FiasId, string? KladrId, string? GeoLat, string? GeoLon);
+
+        /// Г‘ГІГ Г­Г¤Г Г°ГІГЁГ§Г Г¶ГЁГї ГЇГ®Г·ГІГ®ГўГ®ГЈГ® Г Г¤Г°ГҐГ±Г  (clean/address).
         /// </summary>
         Task<CleanedAddress?> CleanAddressAsync(string rawAddress, CancellationToken cancellationToken);
 
         /// <summary>
-        /// Стандартизация email (clean/email).
+        /// Г‘ГІГ Г­Г¤Г Г°ГІГЁГ§Г Г¶ГЁГї email (clean/email).
         /// </summary>
         Task<CleanedEmail?> CleanEmailAsync(string rawEmail, CancellationToken cancellationToken);
 
         /// <summary>
-        /// Стандартизация телефона (clean/phone).
+        /// Г‘ГІГ Г­Г¤Г Г°ГІГЁГ§Г Г¶ГЁГї ГІГҐГ«ГҐГґГ®Г­Г  (clean/phone).
         /// </summary>
         Task<CleanedPhone?> CleanPhoneAsync(string rawPhone, CancellationToken cancellationToken);
 
         /// <summary>
-        /// Ищет организацию по ИНН или ОГРН (опционально филиал по КПП) и возвращает расширенные данные.
+        /// Г€Г№ГҐГІ Г®Г°ГЈГ Г­ГЁГ§Г Г¶ГЁГѕ ГЇГ® Г€ГЌГЌ ГЁГ«ГЁ ГЋГѓГђГЌ (Г®ГЇГ¶ГЁГ®Г­Г Г«ГјГ­Г® ГґГЁГ«ГЁГ Г« ГЇГ® ГЉГЏГЏ) ГЁ ГўГ®Г§ГўГ°Г Г№Г ГҐГІ Г°Г Г±ГёГЁГ°ГҐГ­Г­Г»ГҐ Г¤Г Г­Г­Г»ГҐ.
         /// </summary>
         Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken);
 

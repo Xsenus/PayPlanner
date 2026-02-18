@@ -153,6 +153,7 @@ public class ClientsV2Controller : ControllerBase
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
+        e.ProfileJson = model.ProfileJson ?? e.ProfileJson;
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
         e.ClientStatusId = model.ClientStatusId;

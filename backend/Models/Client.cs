@@ -73,6 +73,11 @@ namespace PayPlanner.Api.Models
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
+        /// Расширенный профиль клиента в формате JSON (структурированные данные карточки).
+        /// </summary>
+        public string? ProfileJson { get; set; }
+
+        /// <summary>
         /// Коллекция платежей, связанных с клиентом.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();

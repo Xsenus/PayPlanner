@@ -74,6 +74,7 @@ export function ClientModal({
         isActive: baseClient.isActive ?? true,
         legalEntityId: baseClient.legalEntityId ?? null,
         clientStatusId: baseClient.clientStatusId ?? null,
+        profileJson: baseClient.profileJson ?? null,
       };
       await onSubmit(payload);
       onClose();

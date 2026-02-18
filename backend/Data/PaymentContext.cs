@@ -282,7 +282,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Phone).HasMaxLength(50);
             entity.Property(e => e.Company).HasMaxLength(200);
             entity.Property(e => e.Address).HasMaxLength(500);
-            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.ProfileJson).HasColumnType("text");
 
             entity.HasOne(e => e.LegalEntity)
                   .WithMany(le => le.Clients)
