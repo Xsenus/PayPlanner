@@ -694,7 +694,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
-  const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'documents' | 'poa'>('main');
+  const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
@@ -2206,12 +2206,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
         {activeSection === 'profile' ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Карточка клиента</h2>
                 <p className="text-sm text-gray-500">
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
+              </div>
+              <div className="w-full max-w-sm">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
+                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
+                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                  {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
+                </select>
+                {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
               </div>
             </div>
             {!clientPermissions.canEdit && (
@@ -2267,7 +2275,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                   </div>
 
-                  <div className="md:col-span-2 grid gap-3 md:grid-cols-3">
+                  <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">ИНН</label>
                       <input type="text" name="inn" value={clientFormState.inn} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
@@ -2280,9 +2288,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <label className="block text-sm font-medium text-gray-700 mb-2">Дата рождения</label>
                       <input type="date" name="birthDate" value={clientFormState.birthDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
                     </div>
-                  </div>
-
-                  <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Семейное положение</label>
                       <select name="maritalStatus" value={clientFormState.maritalStatus} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
@@ -2290,25 +2295,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         {MARITAL_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
-                      <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                        <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                        {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
-                      </select>
-                    </div>
                   </div>
 
                   <div className="md:col-span-2">
                     <div className="mb-3 flex flex-wrap gap-2">
                       {[
+                        { id: 'main', label: 'Контакты' },
                         { id: 'passports', label: 'Паспорта' },
                         { id: 'addresses', label: 'Адреса' },
                         { id: 'education', label: 'Образование (ОКСО)' },
                         { id: 'professions', label: 'Профессии (ОКПДТР)' },
                         { id: 'workplaces', label: 'Работа и должности' },
                         { id: 'relatives', label: 'Родственники' },
-                        { id: 'documents', label: 'Документы' },
+                        { id: 'birthCertificates', label: 'Свидетельства о рождении' },
+                        { id: 'militaryIds', label: 'Военные билеты' },
                         { id: 'poa', label: 'Доверенности' },
                       ].map((tab) => (
                         <button
@@ -2335,46 +2335,24 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </div>
               )}
 
-              {clientFormState.kind === 'legal' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
-                  <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                    <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                    {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
-                  </select>
-                  {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
-                </div>
-              )}
-
               {clientFormState.kind === 'individual' && activeProfileGroup === 'passports' && (
-                <div className="md:col-span-2 space-y-3">
+                <div className="md:col-span-2 space-y-4">
                   {clientFormState.passportEntries.map((passport, index) => (
-                    <div key={`passport-entry-${index}`} className="rounded-xl border border-gray-200 p-4">
+                    <div key={`passport-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-800">Паспорт #{index + 1}</h3>
+                        <h3 className="text-sm font-semibold text-slate-800">Паспорт #{index + 1}</h3>
                         <button type="button" onClick={() => removePassportEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        <input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} placeholder="Серия паспорта" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={passport.number} onChange={(e) => updatePassportEntry(index, 'number', e.target.value)} placeholder="Номер паспорта" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-gray-500">Дата выдачи</span>
-                          <input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                        </div>
-                        <input value={passport.departmentCode} onChange={(e) => updatePassportEntry(index, 'departmentCode', e.target.value)} placeholder="Код подразделения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-gray-500">Срок действия: с</span>
-                          <input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                        </div>
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-gray-500">Срок действия: по</span>
-                          <input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                        </div>
-                        <input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} placeholder="Место рождения (как в паспорте)" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={passport.birthPlaceFias} onChange={(e) => updatePassportEntry(index, 'birthPlaceFias', e.target.value)} placeholder="Место рождения (ФИАС)" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      </div>
-                      <div className="mt-3">
-                        <input value={passport.issuedBy} onChange={(e) => updatePassportEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан паспорт" disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Серия</span><input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Номер</span><input value={passport.number} onChange={(e) => updatePassportEntry(index, 'number', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Дата выдачи</span><input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Код подразделения</span><input value={passport.departmentCode} onChange={(e) => updatePassportEntry(index, 'departmentCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Кем выдан</span><input value={passport.issuedBy} onChange={(e) => updatePassportEntry(index, 'issuedBy', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (как в паспорте)</span><input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (ФИАС)</span><input value={passport.birthPlaceFias} onChange={(e) => updatePassportEntry(index, 'birthPlaceFias', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
                       </div>
                     </div>
                   ))}
@@ -2383,58 +2361,25 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'addresses' && (
-                <div className="md:col-span-2 space-y-3">
+                <div className="md:col-span-2 space-y-4">
                   {clientFormState.addressEntries.map((entry, index) => (
-                    <div key={`address-entry-${index}`} className="rounded-xl border border-gray-200 p-4">
+                    <div key={`address-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-800">Адрес #{index + 1}</h3>
+                        <h3 className="text-sm font-semibold text-slate-800">Адрес #{index + 1}</h3>
                         <button type="button" onClick={() => removeAddressEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <label className="text-sm text-gray-700">
-                          <span className="mb-1 block">Основной тип</span>
-                          <select value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                            {ADDRESS_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                          </select>
-                        </label>
-                        <div>
-                          <span className="mb-1 block text-sm text-gray-700">Дополнительно относится к</span>
-                          <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 p-2">
-                            {ADDRESS_TYPE_OPTIONS.map((option) => (
-                              <label key={option.value} className="inline-flex items-center gap-1 text-xs text-gray-700">
-                                <input type="checkbox" checked={entry.additionalTypes.includes(option.value)} onChange={() => toggleAddressAdditionalType(index, option.value)} disabled={!clientPermissions.canEdit} />
-                                {option.label}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <input value={entry.sourceQuery} onChange={(e) => updateAddressEntry(index, 'sourceQuery', e.target.value)} placeholder="Строка ввода для поиска" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} placeholder="Полный адрес" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-gray-500">Действует с</span>
-                          <input type="date" value={entry.validFrom} onChange={(e) => updateAddressEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                        </div>
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-gray-500">Действует по</span>
-                          <input type="date" value={entry.validTo} onChange={(e) => updateAddressEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                        </div>
-                        <input value={entry.postalCode} onChange={(e) => updateAddressEntry(index, 'postalCode', e.target.value)} placeholder="Индекс" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={entry.fiasId} onChange={(e) => updateAddressEntry(index, 'fiasId', e.target.value)} placeholder="FIAS ID" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={entry.kladrId} onChange={(e) => updateAddressEntry(index, 'kladrId', e.target.value)} placeholder="КЛАДР" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <div className="flex gap-3">
-                          <button type="button" onClick={() => suggestAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-indigo-600">Подсказать через DaData</button>
-                          <button type="button" onClick={() => cleanAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">Стандартизовать</button>
-                        </div>
-                        {(addressSuggestionsByIndex[index]?.length ?? 0) > 0 && (
-                          <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 p-3">
-                            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p>
-                            <div className="flex flex-wrap gap-2">
-                              {addressSuggestionsByIndex[index].map((item) => (
-                                <button key={item} type="button" onClick={() => updateAddressEntry(index, 'fullAddress', item)} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">{item}</button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Основной тип</span><select value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2">{ADDRESS_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                        <div className="xl:col-span-2"><span className="mb-1 block text-sm text-slate-700">Дополнительно относится к</span><div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-2">{ADDRESS_TYPE_OPTIONS.map((option) => (<label key={option.value} className="inline-flex items-center gap-1 text-xs text-gray-700"><input type="checkbox" checked={entry.additionalTypes.includes(option.value)} onChange={() => toggleAddressAdditionalType(index, option.value)} disabled={!clientPermissions.canEdit} />{option.label}</label>))}</div></div>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Поисковая строка</span><input value={entry.sourceQuery} onChange={(e) => updateAddressEntry(index, 'sourceQuery', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Полный адрес</span><input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={entry.validFrom} onChange={(e) => updateAddressEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={entry.validTo} onChange={(e) => updateAddressEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Индекс</span><input value={entry.postalCode} onChange={(e) => updateAddressEntry(index, 'postalCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">FIAS ID</span><input value={entry.fiasId} onChange={(e) => updateAddressEntry(index, 'fiasId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">КЛАДР</span><input value={entry.kladrId} onChange={(e) => updateAddressEntry(index, 'kladrId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <div className="xl:col-span-2 flex items-end gap-3"><button type="button" onClick={() => suggestAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-indigo-600">Подсказать через DaData</button><button type="button" onClick={() => cleanAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">Стандартизовать</button></div>
+                        {(addressSuggestionsByIndex[index]?.length ?? 0) > 0 && (<div className="xl:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50 p-3"><p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p><div className="flex flex-wrap gap-2">{addressSuggestionsByIndex[index].map((item) => (<button key={item} type="button" onClick={() => updateAddressEntry(index, 'fullAddress', item)} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">{item}</button>))}</div></div>)}
                       </div>
                     </div>
                   ))}
@@ -2442,28 +2387,32 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </div>
               )}
 
-              {clientFormState.kind === 'individual' && activeProfileGroup === 'main' && (['phones', 'emails'] as const).map((field) => (
-                <div key={field} className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {field === 'phones' ? 'Телефоны' : field === 'emails' ? 'Email' : 'Адреса'}
-                  </label>
-                  <div className="space-y-2">
-                    {clientFormState[field].map((value, index) => (
-                      <div key={`${field}-${index}`} className="flex gap-2">
-                        <input
-                          type={field === 'emails' ? 'email' : 'text'}
-                          value={value}
-                          onChange={(event) => updateListField(field, index, event.target.value)}
-                          disabled={!clientPermissions.canEdit}
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                        />
-                        <button type="button" onClick={() => removeListFieldRow(field, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'main' && (
+                <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+                  {(['phones', 'emails'] as const).map((field) => (
+                    <div key={field}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {field === 'phones' ? 'Телефоны' : 'Email'}
+                      </label>
+                      <div className="space-y-2">
+                        {clientFormState[field].map((value, index) => (
+                          <div key={`${field}-${index}`} className="flex gap-2">
+                            <input
+                              type={field === 'emails' ? 'email' : 'text'}
+                              value={value}
+                              onChange={(event) => updateListField(field, index, event.target.value)}
+                              disabled={!clientPermissions.canEdit}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                            />
+                            <button type="button" onClick={() => removeListFieldRow(field, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addListFieldRow(field)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
                       </div>
-                    ))}
-                    <button type="button" onClick={() => addListFieldRow(field)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'education' && (
               <div className="md:col-span-2">
@@ -2505,11 +2454,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Места работы и должности</label>
                 <div className="space-y-2">
                   {clientFormState.workplaces.map((item, index) => (
-                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-4">
-                      <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                      <input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-12">
+                      <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      <div className="md:col-span-2"><input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                      <div className="md:col-span-2"><input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, workplaces: [...prev.workplaces, createEmptyWorkplace()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить место работы</button>
@@ -2557,7 +2506,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               </div>
               )}
 
-              {clientFormState.kind === 'individual' && activeProfileGroup === 'documents' && (
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'birthCertificates' && (
                 <div className="md:col-span-2 space-y-4">
                   <div>
                     <div className="mb-2 flex items-center justify-between">
@@ -2578,7 +2527,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'militaryIds' && (
+                <div className="md:col-span-2 space-y-4">
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <label className="block text-sm font-medium text-gray-700">Военные билеты</label>
