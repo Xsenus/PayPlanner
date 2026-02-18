@@ -441,8 +441,66 @@ const buildClientDisplayName = (
   return [profile.lastName, profile.firstName, profile.middleName].map((item) => item.trim()).filter(Boolean).join(' ') || 'Новый клиент';
 };
 
+const mapBackendAddressTypeToProfile = (type?: number): string => {
+  switch (type) {
+    case 1:
+      return 'registration';
+    case 2:
+      return 'actual';
+    case 3:
+      return 'legal';
+    default:
+      return 'other';
+  }
+};
+
+const buildAddressEntriesFromClient = (client: Client): ClientAddressItem[] => {
+  const prepared = (client.addresses ?? [])
+    .map((address) => {
+      const fullAddress = (address.unrestrictedValue ?? address.value ?? '').trim();
+      if (!fullAddress) return null;
+      return {
+        ...createEmptyAddressEntry(),
+        type: mapBackendAddressTypeToProfile(address.type),
+        sourceQuery: fullAddress,
+        fullAddress,
+        postalCode: address.postalCode ?? '',
+        fiasId: address.fiasId ?? '',
+        kladrId: address.kladrId ?? '',
+        geoLat: address.geoLat ?? '',
+        geoLon: address.geoLon ?? '',
+      };
+    })
+    .filter((item): item is ClientAddressItem => item !== null);
+
+  if (prepared.length > 0) return prepared;
+
+  if (client.address?.trim()) {
+    return [
+      {
+        ...createEmptyAddressEntry(),
+        type: 'registration',
+        sourceQuery: client.address,
+        fullAddress: client.address,
+      },
+    ];
+  }
+
+  return [createEmptyAddressEntry()];
+};
+
 const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
   const sourceNotes = client.notes ?? '';
+  const profileAddressEntries = buildAddressEntriesFromClient(client);
+  const registrationEntry =
+    profileAddressEntries.find((entry) => entry.type === 'registration')
+    ?? profileAddressEntries.find((entry) => entry.type === 'legal')
+    ?? profileAddressEntries[0]
+    ?? createEmptyAddressEntry();
+  const actualEntry =
+    profileAddressEntries.find((entry) => entry.type === 'actual')
+    ?? profileAddressEntries[1]
+    ?? registrationEntry;
   const defaultProfile: ClientExtendedProfile = {
     kind: client.legalEntityId ? 'legal' : 'individual',
     lastName: '',
@@ -465,29 +523,31 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     workplaces: [createEmptyWorkplace()],
     maritalStatus: '',
     relatives: [createEmptyRelative()],
-    registrationAddress: client.address || '',
-    registrationAddressPostalCode: '',
-    registrationAddressFiasId: '',
-    registrationAddressKladrId: '',
-    registrationAddressGeoLat: '',
-    registrationAddressGeoLon: '',
-    actualAddress: '',
-    actualAddressPostalCode: '',
-    actualAddressFiasId: '',
-    actualAddressKladrId: '',
-    actualAddressGeoLat: '',
-    actualAddressGeoLon: '',
-    actualAddressMatchesRegistration: false,
+    registrationAddress: registrationEntry.fullAddress,
+    registrationAddressPostalCode: registrationEntry.postalCode,
+    registrationAddressFiasId: registrationEntry.fiasId,
+    registrationAddressKladrId: registrationEntry.kladrId,
+    registrationAddressGeoLat: registrationEntry.geoLat,
+    registrationAddressGeoLon: registrationEntry.geoLon,
+    actualAddress: actualEntry.fullAddress,
+    actualAddressPostalCode: actualEntry.postalCode,
+    actualAddressFiasId: actualEntry.fiasId,
+    actualAddressKladrId: actualEntry.kladrId,
+    actualAddressGeoLat: actualEntry.geoLat,
+    actualAddressGeoLon: actualEntry.geoLon,
+    actualAddressMatchesRegistration:
+      Boolean(actualEntry.fullAddress)
+      && actualEntry.fullAddress === registrationEntry.fullAddress,
     phones: client.phone ? [client.phone] : [''],
     emails: client.email ? [client.email] : [''],
-    addresses: client.address ? [client.address] : [''],
+    addresses: profileAddressEntries.map((entry) => entry.fullAddress).filter(Boolean),
     passports: [''],
     birthCertificates: [''],
     militaryIds: [''],
     birthCertificateEntries: [createEmptyBirthCertificateEntry()],
     militaryIdEntries: [createEmptyMilitaryIdEntry()],
     passportEntries: [createEmptyPassportEntry()],
-    addressEntries: [createEmptyAddressEntry()],
+    addressEntries: profileAddressEntries,
     comment: '',
     legacyNotes: sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX) ? '' : sourceNotes,
   };
