@@ -73,9 +73,19 @@ namespace PayPlanner.Api.Models
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
-        /// Расширенный профиль клиента в формате JSON (структурированные данные карточки).
+        /// Нормализованные адреса клиента (регистрация, фактический и др.).
         /// </summary>
-        public string? ProfileJson { get; set; }
+        public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
+
+        /// <summary>
+        /// Паспортные реквизиты клиента (отдельная сущность).
+        /// </summary>
+        public ClientPassport? Passport { get; set; }
+
+        /// <summary>
+        /// Доверенности клиента.
+        /// </summary>
+        public ICollection<PowerOfAttorney> PowersOfAttorney { get; set; } = new List<PowerOfAttorney>();
 
         /// <summary>
         /// Коллекция платежей, связанных с клиентом.

@@ -420,6 +420,51 @@ export class ApiService {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
   }
 
+  async getClientPassport(clientId: number) {
+    return this.request<ClientPassport | null>(`/clients/${clientId}/passport`, { method: 'GET' });
+  }
+
+  async upsertClientPassport(clientId: number, payload: ClientPassportInput) {
+    return this.request<ClientPassport>(`/clients/${clientId}/passport`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getClientPowersOfAttorney(clientId: number) {
+    return this.request<PowerOfAttorney[]>(`/clients/${clientId}/powers-of-attorney`);
+  }
+
+  async createClientPowerOfAttorney(clientId: number, payload: PowerOfAttorneyInput) {
+    return this.request<PowerOfAttorney>(`/clients/${clientId}/powers-of-attorney`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateClientPowerOfAttorney(clientId: number, id: number, payload: PowerOfAttorneyInput) {
+    return this.request<PowerOfAttorney>(`/clients/${clientId}/powers-of-attorney/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteClientPowerOfAttorney(clientId: number, id: number) {
+    return this.request<void>(`/clients/${clientId}/powers-of-attorney/${id}`, { method: 'DELETE' });
+  }
+
+  async getOkinDictionary() {
+    return this.request<ClientReferenceItem[]>('/client-reference-data/okin');
+  }
+
+  async getOksoDictionary() {
+    return this.request<ClientReferenceItem[]>('/client-reference-data/okso');
+  }
+
+  async getOkpdtrDictionary() {
+    return this.request<ClientReferenceItem[]>('/client-reference-data/okpdtr');
+  }
+
   // ===== Legal entities =====
   async getLegalEntities(params?: { search?: string }) {
     const q = buildQuery({ search: params?.search });
@@ -945,6 +990,11 @@ import type {
   MoneyOperationSource,
   CleanedAddress,
   DadataAddressSuggestion,
+  ClientReferenceItem,
+  ClientPassport,
+  ClientPassportInput,
+  PowerOfAttorney,
+  PowerOfAttorneyInput,
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';
