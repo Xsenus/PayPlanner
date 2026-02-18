@@ -627,7 +627,7 @@ public class LegalEntitiesController : ControllerBase
         AddressRecord target,
         string legacyAddress,
         string normalizedAddress,
-        ILegalEntityEnrichmentService.CleanedAddress? cleaned)
+        CleanedAddress? cleaned)
     {
         var changed = false;
 
