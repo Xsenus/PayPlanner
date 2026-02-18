@@ -100,7 +100,7 @@ public class ClientsController : ControllerBase
 
 
     [HttpPost("dadata/clean-address")]
-    public async Task<IActionResult> CleanAddress([FromBody] CleanAddressRequest request, CancellationToken ct)
+    public async Task<IActionResult> CleanAddress([FromBody] ClientCleanAddressRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Address)) return BadRequest("Укажите Address");
 
@@ -141,7 +141,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost("dadata/suggest-address")]
-    public async Task<IActionResult> SuggestAddress([FromBody] SuggestAddressRequest request, CancellationToken ct)
+    public async Task<IActionResult> SuggestAddress([FromBody] ClientSuggestAddressRequest request, CancellationToken ct)
     {
         var query = request.Query?.Trim();
         if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<object>());
@@ -360,8 +360,8 @@ public class ClientsController : ControllerBase
     }
 }
 
-public sealed record CleanAddressRequest(string Address);
-public sealed record SuggestAddressRequest(string Query, int Limit = 7);
+public sealed record ClientCleanAddressRequest(string Address);
+public sealed record ClientSuggestAddressRequest(string Query, int Limit = 7);
 
 public sealed class ClientAddressProfile
 {
