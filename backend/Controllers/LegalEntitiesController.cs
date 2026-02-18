@@ -667,7 +667,6 @@ public class LegalEntitiesController : ControllerBase
         setter(normalizedIncoming);
         return true;
     }
-    }
 }
 
 public sealed record LegacyAddressMigrationRequest(bool ValidateWithDadata = true);
