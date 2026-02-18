@@ -2214,36 +2214,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </p>
               </div>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-slate-50 p-4 sm:p-5 mb-6">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Тип клиента</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">
-                    {profilePreview?.kind === 'legal' ? 'Юридическое лицо' : 'Физическое лицо'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">ФИО / Наименование</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{clientData?.name ?? '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Дата рождения</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.birthDate || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">ИНН</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.inn || clientData?.legalEntity?.inn || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">СНИЛС</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.snils || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Юр. лицо</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{clientData?.legalEntity?.shortName ?? '—'}</p>
-                </div>
-              </div>
-            </div>
             {!clientPermissions.canEdit && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 Недостаточно прав для редактирования клиента. Доступен только просмотр.
