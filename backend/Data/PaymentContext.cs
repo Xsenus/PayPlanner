@@ -277,18 +277,22 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ClientPassport>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Series).HasMaxLength(10);
+            entity.Property(e => e.Series).HasMaxLength(20);
             entity.Property(e => e.Number).HasMaxLength(20);
             entity.Property(e => e.IssuedBy).HasMaxLength(500);
             entity.Property(e => e.DepartmentCode).HasMaxLength(20);
+            entity.Property(e => e.BirthPlacePassport).HasMaxLength(500);
+            entity.Property(e => e.BirthPlaceFias).HasMaxLength(120);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.Client)
-                  .WithOne(c => c.Passport)
-                  .HasForeignKey<ClientPassport>(e => e.ClientId)
+                  .WithMany(c => c.Passports)
+                  .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasIndex(e => e.ClientId).IsUnique().HasDatabaseName("IX_ClientPassports_ClientId");
+            entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_ClientPassports_ClientId");
+            entity.HasIndex(e => new { e.ClientId, e.IsPrimary }).HasDatabaseName("IX_ClientPassports_ClientId_IsPrimary");
+            entity.HasIndex(e => new { e.ClientId, e.Series, e.Number }).HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
         });
 
         // ------------------ PowerOfAttorney ------------------

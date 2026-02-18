@@ -24,7 +24,14 @@ public class ClientPassportController : ControllerBase
         var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
         if (!exists) return NotFound();
 
-        var passport = await _db.ClientPassports.AsNoTracking().FirstOrDefaultAsync(x => x.ClientId == clientId, ct);
+        var passport = await _db.ClientPassports
+            .AsNoTracking()
+            .Where(x => x.ClientId == clientId)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenByDescending(x => x.UpdatedAt)
+            .ThenByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
         return passport is null ? NoContent() : Ok(passport);
     }
 
@@ -34,10 +41,15 @@ public class ClientPassportController : ControllerBase
         var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
         if (!exists) return NotFound();
 
-        var entity = await _db.ClientPassports.FirstOrDefaultAsync(x => x.ClientId == clientId, ct);
+        var entity = await _db.ClientPassports
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenByDescending(x => x.UpdatedAt)
+            .ThenByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(x => x.ClientId == clientId, ct);
+
         if (entity is null)
         {
-            entity = new ClientPassport { ClientId = clientId };
+            entity = new ClientPassport { ClientId = clientId, IsPrimary = true };
             _db.ClientPassports.Add(entity);
         }
 
@@ -46,6 +58,11 @@ public class ClientPassportController : ControllerBase
         entity.IssuedBy = Normalize(model.IssuedBy);
         entity.IssuedAt = model.IssuedAt;
         entity.DepartmentCode = Normalize(model.DepartmentCode);
+        entity.BirthPlacePassport = Normalize(model.BirthPlacePassport);
+        entity.BirthPlaceFias = Normalize(model.BirthPlaceFias);
+        entity.ValidFrom = model.ValidFrom;
+        entity.ValidTo = model.ValidTo;
+        entity.IsPrimary = true;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);

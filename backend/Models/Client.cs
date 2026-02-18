@@ -78,9 +78,9 @@ namespace PayPlanner.Api.Models
         public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
 
         /// <summary>
-        /// Паспортные реквизиты клиента (отдельная сущность).
+        /// Паспортные реквизиты клиента (нормализованная коллекция документов).
         /// </summary>
-        public ClientPassport? Passport { get; set; }
+        public ICollection<ClientPassport> Passports { get; set; } = new List<ClientPassport>();
 
         /// <summary>
         /// Доверенности клиента.
