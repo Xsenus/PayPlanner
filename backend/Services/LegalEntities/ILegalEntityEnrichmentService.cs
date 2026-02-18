@@ -25,16 +25,16 @@ public interface ILegalEntityEnrichmentService
     Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit, CancellationToken cancellationToken);
-}
 
-public sealed record DadataAddressSuggestion(
-    string Value,
-    string? UnrestrictedValue,
-    string? PostalCode,
-    string? FiasId,
-    string? KladrId,
-    string? GeoLat,
-    string? GeoLon);
+    public sealed record DadataAddressSuggestion(
+        string Value,
+        string? UnrestrictedValue,
+        string? PostalCode,
+        string? FiasId,
+        string? KladrId,
+        string? GeoLat,
+        string? GeoLon);
+}
 
 public sealed record LegalEntitySuggestion(
     string ShortName,

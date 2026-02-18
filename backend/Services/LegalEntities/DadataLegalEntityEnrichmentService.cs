@@ -221,13 +221,13 @@ namespace PayPlanner.Api.Services.LegalEntities
         }
 
 
-        public async Task<IReadOnlyList<DadataAddressSuggestion>> SuggestAddressesAsync(
+        public async Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(
             string query, int limit, CancellationToken ct)
         {
             var token = _opt.ApiKey;
             var payloadQuery = query?.Trim();
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(payloadQuery))
-                return Array.Empty<DadataAddressSuggestion>();
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
 
             var effectiveLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
             var url = Combine(_opt.BaseUrl, "suggest/address");
@@ -245,16 +245,16 @@ namespace PayPlanner.Api.Services.LegalEntities
                 {
                     _logger.LogWarning("DaData address suggest failed: {Code} {Reason}",
                         (int)resp.StatusCode, resp.ReasonPhrase);
-                    return Array.Empty<DadataAddressSuggestion>();
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
                 }
 
                 await using var stream = await resp.Content.ReadAsStreamAsync(ct);
                 var result = await JsonSerializer.DeserializeAsync<AddressSuggestResponse>(stream, JsonOptions, ct);
                 if (result?.Suggestions == null || result.Suggestions.Count == 0)
-                    return Array.Empty<DadataAddressSuggestion>();
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
 
                 return result.Suggestions
-                    .Select(s => new DadataAddressSuggestion(
+                    .Select(s => new ILegalEntityEnrichmentService.DadataAddressSuggestion(
                         s.Value ?? string.Empty,
                         s.UnrestrictedValue,
                         s.Data?.PostalCode,
@@ -269,7 +269,7 @@ namespace PayPlanner.Api.Services.LegalEntities
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DaData address suggest error");
-                return Array.Empty<DadataAddressSuggestion>();
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
             }
         }
 
