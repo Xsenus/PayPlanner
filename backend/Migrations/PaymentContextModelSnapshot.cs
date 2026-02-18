@@ -332,6 +332,14 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("BirthPlaceFias")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BirthPlacePassport")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("ClientId")
                         .HasColumnType("INTEGER");
 
@@ -343,6 +351,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("DepartmentCode")
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("IssuedAt")
                         .HasColumnType("TEXT");
@@ -356,17 +367,28 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Series")
-                        .HasMaxLength(10)
+                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("ValidFrom")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ValidTo")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId")
-                        .IsUnique()
                         .HasDatabaseName("IX_ClientPassports_ClientId");
+
+                    b.HasIndex("ClientId", "IsPrimary")
+                        .HasDatabaseName("IX_ClientPassports_ClientId_IsPrimary");
+
+                    b.HasIndex("ClientId", "Series", "Number")
+                        .HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
 
                     b.ToTable("ClientPassports");
                 });
@@ -1617,8 +1639,8 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.ClientPassport", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
-                        .WithOne("Passport")
-                        .HasForeignKey("PayPlanner.Api.Models.ClientPassport", "ClientId")
+                        .WithMany("Passports")
+                        .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1798,7 +1820,7 @@ namespace PayPlanner.Api.Migrations
 
                     b.Navigation("ClientContracts");
 
-                    b.Navigation("Passport");
+                    b.Navigation("Passports");
 
                     b.Navigation("Payments");
 

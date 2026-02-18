@@ -264,12 +264,61 @@ interface ClientProfessionItem {
 interface ClientWorkplaceItem {
   organizationName: string;
   position: string;
+  startDate: string;
+  endDate: string;
 }
 
 interface ClientRelativeItem {
   relation: string;
   fullName: string;
   birthYear: string;
+}
+
+interface ClientBirthCertificateItem {
+  series: string;
+  number: string;
+  issueDate: string;
+  issuedBy: string;
+  actRecordNumber: string;
+  childFullName: string;
+}
+
+interface ClientMilitaryIdItem {
+  series: string;
+  number: string;
+  issueDate: string;
+  issuedBy: string;
+  category: string;
+  rank: string;
+  vusCode: string;
+  fitnessCategory: string;
+  militaryCommissariat: string;
+}
+
+interface ClientPassportItem {
+  series: string;
+  number: string;
+  issuedBy: string;
+  issueDate: string;
+  departmentCode: string;
+  birthPlacePassport: string;
+  birthPlaceFias: string;
+  validFrom: string;
+  validTo: string;
+}
+
+interface ClientAddressItem {
+  type: string;
+  additionalTypes: string[];
+  sourceQuery: string;
+  fullAddress: string;
+  postalCode: string;
+  fiasId: string;
+  kladrId: string;
+  geoLat: string;
+  geoLon: string;
+  validFrom: string;
+  validTo: string;
 }
 
 interface ClientExtendedProfile {
@@ -313,6 +362,10 @@ interface ClientExtendedProfile {
   passports: string[];
   birthCertificates: string[];
   militaryIds: string[];
+  birthCertificateEntries: ClientBirthCertificateItem[];
+  militaryIdEntries: ClientMilitaryIdItem[];
+  passportEntries: ClientPassportItem[];
+  addressEntries: ClientAddressItem[];
   comment: string;
   legacyNotes: string;
 }
@@ -321,8 +374,34 @@ const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
 const createEmptyEducation = (): ClientEducationItem => ({ institution: '', specialty: '', diplomaNumber: '', oksoCode: '' });
 const createEmptyProfession = (): ClientProfessionItem => ({ profession: '', okpdtrCode: '' });
-const createEmptyWorkplace = (): ClientWorkplaceItem => ({ organizationName: '', position: '' });
+const createEmptyWorkplace = (): ClientWorkplaceItem => ({ organizationName: '', position: '', startDate: '', endDate: '' });
 const createEmptyRelative = (): ClientRelativeItem => ({ relation: '', fullName: '', birthYear: '' });
+const createEmptyBirthCertificateEntry = (): ClientBirthCertificateItem => ({ series: '', number: '', issueDate: '', issuedBy: '', actRecordNumber: '', childFullName: '' });
+const createEmptyMilitaryIdEntry = (): ClientMilitaryIdItem => ({ series: '', number: '', issueDate: '', issuedBy: '', category: '', rank: '', vusCode: '', fitnessCategory: '', militaryCommissariat: '' });
+const createEmptyPassportEntry = (): ClientPassportItem => ({
+  series: '',
+  number: '',
+  issuedBy: '',
+  issueDate: '',
+  departmentCode: '',
+  birthPlacePassport: '',
+  birthPlaceFias: '',
+  validFrom: '',
+  validTo: '',
+});
+const createEmptyAddressEntry = (): ClientAddressItem => ({
+  type: 'registration',
+  additionalTypes: [],
+  sourceQuery: '',
+  fullAddress: '',
+  postalCode: '',
+  fiasId: '',
+  kladrId: '',
+  geoLat: '',
+  geoLon: '',
+  validFrom: '',
+  validTo: '',
+});
 
 const CITIZENSHIP_OPTIONS: Array<{ value: Exclude<ClientCitizenship, ''>; label: string }> = [
   { value: 'rf', label: 'Гражданин РФ' },
@@ -331,6 +410,17 @@ const CITIZENSHIP_OPTIONS: Array<{ value: Exclude<ClientCitizenship, ''>; label:
   { value: 'stateless', label: 'Лицо без гражданства' },
   { value: 'other', label: 'Иное' },
 ];
+
+const ADDRESS_TYPE_OPTIONS = [
+  { value: 'registration', label: 'Адрес регистрации' },
+  { value: 'actual', label: 'Фактический адрес' },
+  { value: 'legal', label: 'Юридический адрес' },
+  { value: 'temporary', label: 'Временная регистрация' },
+  { value: 'mailing', label: 'Почтовый адрес' },
+  { value: 'other', label: 'Иной адрес' },
+] as const;
+
+const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
 
 const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; label: string }> = [
   { value: 'never_married', label: 'Никогда не состоял(а) в браке' },
@@ -408,6 +498,10 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     passports: [''],
     birthCertificates: [''],
     militaryIds: [''],
+    birthCertificateEntries: [createEmptyBirthCertificateEntry()],
+    militaryIdEntries: [createEmptyMilitaryIdEntry()],
+    passportEntries: [createEmptyPassportEntry()],
+    addressEntries: [createEmptyAddressEntry()],
     comment: '',
     legacyNotes: sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX) ? '' : sourceNotes,
   };
@@ -453,6 +547,44 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
       passports: normalizeList(parsed.passports ?? defaultProfile.passports),
       birthCertificates: normalizeList(parsed.birthCertificates ?? defaultProfile.birthCertificates),
       militaryIds: normalizeList(parsed.militaryIds ?? defaultProfile.militaryIds),
+      birthCertificateEntries: (parsed.birthCertificateEntries ?? defaultProfile.birthCertificateEntries).map((item) => ({ ...createEmptyBirthCertificateEntry(), ...item })),
+      militaryIdEntries: (parsed.militaryIdEntries ?? defaultProfile.militaryIdEntries).map((item) => ({ ...createEmptyMilitaryIdEntry(), ...item })),
+      passportEntries: (parsed.passportEntries ?? [
+        {
+          ...createEmptyPassportEntry(),
+          series: parsed.passportSeries ?? defaultProfile.passportSeries,
+          number: parsed.passportNumber ?? defaultProfile.passportNumber,
+          issuedBy: parsed.passportIssuedBy ?? defaultProfile.passportIssuedBy,
+          issueDate: parsed.passportIssueDate ?? defaultProfile.passportIssueDate,
+          departmentCode: parsed.passportDepartmentCode ?? defaultProfile.passportDepartmentCode,
+          birthPlacePassport: parsed.birthPlacePassport ?? defaultProfile.birthPlacePassport,
+          birthPlaceFias: parsed.birthPlaceFias ?? defaultProfile.birthPlaceFias,
+        },
+      ]).map((item) => ({ ...createEmptyPassportEntry(), ...item })),
+      addressEntries: (parsed.addressEntries ?? [
+        {
+          ...createEmptyAddressEntry(),
+          type: 'registration',
+          sourceQuery: parsed.registrationAddress ?? defaultProfile.registrationAddress,
+          fullAddress: parsed.registrationAddress ?? defaultProfile.registrationAddress,
+          postalCode: parsed.registrationAddressPostalCode ?? defaultProfile.registrationAddressPostalCode,
+          fiasId: parsed.registrationAddressFiasId ?? defaultProfile.registrationAddressFiasId,
+          kladrId: parsed.registrationAddressKladrId ?? defaultProfile.registrationAddressKladrId,
+          geoLat: parsed.registrationAddressGeoLat ?? defaultProfile.registrationAddressGeoLat,
+          geoLon: parsed.registrationAddressGeoLon ?? defaultProfile.registrationAddressGeoLon,
+        },
+        {
+          ...createEmptyAddressEntry(),
+          type: 'actual',
+          sourceQuery: parsed.actualAddress ?? defaultProfile.actualAddress,
+          fullAddress: parsed.actualAddress ?? defaultProfile.actualAddress,
+          postalCode: parsed.actualAddressPostalCode ?? defaultProfile.actualAddressPostalCode,
+          fiasId: parsed.actualAddressFiasId ?? defaultProfile.actualAddressFiasId,
+          kladrId: parsed.actualAddressKladrId ?? defaultProfile.actualAddressKladrId,
+          geoLat: parsed.actualAddressGeoLat ?? defaultProfile.actualAddressGeoLat,
+          geoLon: parsed.actualAddressGeoLon ?? defaultProfile.actualAddressGeoLon,
+        },
+      ]).map((item) => ({ ...createEmptyAddressEntry(), ...item, additionalTypes: Array.isArray((item as ClientAddressItem).additionalTypes) ? (item as ClientAddressItem).additionalTypes : [] })),
       comment: parsed.comment ?? '',
       legacyNotes: parsed.legacyNotes ?? defaultProfile.legacyNotes,
     };
@@ -470,6 +602,10 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     passports: normalizeList(profile.passports),
     birthCertificates: normalizeList(profile.birthCertificates),
     militaryIds: normalizeList(profile.militaryIds),
+    birthCertificateEntries: profile.birthCertificateEntries,
+    militaryIdEntries: profile.militaryIdEntries,
+    passportEntries: profile.passportEntries,
+    addressEntries: profile.addressEntries,
     comment: profile.comment.trim(),
     legacyNotes: profile.legacyNotes.trim(),
   });
@@ -541,6 +677,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     passports: [''],
     birthCertificates: [''],
     militaryIds: [''],
+    birthCertificateEntries: [createEmptyBirthCertificateEntry()],
+    militaryIdEntries: [createEmptyMilitaryIdEntry()],
+    passportEntries: [createEmptyPassportEntry()],
+    addressEntries: [createEmptyAddressEntry()],
     comment: '',
     legacyNotes: '',
     legalEntityId: '',
@@ -549,10 +689,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   });
   const [registrationAddressSuggestions, setRegistrationAddressSuggestions] = useState<string[]>([]);
   const [actualAddressSuggestions, setActualAddressSuggestions] = useState<string[]>([]);
+  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, string[]>>({});
   const [okinOptions, setOkinOptions] = useState<ClientReferenceItem[]>([]);
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
+  const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
@@ -1066,6 +1208,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       citizenship: profile.citizenship,
       inn: profile.inn,
       snils: profile.snils,
+      passportSeries: profile.passportSeries,
+      passportNumber: profile.passportNumber,
+      passportIssuedBy: profile.passportIssuedBy,
+      passportIssueDate: profile.passportIssueDate,
+      passportDepartmentCode: profile.passportDepartmentCode,
       education: profile.education.length > 0 ? profile.education : [createEmptyEducation()],
       professions: profile.professions.length > 0 ? profile.professions : [createEmptyProfession()],
       workplaces: profile.workplaces.length > 0 ? profile.workplaces : [createEmptyWorkplace()],
@@ -1090,6 +1237,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       passports: profile.passports.length > 0 ? profile.passports : [''],
       birthCertificates: profile.birthCertificates.length > 0 ? profile.birthCertificates : [''],
       militaryIds: profile.militaryIds.length > 0 ? profile.militaryIds : [''],
+      birthCertificateEntries: profile.birthCertificateEntries.length > 0 ? profile.birthCertificateEntries : [createEmptyBirthCertificateEntry()],
+      militaryIdEntries: profile.militaryIdEntries.length > 0 ? profile.militaryIdEntries : [createEmptyMilitaryIdEntry()],
+      passportEntries: profile.passportEntries.length > 0 ? profile.passportEntries : [createEmptyPassportEntry()],
+      addressEntries: profile.addressEntries.length > 0 ? profile.addressEntries : [createEmptyAddressEntry()],
       comment: profile.comment,
       legacyNotes: profile.legacyNotes,
       legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
@@ -1667,6 +1818,137 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }));
   };
 
+  const updatePassportEntry = (index: number, key: keyof ClientPassportItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      passportEntries: prev.passportEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addPassportEntry = () => {
+    setClientFormState((prev) => ({ ...prev, passportEntries: [...prev.passportEntries, createEmptyPassportEntry()] }));
+  };
+
+  const removePassportEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      passportEntries: prev.passportEntries.filter((_, i) => i !== index).length > 0
+        ? prev.passportEntries.filter((_, i) => i !== index)
+        : [createEmptyPassportEntry()],
+    }));
+  };
+
+  const updateAddressEntry = (index: number, key: keyof ClientAddressItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      addressEntries: prev.addressEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addAddressEntry = () => {
+    setClientFormState((prev) => ({ ...prev, addressEntries: [...prev.addressEntries, createEmptyAddressEntry()] }));
+  };
+
+  const removeAddressEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      addressEntries: prev.addressEntries.filter((_, i) => i !== index).length > 0
+        ? prev.addressEntries.filter((_, i) => i !== index)
+        : [createEmptyAddressEntry()],
+    }));
+  };
+
+  const toggleAddressAdditionalType = (index: number, type: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      addressEntries: prev.addressEntries.map((item, i) => {
+        if (i !== index) return item;
+        const has = item.additionalTypes.includes(type);
+        return {
+          ...item,
+          additionalTypes: has ? item.additionalTypes.filter((value) => value !== type) : [...item.additionalTypes, type],
+        };
+      }),
+    }));
+  };
+
+  const updateBirthCertificateEntry = (index: number, key: keyof ClientBirthCertificateItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      birthCertificateEntries: prev.birthCertificateEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addBirthCertificateEntry = () => {
+    setClientFormState((prev) => ({ ...prev, birthCertificateEntries: [...prev.birthCertificateEntries, createEmptyBirthCertificateEntry()] }));
+  };
+
+  const removeBirthCertificateEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      birthCertificateEntries: prev.birthCertificateEntries.filter((_, i) => i !== index).length > 0
+        ? prev.birthCertificateEntries.filter((_, i) => i !== index)
+        : [createEmptyBirthCertificateEntry()],
+    }));
+  };
+
+  const updateMilitaryIdEntry = (index: number, key: keyof ClientMilitaryIdItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      militaryIdEntries: prev.militaryIdEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addMilitaryIdEntry = () => {
+    setClientFormState((prev) => ({ ...prev, militaryIdEntries: [...prev.militaryIdEntries, createEmptyMilitaryIdEntry()] }));
+  };
+
+  const removeMilitaryIdEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      militaryIdEntries: prev.militaryIdEntries.filter((_, i) => i !== index).length > 0
+        ? prev.militaryIdEntries.filter((_, i) => i !== index)
+        : [createEmptyMilitaryIdEntry()],
+    }));
+  };
+
+  const suggestAddressEntryByDaData = async (index: number) => {
+    const entry = clientFormState.addressEntries[index];
+    const raw = (entry?.sourceQuery || entry?.fullAddress || '').trim();
+    if (!raw) return;
+    try {
+      const suggestions = await apiService.suggestClientAddresses(raw, 7);
+      const values = (suggestions ?? []).map((item) => item.value).filter(Boolean);
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: values }));
+    } catch (error) {
+      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось получить подсказки адресов', variant: 'error' });
+    }
+  };
+
+  const cleanAddressEntryByDaData = async (index: number) => {
+    const entry = clientFormState.addressEntries[index];
+    const raw = (entry?.sourceQuery || entry?.fullAddress || '').trim();
+    if (!raw) return;
+    try {
+      const cleaned = await apiService.cleanAddress(raw);
+      setClientFormState((prev) => ({
+        ...prev,
+        addressEntries: prev.addressEntries.map((item, i) => i === index ? {
+          ...item,
+          sourceQuery: raw,
+          fullAddress: cleaned.result || raw,
+          postalCode: cleaned.postalCode || '',
+          fiasId: cleaned.fiasId || '',
+          kladrId: cleaned.kladrId || '',
+          geoLat: cleaned.geoLat || '',
+          geoLon: cleaned.geoLon || '',
+        } : item),
+      }));
+    } catch (error) {
+      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось стандартизовать адрес', variant: 'error' });
+    }
+  };
+
   const suggestAddressesByDaData = async (field: 'registrationAddress' | 'actualAddress') => {
     const raw = clientFormState[field]?.trim();
     if (!raw) return;
@@ -1707,6 +1989,15 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }
     setClientFormSaving(true);
     try {
+      const primaryPassport = clientFormState.passportEntries[0] ?? createEmptyPassportEntry();
+      const registrationEntry = clientFormState.addressEntries.find((entry) => {
+        const type = entry.type.toLowerCase();
+        return type.includes('рег') || type.includes('registration') || entry.additionalTypes.includes('registration');
+      }) ?? clientFormState.addressEntries[0] ?? createEmptyAddressEntry();
+      const actualEntry = clientFormState.addressEntries.find((entry) => {
+        const type = entry.type.toLowerCase();
+        return type.includes('факт') || type.includes('actual') || entry.additionalTypes.includes('actual');
+      }) ?? clientFormState.addressEntries[1] ?? createEmptyAddressEntry();
       const profile: ClientExtendedProfile = {
         kind: clientFormState.kind,
         lastName: clientFormState.lastName,
@@ -1714,33 +2005,33 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         middleName: clientFormState.middleName,
         gender: clientFormState.gender,
         birthDate: clientFormState.birthDate,
-        birthPlacePassport: clientFormState.birthPlacePassport,
-        birthPlaceFias: clientFormState.birthPlaceFias,
+        birthPlacePassport: primaryPassport.birthPlacePassport || clientFormState.birthPlacePassport,
+        birthPlaceFias: primaryPassport.birthPlaceFias || clientFormState.birthPlaceFias,
         citizenship: clientFormState.citizenship,
         inn: clientFormState.inn,
         snils: clientFormState.snils,
-        passportSeries: clientFormState.passportSeries,
-        passportNumber: clientFormState.passportNumber,
-        passportIssuedBy: clientFormState.passportIssuedBy,
-        passportIssueDate: clientFormState.passportIssueDate,
-        passportDepartmentCode: clientFormState.passportDepartmentCode,
+        passportSeries: primaryPassport.series || clientFormState.passportSeries,
+        passportNumber: primaryPassport.number || clientFormState.passportNumber,
+        passportIssuedBy: primaryPassport.issuedBy || clientFormState.passportIssuedBy,
+        passportIssueDate: primaryPassport.issueDate || clientFormState.passportIssueDate,
+        passportDepartmentCode: primaryPassport.departmentCode || clientFormState.passportDepartmentCode,
         education: clientFormState.education,
         professions: clientFormState.professions,
         workplaces: clientFormState.workplaces,
         maritalStatus: clientFormState.maritalStatus,
         relatives: clientFormState.relatives,
-        registrationAddress: clientFormState.registrationAddress,
-        registrationAddressPostalCode: clientFormState.registrationAddressPostalCode,
-        registrationAddressFiasId: clientFormState.registrationAddressFiasId,
-        registrationAddressKladrId: clientFormState.registrationAddressKladrId,
-        registrationAddressGeoLat: clientFormState.registrationAddressGeoLat,
-        registrationAddressGeoLon: clientFormState.registrationAddressGeoLon,
-        actualAddress: clientFormState.actualAddress,
-        actualAddressPostalCode: clientFormState.actualAddressPostalCode,
-        actualAddressFiasId: clientFormState.actualAddressFiasId,
-        actualAddressKladrId: clientFormState.actualAddressKladrId,
-        actualAddressGeoLat: clientFormState.actualAddressGeoLat,
-        actualAddressGeoLon: clientFormState.actualAddressGeoLon,
+        registrationAddress: registrationEntry.fullAddress || clientFormState.registrationAddress,
+        registrationAddressPostalCode: registrationEntry.postalCode || clientFormState.registrationAddressPostalCode,
+        registrationAddressFiasId: registrationEntry.fiasId || clientFormState.registrationAddressFiasId,
+        registrationAddressKladrId: registrationEntry.kladrId || clientFormState.registrationAddressKladrId,
+        registrationAddressGeoLat: registrationEntry.geoLat || clientFormState.registrationAddressGeoLat,
+        registrationAddressGeoLon: registrationEntry.geoLon || clientFormState.registrationAddressGeoLon,
+        actualAddress: actualEntry.fullAddress || clientFormState.actualAddress,
+        actualAddressPostalCode: actualEntry.postalCode || clientFormState.actualAddressPostalCode,
+        actualAddressFiasId: actualEntry.fiasId || clientFormState.actualAddressFiasId,
+        actualAddressKladrId: actualEntry.kladrId || clientFormState.actualAddressKladrId,
+        actualAddressGeoLat: actualEntry.geoLat || clientFormState.actualAddressGeoLat,
+        actualAddressGeoLon: actualEntry.geoLon || clientFormState.actualAddressGeoLon,
         actualAddressMatchesRegistration: clientFormState.actualAddressMatchesRegistration,
         phones: clientFormState.phones,
         emails: clientFormState.emails,
@@ -1748,6 +2039,10 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         passports: clientFormState.passports,
         birthCertificates: clientFormState.birthCertificates,
         militaryIds: clientFormState.militaryIds,
+        birthCertificateEntries: clientFormState.birthCertificateEntries,
+        militaryIdEntries: clientFormState.militaryIdEntries,
+        passportEntries: clientFormState.passportEntries,
+        addressEntries: clientFormState.addressEntries,
         comment: clientFormState.comment,
         legacyNotes: clientFormState.legacyNotes,
       };
@@ -1911,42 +2206,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
         {activeSection === 'profile' ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Карточка клиента</h2>
                 <p className="text-sm text-gray-500">
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
               </div>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-slate-50 p-4 sm:p-5 mb-6">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Тип клиента</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">
-                    {profilePreview?.kind === 'legal' ? 'Юридическое лицо' : 'Физическое лицо'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">ФИО / Наименование</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{clientData?.name ?? '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Дата рождения</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.birthDate || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">ИНН</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.inn || clientData?.legalEntity?.inn || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">СНИЛС</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{profilePreview?.snils || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400">Юр. лицо</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{clientData?.legalEntity?.shortName ?? '—'}</p>
-                </div>
+              <div className="w-full max-w-sm">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
+                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
+                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                  {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
+                </select>
+                {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
               </div>
             </div>
             {!clientPermissions.canEdit && (
@@ -1979,75 +2252,75 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
               {clientFormState.kind === 'individual' ? (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Фамилия *</label>
-                    <input type="text" name="lastName" value={clientFormState.lastName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Фамилия *</label>
+                      <input type="text" name="lastName" value={clientFormState.lastName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Имя *</label>
+                      <input type="text" name="firstName" value={clientFormState.firstName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Отчество</label>
+                      <input type="text" name="middleName" value={clientFormState.middleName} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Пол</label>
+                      <select name="gender" value={clientFormState.gender} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
+                        <option value="">Не указан</option>
+                        <option value="male">Мужской</option>
+                        <option value="female">Женский</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Имя *</label>
-                    <input type="text" name="firstName" value={clientFormState.firstName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+
+                  <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ИНН</label>
+                      <input type="text" name="inn" value={clientFormState.inn} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">СНИЛС</label>
+                      <input type="text" name="snils" value={clientFormState.snils} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Дата рождения</label>
+                      <input type="date" name="birthDate" value={clientFormState.birthDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Семейное положение</label>
+                      <select name="maritalStatus" value={clientFormState.maritalStatus} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
+                        <option value="">Не указано</option>
+                        {MARITAL_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Отчество</label>
-                    <input type="text" name="middleName" value={clientFormState.middleName} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Дата рождения</label>
-                    <input type="date" name="birthDate" value={clientFormState.birthDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ИНН</label>
-                    <input type="text" name="inn" value={clientFormState.inn} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Пол</label>
-                    <select name="gender" value={clientFormState.gender} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                      <option value="">Не указан</option>
-                      <option value="male">Мужской</option>
-                      <option value="female">Женский</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Серия паспорта</label>
-                    <input type="text" name="passportSeries" value={clientFormState.passportSeries} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Номер паспорта</label>
-                    <input type="text" name="passportNumber" value={clientFormState.passportNumber} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
+
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Кем выдан паспорт</label>
-                    <input type="text" name="passportIssuedBy" value={clientFormState.passportIssuedBy} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Дата выдачи паспорта</label>
-                    <input type="date" name="passportIssueDate" value={clientFormState.passportIssueDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Код подразделения</label>
-                    <input type="text" name="passportDepartmentCode" value={clientFormState.passportDepartmentCode} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Гражданство (ОКИН)</label>
-                    <select name="citizenship" value={clientFormState.citizenship} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                      <option value="">Не указано</option>
-                      {(okinOptions.length > 0 ? okinOptions : CITIZENSHIP_OPTIONS.map((item) => ({ id: 0, code: item.value, name: item.label }))).map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Семейное положение</label>
-                    <select name="maritalStatus" value={clientFormState.maritalStatus} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                      <option value="">Не указано</option>
-                      {MARITAL_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Место рождения (как в паспорте)</label>
-                    <input type="text" name="birthPlacePassport" value={clientFormState.birthPlacePassport} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Место рождения (ФИАС)</label>
-                    <input type="text" name="birthPlaceFias" value={clientFormState.birthPlaceFias} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {[
+                        { id: 'main', label: 'Контакты' },
+                        { id: 'passports', label: 'Паспорта' },
+                        { id: 'addresses', label: 'Адреса' },
+                        { id: 'education', label: 'Образование (ОКСО)' },
+                        { id: 'professions', label: 'Профессии (ОКПДТР)' },
+                        { id: 'workplaces', label: 'Работа и должности' },
+                        { id: 'relatives', label: 'Родственники' },
+                        { id: 'birthCertificates', label: 'Свидетельства о рождении' },
+                        { id: 'militaryIds', label: 'Военные билеты' },
+                        { id: 'poa', label: 'Доверенности' },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveProfileGroup(tab.id as typeof activeProfileGroup)}
+                          className={`rounded-lg border px-3 py-1.5 text-sm ${activeProfileGroup === tab.id ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-700'}`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -2062,93 +2335,86 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
-                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
-                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                  {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
-                </select>
-                {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
-              </div>
-
-              <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Адрес регистрации</label>
-                  <input type="text" name="registrationAddress" value={clientFormState.registrationAddress} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Индекс регистрации</label>
-                  <input type="text" name="registrationAddressPostalCode" value={clientFormState.registrationAddressPostalCode} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-                </div>
-                <div className="md:col-span-2 flex flex-wrap items-center gap-3">
-                  <button type="button" onClick={() => cleanAddressByDaData('registrationAddress')} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">Стандартизовать адрес регистрации через DaData / ФИАС</button>
-                  <button type="button" onClick={() => suggestAddressesByDaData('registrationAddress')} disabled={!clientPermissions.canEdit} className="text-sm text-indigo-600">Подсказать адрес регистрации</button>
-                </div>
-                {registrationAddressSuggestions.length > 0 && (
-                  <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 p-3">
-                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p>
-                    <div className="flex flex-wrap gap-2">
-                      {registrationAddressSuggestions.map((item) => (
-                        <button key={item} type="button" onClick={() => setClientFormState((prev) => ({ ...prev, registrationAddress: item }))} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">
-                          {item}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="md:col-span-2 flex items-center gap-2">
-                  <input id="same-address" type="checkbox" name="actualAddressMatchesRegistration" checked={clientFormState.actualAddressMatchesRegistration} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="h-4 w-4" />
-                  <label htmlFor="same-address" className="text-sm text-gray-700">Фактический адрес совпадает с регистрацией</label>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Фактический адрес</label>
-                  <input type="text" name="actualAddress" value={clientFormState.actualAddressMatchesRegistration ? clientFormState.registrationAddress : clientFormState.actualAddress} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit || clientFormState.actualAddressMatchesRegistration} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Индекс фактического адреса</label>
-                  <input type="text" name="actualAddressPostalCode" value={clientFormState.actualAddressMatchesRegistration ? clientFormState.registrationAddressPostalCode : clientFormState.actualAddressPostalCode} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit || clientFormState.actualAddressMatchesRegistration} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-                </div>
-                <div className="md:col-span-2 flex flex-wrap items-center gap-3">
-                  <button type="button" onClick={() => cleanAddressByDaData('actualAddress')} disabled={!clientPermissions.canEdit || clientFormState.actualAddressMatchesRegistration} className="text-sm text-emerald-600">Стандартизовать фактический адрес через DaData / ФИАС</button>
-                  <button type="button" onClick={() => suggestAddressesByDaData('actualAddress')} disabled={!clientPermissions.canEdit || clientFormState.actualAddressMatchesRegistration} className="text-sm text-indigo-600">Подсказать фактический адрес</button>
-                </div>
-                {actualAddressSuggestions.length > 0 && (
-                  <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 p-3">
-                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p>
-                    <div className="flex flex-wrap gap-2">
-                      {actualAddressSuggestions.map((item) => (
-                        <button key={item} type="button" onClick={() => setClientFormState((prev) => ({ ...prev, actualAddress: item }))} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">
-                          {item}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {(['phones', 'emails'] as const).map((field) => (
-                <div key={field} className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {field === 'phones' ? 'Телефоны' : field === 'emails' ? 'Email' : 'Адреса'}
-                  </label>
-                  <div className="space-y-2">
-                    {clientFormState[field].map((value, index) => (
-                      <div key={`${field}-${index}`} className="flex gap-2">
-                        <input
-                          type={field === 'emails' ? 'email' : 'text'}
-                          value={value}
-                          onChange={(event) => updateListField(field, index, event.target.value)}
-                          disabled={!clientPermissions.canEdit}
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                        />
-                        <button type="button" onClick={() => removeListFieldRow(field, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'passports' && (
+                <div className="md:col-span-2 space-y-4">
+                  {clientFormState.passportEntries.map((passport, index) => (
+                    <div key={`passport-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-800">Паспорт #{index + 1}</h3>
+                        <button type="button" onClick={() => removePassportEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
                       </div>
-                    ))}
-                    <button type="button" onClick={() => addListFieldRow(field)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
-                  </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Серия</span><input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Номер</span><input value={passport.number} onChange={(e) => updatePassportEntry(index, 'number', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Дата выдачи</span><input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Код подразделения</span><input value={passport.departmentCode} onChange={(e) => updatePassportEntry(index, 'departmentCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Кем выдан</span><input value={passport.issuedBy} onChange={(e) => updatePassportEntry(index, 'issuedBy', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (как в паспорте)</span><input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (ФИАС)</span><input value={passport.birthPlaceFias} onChange={(e) => updatePassportEntry(index, 'birthPlaceFias', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addPassportEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить паспорт</button>
                 </div>
-              ))}
+              )}
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'addresses' && (
+                <div className="md:col-span-2 space-y-4">
+                  {clientFormState.addressEntries.map((entry, index) => (
+                    <div key={`address-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-800">Адрес #{index + 1}</h3>
+                        <button type="button" onClick={() => removeAddressEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Основной тип</span><select value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2">{ADDRESS_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                        <div className="xl:col-span-2"><span className="mb-1 block text-sm text-slate-700">Дополнительно относится к</span><div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-2">{ADDRESS_TYPE_OPTIONS.map((option) => (<label key={option.value} className="inline-flex items-center gap-1 text-xs text-gray-700"><input type="checkbox" checked={entry.additionalTypes.includes(option.value)} onChange={() => toggleAddressAdditionalType(index, option.value)} disabled={!clientPermissions.canEdit} />{option.label}</label>))}</div></div>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Поисковая строка</span><input value={entry.sourceQuery} onChange={(e) => updateAddressEntry(index, 'sourceQuery', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Полный адрес</span><input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={entry.validFrom} onChange={(e) => updateAddressEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={entry.validTo} onChange={(e) => updateAddressEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">Индекс</span><input value={entry.postalCode} onChange={(e) => updateAddressEntry(index, 'postalCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700"><span className="mb-1 block">FIAS ID</span><input value={entry.fiasId} onChange={(e) => updateAddressEntry(index, 'fiasId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">КЛАДР</span><input value={entry.kladrId} onChange={(e) => updateAddressEntry(index, 'kladrId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
+                        <div className="xl:col-span-2 flex items-end gap-3"><button type="button" onClick={() => suggestAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-indigo-600">Подсказать через DaData</button><button type="button" onClick={() => cleanAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">Стандартизовать</button></div>
+                        {(addressSuggestionsByIndex[index]?.length ?? 0) > 0 && (<div className="xl:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50 p-3"><p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p><div className="flex flex-wrap gap-2">{addressSuggestionsByIndex[index].map((item) => (<button key={item} type="button" onClick={() => updateAddressEntry(index, 'fullAddress', item)} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">{item}</button>))}</div></div>)}
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addAddressEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить адрес</button>
+                </div>
+              )}
+
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'main' && (
+                <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+                  {(['phones', 'emails'] as const).map((field) => (
+                    <div key={field}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {field === 'phones' ? 'Телефоны' : 'Email'}
+                      </label>
+                      <div className="space-y-2">
+                        {clientFormState[field].map((value, index) => (
+                          <div key={`${field}-${index}`} className="flex gap-2">
+                            <input
+                              type={field === 'emails' ? 'email' : 'text'}
+                              value={value}
+                              onChange={(event) => updateListField(field, index, event.target.value)}
+                              disabled={!clientPermissions.canEdit}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                            />
+                            <button type="button" onClick={() => removeListFieldRow(field, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addListFieldRow(field)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'education' && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Образование (ОКСО)</label>
                 <div className="space-y-2">
@@ -2163,10 +2429,12 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, education: [...prev.education, createEmptyEducation()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить образование</button>
                 </div>
               </div>
+              )}
 
               <datalist id="okso-codes">{oksoOptions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</datalist>
               <datalist id="okpdtr-codes">{okpdtrOptions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</datalist>
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'professions' && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Профессии (ОКПДТР)</label>
                 <div className="space-y-2">
@@ -2179,14 +2447,18 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, professions: [...prev.professions, createEmptyProfession()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить профессию</button>
                 </div>
               </div>
+              )}
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'workplaces' && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Места работы и должности</label>
                 <div className="space-y-2">
                   {clientFormState.workplaces.map((item, index) => (
-                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-2">
-                      <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-12">
+                      <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      <div className="md:col-span-2"><input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                      <div className="md:col-span-2"><input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, workplaces: [...prev.workplaces, createEmptyWorkplace()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить место работы</button>
@@ -2204,7 +2476,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           ...prev,
                           workplaces: prev.workplaces.length
                             ? prev.workplaces.map((w, i) => (i === prev.workplaces.length - 1 ? { ...w, organizationName: created.shortName } : w))
-                            : [{ organizationName: created.shortName, position: "" }],
+                            : [{ organizationName: created.shortName, position: "", startDate: "", endDate: "" }],
                         }));
                       } catch (error) {
                         await alert({ title: 'Организация', description: error instanceof Error ? error.message : 'Не удалось создать организацию', variant: 'error' });
@@ -2216,7 +2488,9 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   </button>
                 </div>
               </div>
+              )}
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'relatives' && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Близкие родственники</label>
                 <div className="space-y-2">
@@ -2230,22 +2504,60 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, relatives: [...prev.relatives, createEmptyRelative()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить родственника</button>
                 </div>
               </div>
+              )}
 
-              {DOCUMENT_FIELD_META.map((documentField) => (
-                <div key={documentField.key} className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{documentField.label}</label>
-                  <div className="space-y-2">
-                    {clientFormState[documentField.key].map((value, index) => (
-                      <div key={`${documentField.key}-${index}`} className="flex gap-2">
-                        <input value={value} onChange={(event) => updateListField(documentField.key, index, event.target.value)} disabled={!clientPermissions.canEdit} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                        <button type="button" onClick={() => removeListFieldRow(documentField.key, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => addListFieldRow(documentField.key)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'birthCertificates' && (
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="block text-sm font-medium text-gray-700">Свидетельства о рождении</label>
+                      <button type="button" onClick={addBirthCertificateEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить свидетельство</button>
+                    </div>
+                    <div className="space-y-2">
+                      {clientFormState.birthCertificateEntries.map((doc, index) => (
+                        <div key={`birth-certificate-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
+                          <input value={doc.series} onChange={(e) => updateBirthCertificateEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.number} onChange={(e) => updateBirthCertificateEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input type="date" value={doc.issueDate} onChange={(e) => updateBirthCertificateEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                          <input value={doc.actRecordNumber} onChange={(e) => updateBirthCertificateEntry(index, 'actRecordNumber', e.target.value)} placeholder="№ актовой записи" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.childFullName} onChange={(e) => updateBirthCertificateEntry(index, 'childFullName', e.target.value)} placeholder="ФИО ребенка" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <button type="button" onClick={() => removeBirthCertificateEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <input value={doc.issuedBy} onChange={(e) => updateBirthCertificateEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдано" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
 
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'militaryIds' && (
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="block text-sm font-medium text-gray-700">Военные билеты</label>
+                      <button type="button" onClick={addMilitaryIdEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить военный билет</button>
+                    </div>
+                    <div className="space-y-2">
+                      {clientFormState.militaryIdEntries.map((doc, index) => (
+                        <div key={`military-id-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
+                          <input value={doc.series} onChange={(e) => updateMilitaryIdEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.number} onChange={(e) => updateMilitaryIdEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input type="date" value={doc.issueDate} onChange={(e) => updateMilitaryIdEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                          <input value={doc.rank} onChange={(e) => updateMilitaryIdEntry(index, 'rank', e.target.value)} placeholder="Воинское звание" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.category} onChange={(e) => updateMilitaryIdEntry(index, 'category', e.target.value)} placeholder="Категория запаса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.fitnessCategory} onChange={(e) => updateMilitaryIdEntry(index, 'fitnessCategory', e.target.value)} placeholder="Категория годности" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.vusCode} onChange={(e) => updateMilitaryIdEntry(index, 'vusCode', e.target.value)} placeholder="Код ВУС" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <button type="button" onClick={() => removeMilitaryIdEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <input value={doc.issuedBy} onChange={(e) => updateMilitaryIdEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                          <input value={doc.militaryCommissariat} onChange={(e) => updateMilitaryIdEntry(index, 'militaryCommissariat', e.target.value)} placeholder="Военный комиссариат" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'poa' && (
               <div className="md:col-span-2">
                 <div className="mb-2 flex items-center justify-between">
                   <label className="block text-sm font-medium text-gray-700">Доверенности</label>
@@ -2282,14 +2594,17 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   )}
                 </div>
               </div>
+              )}
 
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>
-                <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('additionalInfo')} />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Исторические заметки (не удаляются)</label>
-                <textarea name="legacyNotes" value={clientFormState.legacyNotes} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('notes') || 'Заметки'} />
+              <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>
+                  <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('additionalInfo')} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Исторические заметки (не удаляются)</label>
+                  <textarea name="legacyNotes" value={clientFormState.legacyNotes} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('notes') || 'Заметки'} />
+                </div>
               </div>
               <div className="md:col-span-2 flex items-center gap-3">
                 <input

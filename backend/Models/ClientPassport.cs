@@ -10,7 +10,7 @@ public class ClientPassport
     public int ClientId { get; set; }
     public Client Client { get; set; } = null!;
 
-    [MaxLength(10)]
+    [MaxLength(20)]
     public string? Series { get; set; }
 
     [MaxLength(20)]
@@ -23,6 +23,18 @@ public class ClientPassport
 
     [MaxLength(20)]
     public string? DepartmentCode { get; set; }
+
+    [MaxLength(500)]
+    public string? BirthPlacePassport { get; set; }
+
+    [MaxLength(120)]
+    public string? BirthPlaceFias { get; set; }
+
+    public DateTime? ValidFrom { get; set; }
+
+    public DateTime? ValidTo { get; set; }
+
+    public bool IsPrimary { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

@@ -272,12 +272,46 @@ public class ClientsController : ControllerBase
 
         if (profile is null) return;
 
-        var registrationValue = profile.RegistrationAddress?.Trim();
-        var actualValue = (profile.ActualAddressMatchesRegistration == true
-            ? profile.RegistrationAddress
-            : profile.ActualAddress)?.Trim();
-
         var existing = await _db.AddressRecords.Where(x => x.ClientId == client.Id).ToListAsync();
+
+        if (profile.AddressEntries is { Count: > 0 })
+        {
+            var normalizedEntries = profile.AddressEntries
+                .Select((item, index) => new AddressRecord
+                {
+                    ClientId = client.Id,
+                    Type = ParseAddressType(item.Type),
+                    IsPrimary = index == 0,
+                    Value = NormalizeOptional(item.FullAddress) ?? NormalizeOptional(item.SourceQuery) ?? string.Empty,
+                    PostalCode = NormalizeOptional(item.PostalCode),
+                    FiasId = NormalizeOptional(item.FiasId),
+                    KladrId = NormalizeOptional(item.KladrId),
+                    GeoLat = NormalizeOptional(item.GeoLat),
+                    GeoLon = NormalizeOptional(item.GeoLon),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+                .ToList();
+
+            if (existing.Count > 0)
+            {
+                _db.AddressRecords.RemoveRange(existing);
+            }
+
+            if (normalizedEntries.Count > 0)
+            {
+                _db.AddressRecords.AddRange(normalizedEntries);
+            }
+
+            return;
+        }
+
+        // backward compatibility for legacy single-value address fields
+        var registrationValue = NormalizeOptional(profile.RegistrationAddress);
+        var actualValue = NormalizeOptional(profile.ActualAddressMatchesRegistration == true
+            ? profile.RegistrationAddress
+            : profile.ActualAddress);
 
         UpsertAddress(existing, client.Id, AddressType.Registration, true,
             registrationValue, null, profile.RegistrationAddressPostalCode, profile.RegistrationAddressFiasId, profile.RegistrationAddressKladrId,
@@ -315,32 +349,69 @@ public class ClientsController : ControllerBase
 
         if (profile is null) return;
 
-        var hasAnyPassportField = !string.IsNullOrWhiteSpace(profile.PassportSeries)
-            || !string.IsNullOrWhiteSpace(profile.PassportNumber)
-            || !string.IsNullOrWhiteSpace(profile.PassportIssuedBy)
-            || profile.PassportIssueDate.HasValue
-            || !string.IsNullOrWhiteSpace(profile.PassportDepartmentCode);
+        var existing = await _db.ClientPassports.Where(x => x.ClientId == client.Id).ToListAsync();
 
-        var existing = await _db.ClientPassports.FirstOrDefaultAsync(x => x.ClientId == client.Id);
+        var normalizedPassports = (profile.PassportEntries is { Count: > 0 }
+                ? profile.PassportEntries.Select((item, index) => new { Item = item, Index = index })
+                : new[]
+                {
+                    new
+                    {
+                        Item = new ClientPassportProfile
+                        {
+                            Series = profile.PassportSeries,
+                            Number = profile.PassportNumber,
+                            IssuedBy = profile.PassportIssuedBy,
+                            IssueDate = profile.PassportIssueDate,
+                            DepartmentCode = profile.PassportDepartmentCode,
+                            BirthPlacePassport = profile.BirthPlacePassport,
+                            BirthPlaceFias = profile.BirthPlaceFias,
+                        },
+                        Index = 0,
+                    },
+                })
+            .Select(x => new ClientPassport
+            {
+                ClientId = client.Id,
+                Series = NormalizeOptional(x.Item.Series),
+                Number = NormalizeOptional(x.Item.Number),
+                IssuedBy = NormalizeOptional(x.Item.IssuedBy),
+                IssuedAt = x.Item.IssueDate,
+                DepartmentCode = NormalizeOptional(x.Item.DepartmentCode),
+                BirthPlacePassport = NormalizeOptional(x.Item.BirthPlacePassport),
+                BirthPlaceFias = NormalizeOptional(x.Item.BirthPlaceFias),
+                ValidFrom = x.Item.ValidFrom,
+                ValidTo = x.Item.ValidTo,
+                IsPrimary = x.Index == 0,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Series)
+                        || !string.IsNullOrWhiteSpace(x.Number)
+                        || !string.IsNullOrWhiteSpace(x.IssuedBy)
+                        || x.IssuedAt.HasValue
+                        || !string.IsNullOrWhiteSpace(x.DepartmentCode))
+            .ToList();
 
-        if (!hasAnyPassportField)
+        if (existing.Count > 0)
         {
-            if (existing is not null) _db.ClientPassports.Remove(existing);
-            return;
+            _db.ClientPassports.RemoveRange(existing);
         }
 
-        if (existing is null)
+        if (normalizedPassports.Count > 0)
         {
-            existing = new ClientPassport { ClientId = client.Id, CreatedAt = DateTime.UtcNow };
-            _db.ClientPassports.Add(existing);
+            _db.ClientPassports.AddRange(normalizedPassports);
         }
+    }
 
-        existing.Series = NormalizeOptional(profile.PassportSeries);
-        existing.Number = NormalizeOptional(profile.PassportNumber);
-        existing.IssuedBy = NormalizeOptional(profile.PassportIssuedBy);
-        existing.IssuedAt = profile.PassportIssueDate;
-        existing.DepartmentCode = NormalizeOptional(profile.PassportDepartmentCode);
-        existing.UpdatedAt = DateTime.UtcNow;
+    private static AddressType ParseAddressType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return AddressType.Other;
+        var normalized = raw.Trim().ToLowerInvariant();
+        if (normalized.Contains("reg") || normalized.Contains("рег")) return AddressType.Registration;
+        if (normalized.Contains("act") || normalized.Contains("факт")) return AddressType.Actual;
+        if (normalized.Contains("legal") || normalized.Contains("юр")) return AddressType.Legal;
+        return AddressType.Other;
     }
 
     private void UpsertAddress(
@@ -424,9 +495,41 @@ public sealed class ClientAddressProfile
     public string? ActualAddressGeoLat { get; init; }
     public string? ActualAddressGeoLon { get; init; }
     public bool? ActualAddressMatchesRegistration { get; init; }
+
+    public List<ClientAddressEntryProfile>? AddressEntries { get; init; }
+
     public string? PassportSeries { get; init; }
     public string? PassportNumber { get; init; }
     public string? PassportIssuedBy { get; init; }
     public DateTime? PassportIssueDate { get; init; }
     public string? PassportDepartmentCode { get; init; }
+    public string? BirthPlacePassport { get; init; }
+    public string? BirthPlaceFias { get; init; }
+
+    public List<ClientPassportProfile>? PassportEntries { get; init; }
+}
+
+public sealed class ClientAddressEntryProfile
+{
+    public string? Type { get; init; }
+    public string? SourceQuery { get; init; }
+    public string? FullAddress { get; init; }
+    public string? PostalCode { get; init; }
+    public string? FiasId { get; init; }
+    public string? KladrId { get; init; }
+    public string? GeoLat { get; init; }
+    public string? GeoLon { get; init; }
+}
+
+public sealed class ClientPassportProfile
+{
+    public string? Series { get; init; }
+    public string? Number { get; init; }
+    public string? IssuedBy { get; init; }
+    public DateTime? IssueDate { get; init; }
+    public string? DepartmentCode { get; init; }
+    public string? BirthPlacePassport { get; init; }
+    public string? BirthPlaceFias { get; init; }
+    public DateTime? ValidFrom { get; init; }
+    public DateTime? ValidTo { get; init; }
 }
