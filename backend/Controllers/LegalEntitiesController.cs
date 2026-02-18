@@ -452,7 +452,7 @@ public class LegalEntitiesController : ControllerBase
     /// Перенос legacy-поля LegalEntity.Address в AddressRecords с optional проверкой через DaData.
     /// </summary>
     [HttpPost("migrate-legacy-addresses")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<LegalEntityAddressMigrationResultDto>> MigrateLegacyAddresses(
         [FromBody] LegacyAddressMigrationRequest? request,
         CancellationToken ct)
