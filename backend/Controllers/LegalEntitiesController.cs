@@ -449,7 +449,7 @@ public class LegalEntitiesController : ControllerBase
     }
 
     /// <summary>
-    /// Перенос legacy-поля LegalEntity.Address в AddressRecords с optional проверкой через DaData.
+    /// Перенос legacy-полей Address (у юр. и физ. лиц) в AddressRecords с optional проверкой через DaData.
     /// </summary>
     [HttpPost("migrate-legacy-addresses")]
     [Authorize(Policy = "Admin")]
@@ -459,147 +459,52 @@ public class LegalEntitiesController : ControllerBase
     {
         var validateWithDadata = request?.ValidateWithDadata ?? true;
 
-        var entities = await _db.LegalEntities
+        var legalEntities = await _db.LegalEntities
             .Include(le => le.Addresses)
             .Where(le => le.Address != null && le.Address != string.Empty)
             .OrderBy(le => le.ShortName)
             .ToListAsync(ct);
 
+        var clients = await _db.Clients
+            .Include(c => c.Addresses)
+            .Where(c => c.Address != null && c.Address != string.Empty)
+            .OrderBy(c => c.Name)
+            .ToListAsync(ct);
+
         var result = new LegalEntityAddressMigrationResultDto
         {
-            Scanned = entities.Count,
+            Scanned = legalEntities.Count + clients.Count,
+            ScannedLegalEntities = legalEntities.Count,
+            ScannedClients = clients.Count,
             ValidateWithDadata = validateWithDadata,
         };
 
-        foreach (var entity in entities)
+        foreach (var entity in legalEntities)
         {
-            var legacyAddress = NormalizeOptional(entity.Address);
-            if (string.IsNullOrWhiteSpace(legacyAddress))
-            {
-                result.EmptySkipped++;
-                result.Details.Add(new LegalEntityAddressMigrationDetailDto
-                {
-                    LegalEntityId = entity.Id,
-                    LegalEntityName = entity.ShortName,
-                    LegacyAddress = entity.Address,
-                    Action = "SkippedEmpty",
-                    Message = "Пустой legacy-адрес",
-                });
-                continue;
-            }
+            await MigrateLegacyAddressAsync(
+                result,
+                ownerType: "legal",
+                ownerId: entity.Id,
+                ownerName: entity.ShortName,
+                legacyAddressRaw: entity.Address,
+                addresses: entity.Addresses,
+                addressType: AddressType.Legal,
+                assignOwner: record => record.LegalEntityId = entity.Id,
+                ct: ct);
+        }
 
-            var cleaned = validateWithDadata
-                ? await _enrichmentService.CleanAddressAsync(legacyAddress, ct)
-                : null;
-
-            if (validateWithDadata)
-            {
-                if (cleaned is null)
-                {
-                    result.DadataNotMatched++;
-                }
-                else
-                {
-                    result.DadataMatched++;
-                }
-            }
-
-            var normalizedValue = NormalizeOptional(cleaned?.Result) ?? legacyAddress;
-            if (string.IsNullOrWhiteSpace(normalizedValue))
-            {
-                result.Failed++;
-                result.Details.Add(new LegalEntityAddressMigrationDetailDto
-                {
-                    LegalEntityId = entity.Id,
-                    LegalEntityName = entity.ShortName,
-                    LegacyAddress = legacyAddress,
-                    Action = "Failed",
-                    Message = "Не удалось получить нормализованный адрес",
-                    DadataMatched = cleaned is not null,
-                });
-                continue;
-            }
-
-            var existingLegalAddress = entity.Addresses
-                .FirstOrDefault(a => a.Type == AddressType.Legal && IsSameAddress(a, legacyAddress, normalizedValue));
-
-            if (existingLegalAddress is not null)
-            {
-                var existingChanged = ApplyCleanedData(existingLegalAddress, legacyAddress, normalizedValue, cleaned);
-                if (existingChanged)
-                {
-                    existingLegalAddress.UpdatedAt = DateTime.UtcNow;
-                    result.Updated++;
-                    result.Details.Add(new LegalEntityAddressMigrationDetailDto
-                    {
-                        LegalEntityId = entity.Id,
-                        LegalEntityName = entity.ShortName,
-                        LegacyAddress = legacyAddress,
-                        NormalizedAddress = normalizedValue,
-                        Action = "Updated",
-                        AddressRecordId = existingLegalAddress.Id,
-                        DadataMatched = cleaned is not null,
-                        Message = "Существующая запись дополнена/обновлена",
-                    });
-                }
-                else
-                {
-                    result.DuplicateSkipped++;
-                    result.Details.Add(new LegalEntityAddressMigrationDetailDto
-                    {
-                        LegalEntityId = entity.Id,
-                        LegalEntityName = entity.ShortName,
-                        LegacyAddress = legacyAddress,
-                        NormalizedAddress = normalizedValue,
-                        Action = "DuplicateSkipped",
-                        AddressRecordId = existingLegalAddress.Id,
-                        DadataMatched = cleaned is not null,
-                        Message = "Дубликат: запись уже есть",
-                    });
-                }
-            }
-            else
-            {
-                var hasPrimaryLegal = entity.Addresses.Any(a => a.Type == AddressType.Legal && a.IsPrimary);
-
-                var newRecord = new AddressRecord
-                {
-                    LegalEntityId = entity.Id,
-                    Type = AddressType.Legal,
-                    IsPrimary = !hasPrimaryLegal,
-                    Value = normalizedValue,
-                    UnrestrictedValue = legacyAddress,
-                    PostalCode = NormalizeOptional(cleaned?.PostalCode),
-                    Country = NormalizeOptional(cleaned?.Country),
-                    RegionWithType = NormalizeOptional(cleaned?.RegionWithType),
-                    CityWithType = NormalizeOptional(cleaned?.CityWithType),
-                    StreetWithType = NormalizeOptional(cleaned?.StreetWithType),
-                    House = NormalizeOptional(cleaned?.House),
-                    Flat = NormalizeOptional(cleaned?.Flat),
-                    FiasId = NormalizeOptional(cleaned?.FiasId),
-                    KladrId = NormalizeOptional(cleaned?.KladrId),
-                    GeoLat = NormalizeOptional(cleaned?.GeoLat),
-                    GeoLon = NormalizeOptional(cleaned?.GeoLon),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-
-                _db.AddressRecords.Add(newRecord);
-                entity.Addresses.Add(newRecord);
-                result.Added++;
-                result.Details.Add(new LegalEntityAddressMigrationDetailDto
-                {
-                    LegalEntityId = entity.Id,
-                    LegalEntityName = entity.ShortName,
-                    LegacyAddress = legacyAddress,
-                    NormalizedAddress = normalizedValue,
-                    Action = "Added",
-                    DadataMatched = cleaned is not null,
-                    Message = "Создана новая запись адреса",
-                });
-            }
-
-            // legacy поле Address не изменяем: миграция должна быть строго неразрушающей.
+        foreach (var client in clients)
+        {
+            await MigrateLegacyAddressAsync(
+                result,
+                ownerType: "client",
+                ownerId: client.Id,
+                ownerName: client.Name,
+                legacyAddressRaw: client.Address,
+                addresses: client.Addresses,
+                addressType: AddressType.Registration,
+                assignOwner: record => record.ClientId = client.Id,
+                ct: ct);
         }
 
         if (result.Added > 0 || result.Updated > 0)
@@ -608,6 +513,155 @@ public class LegalEntitiesController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    private async Task MigrateLegacyAddressAsync(
+        LegalEntityAddressMigrationResultDto result,
+        string ownerType,
+        int ownerId,
+        string ownerName,
+        string? legacyAddressRaw,
+        ICollection<AddressRecord> addresses,
+        AddressType addressType,
+        Action<AddressRecord> assignOwner,
+        CancellationToken ct)
+    {
+        var legacyAddress = NormalizeOptional(legacyAddressRaw);
+        if (string.IsNullOrWhiteSpace(legacyAddress))
+        {
+            result.EmptySkipped++;
+            result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
+            {
+                LegacyAddress = legacyAddressRaw,
+                Action = "SkippedEmpty",
+                Message = "Пустой legacy-адрес",
+            }));
+            return;
+        }
+
+        var cleaned = result.ValidateWithDadata
+            ? await _enrichmentService.CleanAddressAsync(legacyAddress, ct)
+            : null;
+
+        if (result.ValidateWithDadata)
+        {
+            if (cleaned is null)
+            {
+                result.DadataNotMatched++;
+            }
+            else
+            {
+                result.DadataMatched++;
+            }
+        }
+
+        var normalizedValue = NormalizeOptional(cleaned?.Result) ?? legacyAddress;
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            result.Failed++;
+            result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
+            {
+                LegacyAddress = legacyAddress,
+                Action = "Failed",
+                Message = "Не удалось получить нормализованный адрес",
+                DadataMatched = cleaned is not null,
+            }));
+            return;
+        }
+
+        var existingAddress = addresses
+            .FirstOrDefault(a => a.Type == addressType && IsSameAddress(a, legacyAddress, normalizedValue));
+
+        if (existingAddress is not null)
+        {
+            var existingChanged = ApplyCleanedData(existingAddress, legacyAddress, normalizedValue, cleaned);
+            if (existingChanged)
+            {
+                existingAddress.UpdatedAt = DateTime.UtcNow;
+                result.Updated++;
+                result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
+                {
+                    LegacyAddress = legacyAddress,
+                    NormalizedAddress = normalizedValue,
+                    Action = "Updated",
+                    AddressRecordId = existingAddress.Id,
+                    DadataMatched = cleaned is not null,
+                    Message = "Существующая запись дополнена/обновлена",
+                }));
+            }
+            else
+            {
+                result.DuplicateSkipped++;
+                result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
+                {
+                    LegacyAddress = legacyAddress,
+                    NormalizedAddress = normalizedValue,
+                    Action = "DuplicateSkipped",
+                    AddressRecordId = existingAddress.Id,
+                    DadataMatched = cleaned is not null,
+                    Message = "Дубликат: запись уже есть",
+                }));
+            }
+
+            return;
+        }
+
+        var hasPrimary = addresses.Any(a => a.Type == addressType && a.IsPrimary);
+
+        var newRecord = new AddressRecord
+        {
+            Type = addressType,
+            IsPrimary = !hasPrimary,
+            Value = normalizedValue,
+            UnrestrictedValue = legacyAddress,
+            PostalCode = NormalizeOptional(cleaned?.PostalCode),
+            Country = NormalizeOptional(cleaned?.Country),
+            RegionWithType = NormalizeOptional(cleaned?.RegionWithType),
+            CityWithType = NormalizeOptional(cleaned?.CityWithType),
+            StreetWithType = NormalizeOptional(cleaned?.StreetWithType),
+            House = NormalizeOptional(cleaned?.House),
+            Flat = NormalizeOptional(cleaned?.Flat),
+            FiasId = NormalizeOptional(cleaned?.FiasId),
+            KladrId = NormalizeOptional(cleaned?.KladrId),
+            GeoLat = NormalizeOptional(cleaned?.GeoLat),
+            GeoLon = NormalizeOptional(cleaned?.GeoLon),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        assignOwner(newRecord);
+        _db.AddressRecords.Add(newRecord);
+        addresses.Add(newRecord);
+        result.Added++;
+        result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
+        {
+            LegacyAddress = legacyAddress,
+            NormalizedAddress = normalizedValue,
+            Action = "Added",
+            DadataMatched = cleaned is not null,
+            Message = "Создана новая запись адреса",
+        }));
+
+        // legacy поле Address не изменяем: миграция должна быть строго неразрушающей.
+    }
+
+    private static LegalEntityAddressMigrationDetailDto BuildMigrationDetail(
+        string ownerType,
+        int ownerId,
+        string ownerName,
+        LegalEntityAddressMigrationDetailDto detail)
+    {
+        var normalizedType = ownerType.Equals("client", StringComparison.OrdinalIgnoreCase) ? "client" : "legal";
+        return detail with
+        {
+            OwnerType = normalizedType,
+            OwnerId = ownerId,
+            OwnerName = ownerName,
+            LegalEntityId = normalizedType == "legal" ? ownerId : null,
+            LegalEntityName = normalizedType == "legal" ? ownerName : null,
+            ClientId = normalizedType == "client" ? ownerId : null,
+            ClientName = normalizedType == "client" ? ownerName : null,
+        };
     }
 
     private static bool IsSameAddress(AddressRecord existing, string legacyAddress, string normalizedAddress)
@@ -674,6 +728,8 @@ public sealed record LegacyAddressMigrationRequest(bool ValidateWithDadata = tru
 public sealed record LegalEntityAddressMigrationResultDto
 {
     public int Scanned { get; init; }
+    public int ScannedLegalEntities { get; init; }
+    public int ScannedClients { get; init; }
     public int Added { get; set; }
     public int Updated { get; set; }
     public int DuplicateSkipped { get; set; }
@@ -687,8 +743,13 @@ public sealed record LegalEntityAddressMigrationResultDto
 
 public sealed record LegalEntityAddressMigrationDetailDto
 {
-    public int LegalEntityId { get; init; }
-    public string LegalEntityName { get; init; } = string.Empty;
+    public string OwnerType { get; init; } = "legal";
+    public int OwnerId { get; init; }
+    public string OwnerName { get; init; } = string.Empty;
+    public int? LegalEntityId { get; init; }
+    public string? LegalEntityName { get; init; }
+    public int? ClientId { get; init; }
+    public string? ClientName { get; init; }
     public string? LegacyAddress { get; init; }
     public string? NormalizedAddress { get; init; }
     public string Action { get; init; } = string.Empty;

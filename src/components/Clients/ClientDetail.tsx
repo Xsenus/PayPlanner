@@ -403,14 +403,6 @@ const createEmptyAddressEntry = (): ClientAddressItem => ({
   validTo: '',
 });
 
-const CITIZENSHIP_OPTIONS: Array<{ value: Exclude<ClientCitizenship, ''>; label: string }> = [
-  { value: 'rf', label: 'Гражданин РФ' },
-  { value: 'double', label: 'Двойное гражданство' },
-  { value: 'foreign', label: 'Иностранный гражданин' },
-  { value: 'stateless', label: 'Лицо без гражданства' },
-  { value: 'other', label: 'Иное' },
-];
-
 const ADDRESS_TYPE_OPTIONS = [
   { value: 'registration', label: 'Адрес регистрации' },
   { value: 'actual', label: 'Фактический адрес' },
@@ -430,12 +422,6 @@ const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; l
   { value: 'civil_union', label: 'Гражданский брак' },
 ];
 
-
-const DOCUMENT_FIELD_META: Array<{ key: ClientDocumentKey; label: string }> = [
-  { key: 'passports', label: 'Паспортные данные (legacy)' },
-  { key: 'birthCertificates', label: 'Свидетельства о рождении' },
-  { key: 'militaryIds', label: 'Военные билеты' },
-];
 
 const normalizeList = (values: string[]): string[] =>
   values
@@ -687,10 +673,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     isActive: true,
     clientStatusId: '',
   });
-  const [registrationAddressSuggestions, setRegistrationAddressSuggestions] = useState<string[]>([]);
-  const [actualAddressSuggestions, setActualAddressSuggestions] = useState<string[]>([]);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, string[]>>({});
-  const [okinOptions, setOkinOptions] = useState<ClientReferenceItem[]>([]);
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
@@ -704,13 +687,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   useEffect(() => {
     void (async () => {
       try {
-        const [okin, okso, okpdtr, poa] = await Promise.all([
-          apiService.getOkinDictionary(),
+        const [okso, okpdtr, poa] = await Promise.all([
           apiService.getOksoDictionary(),
           apiService.getOkpdtrDictionary(),
           apiService.getClientPowersOfAttorney(clientId),
         ]);
-        setOkinOptions(okin ?? []);
         setOksoOptions(okso ?? []);
         setOkpdtrOptions(okpdtr ?? []);
         setPowersOfAttorney(poa ?? []);
@@ -1492,11 +1473,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     );
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
-  const profilePreview = useMemo(() => {
-    if (!clientData) return null;
-    return parseClientExtendedProfile(clientData);
-  }, [clientData]);
-
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
     if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
@@ -1943,38 +1919,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           geoLat: cleaned.geoLat || '',
           geoLon: cleaned.geoLon || '',
         } : item),
-      }));
-    } catch (error) {
-      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось стандартизовать адрес', variant: 'error' });
-    }
-  };
-
-  const suggestAddressesByDaData = async (field: 'registrationAddress' | 'actualAddress') => {
-    const raw = clientFormState[field]?.trim();
-    if (!raw) return;
-    try {
-      const suggestions = await apiService.suggestClientAddresses(raw, 7);
-      const values = (suggestions ?? []).map((item) => item.value).filter(Boolean);
-      if (field === 'registrationAddress') setRegistrationAddressSuggestions(values);
-      else setActualAddressSuggestions(values);
-    } catch (error) {
-      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось получить подсказки адресов', variant: 'error' });
-    }
-  };
-
-  const cleanAddressByDaData = async (field: 'registrationAddress' | 'actualAddress') => {
-    const raw = clientFormState[field]?.trim();
-    if (!raw) return;
-    try {
-      const cleaned = await apiService.cleanAddress(raw);
-      setClientFormState((prev) => ({
-        ...prev,
-        [field]: cleaned.result || raw,
-        [field === 'registrationAddress' ? 'registrationAddressPostalCode' : 'actualAddressPostalCode']: cleaned.postalCode || '',
-        [field === 'registrationAddress' ? 'registrationAddressFiasId' : 'actualAddressFiasId']: cleaned.fiasId || '',
-        [field === 'registrationAddress' ? 'registrationAddressKladrId' : 'actualAddressKladrId']: cleaned.kladrId || '',
-        [field === 'registrationAddress' ? 'registrationAddressGeoLat' : 'actualAddressGeoLat']: cleaned.geoLat || '',
-        [field === 'registrationAddress' ? 'registrationAddressGeoLon' : 'actualAddressGeoLon']: cleaned.geoLon || '',
       }));
     } catch (error) {
       await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось стандартизовать адрес', variant: 'error' });
