@@ -420,7 +420,7 @@ const ADDRESS_TYPE_OPTIONS = [
   { value: 'other', label: 'Иной адрес' },
 ] as const;
 
-const DATE_INPUT_CLASS = 'w-40 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
+const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
 
 const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; label: string }> = [
   { value: 'never_married', label: 'Никогда не состоял(а) в браке' },
