@@ -264,12 +264,35 @@ interface ClientProfessionItem {
 interface ClientWorkplaceItem {
   organizationName: string;
   position: string;
+  startDate: string;
+  endDate: string;
 }
 
 interface ClientRelativeItem {
   relation: string;
   fullName: string;
   birthYear: string;
+}
+
+interface ClientBirthCertificateItem {
+  series: string;
+  number: string;
+  issueDate: string;
+  issuedBy: string;
+  actRecordNumber: string;
+  childFullName: string;
+}
+
+interface ClientMilitaryIdItem {
+  series: string;
+  number: string;
+  issueDate: string;
+  issuedBy: string;
+  category: string;
+  rank: string;
+  vusCode: string;
+  fitnessCategory: string;
+  militaryCommissariat: string;
 }
 
 interface ClientPassportItem {
@@ -286,6 +309,7 @@ interface ClientPassportItem {
 
 interface ClientAddressItem {
   type: string;
+  additionalTypes: string[];
   sourceQuery: string;
   fullAddress: string;
   postalCode: string;
@@ -293,6 +317,8 @@ interface ClientAddressItem {
   kladrId: string;
   geoLat: string;
   geoLon: string;
+  validFrom: string;
+  validTo: string;
 }
 
 interface ClientExtendedProfile {
@@ -336,6 +362,8 @@ interface ClientExtendedProfile {
   passports: string[];
   birthCertificates: string[];
   militaryIds: string[];
+  birthCertificateEntries: ClientBirthCertificateItem[];
+  militaryIdEntries: ClientMilitaryIdItem[];
   passportEntries: ClientPassportItem[];
   addressEntries: ClientAddressItem[];
   comment: string;
@@ -346,8 +374,10 @@ const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
 const createEmptyEducation = (): ClientEducationItem => ({ institution: '', specialty: '', diplomaNumber: '', oksoCode: '' });
 const createEmptyProfession = (): ClientProfessionItem => ({ profession: '', okpdtrCode: '' });
-const createEmptyWorkplace = (): ClientWorkplaceItem => ({ organizationName: '', position: '' });
+const createEmptyWorkplace = (): ClientWorkplaceItem => ({ organizationName: '', position: '', startDate: '', endDate: '' });
 const createEmptyRelative = (): ClientRelativeItem => ({ relation: '', fullName: '', birthYear: '' });
+const createEmptyBirthCertificateEntry = (): ClientBirthCertificateItem => ({ series: '', number: '', issueDate: '', issuedBy: '', actRecordNumber: '', childFullName: '' });
+const createEmptyMilitaryIdEntry = (): ClientMilitaryIdItem => ({ series: '', number: '', issueDate: '', issuedBy: '', category: '', rank: '', vusCode: '', fitnessCategory: '', militaryCommissariat: '' });
 const createEmptyPassportEntry = (): ClientPassportItem => ({
   series: '',
   number: '',
@@ -360,7 +390,8 @@ const createEmptyPassportEntry = (): ClientPassportItem => ({
   validTo: '',
 });
 const createEmptyAddressEntry = (): ClientAddressItem => ({
-  type: 'Регистрация',
+  type: 'registration',
+  additionalTypes: [],
   sourceQuery: '',
   fullAddress: '',
   postalCode: '',
@@ -368,6 +399,8 @@ const createEmptyAddressEntry = (): ClientAddressItem => ({
   kladrId: '',
   geoLat: '',
   geoLon: '',
+  validFrom: '',
+  validTo: '',
 });
 
 const CITIZENSHIP_OPTIONS: Array<{ value: Exclude<ClientCitizenship, ''>; label: string }> = [
@@ -377,6 +410,17 @@ const CITIZENSHIP_OPTIONS: Array<{ value: Exclude<ClientCitizenship, ''>; label:
   { value: 'stateless', label: 'Лицо без гражданства' },
   { value: 'other', label: 'Иное' },
 ];
+
+const ADDRESS_TYPE_OPTIONS = [
+  { value: 'registration', label: 'Адрес регистрации' },
+  { value: 'actual', label: 'Фактический адрес' },
+  { value: 'legal', label: 'Юридический адрес' },
+  { value: 'temporary', label: 'Временная регистрация' },
+  { value: 'mailing', label: 'Почтовый адрес' },
+  { value: 'other', label: 'Иной адрес' },
+] as const;
+
+const DATE_INPUT_CLASS = 'w-40 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
 
 const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; label: string }> = [
   { value: 'never_married', label: 'Никогда не состоял(а) в браке' },
@@ -454,6 +498,8 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     passports: [''],
     birthCertificates: [''],
     militaryIds: [''],
+    birthCertificateEntries: [createEmptyBirthCertificateEntry()],
+    militaryIdEntries: [createEmptyMilitaryIdEntry()],
     passportEntries: [createEmptyPassportEntry()],
     addressEntries: [createEmptyAddressEntry()],
     comment: '',
@@ -501,6 +547,8 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
       passports: normalizeList(parsed.passports ?? defaultProfile.passports),
       birthCertificates: normalizeList(parsed.birthCertificates ?? defaultProfile.birthCertificates),
       militaryIds: normalizeList(parsed.militaryIds ?? defaultProfile.militaryIds),
+      birthCertificateEntries: (parsed.birthCertificateEntries ?? defaultProfile.birthCertificateEntries).map((item) => ({ ...createEmptyBirthCertificateEntry(), ...item })),
+      militaryIdEntries: (parsed.militaryIdEntries ?? defaultProfile.militaryIdEntries).map((item) => ({ ...createEmptyMilitaryIdEntry(), ...item })),
       passportEntries: (parsed.passportEntries ?? [
         {
           ...createEmptyPassportEntry(),
@@ -516,7 +564,7 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
       addressEntries: (parsed.addressEntries ?? [
         {
           ...createEmptyAddressEntry(),
-          type: 'Регистрация',
+          type: 'registration',
           sourceQuery: parsed.registrationAddress ?? defaultProfile.registrationAddress,
           fullAddress: parsed.registrationAddress ?? defaultProfile.registrationAddress,
           postalCode: parsed.registrationAddressPostalCode ?? defaultProfile.registrationAddressPostalCode,
@@ -527,7 +575,7 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
         },
         {
           ...createEmptyAddressEntry(),
-          type: 'Фактический',
+          type: 'actual',
           sourceQuery: parsed.actualAddress ?? defaultProfile.actualAddress,
           fullAddress: parsed.actualAddress ?? defaultProfile.actualAddress,
           postalCode: parsed.actualAddressPostalCode ?? defaultProfile.actualAddressPostalCode,
@@ -536,7 +584,7 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
           geoLat: parsed.actualAddressGeoLat ?? defaultProfile.actualAddressGeoLat,
           geoLon: parsed.actualAddressGeoLon ?? defaultProfile.actualAddressGeoLon,
         },
-      ]).map((item) => ({ ...createEmptyAddressEntry(), ...item })),
+      ]).map((item) => ({ ...createEmptyAddressEntry(), ...item, additionalTypes: Array.isArray((item as ClientAddressItem).additionalTypes) ? (item as ClientAddressItem).additionalTypes : [] })),
       comment: parsed.comment ?? '',
       legacyNotes: parsed.legacyNotes ?? defaultProfile.legacyNotes,
     };
@@ -554,6 +602,8 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     passports: normalizeList(profile.passports),
     birthCertificates: normalizeList(profile.birthCertificates),
     militaryIds: normalizeList(profile.militaryIds),
+    birthCertificateEntries: profile.birthCertificateEntries,
+    militaryIdEntries: profile.militaryIdEntries,
     passportEntries: profile.passportEntries,
     addressEntries: profile.addressEntries,
     comment: profile.comment.trim(),
@@ -627,6 +677,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     passports: [''],
     birthCertificates: [''],
     militaryIds: [''],
+    birthCertificateEntries: [createEmptyBirthCertificateEntry()],
+    militaryIdEntries: [createEmptyMilitaryIdEntry()],
     passportEntries: [createEmptyPassportEntry()],
     addressEntries: [createEmptyAddressEntry()],
     comment: '',
@@ -1185,6 +1237,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       passports: profile.passports.length > 0 ? profile.passports : [''],
       birthCertificates: profile.birthCertificates.length > 0 ? profile.birthCertificates : [''],
       militaryIds: profile.militaryIds.length > 0 ? profile.militaryIds : [''],
+      birthCertificateEntries: profile.birthCertificateEntries.length > 0 ? profile.birthCertificateEntries : [createEmptyBirthCertificateEntry()],
+      militaryIdEntries: profile.militaryIdEntries.length > 0 ? profile.militaryIdEntries : [createEmptyMilitaryIdEntry()],
       passportEntries: profile.passportEntries.length > 0 ? profile.passportEntries : [createEmptyPassportEntry()],
       addressEntries: profile.addressEntries.length > 0 ? profile.addressEntries : [createEmptyAddressEntry()],
       comment: profile.comment,
@@ -1804,6 +1858,60 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }));
   };
 
+  const toggleAddressAdditionalType = (index: number, type: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      addressEntries: prev.addressEntries.map((item, i) => {
+        if (i !== index) return item;
+        const has = item.additionalTypes.includes(type);
+        return {
+          ...item,
+          additionalTypes: has ? item.additionalTypes.filter((value) => value !== type) : [...item.additionalTypes, type],
+        };
+      }),
+    }));
+  };
+
+  const updateBirthCertificateEntry = (index: number, key: keyof ClientBirthCertificateItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      birthCertificateEntries: prev.birthCertificateEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addBirthCertificateEntry = () => {
+    setClientFormState((prev) => ({ ...prev, birthCertificateEntries: [...prev.birthCertificateEntries, createEmptyBirthCertificateEntry()] }));
+  };
+
+  const removeBirthCertificateEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      birthCertificateEntries: prev.birthCertificateEntries.filter((_, i) => i !== index).length > 0
+        ? prev.birthCertificateEntries.filter((_, i) => i !== index)
+        : [createEmptyBirthCertificateEntry()],
+    }));
+  };
+
+  const updateMilitaryIdEntry = (index: number, key: keyof ClientMilitaryIdItem, value: string) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      militaryIdEntries: prev.militaryIdEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const addMilitaryIdEntry = () => {
+    setClientFormState((prev) => ({ ...prev, militaryIdEntries: [...prev.militaryIdEntries, createEmptyMilitaryIdEntry()] }));
+  };
+
+  const removeMilitaryIdEntry = (index: number) => {
+    setClientFormState((prev) => ({
+      ...prev,
+      militaryIdEntries: prev.militaryIdEntries.filter((_, i) => i !== index).length > 0
+        ? prev.militaryIdEntries.filter((_, i) => i !== index)
+        : [createEmptyMilitaryIdEntry()],
+    }));
+  };
+
   const suggestAddressEntryByDaData = async (index: number) => {
     const entry = clientFormState.addressEntries[index];
     const raw = (entry?.sourceQuery || entry?.fullAddress || '').trim();
@@ -1882,8 +1990,14 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     setClientFormSaving(true);
     try {
       const primaryPassport = clientFormState.passportEntries[0] ?? createEmptyPassportEntry();
-      const registrationEntry = clientFormState.addressEntries.find((entry) => entry.type.toLowerCase().includes('рег')) ?? clientFormState.addressEntries[0] ?? createEmptyAddressEntry();
-      const actualEntry = clientFormState.addressEntries.find((entry) => entry.type.toLowerCase().includes('факт')) ?? clientFormState.addressEntries[1] ?? createEmptyAddressEntry();
+      const registrationEntry = clientFormState.addressEntries.find((entry) => {
+        const type = entry.type.toLowerCase();
+        return type.includes('рег') || type.includes('registration') || entry.additionalTypes.includes('registration');
+      }) ?? clientFormState.addressEntries[0] ?? createEmptyAddressEntry();
+      const actualEntry = clientFormState.addressEntries.find((entry) => {
+        const type = entry.type.toLowerCase();
+        return type.includes('факт') || type.includes('actual') || entry.additionalTypes.includes('actual');
+      }) ?? clientFormState.addressEntries[1] ?? createEmptyAddressEntry();
       const profile: ClientExtendedProfile = {
         kind: clientFormState.kind,
         lastName: clientFormState.lastName,
@@ -1925,6 +2039,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         passports: clientFormState.passports,
         birthCertificates: clientFormState.birthCertificates,
         militaryIds: clientFormState.militaryIds,
+        birthCertificateEntries: clientFormState.birthCertificateEntries,
+        militaryIdEntries: clientFormState.militaryIdEntries,
         passportEntries: clientFormState.passportEntries,
         addressEntries: clientFormState.addressEntries,
         comment: clientFormState.comment,
@@ -2192,7 +2308,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Дата рождения</label>
-                      <input type="date" name="birthDate" value={clientFormState.birthDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <input type="date" name="birthDate" value={clientFormState.birthDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
                     </div>
                   </div>
 
@@ -2271,11 +2387,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} placeholder="Серия паспорта" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                         <input value={passport.number} onChange={(e) => updatePassportEntry(index, 'number', e.target.value)} placeholder="Номер паспорта" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-gray-500">Дата выдачи</span>
+                          <input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                        </div>
                         <input value={passport.departmentCode} onChange={(e) => updatePassportEntry(index, 'departmentCode', e.target.value)} placeholder="Код подразделения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} placeholder="Действует с" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} placeholder="Действует до" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} placeholder="Место рождения (как в паспорте)" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg lg:col-span-2" />
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-gray-500">Срок действия: с</span>
+                          <input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                        </div>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-gray-500">Срок действия: по</span>
+                          <input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                        </div>
+                        <input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} placeholder="Место рождения (как в паспорте)" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                         <input value={passport.birthPlaceFias} onChange={(e) => updatePassportEntry(index, 'birthPlaceFias', e.target.value)} placeholder="Место рождения (ФИАС)" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                       </div>
                       <div className="mt-3">
@@ -2296,9 +2421,33 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         <button type="button" onClick={() => removeAddressEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
-                        <input value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} placeholder="Тип адреса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <label className="text-sm text-gray-700">
+                          <span className="mb-1 block">Основной тип</span>
+                          <select value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                            {ADDRESS_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </label>
+                        <div>
+                          <span className="mb-1 block text-sm text-gray-700">Дополнительно относится к</span>
+                          <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 p-2">
+                            {ADDRESS_TYPE_OPTIONS.map((option) => (
+                              <label key={option.value} className="inline-flex items-center gap-1 text-xs text-gray-700">
+                                <input type="checkbox" checked={entry.additionalTypes.includes(option.value)} onChange={() => toggleAddressAdditionalType(index, option.value)} disabled={!clientPermissions.canEdit} />
+                                {option.label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                         <input value={entry.sourceQuery} onChange={(e) => updateAddressEntry(index, 'sourceQuery', e.target.value)} placeholder="Строка ввода для поиска" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} placeholder="Полный адрес" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                        <input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} placeholder="Полный адрес" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-gray-500">Действует с</span>
+                          <input type="date" value={entry.validFrom} onChange={(e) => updateAddressEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                        </div>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-gray-500">Действует по</span>
+                          <input type="date" value={entry.validTo} onChange={(e) => updateAddressEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                        </div>
                         <input value={entry.postalCode} onChange={(e) => updateAddressEntry(index, 'postalCode', e.target.value)} placeholder="Индекс" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                         <input value={entry.fiasId} onChange={(e) => updateAddressEntry(index, 'fiasId', e.target.value)} placeholder="FIAS ID" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                         <input value={entry.kladrId} onChange={(e) => updateAddressEntry(index, 'kladrId', e.target.value)} placeholder="КЛАДР" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
@@ -2386,9 +2535,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Места работы и должности</label>
                 <div className="space-y-2">
                   {clientFormState.workplaces.map((item, index) => (
-                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-2">
+                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-4">
                       <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                       <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                      <input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, workplaces: [...prev.workplaces, createEmptyWorkplace()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить место работы</button>
@@ -2406,7 +2557,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           ...prev,
                           workplaces: prev.workplaces.length
                             ? prev.workplaces.map((w, i) => (i === prev.workplaces.length - 1 ? { ...w, organizationName: created.shortName } : w))
-                            : [{ organizationName: created.shortName, position: "" }],
+                            : [{ organizationName: created.shortName, position: "", startDate: "", endDate: "" }],
                         }));
                       } catch (error) {
                         await alert({ title: 'Организация', description: error instanceof Error ? error.message : 'Не удалось создать организацию', variant: 'error' });
@@ -2436,20 +2587,52 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               </div>
               )}
 
-              {clientFormState.kind === 'individual' && activeProfileGroup === 'documents' && DOCUMENT_FIELD_META.map((documentField) => (
-                <div key={documentField.key} className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{documentField.label}</label>
-                  <div className="space-y-2">
-                    {clientFormState[documentField.key].map((value, index) => (
-                      <div key={`${documentField.key}-${index}`} className="flex gap-2">
-                        <input value={value} onChange={(event) => updateListField(documentField.key, index, event.target.value)} disabled={!clientPermissions.canEdit} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
-                        <button type="button" onClick={() => removeListFieldRow(documentField.key, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => addListFieldRow(documentField.key)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
+              {clientFormState.kind === 'individual' && activeProfileGroup === 'documents' && (
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="block text-sm font-medium text-gray-700">Свидетельства о рождении</label>
+                      <button type="button" onClick={addBirthCertificateEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить свидетельство</button>
+                    </div>
+                    <div className="space-y-2">
+                      {clientFormState.birthCertificateEntries.map((doc, index) => (
+                        <div key={`birth-certificate-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
+                          <input value={doc.series} onChange={(e) => updateBirthCertificateEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.number} onChange={(e) => updateBirthCertificateEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input type="date" value={doc.issueDate} onChange={(e) => updateBirthCertificateEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                          <input value={doc.actRecordNumber} onChange={(e) => updateBirthCertificateEntry(index, 'actRecordNumber', e.target.value)} placeholder="№ актовой записи" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.childFullName} onChange={(e) => updateBirthCertificateEntry(index, 'childFullName', e.target.value)} placeholder="ФИО ребенка" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <button type="button" onClick={() => removeBirthCertificateEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <input value={doc.issuedBy} onChange={(e) => updateBirthCertificateEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдано" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="block text-sm font-medium text-gray-700">Военные билеты</label>
+                      <button type="button" onClick={addMilitaryIdEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить военный билет</button>
+                    </div>
+                    <div className="space-y-2">
+                      {clientFormState.militaryIdEntries.map((doc, index) => (
+                        <div key={`military-id-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
+                          <input value={doc.series} onChange={(e) => updateMilitaryIdEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.number} onChange={(e) => updateMilitaryIdEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input type="date" value={doc.issueDate} onChange={(e) => updateMilitaryIdEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                          <input value={doc.rank} onChange={(e) => updateMilitaryIdEntry(index, 'rank', e.target.value)} placeholder="Воинское звание" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.category} onChange={(e) => updateMilitaryIdEntry(index, 'category', e.target.value)} placeholder="Категория запаса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.fitnessCategory} onChange={(e) => updateMilitaryIdEntry(index, 'fitnessCategory', e.target.value)} placeholder="Категория годности" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <input value={doc.vusCode} onChange={(e) => updateMilitaryIdEntry(index, 'vusCode', e.target.value)} placeholder="Код ВУС" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                          <button type="button" onClick={() => removeMilitaryIdEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <input value={doc.issuedBy} onChange={(e) => updateMilitaryIdEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                          <input value={doc.militaryCommissariat} onChange={(e) => updateMilitaryIdEntry(index, 'militaryCommissariat', e.target.value)} placeholder="Военный комиссариат" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'poa' && (
               <div className="md:col-span-2">
@@ -2490,13 +2673,15 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               </div>
               )}
 
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>
-                <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('additionalInfo')} />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Исторические заметки (не удаляются)</label>
-                <textarea name="legacyNotes" value={clientFormState.legacyNotes} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('notes') || 'Заметки'} />
+              <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>
+                  <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('additionalInfo')} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Исторические заметки (не удаляются)</label>
+                  <textarea name="legacyNotes" value={clientFormState.legacyNotes} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('notes') || 'Заметки'} />
+                </div>
               </div>
               <div className="md:col-span-2 flex items-center gap-3">
                 <input
