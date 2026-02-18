@@ -374,7 +374,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.ClientId, e.Type, e.IsPrimary }).HasDatabaseName("IX_AddressRecords_ClientId_Type_IsPrimary");
             entity.HasIndex(e => new { e.LegalEntityId, e.Type, e.IsPrimary }).HasDatabaseName("IX_AddressRecords_LegalEntityId_Type_IsPrimary");
             entity.HasIndex(e => e.FiasId).HasDatabaseName("IX_AddressRecords_FiasId");
-            entity.HasCheckConstraint("CK_AddressRecords_Owner", '("ClientId" IS NOT NULL AND "LegalEntityId" IS NULL) OR ("ClientId" IS NULL AND "LegalEntityId" IS NOT NULL)');
+            entity.HasCheckConstraint("CK_AddressRecords_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
         });
 
         // ------------------ Client ------------------
