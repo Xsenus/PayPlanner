@@ -156,7 +156,7 @@ function AppContent() {
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions],
+    [permissions, isAdminRole],
   );
 
   const canViewTab = useCallback(

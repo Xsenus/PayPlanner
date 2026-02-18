@@ -44,8 +44,13 @@ export interface UserSettingDto {
 }
 
 export interface LegacyAddressMigrationDetail {
-  legalEntityId: number;
-  legalEntityName: string;
+  ownerType?: 'legal' | 'client' | string;
+  ownerId?: number;
+  ownerName?: string;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
+  clientId?: number | null;
+  clientName?: string | null;
   legacyAddress?: string | null;
   normalizedAddress?: string | null;
   action: 'Added' | 'Updated' | 'DuplicateSkipped' | 'SkippedEmpty' | 'Failed' | string;
@@ -56,6 +61,8 @@ export interface LegacyAddressMigrationDetail {
 
 export interface LegacyAddressMigrationResult {
   scanned: number;
+  scannedLegalEntities?: number;
+  scannedClients?: number;
   added: number;
   updated: number;
   duplicateSkipped: number;
