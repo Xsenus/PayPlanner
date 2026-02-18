@@ -1,5 +1,78 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 
+export type AddressType = 'Registration' | 'Actual' | 'Legal' | 'Other';
+
+export interface AddressRecord {
+  id: number;
+  type: number;
+  value: string;
+  unrestrictedValue?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  regionWithType?: string | null;
+  cityWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  flat?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
+  isPrimary: boolean;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface ClientReferenceItem {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface ClientPassport {
+  id: number;
+  clientId: number;
+  series?: string | null;
+  number?: string | null;
+  issuedBy?: string | null;
+  issuedAt?: string | null;
+  departmentCode?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface ClientPassportInput {
+  series?: string | null;
+  number?: string | null;
+  issuedBy?: string | null;
+  issuedAt?: string | null;
+  departmentCode?: string | null;
+}
+
+export interface PowerOfAttorney {
+  id: number;
+  clientId: number;
+  number: string;
+  issuedAt: string;
+  validUntil?: string | null;
+  issuer?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface PowerOfAttorneyInput {
+  number: string;
+  issuedAt: string;
+  validUntil?: string | null;
+  issuer?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+}
+
 export interface LegalEntityClientLink {
   id: number;
   name: string;
@@ -30,6 +103,7 @@ export interface LegalEntitySummary {
   createdAt: string;
   updatedAt?: string | null;
   clients?: LegalEntityClientLink[];
+  addresses?: AddressRecord[];
 }
 
 export interface LegalEntityDetail extends LegalEntitySummary {
@@ -84,6 +158,7 @@ export interface Client {
   clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
   contracts?: Contract[];
+  addresses?: AddressRecord[];
 }
 
 export interface ClientInput {
@@ -96,6 +171,47 @@ export interface ClientInput {
   isActive: boolean;
   legalEntityId?: number | null;
   clientStatusId?: number | null;
+}
+
+export interface DadataAddressSuggestion {
+  value: string;
+  unrestrictedValue?: string | null;
+  postalCode?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
+}
+
+export interface CleanedAddress {
+  source?: string | null;
+  result: string;
+  postalCode?: string | null;
+  country?: string | null;
+  countryIsoCode?: string | null;
+  federalDistrict?: string | null;
+  regionWithType?: string | null;
+  cityWithType?: string | null;
+  settlementWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  block?: string | null;
+  flat?: string | null;
+  fiasId?: string | null;
+  fiasLevel?: string | null;
+  kladrId?: string | null;
+  okato?: string | null;
+  oktmo?: string | null;
+  taxOffice?: string | null;
+  taxOfficeLegal?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
+  qc?: number | null;
+  qcComplete?: number | null;
+  qcHouse?: number | null;
+  qcGeo?: number | null;
+  unparsedParts?: string | null;
+  timezone?: string | null;
 }
 
 export interface ClientCase {

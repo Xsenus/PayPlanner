@@ -73,6 +73,21 @@ namespace PayPlanner.Api.Models
         public string Notes { get; set; } = string.Empty;
 
         /// <summary>
+        /// Нормализованные адреса клиента (регистрация, фактический и др.).
+        /// </summary>
+        public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
+
+        /// <summary>
+        /// Паспортные реквизиты клиента (отдельная сущность).
+        /// </summary>
+        public ClientPassport? Passport { get; set; }
+
+        /// <summary>
+        /// Доверенности клиента.
+        /// </summary>
+        public ICollection<PowerOfAttorney> PowersOfAttorney { get; set; } = new List<PowerOfAttorney>();
+
+        /// <summary>
         /// Коллекция платежей, связанных с клиентом.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();

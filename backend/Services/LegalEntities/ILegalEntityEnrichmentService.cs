@@ -1,44 +1,101 @@
-namespace PayPlanner.Api.Services.LegalEntities
+namespace PayPlanner.Api.Services.LegalEntities;
+
+public interface ILegalEntityEnrichmentService
 {
-    public interface ILegalEntityEnrichmentService
-    {
-        /// <summary>
-        /// Стандартизация почтового адреса (clean/address).
-        /// </summary>
-        Task<CleanedAddress?> CleanAddressAsync(string rawAddress, CancellationToken cancellationToken);
+    Task<IReadOnlyList<DadataAddressSuggestion>> SuggestAddressesAsync(string query, int limit, CancellationToken cancellationToken);
 
-        /// <summary>
-        /// Стандартизация email (clean/email).
-        /// </summary>
-        Task<CleanedEmail?> CleanEmailAsync(string rawEmail, CancellationToken cancellationToken);
+    /// <summary>
+    /// РЎС‚Р°РЅРґР°СЂС‚РёР·Р°С†РёСЏ РїРѕС‡С‚РѕРІРѕРіРѕ Р°РґСЂРµСЃР° (clean/address).
+    /// </summary>
+    Task<CleanedAddress?> CleanAddressAsync(string rawAddress, CancellationToken cancellationToken);
 
-        /// <summary>
-        /// Стандартизация телефона (clean/phone).
-        /// </summary>
-        Task<CleanedPhone?> CleanPhoneAsync(string rawPhone, CancellationToken cancellationToken);
+    /// <summary>
+    /// РЎС‚Р°РЅРґР°СЂС‚РёР·Р°С†РёСЏ email (clean/email).
+    /// </summary>
+    Task<CleanedEmail?> CleanEmailAsync(string rawEmail, CancellationToken cancellationToken);
 
-        /// <summary>
-        /// Ищет организацию по ИНН или ОГРН (опционально филиал по КПП) и возвращает расширенные данные.
-        /// </summary>
-        Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken);
+    /// <summary>
+    /// РЎС‚Р°РЅРґР°СЂС‚РёР·Р°С†РёСЏ С‚РµР»РµС„РѕРЅР° (clean/phone).
+    /// </summary>
+    Task<CleanedPhone?> CleanPhoneAsync(string rawPhone, CancellationToken cancellationToken);
 
-        Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit,
-            CancellationToken cancellationToken);
-    }
+    /// <summary>
+    /// РС‰РµС‚ РѕСЂРіР°РЅРёР·Р°С†РёСЋ РїРѕ РРќРќ РёР»Рё РћР“Р Рќ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ С„РёР»РёР°Р» РїРѕ РљРџРџ) Рё РІРѕР·РІСЂР°С‰Р°РµС‚ СЂР°СЃС€РёСЂРµРЅРЅС‹Рµ РґР°РЅРЅС‹Рµ.
+    /// </summary>
+    Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken);
 
-    public sealed record LegalEntitySuggestion(string ShortName, string? FullName, string? Inn, string? Kpp,
-        string? Ogrn, string? Address, string? Phone, string? Email, string? ManagementName);
+    Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit, CancellationToken cancellationToken);
 
-    public sealed record LegalEntityDetails(string ShortName, string? FullName, string? Inn, string? Kpp, string? Ogrn,
-        string? OpfShort, string? OpfFull, string? Status, DateTimeOffset? RegistrationDate,
-        DateTimeOffset? LiquidationDate, string? Okved, string? OkvedType, int? BranchCount, string? ManagementName,
-        string? ManagementPost, string? AddressValue, string? AddressUnrestrictedValue);
-
-    public sealed record CleanedAddress(string Result, string? PostalCode, string? Country, string? RegionWithType,
-        string? CityWithType, string? StreetWithType, string? House, string? Flat, string? FiasId, string? KladrId,
-        string? GeoLat, string? GeoLon);
-
-    public sealed record CleanedPhone(string Phone, string? Country, string? City, string? Provider, int? Qc);
-
-    public sealed record CleanedEmail(string Email, string? Type, int? Qc);
+    public sealed record DadataAddressSuggestion(
+        string Value,
+        string? UnrestrictedValue,
+        string? PostalCode,
+        string? FiasId,
+        string? KladrId,
+        string? GeoLat,
+        string? GeoLon);
 }
+
+public sealed record LegalEntitySuggestion(
+    string ShortName,
+    string? FullName,
+    string? Inn,
+    string? Kpp,
+    string? Ogrn,
+    string? Address,
+    string? Phone,
+    string? Email,
+    string? ManagementName);
+
+public sealed record LegalEntityDetails(
+    string ShortName,
+    string? FullName,
+    string? Inn,
+    string? Kpp,
+    string? Ogrn,
+    string? OpfShort,
+    string? OpfFull,
+    string? Status,
+    DateTimeOffset? RegistrationDate,
+    DateTimeOffset? LiquidationDate,
+    string? Okved,
+    string? OkvedType,
+    int? BranchCount,
+    string? ManagementName,
+    string? ManagementPost,
+    string? AddressValue,
+    string? AddressUnrestrictedValue);
+
+public sealed record CleanedAddress(
+    string? Source,
+    string Result,
+    string? PostalCode,
+    string? Country,
+    string? CountryIsoCode,
+    string? FederalDistrict,
+    string? RegionWithType,
+    string? CityWithType,
+    string? SettlementWithType,
+    string? StreetWithType,
+    string? House,
+    string? Block,
+    string? Flat,
+    string? FiasId,
+    string? FiasLevel,
+    string? KladrId,
+    string? Okato,
+    string? Oktmo,
+    string? TaxOffice,
+    string? TaxOfficeLegal,
+    string? GeoLat,
+    string? GeoLon,
+    int? Qc,
+    int? QcComplete,
+    int? QcHouse,
+    int? QcGeo,
+    string? UnparsedParts,
+    string? Timezone);
+
+public sealed record CleanedPhone(string Phone, string? Country, string? City, string? Provider, int? Qc);
+
+public sealed record CleanedEmail(string Email, string? Type, int? Qc);

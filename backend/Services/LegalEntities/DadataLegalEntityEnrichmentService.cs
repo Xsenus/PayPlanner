@@ -44,7 +44,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 return default;
             }
 
-            // cleaner îæèäàåò ìàññèâ ñòðîê: [ "value" ]
+            // cleaner Ã®Ã¦Ã¨Ã¤Ã Ã¥Ã² Ã¬Ã Ã±Ã±Ã¨Ã¢ Ã±Ã²Ã°Ã®Ãª: [ "value" ]
             var url = Combine(_opt.CleanerUrl, kind); // e.g. .../clean/address
             using var req = new HttpRequestMessage(HttpMethod.Post, url)
             {
@@ -84,18 +84,34 @@ namespace PayPlanner.Api.Services.LegalEntities
 
         private static CleanedAddress? MapAddress(JsonElement e) =>
             new(
+                Source: e.GetPropertyOrDefault("source"),
                 Result: e.GetPropertyOrDefault("result"),
                 PostalCode: e.GetPropertyOrDefault("postal_code"),
                 Country: e.GetPropertyOrDefault("country"),
+                CountryIsoCode: e.GetPropertyOrDefault("country_iso_code"),
+                FederalDistrict: e.GetPropertyOrDefault("federal_district"),
                 RegionWithType: e.GetPropertyOrDefault("region_with_type"),
                 CityWithType: e.GetPropertyOrDefault("city_with_type"),
+                SettlementWithType: e.GetPropertyOrDefault("settlement_with_type"),
                 StreetWithType: e.GetPropertyOrDefault("street_with_type"),
                 House: e.GetPropertyOrDefault("house"),
+                Block: e.GetPropertyOrDefault("block"),
                 Flat: e.GetPropertyOrDefault("flat"),
                 FiasId: e.GetPropertyOrDefault("fias_id"),
+                FiasLevel: e.GetPropertyOrDefault("fias_level"),
                 KladrId: e.GetPropertyOrDefault("kladr_id"),
+                Okato: e.GetPropertyOrDefault("okato"),
+                Oktmo: e.GetPropertyOrDefault("oktmo"),
+                TaxOffice: e.GetPropertyOrDefault("tax_office"),
+                TaxOfficeLegal: e.GetPropertyOrDefault("tax_office_legal"),
                 GeoLat: e.GetPropertyOrDefault("geo_lat"),
-                GeoLon: e.GetPropertyOrDefault("geo_lon")
+                GeoLon: e.GetPropertyOrDefault("geo_lon"),
+                Qc: e.GetIntOrNull("qc"),
+                QcComplete: e.GetIntOrNull("qc_complete"),
+                QcHouse: e.GetIntOrNull("qc_house"),
+                QcGeo: e.GetIntOrNull("qc_geo"),
+                UnparsedParts: e.GetPropertyOrDefault("unparsed_parts"),
+                Timezone: e.GetPropertyOrDefault("timezone")
             );
 
         private static CleanedEmail? MapEmail(JsonElement e)
@@ -134,7 +150,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 resp = await _http.SendAsync(req.Clone(), ct);
                 if (IsTransient(resp) && attempt < maxAttempts)
                 {
-                    var delayMs = 200 * attempt * attempt; // êâàäðàòè÷íàÿ ïàóçà
+                    var delayMs = 200 * attempt * attempt; // ÃªÃ¢Ã Ã¤Ã°Ã Ã²Ã¨Ã·Ã­Ã Ã¿ Ã¯Ã Ã³Ã§Ã 
                     _logger.LogDebug("Retry {Attempt} for {Url}, status {Code}", attempt, req.RequestUri, (int)resp.StatusCode);
                     await Task.Delay(delayMs, ct);
                     continue;
@@ -202,6 +218,59 @@ namespace PayPlanner.Api.Services.LegalEntities
                 AddressValue: s.Address?.Value,
                 AddressUnrestrictedValue: s.Address?.UnrestrictedValue
             );
+        }
+
+
+        public async Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(
+            string query, int limit, CancellationToken ct)
+        {
+            var token = _opt.ApiKey;
+            var payloadQuery = query?.Trim();
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(payloadQuery))
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+
+            var effectiveLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
+            var url = Combine(_opt.BaseUrl, "suggest/address");
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent(new { query = payloadQuery, count = effectiveLimit })
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
+
+            try
+            {
+                using var resp = await SendWithRetriesAsync(req, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("DaData address suggest failed: {Code} {Reason}",
+                        (int)resp.StatusCode, resp.ReasonPhrase);
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+                }
+
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                var result = await JsonSerializer.DeserializeAsync<AddressSuggestResponse>(stream, JsonOptions, ct);
+                if (result?.Suggestions == null || result.Suggestions.Count == 0)
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+
+                return result.Suggestions
+                    .Select(s => new ILegalEntityEnrichmentService.DadataAddressSuggestion(
+                        s.Value ?? string.Empty,
+                        s.UnrestrictedValue,
+                        s.Data?.PostalCode,
+                        s.Data?.FiasId,
+                        s.Data?.KladrId,
+                        s.Data?.GeoLat,
+                        s.Data?.GeoLon))
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+                    .ToList();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DaData address suggest error");
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+            }
         }
 
         public async Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(
@@ -276,6 +345,42 @@ namespace PayPlanner.Api.Services.LegalEntities
             public PartyData? Data { get; set; }
             [JsonPropertyName("value")]
             public string? Value { get; set; }
+        }
+
+        private sealed class AddressSuggestResponse
+        {
+            [JsonPropertyName("suggestions")]
+            public List<AddressSuggestion> Suggestions { get; set; } = new();
+        }
+
+        private sealed class AddressSuggestion
+        {
+            [JsonPropertyName("value")]
+            public string? Value { get; set; }
+
+            [JsonPropertyName("unrestricted_value")]
+            public string? UnrestrictedValue { get; set; }
+
+            [JsonPropertyName("data")]
+            public AddressSuggestionData? Data { get; set; }
+        }
+
+        private sealed class AddressSuggestionData
+        {
+            [JsonPropertyName("postal_code")]
+            public string? PostalCode { get; set; }
+
+            [JsonPropertyName("fias_id")]
+            public string? FiasId { get; set; }
+
+            [JsonPropertyName("kladr_id")]
+            public string? KladrId { get; set; }
+
+            [JsonPropertyName("geo_lat")]
+            public string? GeoLat { get; set; }
+
+            [JsonPropertyName("geo_lon")]
+            public string? GeoLon { get; set; }
         }
 
         private sealed class PartyData
@@ -401,7 +506,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 clone.Content = new StringContent(sc.ReadAsString(), Encoding.UTF8, sc.Headers.ContentType?.MediaType);
             else if (req.Content != null)
             {
-                // óíèâåðñàëüíàÿ êîïèÿ
+                // Ã³Ã­Ã¨Ã¢Ã¥Ã°Ã±Ã Ã«Ã¼Ã­Ã Ã¿ ÃªÃ®Ã¯Ã¨Ã¿
                 var bytes = req.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
                 clone.Content = new ByteArrayContent(bytes);
                 foreach (var h in req.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);

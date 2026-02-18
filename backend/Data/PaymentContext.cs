@@ -273,6 +273,110 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
         });
 
+        // ------------------ ClientPassport ------------------
+        modelBuilder.Entity<ClientPassport>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Series).HasMaxLength(10);
+            entity.Property(e => e.Number).HasMaxLength(20);
+            entity.Property(e => e.IssuedBy).HasMaxLength(500);
+            entity.Property(e => e.DepartmentCode).HasMaxLength(20);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Client)
+                  .WithOne(c => c.Passport)
+                  .HasForeignKey<ClientPassport>(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.ClientId).IsUnique().HasDatabaseName("IX_ClientPassports_ClientId");
+        });
+
+        // ------------------ PowerOfAttorney ------------------
+        modelBuilder.Entity<PowerOfAttorney>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Issuer).HasMaxLength(300);
+            entity.Property(e => e.Notes).HasMaxLength(1500);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Client)
+                  .WithMany(c => c.PowersOfAttorney)
+                  .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ClientId, e.IsActive }).HasDatabaseName("IX_PowersOfAttorney_ClientId_IsActive");
+            entity.HasIndex(e => e.Number).HasDatabaseName("IX_PowersOfAttorney_Number");
+        });
+
+        // ------------------ OkinDictionaryItem ------------------
+        modelBuilder.Entity<OkinDictionaryItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(300).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique().HasDatabaseName("IX_OkinDictionaryItems_Code");
+            entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_OkinDictionaryItems_IsActive_Name");
+        });
+
+        // ------------------ OksoDictionaryItem ------------------
+        modelBuilder.Entity<OksoDictionaryItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Code).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(500).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique().HasDatabaseName("IX_OksoDictionaryItems_Code");
+            entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_OksoDictionaryItems_IsActive_Name");
+        });
+
+        // ------------------ OkpdtrDictionaryItem ------------------
+        modelBuilder.Entity<OkpdtrDictionaryItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Code).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(500).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique().HasDatabaseName("IX_OkpdtrDictionaryItems_Code");
+            entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_OkpdtrDictionaryItems_IsActive_Name");
+        });
+
+        // ------------------ AddressRecord ------------------
+        modelBuilder.Entity<AddressRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Type).HasConversion<int>();
+            entity.Property(e => e.Value).HasMaxLength(600).IsRequired();
+            entity.Property(e => e.UnrestrictedValue).HasMaxLength(600);
+            entity.Property(e => e.PostalCode).HasMaxLength(20);
+            entity.Property(e => e.Country).HasMaxLength(120);
+            entity.Property(e => e.RegionWithType).HasMaxLength(200);
+            entity.Property(e => e.CityWithType).HasMaxLength(200);
+            entity.Property(e => e.StreetWithType).HasMaxLength(200);
+            entity.Property(e => e.House).HasMaxLength(50);
+            entity.Property(e => e.Flat).HasMaxLength(50);
+            entity.Property(e => e.FiasId).HasMaxLength(60);
+            entity.Property(e => e.KladrId).HasMaxLength(60);
+            entity.Property(e => e.GeoLat).HasMaxLength(32);
+            entity.Property(e => e.GeoLon).HasMaxLength(32);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Client)
+                  .WithMany(c => c.Addresses)
+                  .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany(le => le.Addresses)
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_AddressRecords_ClientId");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_AddressRecords_LegalEntityId");
+            entity.HasIndex(e => new { e.ClientId, e.Type, e.IsPrimary }).HasDatabaseName("IX_AddressRecords_ClientId_Type_IsPrimary");
+            entity.HasIndex(e => new { e.LegalEntityId, e.Type, e.IsPrimary }).HasDatabaseName("IX_AddressRecords_LegalEntityId_Type_IsPrimary");
+            entity.HasIndex(e => e.FiasId).HasDatabaseName("IX_AddressRecords_FiasId");
+            entity.HasCheckConstraint("CK_AddressRecords_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
+        });
+
         // ------------------ Client ------------------
         modelBuilder.Entity<Client>(entity =>
         {
@@ -282,7 +386,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Phone).HasMaxLength(50);
             entity.Property(e => e.Company).HasMaxLength(200);
             entity.Property(e => e.Address).HasMaxLength(500);
-            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
 
             entity.HasOne(e => e.LegalEntity)
                   .WithMany(le => le.Clients)
@@ -558,6 +662,19 @@ public class PaymentContext : DbContext
     /// Юридические лица, связанные с клиентами.
     /// </summary>
     public DbSet<LegalEntity> LegalEntities { get; set; }
+
+    public DbSet<AddressRecord> AddressRecords { get; set; }
+
+    public DbSet<ClientPassport> ClientPassports { get; set; }
+
+    public DbSet<PowerOfAttorney> PowersOfAttorney { get; set; }
+
+    public DbSet<OkinDictionaryItem> OkinDictionaryItems { get; set; }
+
+    public DbSet<OksoDictionaryItem> OksoDictionaryItems { get; set; }
+
+    public DbSet<OkpdtrDictionaryItem> OkpdtrDictionaryItems { get; set; }
+
 
     /// <summary>
     /// Дела (кейсы) клиентов.
