@@ -297,6 +297,52 @@ public class ClientsController : ControllerBase
         }
     }
 
+
+    private async Task SyncClientPassportAsync(Client client, string? profilePayload)
+    {
+        var raw = profilePayload?.Trim();
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        ClientAddressProfile? profile;
+        try
+        {
+            profile = JsonSerializer.Deserialize<ClientAddressProfile>(raw);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (profile is null) return;
+
+        var hasAnyPassportField = !string.IsNullOrWhiteSpace(profile.PassportSeries)
+            || !string.IsNullOrWhiteSpace(profile.PassportNumber)
+            || !string.IsNullOrWhiteSpace(profile.PassportIssuedBy)
+            || profile.PassportIssueDate.HasValue
+            || !string.IsNullOrWhiteSpace(profile.PassportDepartmentCode);
+
+        var existing = await _db.ClientPassports.FirstOrDefaultAsync(x => x.ClientId == client.Id);
+
+        if (!hasAnyPassportField)
+        {
+            if (existing is not null) _db.ClientPassports.Remove(existing);
+            return;
+        }
+
+        if (existing is null)
+        {
+            existing = new ClientPassport { ClientId = client.Id, CreatedAt = DateTime.UtcNow };
+            _db.ClientPassports.Add(existing);
+        }
+
+        existing.Series = NormalizeOptional(profile.PassportSeries);
+        existing.Number = NormalizeOptional(profile.PassportNumber);
+        existing.IssuedBy = NormalizeOptional(profile.PassportIssuedBy);
+        existing.IssuedAt = profile.PassportIssueDate;
+        existing.DepartmentCode = NormalizeOptional(profile.PassportDepartmentCode);
+        existing.UpdatedAt = DateTime.UtcNow;
+    }
+
     private void UpsertAddress(
         List<AddressRecord> existing,
         int clientId,
