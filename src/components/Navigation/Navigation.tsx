@@ -233,6 +233,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       { id: 'users', tab: 'users' as Tab, label: 'Пользователи', icon: UserCog },
       { id: 'roles', tab: 'roles' as Tab, label: 'Роли', icon: Shield },
       { id: 'userActivity', tab: 'userActivity' as Tab, label: 'Контроль пользователей', icon: Eye },
+      { id: 'settings', tab: 'settings' as Tab, label: 'Настройки', icon: Settings },
     ];
   }, [isAdmin]);
 
