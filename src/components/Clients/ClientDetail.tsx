@@ -45,6 +45,7 @@ import type {
   Client,
   ClientCase,
   ClientInput,
+  ClientReferenceItem,
   Contract,
   ContractClient,
   ContractInput,
@@ -53,6 +54,7 @@ import type {
   Payment,
   PaymentPayload,
   PaymentStatus,
+  PowerOfAttorney,
 } from '../../types';
 import type { MenuSectionKey } from '../../types/permissions';
 import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
@@ -244,7 +246,7 @@ type ClientKind = 'individual' | 'legal';
 type ClientDocumentKey = 'passports' | 'birthCertificates' | 'militaryIds';
 
 type ClientGender = 'male' | 'female' | '';
-type ClientCitizenship = 'rf' | 'double' | 'foreign' | 'stateless' | 'other' | '';
+type ClientCitizenship = string;
 type ClientMaritalStatus = 'never_married' | 'married' | 'divorced' | 'widowed' | 'civil_union' | '';
 
 interface ClientEducationItem {
@@ -282,6 +284,11 @@ interface ClientExtendedProfile {
   citizenship: ClientCitizenship;
   inn: string;
   snils: string;
+  passportSeries: string;
+  passportNumber: string;
+  passportIssuedBy: string;
+  passportIssueDate: string;
+  passportDepartmentCode: string;
   education: ClientEducationItem[];
   professions: ClientProfessionItem[];
   workplaces: ClientWorkplaceItem[];
@@ -289,8 +296,16 @@ interface ClientExtendedProfile {
   relatives: ClientRelativeItem[];
   registrationAddress: string;
   registrationAddressPostalCode: string;
+  registrationAddressFiasId: string;
+  registrationAddressKladrId: string;
+  registrationAddressGeoLat: string;
+  registrationAddressGeoLon: string;
   actualAddress: string;
   actualAddressPostalCode: string;
+  actualAddressFiasId: string;
+  actualAddressKladrId: string;
+  actualAddressGeoLat: string;
+  actualAddressGeoLon: string;
   actualAddressMatchesRegistration: boolean;
   phones: string[];
   emails: string[];
@@ -327,7 +342,7 @@ const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; l
 
 
 const DOCUMENT_FIELD_META: Array<{ key: ClientDocumentKey; label: string }> = [
-  { key: 'passports', label: 'Паспортные данные' },
+  { key: 'passports', label: 'Паспортные данные (legacy)' },
   { key: 'birthCertificates', label: 'Свидетельства о рождении' },
   { key: 'militaryIds', label: 'Военные билеты' },
 ];
@@ -352,7 +367,6 @@ const buildClientDisplayName = (
 
 const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
   const sourceNotes = client.notes ?? '';
-  const sourceProfile = client.profileJson ?? '';
   const defaultProfile: ClientExtendedProfile = {
     kind: client.legalEntityId ? 'legal' : 'individual',
     lastName: '',
@@ -365,6 +379,11 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     citizenship: '',
     inn: '',
     snils: '',
+    passportSeries: '',
+    passportNumber: '',
+    passportIssuedBy: '',
+    passportIssueDate: '',
+    passportDepartmentCode: '',
     education: [createEmptyEducation()],
     professions: [createEmptyProfession()],
     workplaces: [createEmptyWorkplace()],
@@ -372,8 +391,16 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     relatives: [createEmptyRelative()],
     registrationAddress: client.address || '',
     registrationAddressPostalCode: '',
+    registrationAddressFiasId: '',
+    registrationAddressKladrId: '',
+    registrationAddressGeoLat: '',
+    registrationAddressGeoLon: '',
     actualAddress: '',
     actualAddressPostalCode: '',
+    actualAddressFiasId: '',
+    actualAddressKladrId: '',
+    actualAddressGeoLat: '',
+    actualAddressGeoLon: '',
     actualAddressMatchesRegistration: false,
     phones: client.phone ? [client.phone] : [''],
     emails: client.email ? [client.email] : [''],
@@ -382,7 +409,7 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     birthCertificates: [''],
     militaryIds: [''],
     comment: '',
-    legacyNotes: sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX) || sourceProfile ? '' : sourceNotes,
+    legacyNotes: sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX) ? '' : sourceNotes,
   };
 
   if (client.name && !client.legalEntityId) {
@@ -392,9 +419,9 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
     defaultProfile.middleName = rest.join(' ');
   }
 
-  const rawProfilePayload = sourceProfile || (sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX)
+  const rawProfilePayload = sourceNotes.startsWith(CLIENT_PROFILE_NOTES_PREFIX)
     ? sourceNotes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)
-    : '');
+    : '';
 
   if (!rawProfilePayload) return defaultProfile;
 
@@ -411,6 +438,11 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
       maritalStatus: parsed.maritalStatus && ['never_married', 'married', 'divorced', 'widowed', 'civil_union'].includes(parsed.maritalStatus)
         ? parsed.maritalStatus as ClientMaritalStatus
         : '',
+      passportSeries: parsed.passportSeries ?? defaultProfile.passportSeries,
+      passportNumber: parsed.passportNumber ?? defaultProfile.passportNumber,
+      passportIssuedBy: parsed.passportIssuedBy ?? defaultProfile.passportIssuedBy,
+      passportIssueDate: parsed.passportIssueDate ?? defaultProfile.passportIssueDate,
+      passportDepartmentCode: parsed.passportDepartmentCode ?? defaultProfile.passportDepartmentCode,
       education: (parsed.education ?? defaultProfile.education).map((item) => ({ ...createEmptyEducation(), ...item })),
       professions: (parsed.professions ?? defaultProfile.professions).map((item) => ({ ...createEmptyProfession(), ...item })),
       workplaces: (parsed.workplaces ?? defaultProfile.workplaces).map((item) => ({ ...createEmptyWorkplace(), ...item })),
@@ -451,7 +483,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
   const contractPermissions = permissions.contracts;
-  const { legalEntities } = useLegalEntities();
+  const { legalEntities, createLegalEntity, refresh: refreshLegalEntities } = useLegalEntities();
   const { statuses: clientStatuses } = useClientStatuses();
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) => permissions[SECTION_PERMISSION_MAP[section]],
@@ -480,6 +512,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     citizenship: '' as ClientCitizenship,
     inn: '',
     snils: '',
+    passportSeries: '',
+    passportNumber: '',
+    passportIssuedBy: '',
+    passportIssueDate: '',
+    passportDepartmentCode: '',
     education: [createEmptyEducation()],
     professions: [createEmptyProfession()],
     workplaces: [createEmptyWorkplace()],
@@ -487,8 +524,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     relatives: [createEmptyRelative()],
     registrationAddress: '',
     registrationAddressPostalCode: '',
+    registrationAddressFiasId: '',
+    registrationAddressKladrId: '',
+    registrationAddressGeoLat: '',
+    registrationAddressGeoLon: '',
     actualAddress: '',
     actualAddressPostalCode: '',
+    actualAddressFiasId: '',
+    actualAddressKladrId: '',
+    actualAddressGeoLat: '',
+    actualAddressGeoLon: '',
     actualAddressMatchesRegistration: false,
     phones: [''],
     emails: [''],
@@ -504,11 +549,34 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   });
   const [registrationAddressSuggestions, setRegistrationAddressSuggestions] = useState<string[]>([]);
   const [actualAddressSuggestions, setActualAddressSuggestions] = useState<string[]>([]);
+  const [okinOptions, setOkinOptions] = useState<ClientReferenceItem[]>([]);
+  const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
+  const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
+  const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
   const cases = useMemo(() => casesLocal ?? serverCases, [casesLocal, serverCases]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [okin, okso, okpdtr, poa] = await Promise.all([
+          apiService.getOkinDictionary(),
+          apiService.getOksoDictionary(),
+          apiService.getOkpdtrDictionary(),
+          apiService.getClientPowersOfAttorney(clientId),
+        ]);
+        setOkinOptions(okin ?? []);
+        setOksoOptions(okso ?? []);
+        setOkpdtrOptions(okpdtr ?? []);
+        setPowersOfAttorney(poa ?? []);
+      } catch {
+        // optional
+      }
+    })();
+  }, [clientId]);
 
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
@@ -1005,8 +1073,16 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       relatives: profile.relatives.length > 0 ? profile.relatives : [createEmptyRelative()],
       registrationAddress: profile.registrationAddress,
       registrationAddressPostalCode: profile.registrationAddressPostalCode,
+      registrationAddressFiasId: profile.registrationAddressFiasId,
+      registrationAddressKladrId: profile.registrationAddressKladrId,
+      registrationAddressGeoLat: profile.registrationAddressGeoLat,
+      registrationAddressGeoLon: profile.registrationAddressGeoLon,
       actualAddress: profile.actualAddress,
       actualAddressPostalCode: profile.actualAddressPostalCode,
+      actualAddressFiasId: profile.actualAddressFiasId,
+      actualAddressKladrId: profile.actualAddressKladrId,
+      actualAddressGeoLat: profile.actualAddressGeoLat,
+      actualAddressGeoLon: profile.actualAddressGeoLon,
       actualAddressMatchesRegistration: profile.actualAddressMatchesRegistration,
       phones: profile.phones.length > 0 ? profile.phones : [''],
       emails: profile.emails.length > 0 ? profile.emails : [''],
@@ -1613,6 +1689,10 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         ...prev,
         [field]: cleaned.result || raw,
         [field === 'registrationAddress' ? 'registrationAddressPostalCode' : 'actualAddressPostalCode']: cleaned.postalCode || '',
+        [field === 'registrationAddress' ? 'registrationAddressFiasId' : 'actualAddressFiasId']: cleaned.fiasId || '',
+        [field === 'registrationAddress' ? 'registrationAddressKladrId' : 'actualAddressKladrId']: cleaned.kladrId || '',
+        [field === 'registrationAddress' ? 'registrationAddressGeoLat' : 'actualAddressGeoLat']: cleaned.geoLat || '',
+        [field === 'registrationAddress' ? 'registrationAddressGeoLon' : 'actualAddressGeoLon']: cleaned.geoLon || '',
       }));
     } catch (error) {
       await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось стандартизовать адрес', variant: 'error' });
@@ -1639,6 +1719,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         citizenship: clientFormState.citizenship,
         inn: clientFormState.inn,
         snils: clientFormState.snils,
+        passportSeries: clientFormState.passportSeries,
+        passportNumber: clientFormState.passportNumber,
+        passportIssuedBy: clientFormState.passportIssuedBy,
+        passportIssueDate: clientFormState.passportIssueDate,
+        passportDepartmentCode: clientFormState.passportDepartmentCode,
         education: clientFormState.education,
         professions: clientFormState.professions,
         workplaces: clientFormState.workplaces,
@@ -1646,8 +1731,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         relatives: clientFormState.relatives,
         registrationAddress: clientFormState.registrationAddress,
         registrationAddressPostalCode: clientFormState.registrationAddressPostalCode,
+        registrationAddressFiasId: clientFormState.registrationAddressFiasId,
+        registrationAddressKladrId: clientFormState.registrationAddressKladrId,
+        registrationAddressGeoLat: clientFormState.registrationAddressGeoLat,
+        registrationAddressGeoLon: clientFormState.registrationAddressGeoLon,
         actualAddress: clientFormState.actualAddress,
         actualAddressPostalCode: clientFormState.actualAddressPostalCode,
+        actualAddressFiasId: clientFormState.actualAddressFiasId,
+        actualAddressKladrId: clientFormState.actualAddressKladrId,
+        actualAddressGeoLat: clientFormState.actualAddressGeoLat,
+        actualAddressGeoLon: clientFormState.actualAddressGeoLon,
         actualAddressMatchesRegistration: clientFormState.actualAddressMatchesRegistration,
         phones: clientFormState.phones,
         emails: clientFormState.emails,
@@ -1675,8 +1768,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         phone: normalizedPhones[0] ?? '',
         company: profile.kind === 'legal' ? selectedLegalEntity?.shortName ?? 'Юридическое лицо' : '',
         address: registrationAddress || actualAddress || normalizedAddresses[0] || '',
-        notes: profile.legacyNotes.trim(),
-        profileJson: serializeClientExtendedProfile(profile),
+        notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,
         isActive: clientFormState.isActive,
         legalEntityId:
           profile.kind === 'legal' && clientFormState.legalEntityId
@@ -1916,10 +2008,30 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Серия паспорта</label>
+                    <input type="text" name="passportSeries" value={clientFormState.passportSeries} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Номер паспорта</label>
+                    <input type="text" name="passportNumber" value={clientFormState.passportNumber} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Кем выдан паспорт</label>
+                    <input type="text" name="passportIssuedBy" value={clientFormState.passportIssuedBy} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Дата выдачи паспорта</label>
+                    <input type="date" name="passportIssueDate" value={clientFormState.passportIssueDate} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Код подразделения</label>
+                    <input type="text" name="passportDepartmentCode" value={clientFormState.passportDepartmentCode} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Гражданство (ОКИН)</label>
                     <select name="citizenship" value={clientFormState.citizenship} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
                       <option value="">Не указано</option>
-                      {CITIZENSHIP_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                      {(okinOptions.length > 0 ? okinOptions : CITIZENSHIP_OPTIONS.map((item) => ({ id: 0, code: item.value, name: item.label }))).map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2045,12 +2157,15 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <input value={item.institution} onChange={(e) => updateEducation(index, 'institution', e.target.value)} placeholder="Учебное заведение" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                       <input value={item.specialty} onChange={(e) => updateEducation(index, 'specialty', e.target.value)} placeholder="Специальность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                       <input value={item.diplomaNumber} onChange={(e) => updateEducation(index, 'diplomaNumber', e.target.value)} placeholder="№ диплома" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" list="okso-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, education: [...prev.education, createEmptyEducation()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить образование</button>
                 </div>
               </div>
+
+              <datalist id="okso-codes">{oksoOptions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</datalist>
+              <datalist id="okpdtr-codes">{okpdtrOptions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</datalist>
 
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Профессии (ОКПДТР)</label>
@@ -2058,7 +2173,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   {clientFormState.professions.map((item, index) => (
                     <div key={`profession-${index}`} className="grid gap-2 md:grid-cols-2">
                       <input value={item.profession} onChange={(e) => updateProfession(index, 'profession', e.target.value)} placeholder="Профессия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" list="okpdtr-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, professions: [...prev.professions, createEmptyProfession()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить профессию</button>
@@ -2075,6 +2190,30 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, workplaces: [...prev.workplaces, createEmptyWorkplace()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить место работы</button>
+                  <button
+                    type="button"
+                    disabled={!clientPermissions.canEdit}
+                    onClick={async () => {
+                      const shortName = window.prompt('Название организации');
+                      if (!shortName) return;
+                      const inn = window.prompt('ИНН (опционально)') || undefined;
+                      try {
+                        const created = await createLegalEntity({ shortName, inn, clientIds: [] });
+                        await refreshLegalEntities();
+                        setClientFormState((prev) => ({
+                          ...prev,
+                          workplaces: prev.workplaces.length
+                            ? prev.workplaces.map((w, i) => (i === prev.workplaces.length - 1 ? { ...w, organizationName: created.shortName } : w))
+                            : [{ organizationName: created.shortName, position: "" }],
+                        }));
+                      } catch (error) {
+                        await alert({ title: 'Организация', description: error instanceof Error ? error.message : 'Не удалось создать организацию', variant: 'error' });
+                      }
+                    }}
+                    className="text-sm text-indigo-600"
+                  >
+                    + Добавить организацию
+                  </button>
                 </div>
               </div>
 
@@ -2106,6 +2245,43 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   </div>
                 </div>
               ))}
+
+              <div className="md:col-span-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Доверенности</label>
+                  <button
+                    type="button"
+                    disabled={!clientPermissions.canEdit}
+                    onClick={async () => {
+                      const number = window.prompt('Номер доверенности');
+                      const issuedAt = window.prompt('Дата выдачи (YYYY-MM-DD)', formatLocalYMD(new Date()));
+                      if (!number || !issuedAt) return;
+                      try {
+                        const created = await apiService.createClientPowerOfAttorney(clientId, { number, issuedAt, isActive: true });
+                        setPowersOfAttorney((prev) => [created, ...prev]);
+                      } catch (error) {
+                        await alert({ title: 'Доверенности', description: error instanceof Error ? error.message : 'Не удалось создать доверенность', variant: 'error' });
+                      }
+                    }}
+                    className="text-sm text-emerald-600"
+                  >
+                    + Добавить доверенность
+                  </button>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  {powersOfAttorney.length === 0 ? (
+                    <p className="text-sm text-gray-500">Доверенности не найдены.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {powersOfAttorney.map((poa) => (
+                        <div key={poa.id} className="rounded border border-gray-200 px-3 py-2 text-sm">
+                          №{poa.number} · {toRuDate(poa.issuedAt)} {poa.validUntil ? `— до ${toRuDate(poa.validUntil)}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>

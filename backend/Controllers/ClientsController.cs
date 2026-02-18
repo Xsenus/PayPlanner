@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,8 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class ClientsController : ControllerBase
 {
+    private const string CLIENT_PROFILE_NOTES_PREFIX = "__PP_CLIENT_PROFILE_V2__:";
+
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichment;
 
@@ -27,6 +30,7 @@ public class ClientsController : ControllerBase
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
+            .Include(c => c.Addresses)
             .AsNoTracking()
             .OrderBy(c => c.Name)
             .ToListAsync(ct));
@@ -38,6 +42,7 @@ public class ClientsController : ControllerBase
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
+            .Include(c => c.Addresses)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null ? NotFound() : Ok(client);
@@ -95,7 +100,7 @@ public class ClientsController : ControllerBase
 
 
     [HttpPost("dadata/clean-address")]
-    public async Task<IActionResult> CleanAddress([FromBody] CleanAddressRequest request, CancellationToken ct)
+    public async Task<IActionResult> CleanAddress([FromBody] ClientCleanAddressRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Address)) return BadRequest("Укажите Address");
 
@@ -104,23 +109,39 @@ public class ClientsController : ControllerBase
 
         return Ok(new
         {
+            source = result.Source,
             result = result.Result,
             postalCode = result.PostalCode,
             country = result.Country,
+            countryIsoCode = result.CountryIsoCode,
+            federalDistrict = result.FederalDistrict,
             regionWithType = result.RegionWithType,
             cityWithType = result.CityWithType,
+            settlementWithType = result.SettlementWithType,
             streetWithType = result.StreetWithType,
             house = result.House,
+            block = result.Block,
             flat = result.Flat,
             fiasId = result.FiasId,
+            fiasLevel = result.FiasLevel,
             kladrId = result.KladrId,
+            okato = result.Okato,
+            oktmo = result.Oktmo,
+            taxOffice = result.TaxOffice,
+            taxOfficeLegal = result.TaxOfficeLegal,
             geoLat = result.GeoLat,
             geoLon = result.GeoLon,
+            qc = result.Qc,
+            qcComplete = result.QcComplete,
+            qcHouse = result.QcHouse,
+            qcGeo = result.QcGeo,
+            unparsedParts = result.UnparsedParts,
+            timezone = result.Timezone,
         });
     }
 
     [HttpPost("dadata/suggest-address")]
-    public async Task<IActionResult> SuggestAddress([FromBody] SuggestAddressRequest request, CancellationToken ct)
+    public async Task<IActionResult> SuggestAddress([FromBody] ClientSuggestAddressRequest request, CancellationToken ct)
     {
         var query = request.Query?.Trim();
         if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<object>());
@@ -167,13 +188,16 @@ public class ClientsController : ControllerBase
             Company = model.Company,
             Address = model.Address,
             Notes = model.Notes,
-            ProfileJson = model.ProfileJson,
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
             ClientStatusId = model.ClientStatusId,
         };
 
         _db.Clients.Add(entity);
+        await _db.SaveChangesAsync();
+        var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
+        await SyncClientAddressesAsync(entity, profilePayload);
+        await SyncClientPassportAsync(entity, profilePayload);
         await _db.SaveChangesAsync();
         await _db.Entry(entity).Reference(c => c.LegalEntity).LoadAsync();
         await _db.Entry(entity).Reference(c => c.ClientStatus).LoadAsync();
@@ -208,7 +232,9 @@ public class ClientsController : ControllerBase
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
-        e.ProfileJson = model.ProfileJson ?? e.ProfileJson;
+        var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
+        await SyncClientAddressesAsync(e, profilePayload);
+        await SyncClientPassportAsync(e, profilePayload);
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
         e.ClientStatusId = model.ClientStatusId;
@@ -216,6 +242,152 @@ public class ClientsController : ControllerBase
         await _db.Entry(e).Reference(c => c.LegalEntity).LoadAsync();
         await _db.Entry(e).Reference(c => c.ClientStatus).LoadAsync();
         return Ok(e);
+    }
+
+
+    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? ExtractProfilePayloadFromNotes(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes)) return null;
+        var raw = notes.Trim();
+        if (!raw.StartsWith(CLIENT_PROFILE_NOTES_PREFIX, StringComparison.Ordinal)) return null;
+        return raw[CLIENT_PROFILE_NOTES_PREFIX.Length..].Trim();
+    }
+
+    private async Task SyncClientAddressesAsync(Client client, string? profilePayload)
+    {
+        var raw = profilePayload?.Trim();
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        ClientAddressProfile? profile;
+        try
+        {
+            profile = JsonSerializer.Deserialize<ClientAddressProfile>(raw);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (profile is null) return;
+
+        var registrationValue = profile.RegistrationAddress?.Trim();
+        var actualValue = (profile.ActualAddressMatchesRegistration == true
+            ? profile.RegistrationAddress
+            : profile.ActualAddress)?.Trim();
+
+        var existing = await _db.AddressRecords.Where(x => x.ClientId == client.Id).ToListAsync();
+
+        UpsertAddress(existing, client.Id, AddressType.Registration, true,
+            registrationValue, null, profile.RegistrationAddressPostalCode, profile.RegistrationAddressFiasId, profile.RegistrationAddressKladrId,
+            profile.RegistrationAddressGeoLat, profile.RegistrationAddressGeoLon);
+
+        UpsertAddress(existing, client.Id, AddressType.Actual, true,
+            actualValue, null, profile.ActualAddressPostalCode, profile.ActualAddressFiasId, profile.ActualAddressKladrId,
+            profile.ActualAddressGeoLat, profile.ActualAddressGeoLon);
+
+        var activeTypes = new HashSet<AddressType>();
+        if (!string.IsNullOrWhiteSpace(registrationValue)) activeTypes.Add(AddressType.Registration);
+        if (!string.IsNullOrWhiteSpace(actualValue)) activeTypes.Add(AddressType.Actual);
+
+        foreach (var stale in existing.Where(x => !activeTypes.Contains(x.Type)).ToList())
+        {
+            _db.AddressRecords.Remove(stale);
+        }
+    }
+
+
+    private async Task SyncClientPassportAsync(Client client, string? profilePayload)
+    {
+        var raw = profilePayload?.Trim();
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        ClientAddressProfile? profile;
+        try
+        {
+            profile = JsonSerializer.Deserialize<ClientAddressProfile>(raw);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (profile is null) return;
+
+        var hasAnyPassportField = !string.IsNullOrWhiteSpace(profile.PassportSeries)
+            || !string.IsNullOrWhiteSpace(profile.PassportNumber)
+            || !string.IsNullOrWhiteSpace(profile.PassportIssuedBy)
+            || profile.PassportIssueDate.HasValue
+            || !string.IsNullOrWhiteSpace(profile.PassportDepartmentCode);
+
+        var existing = await _db.ClientPassports.FirstOrDefaultAsync(x => x.ClientId == client.Id);
+
+        if (!hasAnyPassportField)
+        {
+            if (existing is not null) _db.ClientPassports.Remove(existing);
+            return;
+        }
+
+        if (existing is null)
+        {
+            existing = new ClientPassport { ClientId = client.Id, CreatedAt = DateTime.UtcNow };
+            _db.ClientPassports.Add(existing);
+        }
+
+        existing.Series = NormalizeOptional(profile.PassportSeries);
+        existing.Number = NormalizeOptional(profile.PassportNumber);
+        existing.IssuedBy = NormalizeOptional(profile.PassportIssuedBy);
+        existing.IssuedAt = profile.PassportIssueDate;
+        existing.DepartmentCode = NormalizeOptional(profile.PassportDepartmentCode);
+        existing.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private void UpsertAddress(
+        List<AddressRecord> existing,
+        int clientId,
+        AddressType type,
+        bool isPrimary,
+        string? value,
+        string? unrestrictedValue,
+        string? postalCode,
+        string? fiasId,
+        string? kladrId,
+        string? geoLat,
+        string? geoLon)
+    {
+        var current = existing.FirstOrDefault(x => x.Type == type);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            if (current is not null)
+            {
+                _db.AddressRecords.Remove(current);
+                existing.Remove(current);
+            }
+            return;
+        }
+
+        if (current is null)
+        {
+            current = new AddressRecord
+            {
+                ClientId = clientId,
+                Type = type,
+                CreatedAt = DateTime.UtcNow,
+            };
+            existing.Add(current);
+            _db.AddressRecords.Add(current);
+        }
+
+        current.Value = value;
+        current.UnrestrictedValue = unrestrictedValue;
+        current.PostalCode = string.IsNullOrWhiteSpace(postalCode) ? null : postalCode.Trim();
+        current.FiasId = string.IsNullOrWhiteSpace(fiasId) ? null : fiasId.Trim();
+        current.KladrId = string.IsNullOrWhiteSpace(kladrId) ? null : kladrId.Trim();
+        current.GeoLat = string.IsNullOrWhiteSpace(geoLat) ? null : geoLat.Trim();
+        current.GeoLon = string.IsNullOrWhiteSpace(geoLon) ? null : geoLon.Trim();
+        current.IsPrimary = isPrimary;
+        current.UpdatedAt = DateTime.UtcNow;
     }
 
     [HttpDelete("{id:int}")]
@@ -234,5 +406,27 @@ public class ClientsController : ControllerBase
     }
 }
 
-public sealed record CleanAddressRequest(string Address);
-public sealed record SuggestAddressRequest(string Query, int Limit = 7);
+public sealed record ClientCleanAddressRequest(string Address);
+public sealed record ClientSuggestAddressRequest(string Query, int Limit = 7);
+
+public sealed class ClientAddressProfile
+{
+    public string? RegistrationAddress { get; init; }
+    public string? RegistrationAddressPostalCode { get; init; }
+    public string? RegistrationAddressFiasId { get; init; }
+    public string? RegistrationAddressKladrId { get; init; }
+    public string? RegistrationAddressGeoLat { get; init; }
+    public string? RegistrationAddressGeoLon { get; init; }
+    public string? ActualAddress { get; init; }
+    public string? ActualAddressPostalCode { get; init; }
+    public string? ActualAddressFiasId { get; init; }
+    public string? ActualAddressKladrId { get; init; }
+    public string? ActualAddressGeoLat { get; init; }
+    public string? ActualAddressGeoLon { get; init; }
+    public bool? ActualAddressMatchesRegistration { get; init; }
+    public string? PassportSeries { get; init; }
+    public string? PassportNumber { get; init; }
+    public string? PassportIssuedBy { get; init; }
+    public DateTime? PassportIssueDate { get; init; }
+    public string? PassportDepartmentCode { get; init; }
+}

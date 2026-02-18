@@ -84,18 +84,34 @@ namespace PayPlanner.Api.Services.LegalEntities
 
         private static CleanedAddress? MapAddress(JsonElement e) =>
             new(
+                Source: e.GetPropertyOrDefault("source"),
                 Result: e.GetPropertyOrDefault("result"),
                 PostalCode: e.GetPropertyOrDefault("postal_code"),
                 Country: e.GetPropertyOrDefault("country"),
+                CountryIsoCode: e.GetPropertyOrDefault("country_iso_code"),
+                FederalDistrict: e.GetPropertyOrDefault("federal_district"),
                 RegionWithType: e.GetPropertyOrDefault("region_with_type"),
                 CityWithType: e.GetPropertyOrDefault("city_with_type"),
+                SettlementWithType: e.GetPropertyOrDefault("settlement_with_type"),
                 StreetWithType: e.GetPropertyOrDefault("street_with_type"),
                 House: e.GetPropertyOrDefault("house"),
+                Block: e.GetPropertyOrDefault("block"),
                 Flat: e.GetPropertyOrDefault("flat"),
                 FiasId: e.GetPropertyOrDefault("fias_id"),
+                FiasLevel: e.GetPropertyOrDefault("fias_level"),
                 KladrId: e.GetPropertyOrDefault("kladr_id"),
+                Okato: e.GetPropertyOrDefault("okato"),
+                Oktmo: e.GetPropertyOrDefault("oktmo"),
+                TaxOffice: e.GetPropertyOrDefault("tax_office"),
+                TaxOfficeLegal: e.GetPropertyOrDefault("tax_office_legal"),
                 GeoLat: e.GetPropertyOrDefault("geo_lat"),
-                GeoLon: e.GetPropertyOrDefault("geo_lon")
+                GeoLon: e.GetPropertyOrDefault("geo_lon"),
+                Qc: e.GetIntOrNull("qc"),
+                QcComplete: e.GetIntOrNull("qc_complete"),
+                QcHouse: e.GetIntOrNull("qc_house"),
+                QcGeo: e.GetIntOrNull("qc_geo"),
+                UnparsedParts: e.GetPropertyOrDefault("unparsed_parts"),
+                Timezone: e.GetPropertyOrDefault("timezone")
             );
 
         private static CleanedEmail? MapEmail(JsonElement e)
@@ -205,13 +221,13 @@ namespace PayPlanner.Api.Services.LegalEntities
         }
 
 
-        public async Task<IReadOnlyList<DadataAddressSuggestion>> SuggestAddressesAsync(
+        public async Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(
             string query, int limit, CancellationToken ct)
         {
             var token = _opt.ApiKey;
             var payloadQuery = query?.Trim();
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(payloadQuery))
-                return Array.Empty<DadataAddressSuggestion>();
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
 
             var effectiveLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
             var url = Combine(_opt.BaseUrl, "suggest/address");
@@ -229,16 +245,16 @@ namespace PayPlanner.Api.Services.LegalEntities
                 {
                     _logger.LogWarning("DaData address suggest failed: {Code} {Reason}",
                         (int)resp.StatusCode, resp.ReasonPhrase);
-                    return Array.Empty<DadataAddressSuggestion>();
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
                 }
 
                 await using var stream = await resp.Content.ReadAsStreamAsync(ct);
                 var result = await JsonSerializer.DeserializeAsync<AddressSuggestResponse>(stream, JsonOptions, ct);
                 if (result?.Suggestions == null || result.Suggestions.Count == 0)
-                    return Array.Empty<DadataAddressSuggestion>();
+                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
 
                 return result.Suggestions
-                    .Select(s => new DadataAddressSuggestion(
+                    .Select(s => new ILegalEntityEnrichmentService.DadataAddressSuggestion(
                         s.Value ?? string.Empty,
                         s.UnrestrictedValue,
                         s.Data?.PostalCode,
@@ -253,7 +269,7 @@ namespace PayPlanner.Api.Services.LegalEntities
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DaData address suggest error");
-                return Array.Empty<DadataAddressSuggestion>();
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
             }
         }
 

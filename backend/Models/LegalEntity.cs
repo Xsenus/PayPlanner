@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
 namespace PayPlanner.Api.Models;
@@ -62,4 +63,6 @@ public class LegalEntity
     public DateTime? UpdatedAt { get; set; }
 
     public ICollection<Client> Clients { get; set; } = new List<Client>();
+
+    public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
 }
