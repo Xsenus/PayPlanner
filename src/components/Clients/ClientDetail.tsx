@@ -2016,7 +2016,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }, 350);
   };
 
-  const fillAddressEntryByDaData = async (index: number, rawInput?: string) => {
+  const fillAddressEntryByDaData = async (index: number, rawInput?: string, options?: { silent?: boolean }) => {
     const entry = clientFormState.addressEntries[index];
     const raw = (rawInput || entry?.fullAddress || '').trim();
     if (!raw) return;
@@ -2047,15 +2047,40 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         }),
       }));
     } catch (error) {
-      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось найти адрес', variant: 'error' });
+      if (!options?.silent) {
+        await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось найти адрес', variant: 'error' });
+        return;
+      }
+      throw error;
     }
   };
 
   const applyAddressSuggestion = async (index: number, suggestion: DadataAddressSuggestion) => {
     const selected = (suggestion.unrestrictedValue || suggestion.value || '').trim();
     if (!selected) return;
-    await fillAddressEntryByDaData(index, selected);
+
+    // Быстро заполняем минимум из suggestion даже если clean endpoint временно недоступен.
+    setClientFormState((prev) => ({
+      ...prev,
+      addressEntries: prev.addressEntries.map((item, i) => i === index ? {
+        ...item,
+        sourceQuery: selected,
+        fullAddress: selected,
+        postalCode: suggestion.postalCode || item.postalCode,
+        fiasId: suggestion.fiasId || item.fiasId,
+        kladrId: suggestion.kladrId || item.kladrId,
+        geoLat: suggestion.geoLat || item.geoLat,
+        geoLon: suggestion.geoLon || item.geoLon,
+      } : item),
+    }));
+
     setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+
+    try {
+      await fillAddressEntryByDaData(index, selected, { silent: true });
+    } catch {
+      // fallback уже применён выше через suggestion
+    }
   };
 
   const handleClientFormSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

@@ -545,22 +545,29 @@ export class ApiService {
 
 
   async cleanAddress(address: string) {
-    try {
-      return await this.request<CleanedAddress>(`/clients/dadata/clean-address`, {
-        method: 'POST',
-        body: JSON.stringify({ address }),
-      });
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('404')) {
-        throw error;
-      }
+    const endpoints = [
+      '/clients/dadata/clean-address',
+      '/legal-entities/clean/address',
+      '/legalentities/clean/address',
+    ] as const;
 
-      // fallback for backends where clean endpoint is exposed in legal-entities controller
-      return this.request<CleanedAddress>(`/legal-entities/clean/address`, {
-        method: 'POST',
-        body: JSON.stringify({ address }),
-      });
+    let lastError: Error | null = null;
+    for (const endpoint of endpoints) {
+      try {
+        return await this.request<CleanedAddress>(endpoint, {
+          method: 'POST',
+          body: JSON.stringify({ address }),
+        });
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        lastError = error;
+        if (!error.message.includes('404')) {
+          throw error;
+        }
+      }
     }
+
+    throw lastError ?? new Error('Не удалось найти endpoint стандартизации адреса');
   }
 
 
