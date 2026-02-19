@@ -49,6 +49,7 @@ import type {
   Contract,
   ContractClient,
   ContractInput,
+  DadataAddressSuggestion,
   Invoice,
   InvoiceInput,
   Payment,
@@ -67,6 +68,11 @@ import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import {
+  ClientAddressEntriesForm,
+  type AddressTypeOption,
+  type ClientAddressEntryFormValue,
+} from './ClientAddressEntriesForm';
 
 interface ClientDetailProps {
   clientId: number;
@@ -307,18 +313,12 @@ interface ClientPassportItem {
   validTo: string;
 }
 
-interface ClientAddressItem {
-  type: string;
-  additionalTypes: string[];
+interface ClientAddressItem extends ClientAddressEntryFormValue {
   sourceQuery: string;
-  fullAddress: string;
-  postalCode: string;
   fiasId: string;
   kladrId: string;
   geoLat: string;
   geoLon: string;
-  validFrom: string;
-  validTo: string;
 }
 
 interface ClientExtendedProfile {
@@ -395,6 +395,13 @@ const createEmptyAddressEntry = (): ClientAddressItem => ({
   sourceQuery: '',
   fullAddress: '',
   postalCode: '',
+  region: '',
+  district: '',
+  city: '',
+  settlement: '',
+  street: '',
+  house: '',
+  flat: '',
   fiasId: '',
   kladrId: '',
   geoLat: '',
@@ -403,7 +410,7 @@ const createEmptyAddressEntry = (): ClientAddressItem => ({
   validTo: '',
 });
 
-const ADDRESS_TYPE_OPTIONS = [
+const ADDRESS_TYPE_OPTIONS: AddressTypeOption[] = [
   { value: 'registration', label: 'Адрес регистрации' },
   { value: 'actual', label: 'Фактический адрес' },
   { value: 'legal', label: 'Юридический адрес' },
@@ -454,6 +461,23 @@ const mapBackendAddressTypeToProfile = (type?: number): string => {
   }
 };
 
+const composeAddressFromParts = (entry: ClientAddressItem): string => {
+  const parts = [
+    entry.postalCode,
+    entry.region,
+    entry.district,
+    entry.city,
+    entry.settlement,
+    entry.street,
+    entry.house && `д. ${entry.house}`,
+    entry.flat && `кв. ${entry.flat}`,
+  ]
+    .map((item) => (item ?? '').trim())
+    .filter(Boolean);
+
+  return parts.join(', ');
+};
+
 const buildAddressEntriesFromClient = (client: Client): ClientAddressItem[] => {
   const prepared = (client.addresses ?? [])
     .map((address) => {
@@ -465,6 +489,13 @@ const buildAddressEntriesFromClient = (client: Client): ClientAddressItem[] => {
         sourceQuery: fullAddress,
         fullAddress,
         postalCode: address.postalCode ?? '',
+        region: address.regionWithType ?? '',
+        district: '',
+        city: address.cityWithType ?? '',
+        settlement: '',
+        street: address.streetWithType ?? '',
+        house: address.house ?? '',
+        flat: address.flat ?? '',
         fiasId: address.fiasId ?? '',
         kladrId: address.kladrId ?? '',
         geoLat: address.geoLat ?? '',
@@ -733,7 +764,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     isActive: true,
     clientStatusId: '',
   });
-  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, string[]>>({});
+  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, DadataAddressSuggestion[]>>({});
+  const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
@@ -1877,8 +1909,22 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
   const updateAddressEntry = (index: number, key: keyof ClientAddressItem, value: string) => {
     setClientFormState((prev) => ({
       ...prev,
-      addressEntries: prev.addressEntries.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+      addressEntries: prev.addressEntries.map((item, i) => {
+        if (i !== index) return item;
+        const updated = { ...item, [key]: value };
+        if (['postalCode', 'region', 'district', 'city', 'settlement', 'street', 'house', 'flat'].includes(key)) {
+          return {
+            ...updated,
+            fullAddress: composeAddressFromParts(updated),
+          };
+        }
+        return updated;
+      }),
     }));
+  };
+
+  const updateAddressFormEntry = (index: number, key: keyof ClientAddressEntryFormValue, value: string) => {
+    updateAddressEntry(index, key as keyof ClientAddressItem, value);
   };
 
   const addAddressEntry = () => {
@@ -1948,41 +1994,68 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }));
   };
 
-  const suggestAddressEntryByDaData = async (index: number) => {
-    const entry = clientFormState.addressEntries[index];
-    const raw = (entry?.sourceQuery || entry?.fullAddress || '').trim();
-    if (!raw) return;
+  const loadAddressSuggestions = async (index: number, query: string) => {
+    const raw = query.trim();
+    if (raw.length < 3) {
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+      return;
+    }
     try {
       const suggestions = await apiService.suggestClientAddresses(raw, 7);
-      const values = (suggestions ?? []).map((item) => item.value).filter(Boolean);
-      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: values }));
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: suggestions ?? [] }));
     } catch (error) {
       await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось получить подсказки адресов', variant: 'error' });
     }
   };
 
-  const cleanAddressEntryByDaData = async (index: number) => {
+  const scheduleAddressSuggestions = (index: number, query: string) => {
+    const timers = addressSuggestionTimersRef.current;
+    if (timers[index]) window.clearTimeout(timers[index]);
+    timers[index] = window.setTimeout(() => {
+      void loadAddressSuggestions(index, query);
+    }, 350);
+  };
+
+  const fillAddressEntryByDaData = async (index: number, rawInput?: string) => {
     const entry = clientFormState.addressEntries[index];
-    const raw = (entry?.sourceQuery || entry?.fullAddress || '').trim();
+    const raw = (rawInput || entry?.fullAddress || '').trim();
     if (!raw) return;
     try {
       const cleaned = await apiService.cleanAddress(raw);
       setClientFormState((prev) => ({
         ...prev,
-        addressEntries: prev.addressEntries.map((item, i) => i === index ? {
-          ...item,
-          sourceQuery: raw,
-          fullAddress: cleaned.result || raw,
-          postalCode: cleaned.postalCode || '',
-          fiasId: cleaned.fiasId || '',
-          kladrId: cleaned.kladrId || '',
-          geoLat: cleaned.geoLat || '',
-          geoLon: cleaned.geoLon || '',
-        } : item),
+        addressEntries: prev.addressEntries.map((item, i) => {
+          if (i !== index) return item;
+          const updated = {
+            ...item,
+            sourceQuery: raw,
+            fullAddress: cleaned.result || raw,
+            postalCode: cleaned.postalCode || '',
+            region: cleaned.regionWithType || '',
+            district: '',
+            city: cleaned.cityWithType || '',
+            settlement: cleaned.settlementWithType || '',
+            street: cleaned.streetWithType || '',
+            house: cleaned.house || '',
+            flat: cleaned.flat || '',
+            fiasId: cleaned.fiasId || '',
+            kladrId: cleaned.kladrId || '',
+            geoLat: cleaned.geoLat || '',
+            geoLon: cleaned.geoLon || '',
+          };
+          return { ...updated, fullAddress: composeAddressFromParts(updated) || cleaned.result || raw };
+        }),
       }));
     } catch (error) {
-      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось стандартизовать адрес', variant: 'error' });
+      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось найти адрес', variant: 'error' });
     }
+  };
+
+  const applyAddressSuggestion = async (index: number, suggestion: DadataAddressSuggestion) => {
+    const selected = (suggestion.unrestrictedValue || suggestion.value || '').trim();
+    if (!selected) return;
+    await fillAddressEntryByDaData(index, selected);
+    setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
   };
 
   const handleClientFormSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -2365,30 +2438,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'addresses' && (
-                <div className="md:col-span-2 space-y-4">
-                  {clientFormState.addressEntries.map((entry, index) => (
-                    <div key={`address-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-slate-800">Адрес #{index + 1}</h3>
-                        <button type="button" onClick={() => removeAddressEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Основной тип</span><select value={entry.type} onChange={(e) => updateAddressEntry(index, 'type', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2">{ADDRESS_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-                        <div className="xl:col-span-2"><span className="mb-1 block text-sm text-slate-700">Дополнительно относится к</span><div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-2">{ADDRESS_TYPE_OPTIONS.map((option) => (<label key={option.value} className="inline-flex items-center gap-1 text-xs text-gray-700"><input type="checkbox" checked={entry.additionalTypes.includes(option.value)} onChange={() => toggleAddressAdditionalType(index, option.value)} disabled={!clientPermissions.canEdit} />{option.label}</label>))}</div></div>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Поисковая строка</span><input value={entry.sourceQuery} onChange={(e) => updateAddressEntry(index, 'sourceQuery', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Полный адрес</span><input value={entry.fullAddress} onChange={(e) => updateAddressEntry(index, 'fullAddress', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={entry.validFrom} onChange={(e) => updateAddressEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={entry.validTo} onChange={(e) => updateAddressEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Индекс</span><input value={entry.postalCode} onChange={(e) => updateAddressEntry(index, 'postalCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">FIAS ID</span><input value={entry.fiasId} onChange={(e) => updateAddressEntry(index, 'fiasId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">КЛАДР</span><input value={entry.kladrId} onChange={(e) => updateAddressEntry(index, 'kladrId', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <div className="xl:col-span-2 flex items-end gap-3"><button type="button" onClick={() => suggestAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-indigo-600">Подсказать через DaData</button><button type="button" onClick={() => cleanAddressEntryByDaData(index)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">Стандартизовать</button></div>
-                        {(addressSuggestionsByIndex[index]?.length ?? 0) > 0 && (<div className="xl:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50 p-3"><p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">Подсказки DaData</p><div className="flex flex-wrap gap-2">{addressSuggestionsByIndex[index].map((item) => (<button key={item} type="button" onClick={() => updateAddressEntry(index, 'fullAddress', item)} className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100">{item}</button>))}</div></div>)}
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" onClick={addAddressEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить адрес</button>
-                </div>
+                <ClientAddressEntriesForm
+                  entries={clientFormState.addressEntries}
+                  canEdit={clientPermissions.canEdit}
+                  dateInputClassName={DATE_INPUT_CLASS}
+                  addressTypeOptions={ADDRESS_TYPE_OPTIONS}
+                  suggestionsByIndex={addressSuggestionsByIndex}
+                  onUpdateEntry={updateAddressFormEntry}
+                  onRemoveEntry={removeAddressEntry}
+                  onAddEntry={addAddressEntry}
+                  onToggleAdditionalType={toggleAddressAdditionalType}
+                  onScheduleSuggestions={scheduleAddressSuggestions}
+                  onFindAddress={(index) => { void fillAddressEntryByDaData(index); }}
+                  onApplySuggestion={applyAddressSuggestion}
+                />
               )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'main' && (

@@ -4,6 +4,10 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Services.LegalEntities
 {
@@ -16,18 +20,44 @@ namespace PayPlanner.Api.Services.LegalEntities
         private readonly HttpClient _http;
         private readonly ILogger<DadataLegalEntityEnrichmentService> _logger;
         private readonly DadataOptions _opt;
+        private readonly PaymentContext _db;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
         public DadataLegalEntityEnrichmentService(HttpClient httpClient, IOptions<DadataOptions> options,
-            ILogger<DadataLegalEntityEnrichmentService> logger)
+            ILogger<DadataLegalEntityEnrichmentService> logger, PaymentContext db, IHttpContextAccessor httpContextAccessor)
         {
             _http = httpClient;
             _logger = logger;
             _opt = options.Value;
+            _db = db;
+            _httpContextAccessor = httpContextAccessor;
 
             _http.Timeout = TimeSpan.FromSeconds(_opt.TimeoutSeconds);
 
             if (!_http.DefaultRequestHeaders.Accept.Any(h => h.MediaType == "application/json"))
                 _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        }
+
+
+        private async Task<(string? ApiKey, string? Secret)> ResolveCredentialsAsync(CancellationToken ct)
+        {
+            var userIdRaw = _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(userIdRaw, out var userId))
+                return (_opt.ApiKey, _opt.Secret);
+
+            var keys = new[] { "integrations.dadata.apiKey", "integrations.dadata.secret" };
+            var settings = await _db.UserSettings
+                .AsNoTracking()
+                .Where(item => item.UserId == userId && keys.Contains(item.Key))
+                .ToListAsync(ct);
+
+            var apiKey = settings.FirstOrDefault(item => item.Key == "integrations.dadata.apiKey")?.Value;
+            var secret = settings.FirstOrDefault(item => item.Key == "integrations.dadata.secret")?.Value;
+
+            return (
+                string.IsNullOrWhiteSpace(apiKey) ? _opt.ApiKey : apiKey,
+                string.IsNullOrWhiteSpace(secret) ? _opt.Secret : secret
+            );
         }
 
         private async Task<T?> CleanOneAsync<T>(string source, string kind, Func<JsonElement, T?> mapper,
@@ -36,8 +66,9 @@ namespace PayPlanner.Api.Services.LegalEntities
             if (string.IsNullOrWhiteSpace(source))
                 return default;
 
-            var token = _opt.ApiKey;
-            var secret = _opt.Secret;
+            var credentials = await ResolveCredentialsAsync(ct);
+            var token = credentials.ApiKey;
+            var secret = credentials.Secret;
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(secret))
             {
                 _logger.LogDebug("DaData cleaner not configured (token/secret), skipping {Kind}", kind);
@@ -175,7 +206,8 @@ namespace PayPlanner.Api.Services.LegalEntities
         public async Task<LegalEntityDetails?> FindByInnOrOgrnAsync(
             string query, string? kpp, CancellationToken ct)
         {
-            var token = _opt.ApiKey;
+            var credentials = await ResolveCredentialsAsync(ct);
+            var token = credentials.ApiKey;
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(query))
                 return null;
 
@@ -224,7 +256,8 @@ namespace PayPlanner.Api.Services.LegalEntities
         public async Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(
             string query, int limit, CancellationToken ct)
         {
-            var token = _opt.ApiKey;
+            var credentials = await ResolveCredentialsAsync(ct);
+            var token = credentials.ApiKey;
             var payloadQuery = query?.Trim();
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(payloadQuery))
                 return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
@@ -276,7 +309,8 @@ namespace PayPlanner.Api.Services.LegalEntities
         public async Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(
             string? query, string? inn, int limit, CancellationToken ct)
         {
-            var token = _opt.ApiKey;
+            var credentials = await ResolveCredentialsAsync(ct);
+            var token = credentials.ApiKey;
             if (string.IsNullOrWhiteSpace(token))
             {
                 _logger.LogDebug("DaData token not configured, skipping suggestions");
