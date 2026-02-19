@@ -1,20 +1,59 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
 import type { LegacyAddressMigrationResult } from '../../services/api';
 
-type SettingsSection = 'general' | 'import-addresses';
+type SettingsSection = 'general' | 'integrations' | 'import-addresses';
 
 export function AppSettings() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('import-addresses');
+  const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
   const [result, setResult] = useState<LegacyAddressMigrationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dadataToken, setDadataToken] = useState('');
+  const [dadataSecret, setDadataSecret] = useState('');
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [credentialsMessage, setCredentialsMessage] = useState<string | null>(null);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
+    if (activeSection === 'integrations') return 'Ключи интеграций';
     return 'Импорт · Перенос адресов';
   }, [activeSection]);
+
+
+  const loadDaDataCredentials = async () => {
+    setCredentialsLoading(true);
+    setCredentialsMessage(null);
+    try {
+      const [tokenSetting, secretSetting] = await Promise.all([
+        apiService.getUserSetting('integrations.dadata.apiKey').catch(() => null),
+        apiService.getUserSetting('integrations.dadata.secret').catch(() => null),
+      ]);
+      setDadataToken(tokenSetting?.value ?? '');
+      setDadataSecret(secretSetting?.value ?? '');
+    } catch (e) {
+      setCredentialsMessage(e instanceof Error ? e.message : 'Не удалось загрузить ключи DaData');
+    } finally {
+      setCredentialsLoading(false);
+    }
+  };
+
+  const saveDaDataCredentials = async () => {
+    setCredentialsLoading(true);
+    setCredentialsMessage(null);
+    try {
+      await Promise.all([
+        apiService.upsertUserSetting('integrations.dadata.apiKey', dadataToken.trim()),
+        apiService.upsertUserSetting('integrations.dadata.secret', dadataSecret.trim()),
+      ]);
+      setCredentialsMessage('Ключи DaData сохранены');
+    } catch (e) {
+      setCredentialsMessage(e instanceof Error ? e.message : 'Не удалось сохранить ключи DaData');
+    } finally {
+      setCredentialsLoading(false);
+    }
+  };
 
   const runMigration = async () => {
     setLoading(true);
@@ -28,6 +67,12 @@ export function AppSettings() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (activeSection === 'integrations') {
+      void loadDaDataCredentials();
+    }
+  }, [activeSection]);
 
   return (
     <div className="p-6 lg:p-8">
@@ -47,6 +92,18 @@ export function AppSettings() {
                 }`}
               >
                 Основные
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('integrations')}
+                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  activeSection === 'integrations'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
+                }`}
+              >
+                Ключи интеграций
               </button>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
@@ -72,13 +129,56 @@ export function AppSettings() {
               <p className="text-sm text-gray-600 mt-1">
                 {activeSection === 'general'
                   ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
-                  : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
+                  : activeSection === 'integrations'
+                    ? 'Хранение и управление ключами доступа к внешним сервисам.'
+                    : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
               </p>
             </div>
 
             {activeSection === 'general' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 text-sm text-gray-600">
                 Здесь будут общие настройки приложения.
+              </div>
+            )}
+
+
+            {activeSection === 'integrations' && (
+              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="text-sm text-gray-700">
+                    <span className="mb-1 block">DaData API token</span>
+                    <input
+                      value={dadataToken}
+                      onChange={(event) => setDadataToken(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                      placeholder="Введите токен"
+                    />
+                  </label>
+                  <label className="text-sm text-gray-700">
+                    <span className="mb-1 block">DaData Secret key</span>
+                    <input
+                      value={dadataSecret}
+                      onChange={(event) => setDadataSecret(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                      placeholder="Введите секретный ключ"
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={saveDaDataCredentials}
+                    disabled={credentialsLoading}
+                    className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {credentialsLoading ? 'Сохраняем…' : 'Сохранить ключи'}
+                  </button>
+                </div>
+                {credentialsMessage && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    {credentialsMessage}
+                  </div>
+                )}
               </div>
             )}
 

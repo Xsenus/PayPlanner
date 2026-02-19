@@ -33,7 +33,14 @@ public interface ILegalEntityEnrichmentService
         string? FiasId,
         string? KladrId,
         string? GeoLat,
-        string? GeoLon);
+        string? GeoLon,
+        string? RegionWithType,
+        string? AreaWithType,
+        string? CityWithType,
+        string? SettlementWithType,
+        string? StreetWithType,
+        string? House,
+        string? Flat);
 }
 
 public sealed record LegalEntitySuggestion(

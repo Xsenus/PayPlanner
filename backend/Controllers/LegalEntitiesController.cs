@@ -543,6 +543,46 @@ public class LegalEntitiesController : ControllerBase
             ? await _enrichmentService.CleanAddressAsync(legacyAddress, ct)
             : null;
 
+        if (result.ValidateWithDadata && cleaned is null)
+        {
+            // fallback: если clean недоступен/запрещён (например, 403), пробуем enrich через suggest/address
+            var suggest = await _enrichmentService.SuggestAddressesAsync(legacyAddress, 1, ct);
+            var first = suggest.FirstOrDefault();
+            if (first is not null)
+            {
+                var normalized = NormalizeOptional(first.UnrestrictedValue) ?? NormalizeOptional(first.Value) ?? legacyAddress;
+                cleaned = new CleanedAddress(
+                    Source: legacyAddress,
+                    Result: normalized,
+                    PostalCode: NormalizeOptional(first.PostalCode),
+                    Country: null,
+                    CountryIsoCode: null,
+                    FederalDistrict: null,
+                    RegionWithType: NormalizeOptional(first.RegionWithType),
+                    CityWithType: NormalizeOptional(first.CityWithType),
+                    SettlementWithType: NormalizeOptional(first.SettlementWithType),
+                    StreetWithType: NormalizeOptional(first.StreetWithType),
+                    House: NormalizeOptional(first.House),
+                    Block: null,
+                    Flat: NormalizeOptional(first.Flat),
+                    FiasId: NormalizeOptional(first.FiasId),
+                    FiasLevel: null,
+                    KladrId: NormalizeOptional(first.KladrId),
+                    Okato: null,
+                    Oktmo: null,
+                    TaxOffice: null,
+                    TaxOfficeLegal: null,
+                    GeoLat: NormalizeOptional(first.GeoLat),
+                    GeoLon: NormalizeOptional(first.GeoLon),
+                    Qc: null,
+                    QcComplete: null,
+                    QcHouse: null,
+                    QcGeo: null,
+                    UnparsedParts: null,
+                    Timezone: null);
+            }
+        }
+
         if (result.ValidateWithDadata)
         {
             if (cleaned is null)
@@ -574,7 +614,7 @@ public class LegalEntitiesController : ControllerBase
 
         if (existingAddress is not null)
         {
-            var existingChanged = ApplyCleanedData(existingAddress, legacyAddress, normalizedValue, cleaned);
+            var existingChanged = ApplyCleanedData(existingAddress, legacyAddress, normalizedValue, cleaned, result.ValidateWithDadata && cleaned is not null);
             if (existingChanged)
             {
                 existingAddress.UpdatedAt = DateTime.UtcNow;
@@ -681,9 +721,29 @@ public class LegalEntitiesController : ControllerBase
         AddressRecord target,
         string legacyAddress,
         string normalizedAddress,
-        CleanedAddress? cleaned)
+        CleanedAddress? cleaned,
+        bool overwriteWithDadata)
     {
         var changed = false;
+
+        if (overwriteWithDadata)
+        {
+            changed |= SetIfDifferent(target.Value, v => target.Value = v, normalizedAddress);
+            changed |= SetIfDifferent(target.UnrestrictedValue, v => target.UnrestrictedValue = v, legacyAddress);
+
+            changed |= SetIfDifferent(target.PostalCode, v => target.PostalCode = v, NormalizeOptional(cleaned?.PostalCode));
+            changed |= SetIfDifferent(target.Country, v => target.Country = v, NormalizeOptional(cleaned?.Country));
+            changed |= SetIfDifferent(target.RegionWithType, v => target.RegionWithType = v, NormalizeOptional(cleaned?.RegionWithType));
+            changed |= SetIfDifferent(target.CityWithType, v => target.CityWithType = v, NormalizeOptional(cleaned?.CityWithType));
+            changed |= SetIfDifferent(target.StreetWithType, v => target.StreetWithType = v, NormalizeOptional(cleaned?.StreetWithType));
+            changed |= SetIfDifferent(target.House, v => target.House = v, NormalizeOptional(cleaned?.House));
+            changed |= SetIfDifferent(target.Flat, v => target.Flat = v, NormalizeOptional(cleaned?.Flat));
+            changed |= SetIfDifferent(target.FiasId, v => target.FiasId = v, NormalizeOptional(cleaned?.FiasId));
+            changed |= SetIfDifferent(target.KladrId, v => target.KladrId = v, NormalizeOptional(cleaned?.KladrId));
+            changed |= SetIfDifferent(target.GeoLat, v => target.GeoLat = v, NormalizeOptional(cleaned?.GeoLat));
+            changed |= SetIfDifferent(target.GeoLon, v => target.GeoLon = v, NormalizeOptional(cleaned?.GeoLon));
+            return changed;
+        }
 
         // Неразрушающий режим: существующие значения не перезаписываем, только дополняем пустые поля.
         if (string.IsNullOrWhiteSpace(target.Value))
@@ -711,6 +771,16 @@ public class LegalEntitiesController : ControllerBase
         changed |= FillIfEmpty(target.GeoLon, v => target.GeoLon = v, NormalizeOptional(cleaned?.GeoLon));
 
         return changed;
+    }
+
+
+    private static bool SetIfDifferent(string? current, Action<string?> setter, string? incoming)
+    {
+        var normalizedCurrent = NormalizeOptional(current);
+        var normalizedIncoming = NormalizeOptional(incoming);
+        if (string.Equals(normalizedCurrent, normalizedIncoming, StringComparison.OrdinalIgnoreCase)) return false;
+        setter(normalizedIncoming);
+        return true;
     }
 
     private static bool FillIfEmpty(string? current, Action<string?> setter, string? incoming)
