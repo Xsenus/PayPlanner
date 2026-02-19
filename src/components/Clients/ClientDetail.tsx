@@ -2047,6 +2047,30 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         }),
       }));
     } catch (error) {
+      try {
+        const suggestions = await apiService.suggestClientAddresses(raw, 1);
+        const fallbackSuggestion = suggestions?.[0];
+        if (fallbackSuggestion) {
+          const fallbackAddress = (fallbackSuggestion.unrestrictedValue || fallbackSuggestion.value || raw).trim();
+          setClientFormState((prev) => ({
+            ...prev,
+            addressEntries: prev.addressEntries.map((item, i) => i === index ? {
+              ...item,
+              sourceQuery: raw,
+              fullAddress: fallbackAddress,
+              postalCode: fallbackSuggestion.postalCode || item.postalCode,
+              fiasId: fallbackSuggestion.fiasId || item.fiasId,
+              kladrId: fallbackSuggestion.kladrId || item.kladrId,
+              geoLat: fallbackSuggestion.geoLat || item.geoLat,
+              geoLon: fallbackSuggestion.geoLon || item.geoLon,
+            } : item),
+          }));
+          return;
+        }
+      } catch {
+        // ignore and show main error below
+      }
+
       if (!options?.silent) {
         await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось найти адрес', variant: 'error' });
         return;
