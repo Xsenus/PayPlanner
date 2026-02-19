@@ -545,10 +545,22 @@ export class ApiService {
 
 
   async cleanAddress(address: string) {
-    return this.request<CleanedAddress>(`/clients/dadata/clean-address`, {
-      method: 'POST',
-      body: JSON.stringify({ address }),
-    });
+    try {
+      return await this.request<CleanedAddress>(`/clients/dadata/clean-address`, {
+        method: 'POST',
+        body: JSON.stringify({ address }),
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('404')) {
+        throw error;
+      }
+
+      // fallback for backends where clean endpoint is exposed in legal-entities controller
+      return this.request<CleanedAddress>(`/legal-entities/clean/address`, {
+        method: 'POST',
+        body: JSON.stringify({ address }),
+      });
+    }
   }
 
 
