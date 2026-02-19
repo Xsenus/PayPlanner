@@ -80,6 +80,53 @@ public class InvoicesController : ControllerBase
         var query = BuildInvoiceQuery();
         query = ApplyFilters(query, from, to, status, clientId, responsibleId, search, type);
 
+        var today = DateTime.UtcNow.Date;
+
+        var overdueAgingRows = await query
+            .Where(x => x.Payment.Status == PaymentStatus.Overdue)
+            .Select(x => new
+            {
+                Amount = x.Payment.Amount,
+                DueDate = x.Payment.Date,
+            })
+            .ToListAsync(ct);
+
+        decimal overdue0To10 = 0m;
+        decimal overdue11To30 = 0m;
+        decimal overdue31To60 = 0m;
+        decimal overdue61To90 = 0m;
+        decimal overdue91Plus = 0m;
+
+        foreach (var row in overdueAgingRows)
+        {
+            var daysOverdue = Math.Max(0, (today - row.DueDate.Date).Days);
+            if (daysOverdue <= 10)
+            {
+                overdue0To10 += row.Amount;
+                continue;
+            }
+
+            if (daysOverdue <= 30)
+            {
+                overdue11To30 += row.Amount;
+                continue;
+            }
+
+            if (daysOverdue <= 60)
+            {
+                overdue31To60 += row.Amount;
+                continue;
+            }
+
+            if (daysOverdue <= 90)
+            {
+                overdue61To90 += row.Amount;
+                continue;
+            }
+
+            overdue91Plus += row.Amount;
+        }
+
         var grouped = await query
             .GroupBy(x => x.Payment.Status)
             .Select(g => new
@@ -114,6 +161,15 @@ public class InvoicesController : ControllerBase
             {
                 Amount = overdue?.Amount ?? 0m,
                 Count = overdue?.Count ?? 0,
+            },
+            OverdueAging = new InvoiceOverdueAgingDto
+            {
+                Day0To10 = overdue0To10,
+                Day11To30 = overdue11To30,
+                Day31To60 = overdue31To60,
+                Day61To90 = overdue61To90,
+                Day91Plus = overdue91Plus,
+                Total = overdue0To10 + overdue11To30 + overdue31To60 + overdue61To90 + overdue91Plus,
             },
         };
 

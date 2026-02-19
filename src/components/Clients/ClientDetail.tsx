@@ -177,14 +177,6 @@ const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
   Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
 };
 
-const INVOICE_STATUS_ORDER: PaymentStatus[] = [
-  'Pending',
-  'Overdue',
-  'Completed',
-  'Processing',
-  'Cancelled',
-];
-
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
   if (v.includes('complete') || v.includes('выполн')) return 'completed';
@@ -798,11 +790,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   );
   const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
 
-  const [invoiceFrom, setInvoiceFrom] = useState<string>(startOfYear);
-  const [invoiceTo, setInvoiceTo] = useState<string>(todayYMD);
-  const [invoiceStatus, setInvoiceStatus] = useState<'all' | PaymentStatus>('all');
-  const [invoiceSearch, setInvoiceSearch] = useState('');
-  const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
   const [invoiceSort, setInvoiceSort] = useState<{ key: InvoicesSortKey; direction: 'asc' | 'desc' }>({
     key: 'date',
     direction: 'desc',
@@ -876,11 +863,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     updateInvoice: updateClientInvoice,
     deleteInvoice: deleteClientInvoice,
   } = useInvoices({
-    from: invoiceFrom || undefined,
-    to: invoiceTo || undefined,
-    status: invoiceStatus === 'all' ? undefined : invoiceStatus,
     clientId,
-    search: debouncedInvoiceSearch || undefined,
     type: 'Income',
     sortBy: invoiceSort.key,
     sortDir: invoiceSort.direction,
@@ -890,7 +873,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     setInvoicePage(1);
-  }, [invoiceFrom, invoiceTo, invoiceStatus, debouncedInvoiceSearch, clientId]);
+  }, [clientId]);
 
   const invoiceTotalPages = useMemo(() => {
     if (!invoicesPagination.pageSize) return 1;
@@ -1038,13 +1021,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     } catch (err) {
       await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить счёт', variant: 'error' });
     }
-  };
-
-  const resetInvoiceFilters = () => {
-    setInvoiceFrom(startOfYear);
-    setInvoiceTo(todayYMD);
-    setInvoiceStatus('all');
-    setInvoiceSearch('');
   };
 
   const resetContractFilters = () => {
@@ -2718,19 +2694,19 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           </>
         ) : activeSection === 'accounts' ? (
           <>
-            <div className="grid gap-4 mb-6 md:grid-cols-3">
+            <div className="grid gap-4 mb-6 md:grid-cols-4">
               {[
                 {
-                  key: 'total',
-                  title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего',
-                  value: invoiceSummaryBuckets.total.amount,
-                  count: invoiceSummaryBuckets.total.count,
-                  accent: 'border border-blue-100 bg-blue-50 text-blue-700',
+                  key: 'pending',
+                  title: 'Не оплачено всего',
+                  value: invoiceSummaryBuckets.pending.amount,
+                  count: invoiceSummaryBuckets.pending.count,
+                  accent: 'border border-amber-100 bg-amber-50 text-amber-700',
                   icon: WalletCards,
                 },
                 {
                   key: 'overdue',
-                  title: t('invoiceSummaryOverdue') ?? 'Просрочено',
+                  title: 'Не оплачено в срок',
                   value: invoiceSummaryBuckets.overdue.amount,
                   count: invoiceSummaryBuckets.overdue.count,
                   accent: 'border border-rose-100 bg-rose-50 text-rose-700',
@@ -2738,7 +2714,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 },
                 {
                   key: 'paid',
-                  title: t('invoiceSummaryPaid') ?? 'Оплачено',
+                  title: 'Оплачено',
                   value: invoiceSummaryBuckets.paid.amount,
                   count: invoiceSummaryBuckets.paid.count,
                   accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700',
@@ -2763,69 +2739,46 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   </div>
                 );
               })}
+              <div className="rounded-2xl border border-rose-100 bg-rose-50 p-5 shadow-sm text-rose-700">
+                <p className="text-sm font-medium">Просрочено на:</p>
+                <div className="mt-3 space-y-1 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>0-10 дней</span>
+                    <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.day0To10 ?? 0).full}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>11-30 дней</span>
+                    <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.day11To30 ?? 0).full}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>31-60 дней</span>
+                    <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.day31To60 ?? 0).full}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>61-90 дней</span>
+                    <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.day61To90 ?? 0).full}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Больше 90 дней</span>
+                    <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.day91Plus ?? 0).full}</span>
+                  </div>
+                </div>
+                <div className="mt-3 border-t border-rose-200 pt-2 flex items-center justify-between font-semibold">
+                  <span>Просрочено итого:</span>
+                  <span>{formatCurrencySmart(invoiceSummaryBuckets.overdueAging?.total ?? 0).full}</span>
+                </div>
+              </div>
             </div>
 
-            <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <CalendarRange className="h-4 w-4 text-gray-500" />
-                <input
-                  type="date"
-                  value={invoiceFrom}
-                  onChange={(e) => setInvoiceFrom(e.target.value)}
-                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                />
-                <span className="text-gray-500">—</span>
-                <input
-                  type="date"
-                  value={invoiceTo}
-                  onChange={(e) => setInvoiceTo(e.target.value)}
-                  className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                />
-              </div>
-
-              <div>
-                <select
-                  value={invoiceStatus}
-                  onChange={(e) => setInvoiceStatus(e.target.value as 'all' | PaymentStatus)}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                >
-                  <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-                  {INVOICE_STATUS_ORDER.map((status) => (
-                    <option key={status} value={status}>
-                      {invoiceStatusLabels[status]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="relative flex-1 min-w-[220px]">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="search"
-                  value={invoiceSearch}
-                  onChange={(e) => setInvoiceSearch(e.target.value)}
-                  placeholder={t('invoiceSearchPlaceholder') ?? 'Номер счёта или акт'}
-                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => refreshInvoices()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <RotateCcw className={invoicesRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                  {t('invoiceRefresh') ?? 'Обновить'}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetInvoiceFilters}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  {t('invoiceFiltersReset') ?? 'Сбросить'}
-                </button>
-              </div>
+            <div className="mb-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => refreshInvoices()}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <RotateCcw className={invoicesRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                {t('invoiceRefresh') ?? 'Обновить'}
+              </button>
             </div>
           </>
         ) : null}

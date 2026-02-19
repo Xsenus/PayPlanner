@@ -517,6 +517,14 @@ export interface InvoiceSummary {
   pending: InvoiceSummaryBucket;
   paid: InvoiceSummaryBucket;
   overdue: InvoiceSummaryBucket;
+  overdueAging?: {
+    day0To10: number;
+    day11To30: number;
+    day31To60: number;
+    day61To90: number;
+    day91Plus: number;
+    total: number;
+  };
 }
 
 export type AccountSuggestion = {
