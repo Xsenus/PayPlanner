@@ -294,7 +294,14 @@ namespace PayPlanner.Api.Services.LegalEntities
                         s.Data?.FiasId,
                         s.Data?.KladrId,
                         s.Data?.GeoLat,
-                        s.Data?.GeoLon))
+                        s.Data?.GeoLon,
+                        s.Data?.RegionWithType,
+                        s.Data?.AreaWithType,
+                        s.Data?.CityWithType,
+                        s.Data?.SettlementWithType,
+                        s.Data?.StreetWithType,
+                        s.Data?.House,
+                        s.Data?.Flat))
                     .Where(x => !string.IsNullOrWhiteSpace(x.Value))
                     .ToList();
             }
@@ -415,6 +422,27 @@ namespace PayPlanner.Api.Services.LegalEntities
 
             [JsonPropertyName("geo_lon")]
             public string? GeoLon { get; set; }
+
+            [JsonPropertyName("region_with_type")]
+            public string? RegionWithType { get; set; }
+
+            [JsonPropertyName("area_with_type")]
+            public string? AreaWithType { get; set; }
+
+            [JsonPropertyName("city_with_type")]
+            public string? CityWithType { get; set; }
+
+            [JsonPropertyName("settlement_with_type")]
+            public string? SettlementWithType { get; set; }
+
+            [JsonPropertyName("street_with_type")]
+            public string? StreetWithType { get; set; }
+
+            [JsonPropertyName("house")]
+            public string? House { get; set; }
+
+            [JsonPropertyName("flat")]
+            public string? Flat { get; set; }
         }
 
         private sealed class PartyData

@@ -181,6 +181,13 @@ export interface DadataAddressSuggestion {
   kladrId?: string | null;
   geoLat?: string | null;
   geoLon?: string | null;
+  regionWithType?: string | null;
+  areaWithType?: string | null;
+  cityWithType?: string | null;
+  settlementWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  flat?: string | null;
 }
 
 export interface CleanedAddress {

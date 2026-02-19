@@ -156,6 +156,13 @@ public class ClientsController : ControllerBase
             kladrId = s.KladrId,
             geoLat = s.GeoLat,
             geoLon = s.GeoLon,
+            regionWithType = s.RegionWithType,
+            areaWithType = s.AreaWithType,
+            cityWithType = s.CityWithType,
+            settlementWithType = s.SettlementWithType,
+            streetWithType = s.StreetWithType,
+            house = s.House,
+            flat = s.Flat,
         }));
     }
 
