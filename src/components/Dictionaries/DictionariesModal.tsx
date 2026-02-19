@@ -179,7 +179,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-income', label: 'Тип дохода' },
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
-  { value: 'services', label: 'Услуга' },
+  { value: 'services', label: 'Услуги' },
   { value: 'client-statuses', label: 'Статус клиента' },
 ];
 
