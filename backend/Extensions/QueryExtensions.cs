@@ -75,6 +75,7 @@ namespace PayPlanner.Api.Extensions
              .Include(p => p.DealType)
              .Include(p => p.IncomeType)
              .Include(p => p.PaymentSource)
+             .Include(p => p.Service)
              .Include(p => p.PaymentStatusEntity);
 
         public static IQueryable<Payment> ApplyPaymentFilters(

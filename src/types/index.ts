@@ -291,6 +291,15 @@ export interface PaymentSource {
   createdAt: string;
 }
 
+export interface ServiceDictionaryItem {
+  id: number;
+  name: string;
+  description: string;
+  colorHex: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface ClientStatus {
   id: number;
   name: string;
@@ -481,6 +490,8 @@ export interface Invoice {
   responsibleName?: string | null;
   counterpartyInn?: string | null;
   counterpartyName?: string | null;
+  serviceId?: number | null;
+  serviceName?: string | null;
   paymentStatusName?: string | null;
   lineItems?: InvoiceLineItem[];
   createdAt: string;
@@ -506,6 +517,7 @@ export interface InvoiceInput {
   actReference?: string | null;
   actId?: number | null;
   counterpartyName?: string | null;
+  serviceId?: number | null;
   paymentSourceId?: number | null;
   incomeTypeId?: number | null;
   dealTypeId?: number | null;

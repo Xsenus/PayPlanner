@@ -196,6 +196,15 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
+        if (request.ServiceId.HasValue)
+        {
+            var serviceExists = await _db.Services.AsNoTracking().AnyAsync(s => s.Id == request.ServiceId.Value, ct);
+            if (!serviceExists)
+            {
+                return BadRequest($"Unknown serviceId {request.ServiceId.Value}");
+            }
+        }
+
         var payment = new Payment
         {
             Account = number,
@@ -209,6 +218,7 @@ public class InvoicesController : ControllerBase
             ClientId = request.ClientId,
             ClientCaseId = request.ClientCaseId,
             PaymentSourceId = request.PaymentSourceId,
+            ServiceId = request.ServiceId,
             IncomeTypeId = request.IncomeTypeId,
             DealTypeId = request.DealTypeId,
             PaymentStatusId = request.PaymentStatusEntityId,
@@ -258,6 +268,15 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
+        if (request.ServiceId.HasValue)
+        {
+            var serviceExists = await _db.Services.AsNoTracking().AnyAsync(s => s.Id == request.ServiceId.Value, ct);
+            if (!serviceExists)
+            {
+                return BadRequest($"Unknown serviceId {request.ServiceId.Value}");
+            }
+        }
+
         payment.Account = number;
         payment.AccountDate = request.Date.Date;
         payment.Date = (request.DueDate ?? request.Date).Date;
@@ -269,6 +288,7 @@ public class InvoicesController : ControllerBase
         payment.ClientId = request.ClientId;
         payment.ClientCaseId = request.ClientCaseId;
         payment.PaymentSourceId = request.PaymentSourceId;
+        payment.ServiceId = request.ServiceId;
         payment.IncomeTypeId = request.IncomeTypeId;
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
@@ -590,6 +610,8 @@ public class InvoicesController : ControllerBase
             : null,
         CounterpartyInn = x.Act != null ? x.Act.CounterpartyInn : null,
         CounterpartyName = x.Payment.CounterpartyName,
+        ServiceId = x.Payment.ServiceId,
+        ServiceName = x.Payment.Service != null ? x.Payment.Service.Name : null,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
         CreatedAt = x.Payment.CreatedAt,
         SystemNotes = x.Payment.SystemNotes,
@@ -625,6 +647,8 @@ public class InvoicesController : ControllerBase
             ResponsibleName = raw.ResponsibleName,
             CounterpartyInn = raw.CounterpartyInn,
             CounterpartyName = raw.CounterpartyName,
+            ServiceId = raw.ServiceId,
+            ServiceName = raw.ServiceName,
             PaymentStatusName = raw.PaymentStatusName,
             CreatedAt = raw.CreatedAt,
             LineItems = ExtractInvoiceItems(raw.SystemNotes),
@@ -801,6 +825,8 @@ public class InvoicesController : ControllerBase
         public string? ResponsibleName { get; init; }
         public string? CounterpartyInn { get; init; }
         public string? CounterpartyName { get; init; }
+        public int? ServiceId { get; init; }
+        public string? ServiceName { get; init; }
         public string? PaymentStatusName { get; init; }
         public DateTime CreatedAt { get; init; }
         public string? SystemNotes { get; init; }

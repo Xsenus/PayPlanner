@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource } from '../../types';
+import type {
+  ClientStatus,
+  DealType,
+  IncomeType,
+  PaymentSource,
+  ServiceDictionaryItem,
+} from '../../types';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
@@ -146,8 +152,9 @@ type VisibleKind =
   | 'income-income'
   | 'income-expense'
   | 'payment-sources'
+  | 'services'
   | 'client-statuses';
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus;
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
 
 type FullDictItem = {
   id: number;
@@ -172,6 +179,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-income', label: 'Тип дохода' },
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
+  { value: 'services', label: 'Услуга' },
   { value: 'client-statuses', label: 'Статус клиента' },
 ];
 
@@ -185,6 +193,8 @@ function defaultColor(kind: VisibleKind): string {
       return '#EF4444';
     case 'payment-sources':
       return '#8B5CF6';
+    case 'services':
+      return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
   }
@@ -215,6 +225,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     'income-income': [],
     'income-expense': [],
     'payment-sources': [],
+    'services': [],
     'client-statuses': [],
   });
   const [busy, setBusy] = useState(false);

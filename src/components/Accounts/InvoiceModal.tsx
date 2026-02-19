@@ -4,6 +4,7 @@ import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, Pa
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
@@ -23,6 +24,7 @@ type FormState = {
   actReference: string;
   paidDate: string;
   counterpartyName: string;
+  serviceId: string;
 };
 
 type LineItem = {
@@ -106,6 +108,7 @@ function normalizeInvoiceToForm(
       actReference: '',
       paidDate: '',
       counterpartyName: '',
+      serviceId: '',
     };
   }
 
@@ -121,6 +124,7 @@ function normalizeInvoiceToForm(
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
+    serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
   };
 }
 
@@ -168,6 +172,7 @@ export function InvoiceModal({
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
   const isTypeLocked = lockType && mode === 'create';
+  const { services } = useDictionaries();
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
@@ -494,6 +499,7 @@ export function InvoiceModal({
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
+      serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       lineItems: lineItems
         .map((item) => ({
@@ -1089,6 +1095,22 @@ export function InvoiceModal({
                                   Открыть карточку контрагента
                                 </button>
                               )}
+                            </label>
+
+                            <label className="flex flex-col gap-1 text-sm">
+                              <span className="font-medium text-slate-700">Услуга</span>
+                              <select
+                                value={form.serviceId}
+                                onChange={handleChange('serviceId')}
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                              >
+                                <option value="">Не выбрано</option>
+                                {services.map((service) => (
+                                  <option key={service.id} value={service.id}>
+                                    {service.name}
+                                  </option>
+                                ))}
+                              </select>
                             </label>
                           </div>
                         </section>

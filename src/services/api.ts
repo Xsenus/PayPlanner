@@ -13,6 +13,7 @@ export type DictKind =
   | 'deal-types'
   | 'income-types'
   | 'payment-sources'
+  | 'services'
   | 'client-statuses'
   | 'payment-statuses';
 
@@ -22,6 +23,8 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? IncomeType
   : K extends 'payment-sources'
   ? PaymentSource
+  : K extends 'services'
+  ? ServiceDictionaryItem
   : K extends 'client-statuses'
   ? ClientStatus
   : PaymentStatusEntity;
@@ -704,6 +707,9 @@ export class ApiService {
   async getPaymentSources() {
     return this.getDict('payment-sources');
   }
+  async getServices() {
+    return this.getDict('services');
+  }
   async getClientStatuses() {
     return this.getDict('client-statuses');
   }
@@ -1034,6 +1040,7 @@ import type {
   DealType,
   IncomeType,
   PaymentSource,
+  ServiceDictionaryItem,
   PaymentStatusEntity,
   ClientStatus,
   MonthlyStats,

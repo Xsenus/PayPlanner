@@ -30,6 +30,8 @@ public class InvoiceDto
     public int? ResponsibleId { get; set; }
     public string? CounterpartyInn { get; set; }
     public string? CounterpartyName { get; set; }
+    public int? ServiceId { get; set; }
+    public string? ServiceName { get; set; }
     public string? PaymentStatusName { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<InvoiceLineItemDto> LineItems { get; set; } = new();

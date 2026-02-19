@@ -58,6 +58,7 @@ namespace PayPlanner.Api.Services
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
             await EnsureIncomeTypeSchemaAsync(context);
+            await EnsureServiceDictionarySchemaAsync(context);
 
             try
             {
@@ -152,6 +153,64 @@ namespace PayPlanner.Api.Services
                 };
                 context.ClientStatuses.AddRange(clientStatuses);
                 await context.SaveChangesAsync();
+            }
+
+            if (!await context.Services.AnyAsync())
+            {
+                context.Services.AddRange(
+                    new ServiceDictionaryItem { Name = "Юридическая консультация", Description = "Разовая консультация", ColorHex = "#0EA5E9" },
+                    new ServiceDictionaryItem { Name = "Подготовка документов", Description = "Составление договоров и заявлений", ColorHex = "#0284C7" },
+                    new ServiceDictionaryItem { Name = "Сопровождение сделки", Description = "Комплексное сопровождение", ColorHex = "#0369A1" }
+                );
+                await context.SaveChangesAsync();
+            }
+        }
+
+        private static async Task EnsureServiceDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            try
+            {
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"ServiceDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_ServiceDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_ServiceDictionaryItems_IsActive\" ON \"ServiceDictionaryItems\" (\"IsActive\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_ServiceDictionaryItems_Name\" ON \"ServiceDictionaryItems\" (\"Name\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_ServiceDictionaryItems_IsActive_Name\" ON \"ServiceDictionaryItems\" (\"IsActive\", \"Name\");", cancellationToken);
+
+                var hasServiceId = false;
+                await using (var checkCommand = connection.CreateCommand())
+                {
+                    checkCommand.CommandText = "PRAGMA table_info(\"Payments\");";
+                    await using var reader = await checkCommand.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        if (string.Equals(reader.GetString(1), "ServiceId", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasServiceId = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasServiceId)
+                {
+                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"Payments\" ADD COLUMN \"ServiceId\" INTEGER NULL;", cancellationToken);
+                }
+
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_Payments_ServiceId\" ON \"Payments\" (\"ServiceId\");", cancellationToken);
+            }
+            finally
+            {
+                if (shouldClose && connection.State == ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
             }
         }
 

@@ -134,9 +134,19 @@ namespace PayPlanner.Api.Models
         public PaymentSource? PaymentSource { get; set; }
 
         /// <summary>
+        /// Навигация на услугу из справочника услуг.
+        /// </summary>
+        public ServiceDictionaryItem? Service { get; set; }
+
+        /// <summary>
         /// Внешний ключ на источник платежа (если используется справочник).
         /// </summary>
         public int? PaymentSourceId { get; set; }
+
+        /// <summary>
+        /// Внешний ключ на услугу из справочника услуг.
+        /// </summary>
+        public int? ServiceId { get; set; }
 
         /// <summary>
         /// Навигация на сущность статуса платежа.
