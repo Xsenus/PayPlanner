@@ -9,7 +9,6 @@ import type {
   InvoiceLineItem,
   PaymentKind,
   PaymentStatus,
-  ServiceDictionaryItem,
 } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -21,6 +20,7 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
 import { useDialog } from '../../hooks/useDialog';
+import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 type FormState = {
   number: string;
@@ -205,12 +205,6 @@ export function InvoiceModal({
     comment: '',
   });
   const [serviceDictOpen, setServiceDictOpen] = useState(false);
-  const [serviceDictRows, setServiceDictRows] = useState<ServiceDictionaryItem[]>([]);
-  const [serviceDictBusy, setServiceDictBusy] = useState(false);
-  const [serviceDictError, setServiceDictError] = useState<string | null>(null);
-  const [serviceDraftName, setServiceDraftName] = useState('');
-  const [serviceDraftDescription, setServiceDraftDescription] = useState('');
-  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -499,66 +493,6 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const loadServicesDictionary = useCallback(async () => {
-    setServiceDictBusy(true);
-    setServiceDictError(null);
-    try {
-      const rows = await apiService.getDict('services');
-      setServiceDictRows(rows ?? []);
-    } catch (err) {
-      setServiceDictError(err instanceof Error ? err.message : 'Не удалось загрузить услуги');
-    } finally {
-      setServiceDictBusy(false);
-    }
-  }, []);
-
-  const openServicesDictionary = async () => {
-    setServiceDictOpen(true);
-    await loadServicesDictionary();
-  };
-
-  const resetServiceDraft = () => {
-    setServiceDraftName('');
-    setServiceDraftDescription('');
-    setEditingServiceId(null);
-  };
-
-  const saveServiceDraft = async () => {
-    if (!serviceDraftName.trim()) {
-      setServiceDictError('Введите наименование услуги');
-      return;
-    }
-
-    setServiceDictBusy(true);
-    setServiceDictError(null);
-    try {
-      const payload = {
-        name: serviceDraftName.trim(),
-        description: serviceDraftDescription.trim(),
-        colorHex: '#0EA5E9',
-        isActive: true,
-      };
-
-      const saved = editingServiceId
-        ? await apiService.updateDict('services', editingServiceId, payload)
-        : await apiService.createDict('services', payload);
-
-      window.dispatchEvent(new CustomEvent('dicts:changed'));
-      await loadServicesDictionary();
-      setForm((prev) => ({ ...prev, serviceId: String(saved.id) }));
-      resetServiceDraft();
-    } catch (err) {
-      setServiceDictError(err instanceof Error ? err.message : 'Не удалось сохранить услугу');
-    } finally {
-      setServiceDictBusy(false);
-    }
-  };
-
-  const startEditService = (service: ServiceDictionaryItem) => {
-    setEditingServiceId(service.id);
-    setServiceDraftName(service.name);
-    setServiceDraftDescription(service.description ?? '');
-  };
 
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
     const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
@@ -1001,7 +935,7 @@ export function InvoiceModal({
                               )}
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                                 <input
@@ -1018,7 +952,7 @@ export function InvoiceModal({
                                   Услуги
                                   <button
                                     type="button"
-                                    onClick={() => void openServicesDictionary()}
+                                    onClick={() => setServiceDictOpen(true)}
                                     className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
@@ -1038,7 +972,9 @@ export function InvoiceModal({
                                   ))}
                                 </select>
                               </label>
+                            </div>
 
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
                                   {t('invoiceAmount') ?? 'Сумма'}
@@ -1415,111 +1351,12 @@ export function InvoiceModal({
         </div>
       )}
 
-      {serviceDictOpen && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-slate-900">Справочник услуг</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setServiceDictOpen(false);
-                  resetServiceDraft();
-                }}
-                className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-12">
-              <label className="text-sm sm:col-span-5">
-                <span className="mb-1 block font-medium text-slate-700">Наименование</span>
-                <input
-                  value={serviceDraftName}
-                  onChange={(e) => setServiceDraftName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Например: Консультация"
-                />
-              </label>
-              <label className="text-sm sm:col-span-7">
-                <span className="mb-1 block font-medium text-slate-700">Описание</span>
-                <input
-                  value={serviceDraftDescription}
-                  onChange={(e) => setServiceDraftDescription(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Короткое пояснение"
-                />
-              </label>
-
-              <div className="sm:col-span-12 flex items-center justify-end gap-2">
-                {editingServiceId && (
-                  <button
-                    type="button"
-                    onClick={resetServiceDraft}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
-                  >
-                    Сброс
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void saveServiceDraft()}
-                  disabled={serviceDictBusy}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  {serviceDictBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {editingServiceId ? 'Сохранить изменения' : 'Добавить услугу'}
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-slate-200">
-              {serviceDictBusy && serviceDictRows.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-slate-500">Загрузка...</div>
-              ) : serviceDictRows.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-slate-500">Список услуг пуст</div>
-              ) : (
-                serviceDictRows.map((service) => (
-                  <div
-                    key={service.id}
-                    className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0"
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-slate-800">{service.name}</div>
-                      {service.description && (
-                        <div className="text-xs text-slate-500">{service.description}</div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setForm((prev) => ({ ...prev, serviceId: String(service.id) }))}
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                      >
-                        Выбрать
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => startEditService(service)}
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                      >
-                        Редактировать
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {serviceDictError && (
-              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                {serviceDictError}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <DictionariesModal
+        open={serviceDictOpen}
+        onClose={() => setServiceDictOpen(false)}
+        initialTab="services"
+        onlyTab="services"
+      />
 
       {createActOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
 import type {
@@ -106,7 +106,7 @@ function Tabs<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 rounded-xl bg-gray-100 p-1">
+    <div className={`grid rounded-xl bg-gray-100 p-1 ${tabs.length <= 2 ? 'grid-cols-2' : tabs.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'}`}>
       {tabs.map((t) => (
         <button
           key={t.value}
@@ -216,10 +216,17 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
 export interface DictionariesModalProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: VisibleKind;
+  onlyTab?: VisibleKind;
 }
 
-export default function DictionariesModal({ open, onClose }: DictionariesModalProps) {
-  const [activeTab, setActiveTab] = useState<VisibleKind>('deal-types');
+export default function DictionariesModal({
+  open,
+  onClose,
+  initialTab = 'deal-types',
+  onlyTab,
+}: DictionariesModalProps) {
+  const [activeTab, setActiveTab] = useState<VisibleKind>(initialTab);
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
     'deal-types': [],
     'income-income': [],
@@ -233,6 +240,12 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
   const [confirmDelete, setConfirmDelete] = useState<{ kind: VisibleKind; id: number } | null>(
     null,
   );
+
+  const visibleTabs = useMemo(
+    () => (onlyTab ? TABS.filter((t) => t.value === onlyTab) : TABS),
+    [onlyTab],
+  );
+
 
   const loadKind = useCallback(async (kind: VisibleKind) => {
     setBusy(true);
@@ -262,10 +275,11 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
 
   useEffect(() => {
     if (!open) return;
+    setActiveTab(onlyTab ?? initialTab);
     (async () => {
-      await Promise.all(TABS.map((t) => loadKind(t.value)));
+      await Promise.all(visibleTabs.map((t) => loadKind(t.value)));
     })();
-  }, [open, loadKind]);
+  }, [open, loadKind, initialTab, onlyTab, visibleTabs]);
 
   const addNew = (kind: VisibleKind) => {
     setData((prev) => ({
@@ -633,7 +647,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
           </Btn>
         }>
         <div className="mb-4">
-          <Tabs tabs={TABS} value={activeTab} onChange={(v) => setActiveTab(v)} />
+          <Tabs tabs={visibleTabs} value={activeTab} onChange={(v) => setActiveTab(v)} />
         </div>
 
         {error && (
@@ -645,7 +659,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
         <div className={busy ? 'pointer-events-none opacity-70' : ''}>
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm text-gray-600">Всего: {data[activeTab]?.length ?? 0}</div>
-            <Btn onClick={() => addNew(activeTab)}>
+            <Btn onClick={() => addNew(onlyTab ?? activeTab)}>
               <Plus className="h-4 w-4" />
               Добавить
             </Btn>
