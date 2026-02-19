@@ -1356,6 +1356,11 @@ export function InvoiceModal({
         onClose={() => setServiceDictOpen(false)}
         initialTab="services"
         onlyTab="services"
+        onPickItem={(kind, item) => {
+          if (kind !== 'services') return;
+          setForm((prev) => ({ ...prev, serviceId: String(item.id) }));
+          setServiceDictOpen(false);
+        }}
       />
 
       {createActOpen && (

@@ -105,6 +105,23 @@ function Tabs<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  if (tabs.length === 1) {
+    return (
+      <div className="flex justify-center">
+        {tabs.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => onChange(t.value)}
+            className={`w-full max-w-md rounded-lg px-3 py-2 text-sm ${
+              value === t.value ? 'bg-white shadow' : 'text-gray-600 hover:bg-white/60'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={`grid rounded-xl bg-gray-100 p-1 ${tabs.length <= 2 ? 'grid-cols-2' : tabs.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'}`}>
       {tabs.map((t) => (
@@ -142,6 +159,30 @@ function Modal(props: {
         </div>
         <div className="max-h-[72vh] overflow-auto px-5 py-4">{children}</div>
         <div className="flex items-center justify-end gap-2 border-t px-5 py-3">{footer}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal(props: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { open, title, onClose, children } = props;
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute left-1/2 top-1/2 w-[min(520px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div className="text-lg font-semibold">{title}</div>
+          <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-5 py-4">{children}</div>
       </div>
     </div>
   );
@@ -218,6 +259,7 @@ export interface DictionariesModalProps {
   onClose: () => void;
   initialTab?: VisibleKind;
   onlyTab?: VisibleKind;
+  onPickItem?: (kind: VisibleKind, item: FullDictItem) => void;
 }
 
 export default function DictionariesModal({
@@ -225,6 +267,7 @@ export default function DictionariesModal({
   onClose,
   initialTab = 'deal-types',
   onlyTab,
+  onPickItem,
 }: DictionariesModalProps) {
   const [activeTab, setActiveTab] = useState<VisibleKind>(initialTab);
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
@@ -588,11 +631,13 @@ export default function DictionariesModal({
     item,
     onEdit,
     onDelete,
+    onPick,
     kind,
   }: {
     item: FullDictItem;
     onEdit: () => void;
     onDelete: () => void;
+    onPick?: () => void;
     kind: VisibleKind;
   }) {
     return (
@@ -624,6 +669,11 @@ export default function DictionariesModal({
         </div>
         <div className="col-span-2" />
         <div className="col-span-2 flex justify-end gap-2">
+          {onPick && (
+            <Btn variant="secondary" onClick={onPick}>
+              Выбрать
+            </Btn>
+          )}
           <Btn variant="ghost" onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Btn>
@@ -676,6 +726,7 @@ export default function DictionariesModal({
                     kind={activeTab}
                     onEdit={() => setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))}
                     onDelete={() => setConfirmDelete({ kind: activeTab, id: row.item.id })}
+                    onPick={onPickItem ? () => onPickItem(activeTab, row.item) : undefined}
                   />
                 );
               }
@@ -690,7 +741,7 @@ export default function DictionariesModal({
       </Modal>
 
       {confirmDelete && (
-        <Modal open={true} onClose={() => setConfirmDelete(null)} title="Удалить элемент?">
+        <ConfirmModal open={true} onClose={() => setConfirmDelete(null)} title="Удалить элемент?">
           <div className="space-y-4">
             <p className="text-sm text-gray-700">Действие необратимо. Удалить элемент?</p>
             <div className="flex justify-end gap-2">
@@ -700,7 +751,7 @@ export default function DictionariesModal({
               <Btn onClick={doDelete}>Удалить</Btn>
             </div>
           </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </>
   );
