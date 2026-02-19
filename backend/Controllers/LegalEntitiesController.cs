@@ -543,6 +543,46 @@ public class LegalEntitiesController : ControllerBase
             ? await _enrichmentService.CleanAddressAsync(legacyAddress, ct)
             : null;
 
+        if (result.ValidateWithDadata && cleaned is null)
+        {
+            // fallback: если clean недоступен/запрещён (например, 403), пробуем enrich через suggest/address
+            var suggest = await _enrichmentService.SuggestAddressesAsync(legacyAddress, 1, ct);
+            var first = suggest.FirstOrDefault();
+            if (first is not null)
+            {
+                var normalized = NormalizeOptional(first.UnrestrictedValue) ?? NormalizeOptional(first.Value) ?? legacyAddress;
+                cleaned = new CleanedAddress(
+                    Source: legacyAddress,
+                    Result: normalized,
+                    PostalCode: NormalizeOptional(first.PostalCode),
+                    Country: null,
+                    CountryIsoCode: null,
+                    FederalDistrict: null,
+                    RegionWithType: NormalizeOptional(first.RegionWithType),
+                    CityWithType: NormalizeOptional(first.CityWithType),
+                    SettlementWithType: NormalizeOptional(first.SettlementWithType),
+                    StreetWithType: NormalizeOptional(first.StreetWithType),
+                    House: NormalizeOptional(first.House),
+                    Block: null,
+                    Flat: NormalizeOptional(first.Flat),
+                    FiasId: NormalizeOptional(first.FiasId),
+                    FiasLevel: null,
+                    KladrId: NormalizeOptional(first.KladrId),
+                    Okato: null,
+                    Oktmo: null,
+                    TaxOffice: null,
+                    TaxOfficeLegal: null,
+                    GeoLat: NormalizeOptional(first.GeoLat),
+                    GeoLon: NormalizeOptional(first.GeoLon),
+                    Qc: null,
+                    QcComplete: null,
+                    QcHouse: null,
+                    QcGeo: null,
+                    UnparsedParts: null,
+                    Timezone: null);
+            }
+        }
+
         if (result.ValidateWithDadata)
         {
             if (cleaned is null)
