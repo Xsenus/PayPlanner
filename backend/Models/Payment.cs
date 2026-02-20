@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Collections.Generic;
 
 namespace PayPlanner.Api.Models
 {
@@ -152,6 +153,11 @@ namespace PayPlanner.Api.Models
         /// Навигация на сущность статуса платежа.
         /// </summary>
         public PaymentStatusEntity? PaymentStatusEntity { get; set; }
+
+        /// <summary>
+        /// Ответственные пользователи за счёт.
+        /// </summary>
+        public ICollection<InvoiceResponsible> InvoiceResponsibles { get; set; } = new List<InvoiceResponsible>();
 
         /// <summary>
         /// Внешний ключ на сущность статуса платежа (если используется справочник).

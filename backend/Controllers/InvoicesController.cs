@@ -61,7 +61,10 @@ public class InvoicesController : ControllerBase
             .Select(ProjectionRaw)
             .ToListAsync(ct);
 
-        var items = rawItems.Select(MapFromRaw).ToList();
+        var responsiblesMap = await LoadInvoiceResponsiblesMapAsync(rawItems.Select(x => x.Id), ct);
+        var items = rawItems
+            .Select(raw => MapFromRaw(raw, responsiblesMap.GetValueOrDefault(raw.Id)))
+            .ToList();
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -233,12 +236,15 @@ public class InvoicesController : ControllerBase
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
+        await SyncInvoiceResponsiblesAsync(payment.Id, request.ResponsibleIds, ct);
+
         var raw = await BuildInvoiceQuery()
             .Where(x => x.Payment.Id == payment.Id)
             .Select(ProjectionRaw)
             .FirstAsync(ct);
 
-        var dto = MapFromRaw(raw);
+        var responsiblesMap = await LoadInvoiceResponsiblesMapAsync(new[] { raw.Id }, ct);
+        var dto = MapFromRaw(raw, responsiblesMap.GetValueOrDefault(raw.Id));
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -298,13 +304,15 @@ public class InvoicesController : ControllerBase
         ApplyPaidFlags(payment, request.PaidDate);
 
         await _db.SaveChangesAsync(ct);
+        await SyncInvoiceResponsiblesAsync(payment.Id, request.ResponsibleIds, ct);
 
         var raw = await BuildInvoiceQuery()
             .Where(x => x.Payment.Id == payment.Id)
             .Select(ProjectionRaw)
             .FirstAsync(ct);
 
-        var dto = MapFromRaw(raw);
+        var responsiblesMap = await LoadInvoiceResponsiblesMapAsync(new[] { raw.Id }, ct);
+        var dto = MapFromRaw(raw, responsiblesMap.GetValueOrDefault(raw.Id));
 
         return Ok(dto);
     }
@@ -427,7 +435,7 @@ public class InvoicesController : ControllerBase
                select new InvoiceQueryItem { Payment = payment, Act = act };
     }
 
-    private static IQueryable<InvoiceQueryItem> ApplyFilters(
+    private IQueryable<InvoiceQueryItem> ApplyFilters(
         IQueryable<InvoiceQueryItem> query,
         DateTime? from,
         DateTime? to,
@@ -466,7 +474,9 @@ public class InvoicesController : ControllerBase
 
         if (responsibleId.HasValue)
         {
-            query = query.Where(x => x.Act != null && x.Act.ResponsibleId == responsibleId.Value);
+            query = query.Where(x =>
+                (x.Act != null && x.Act.ResponsibleId == responsibleId.Value)
+                || x.Payment.InvoiceResponsibles.Any(ir => ir.UserId == responsibleId.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -617,8 +627,103 @@ public class InvoicesController : ControllerBase
         SystemNotes = x.Payment.SystemNotes,
     };
 
-    private static InvoiceDto MapFromRaw(InvoiceProjectionRaw raw)
+    private async Task<Dictionary<int, List<ActResponsibleDto>>> LoadInvoiceResponsiblesMapAsync(
+        IEnumerable<int> invoiceIds,
+        CancellationToken ct)
     {
+        var idList = invoiceIds.Distinct().ToList();
+        if (idList.Count == 0)
+        {
+            return new();
+        }
+
+        var rows = await _db.InvoiceResponsibles.AsNoTracking()
+            .Where(x => idList.Contains(x.InvoiceId))
+            .Select(x => new
+            {
+                x.InvoiceId,
+                x.UserId,
+                Name = string.IsNullOrWhiteSpace(x.User.FullName) ? x.User.Email : x.User.FullName,
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(x => x.InvoiceId)
+            .ToDictionary(
+                g => g.Key,
+                g => g
+                    .OrderBy(x => x.Name)
+                    .Select(x => new ActResponsibleDto
+                    {
+                        Id = x.UserId,
+                        FullName = FormatResponsibleName(x.Name),
+                    })
+                    .ToList());
+    }
+
+    private async Task SyncInvoiceResponsiblesAsync(int invoiceId, List<int>? responsibleIds, CancellationToken ct)
+    {
+        var normalizedIds = (responsibleIds ?? new())
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        var existing = await _db.InvoiceResponsibles
+            .Where(x => x.InvoiceId == invoiceId)
+            .ToListAsync(ct);
+
+        var existingIds = existing.Select(x => x.UserId).ToHashSet();
+        var idsToRemove = existing.Where(x => !normalizedIds.Contains(x.UserId)).ToList();
+        if (idsToRemove.Count > 0)
+        {
+            _db.InvoiceResponsibles.RemoveRange(idsToRemove);
+        }
+
+        var idsToAdd = normalizedIds.Where(id => !existingIds.Contains(id)).ToList();
+        if (idsToAdd.Count > 0)
+        {
+            var validIds = await _db.Users.AsNoTracking()
+                .Where(u => idsToAdd.Contains(u.Id))
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+
+            foreach (var id in validIds)
+            {
+                _db.InvoiceResponsibles.Add(new InvoiceResponsible
+                {
+                    InvoiceId = invoiceId,
+                    UserId = id,
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static string FormatResponsibleName(string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return string.Empty;
+
+        var parts = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length <= 1) return parts[0];
+
+        var lastName = parts[0];
+        var firstInitial = parts.Length > 1 && parts[1].Length > 0 ? $"{parts[1][0]}." : string.Empty;
+        var middleInitial = parts.Length > 2 && parts[2].Length > 0 ? $"{parts[2][0]}." : string.Empty;
+
+        return $"{lastName} {firstInitial}{middleInitial}".Trim();
+    }
+
+    private static InvoiceDto MapFromRaw(InvoiceProjectionRaw raw, IReadOnlyCollection<ActResponsibleDto>? responsibles = null)
+    {
+        var resolvedResponsibles = responsibles?.ToList() ?? new List<ActResponsibleDto>();
+        var responsibleName = resolvedResponsibles.Count > 0
+            ? string.Join(", ", resolvedResponsibles.Select(x => x.FullName))
+            : FormatResponsibleName(raw.ResponsibleName);
+        var responsibleId = resolvedResponsibles.Count > 0
+            ? resolvedResponsibles[0].Id
+            : raw.ResponsibleId;
+
         return new InvoiceDto
         {
             Id = raw.Id,
@@ -643,8 +748,10 @@ public class InvoicesController : ControllerBase
             ActNumber = raw.ActNumber,
             ActTitle = raw.ActTitle,
             ActStatus = raw.ActStatus,
-            ResponsibleId = raw.ResponsibleId,
-            ResponsibleName = raw.ResponsibleName,
+            ResponsibleId = responsibleId,
+            ResponsibleName = responsibleName,
+            ResponsibleIds = resolvedResponsibles.Select(x => x.Id).ToList(),
+            Responsibles = resolvedResponsibles,
             CounterpartyInn = raw.CounterpartyInn,
             CounterpartyName = raw.CounterpartyName,
             ServiceId = raw.ServiceId,

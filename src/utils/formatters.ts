@@ -37,3 +37,16 @@ export function formatCurrencySmart(
 
   return { short, full };
 }
+
+export function formatPersonWithInitials(fullName: string | null | undefined): string {
+  const value = (fullName ?? '').trim();
+  if (!value) return '';
+
+  const parts = value.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return value;
+
+  const [lastName, firstName, middleName] = parts;
+  const firstInitial = firstName ? `${firstName[0]}.` : '';
+  const middleInitial = middleName ? `${middleName[0]}.` : '';
+  return `${lastName} ${firstInitial}${middleInitial}`.trim();
+}

@@ -35,7 +35,7 @@ import type {
 } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
-import { formatCurrencySmart } from '../../utils/formatters';
+import { formatCurrencySmart, formatPersonWithInitials } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
@@ -325,6 +325,17 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   };
 
   const canOpenClientFromAccounts = useMemo(() => typeof onOpenClient === 'function', [onOpenClient]);
+
+  const formatInvoiceResponsible = (invoice: Invoice): string => {
+    if (invoice.responsibles && invoice.responsibles.length > 0) {
+      return invoice.responsibles
+        .map((item) => formatPersonWithInitials(item.fullName))
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return invoice.responsibleName ? formatPersonWithInitials(invoice.responsibleName) : '—';
+  };
 
   const headingTitle =
     typeFilter === 'Expense'
@@ -1215,7 +1226,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           )}
                           {visibleColumns.includes('responsible') && (
                             <td className="px-4 py-3 text-center align-middle">
-                              {invoice?.responsibleName ? invoice.responsibleName : '—'}
+                              {invoice ? formatInvoiceResponsible(invoice) : '—'}
                             </td>
                           )}
                           {visibleColumns.includes('type') && (

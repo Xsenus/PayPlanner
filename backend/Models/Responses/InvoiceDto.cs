@@ -28,6 +28,8 @@ public class InvoiceDto
     public ActStatus? ActStatus { get; set; }
     public string? ResponsibleName { get; set; }
     public int? ResponsibleId { get; set; }
+    public List<int> ResponsibleIds { get; set; } = new();
+    public List<ActResponsibleDto> Responsibles { get; set; } = new();
     public string? CounterpartyInn { get; set; }
     public string? CounterpartyName { get; set; }
     public int? ServiceId { get; set; }

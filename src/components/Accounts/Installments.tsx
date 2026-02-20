@@ -20,7 +20,7 @@ import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import type { Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
-import { formatCurrencySmart } from '../../utils/formatters';
+import { formatCurrencySmart, formatPersonWithInitials } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
@@ -357,6 +357,17 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     });
   }, [invoices, normalizedSearch, statusFilter]);
 
+  const formatInvoiceResponsible = (invoice: Invoice): string => {
+    if (invoice.responsibles && invoice.responsibles.length > 0) {
+      return invoice.responsibles
+        .map((item) => formatPersonWithInitials(item.fullName))
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return invoice.responsibleName ? formatPersonWithInitials(invoice.responsibleName) : '—';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
@@ -641,7 +652,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {invoice.responsibleName ? invoice.responsibleName : '—'}
+                          {formatInvoiceResponsible(invoice)}
                         </td>
                         <td className="px-4 py-3">{formatDate(invoice.dueDate)}</td>
                         <td className="px-4 py-3">

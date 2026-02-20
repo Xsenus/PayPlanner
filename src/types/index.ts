@@ -488,6 +488,8 @@ export interface Invoice {
   actStatus?: ActStatus | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
+  responsibleIds?: number[];
+  responsibles?: ActResponsible[];
   counterpartyInn?: string | null;
   counterpartyName?: string | null;
   serviceId?: number | null;
@@ -523,6 +525,7 @@ export interface InvoiceInput {
   dealTypeId?: number | null;
   paymentStatusEntityId?: number | null;
   paidDate?: string | null;
+  responsibleIds?: number[];
   lineItems?: InvoiceLineItem[];
 }
 

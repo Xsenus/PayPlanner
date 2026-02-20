@@ -134,6 +134,24 @@ public class PaymentContext : DbContext
             entity.HasIndex(x => x.PaymentId).HasDatabaseName("IX_ContractPayments_PaymentId");
         });
 
+        modelBuilder.Entity<InvoiceResponsible>(entity =>
+        {
+            entity.HasKey(x => new { x.InvoiceId, x.UserId });
+            entity.ToTable("InvoiceResponsibles");
+
+            entity.HasOne(x => x.Invoice)
+                .WithMany(x => x.InvoiceResponsibles)
+                .HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.InvoiceResponsibles)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.UserId).HasDatabaseName("IX_InvoiceResponsibles_UserId");
+        });
+
         // ------------------ LegalEntity ------------------
         modelBuilder.Entity<LegalEntity>(entity =>
         {
@@ -730,6 +748,7 @@ public class PaymentContext : DbContext
     public DbSet<ContractInvoice> ContractInvoices { get; set; }
 
     public DbSet<ContractPayment> ContractPayments { get; set; }
+    public DbSet<InvoiceResponsible> InvoiceResponsibles { get; set; }
 
     /// <summary>
     /// Типы сделок.

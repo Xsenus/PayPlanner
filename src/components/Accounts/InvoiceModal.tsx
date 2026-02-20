@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
+  ActResponsible,
   ActStatus,
   Client,
   Invoice,
@@ -15,7 +16,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
-import { formatCurrencySmart } from '../../utils/formatters';
+import { formatCurrencySmart, formatPersonWithInitials } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
@@ -35,6 +36,7 @@ type FormState = {
   paidDate: string;
   counterpartyName: string;
   serviceId: string;
+  responsibleIds: string[];
 };
 
 type LineItem = {
@@ -119,8 +121,13 @@ function normalizeInvoiceToForm(
       paidDate: '',
       counterpartyName: '',
       serviceId: '',
+      responsibleIds: [],
     };
   }
+
+  const explicitResponsibleIds = invoice.responsibleIds?.map(String) ?? [];
+  const fallbackResponsibleId =
+    explicitResponsibleIds.length === 0 && invoice.responsibleId ? [String(invoice.responsibleId)] : [];
 
   return {
     number: invoice.number ?? '',
@@ -135,6 +142,7 @@ function normalizeInvoiceToForm(
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
     serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
+    responsibleIds: explicitResponsibleIds.length > 0 ? explicitResponsibleIds : fallbackResponsibleId,
   };
 }
 
@@ -205,6 +213,7 @@ export function InvoiceModal({
     comment: '',
   });
   const [serviceDictOpen, setServiceDictOpen] = useState(false);
+  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -279,6 +288,10 @@ export function InvoiceModal({
   }, [clientPickerSearch, clients]);
 
   const isIncome = form.type === 'Income';
+  const selectedResponsibles = useMemo(
+    () => responsibles.filter((item) => form.responsibleIds.includes(String(item.id))),
+    [form.responsibleIds, responsibles],
+  );
 
   useEffect(() => {
     if (open) {
@@ -303,6 +316,32 @@ export function InvoiceModal({
       setLocalError(null);
     }
   }, [open, invoice, defaultClientId, defaultType]);
+
+  useEffect(() => {
+    if (!open) return;
+    const load = async () => {
+      try {
+        const items = await apiService.getActResponsibles();
+        setResponsibles(items ?? []);
+      } catch {
+        setResponsibles([]);
+      }
+    };
+
+    void load();
+  }, [open]);
+
+  const toggleResponsible = (id: string) => {
+    setForm((prev) => {
+      const has = prev.responsibleIds.includes(id);
+      return {
+        ...prev,
+        responsibleIds: has
+          ? prev.responsibleIds.filter((item) => item !== id)
+          : [...prev.responsibleIds, id],
+      };
+    });
+  };
 
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
@@ -513,6 +552,7 @@ export function InvoiceModal({
       counterpartyName: counterparty ? counterparty : undefined,
       serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
+      responsibleIds: form.responsibleIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
         .map((item) => ({
           name: item.name.trim(),
@@ -860,6 +900,12 @@ export function InvoiceModal({
                   )}
                 </p>
                 <p><span className="text-slate-500">Акт:</span> {selectedAct ? actLabel(selectedAct) : (form.actReference || '—')}</p>
+                <p>
+                  <span className="text-slate-500">Ответственный:</span>{' '}
+                  {selectedResponsibles.length > 0
+                    ? selectedResponsibles.map((item) => formatPersonWithInitials(item.fullName)).join(', ')
+                    : '—'}
+                </p>
                 <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
                 <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
                 <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
@@ -971,6 +1017,31 @@ export function InvoiceModal({
                                     </option>
                                   ))}
                                 </select>
+                              </label>
+
+                              <label className="flex flex-col gap-1 text-sm">
+                                <span className="font-medium text-slate-700">Ответственные</span>
+                                <div className="max-h-32 space-y-2 overflow-auto rounded-lg border border-slate-300 px-3 py-2">
+                                  {responsibles.length === 0 ? (
+                                    <span className="text-xs text-slate-500">Нет доступных пользователей</span>
+                                  ) : (
+                                    responsibles.map((responsible) => {
+                                      const id = String(responsible.id);
+                                      const checked = form.responsibleIds.includes(id);
+                                      return (
+                                        <label key={responsible.id} className="flex items-center gap-2 text-sm text-slate-700">
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => toggleResponsible(id)}
+                                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                          />
+                                          <span>{formatResponsibleDisplayName(responsible.fullName)}</span>
+                                        </label>
+                                      );
+                                    })
+                                  )}
+                                </div>
                               </label>
                             </div>
 
