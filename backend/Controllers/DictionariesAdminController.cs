@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
@@ -12,6 +13,9 @@ public class DictionariesAdminController : ControllerBase
 {
     private readonly PaymentContext _db;
     public DictionariesAdminController(PaymentContext db) => _db = db;
+
+    private IActionResult InUseError(string title)
+        => BadRequest($"Нельзя удалить элемент справочника \"{title}\", так как он используется в данных.");
 
     // DealType
     [HttpPost("deal-types")]
@@ -35,6 +39,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.DealTypes.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.DealTypeId == id))
+            return InUseError(e.Name);
         _db.DealTypes.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -71,6 +77,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.IncomeTypes.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.IncomeTypeId == id))
+            return InUseError(e.Name);
         _db.IncomeTypes.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -107,6 +115,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.PaymentSources.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.PaymentSourceId == id))
+            return InUseError(e.Name);
         _db.PaymentSources.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -143,6 +153,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.Services.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ServiceId == id))
+            return InUseError(e.Name);
         _db.Services.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -181,6 +193,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.ClientStatuses.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Clients.AsNoTracking().AnyAsync(c => c.ClientStatusId == id))
+            return InUseError(e.Name);
         _db.ClientStatuses.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -218,6 +232,8 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.PaymentStatuses.FindAsync(id);
         if (e is null) return NotFound();
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.PaymentStatusId == id))
+            return InUseError(e.Name);
         _db.PaymentStatuses.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
