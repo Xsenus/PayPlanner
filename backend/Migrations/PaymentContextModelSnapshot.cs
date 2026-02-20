@@ -993,6 +993,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("ServiceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1037,6 +1040,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("PlannedDate")
                         .HasDatabaseName("IX_Payments_PlannedDate");
+
+                    b.HasIndex("ServiceId")
+                        .HasDatabaseName("IX_Payments_ServiceId");
 
                     b.HasIndex("Account", "AccountDate")
                         .HasDatabaseName("IX_Payments_Account_AccountDate");
@@ -1276,6 +1282,47 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_RolePermissions_Role_Section");
 
                     b.ToTable("RolePermissions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_ServiceDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_ServiceDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_ServiceDictionaryItems_IsActive_Name");
+
+                    b.ToTable("Services");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
@@ -1736,6 +1783,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("PaymentStatusId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.ServiceDictionaryItem", "Service")
+                        .WithMany("Payments")
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Client");
 
                     b.Navigation("ClientCase");
@@ -1747,6 +1799,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("PaymentSource");
 
                     b.Navigation("PaymentStatusEntity");
+
+                    b.Navigation("Service");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PowerOfAttorney", b =>
@@ -1880,6 +1934,11 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Permissions");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+                {
+                    b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
