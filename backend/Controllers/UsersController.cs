@@ -37,7 +37,12 @@ public class UsersController : ControllerBase
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteUser(int id)
-        => await _svc.DeleteUserAsync(id) ? NoContent() : NotFound();
+    {
+        var result = await _svc.DeleteUserAsync(id);
+        if (!result.Found) return NotFound();
+        if (!result.Deleted) return Conflict(new { message = result.Message ?? "User cannot be deleted." });
+        return NoContent();
+    }
 
     [HttpGet("roles")]
     public async Task<IActionResult> GetRoles() => Ok(await _svc.GetAllRolesAsync());

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
+  ActResponsible,
   ActStatus,
   Client,
   Invoice,
@@ -35,6 +36,7 @@ type FormState = {
   paidDate: string;
   counterpartyName: string;
   serviceId: string;
+  responsibleIds: string[];
 };
 
 type LineItem = {
@@ -119,6 +121,7 @@ function normalizeInvoiceToForm(
       paidDate: '',
       counterpartyName: '',
       serviceId: '',
+      responsibleIds: [],
     };
   }
 
@@ -135,6 +138,11 @@ function normalizeInvoiceToForm(
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
     serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
+    responsibleIds: (invoice.responsibleIds && invoice.responsibleIds.length > 0
+      ? invoice.responsibleIds
+      : invoice.responsibleId
+        ? [invoice.responsibleId]
+        : []).map((id) => String(id)),
   };
 }
 
@@ -205,6 +213,8 @@ export function InvoiceModal({
     comment: '',
   });
   const [serviceDictOpen, setServiceDictOpen] = useState(false);
+  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
+  const [responsiblesError, setResponsiblesError] = useState<string | null>(null);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -279,6 +289,31 @@ export function InvoiceModal({
   }, [clientPickerSearch, clients]);
 
   const isIncome = form.type === 'Income';
+  useEffect(() => {
+    let ignore = false;
+
+    const loadResponsibles = async () => {
+      try {
+        const response = await apiService.getActResponsibles();
+        if (!ignore) {
+          setResponsibles(response ?? []);
+          setResponsiblesError(null);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setResponsibles([]);
+          setResponsiblesError(error instanceof Error ? error.message : 'Не удалось загрузить ответственных');
+        }
+      }
+    };
+
+    void loadResponsibles();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
 
   useEffect(() => {
     if (open) {
@@ -493,6 +528,11 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleResponsibleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const values = Array.from(event.target.selectedOptions, (option) => option.value);
+    setForm((prev) => ({ ...prev, responsibleIds: values }));
+  };
+
 
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
     const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
@@ -512,6 +552,9 @@ export function InvoiceModal({
       actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
       serviceId: form.serviceId ? Number(form.serviceId) : undefined,
+      responsibleIds: form.responsibleIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       lineItems: lineItems
         .map((item) => ({
@@ -933,6 +976,26 @@ export function InvoiceModal({
                                   })}
                                 </div>
                               )}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                              <label className="flex flex-col gap-1 text-sm">
+                                <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственный'}</span>
+                                <select
+                                  multiple
+                                  value={form.responsibleIds}
+                                  onChange={handleResponsibleChange}
+                                  className="min-h-[88px] rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                >
+                                  {responsibles.map((employee) => (
+                                    <option key={employee.id} value={employee.id}>
+                                      {employee.fullName}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="text-xs text-slate-500">Можно выбрать нескольких (Ctrl/Cmd + клик)</span>
+                                {responsiblesError && <span className="text-xs text-rose-600">{responsiblesError}</span>}
+                              </label>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

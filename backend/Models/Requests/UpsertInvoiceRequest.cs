@@ -49,6 +49,8 @@ public class UpsertInvoiceRequest
 
     public int? PaymentStatusEntityId { get; set; }
 
+    public List<int>? ResponsibleIds { get; set; }
+
     public List<InvoiceLineItemRequest>? LineItems { get; set; }
 }
 

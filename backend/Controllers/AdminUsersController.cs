@@ -30,7 +30,12 @@ public class AdminUsersController : ControllerBase
     {
         var dto = await _svc.CreateUserAsync(req);
         return dto is null
-            ? Conflict(new { message = "ѕользователь с таким email уже существует." })
+    {
+        var result = await _svc.DeleteUserAsync(id);
+        if (!result.Found) return NotFound();
+        if (!result.Deleted) return Conflict(new { message = result.Message ?? "User cannot be deleted." });
+        return NoContent();
+    }
             : Created($"/api/auth/users/{dto.Id}", dto);
     }
 

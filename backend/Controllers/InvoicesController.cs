@@ -23,6 +23,7 @@ public class InvoicesController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private const string InvoiceItemsMarker = "[pp:invoice-items]";
+    private const string InvoiceResponsiblesMarker = "[pp:invoice-responsibles]";
 
     public InvoicesController(PaymentContext db, IEmailService emailService)
     {
@@ -61,7 +62,8 @@ public class InvoicesController : ControllerBase
             .Select(ProjectionRaw)
             .ToListAsync(ct);
 
-        var items = rawItems.Select(MapFromRaw).ToList();
+        var responsibleDisplayNames = await BuildResponsibleDisplayNameMapAsync(rawItems, ct);
+        var items = rawItems.Select(raw => MapFromRaw(raw, responsibleDisplayNames)).ToList();
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -205,6 +207,12 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        var responsibleValidationError = await ValidateResponsibleIdsAsync(request.ResponsibleIds, ct);
+        if (responsibleValidationError is not null)
+        {
+            return BadRequest(responsibleValidationError);
+        }
+
         var payment = new Payment
         {
             Account = number,
@@ -226,7 +234,7 @@ public class InvoicesController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
-        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
+        payment.SystemNotes = MergeInvoiceMetadataIntoSystemNotes(payment.SystemNotes, request.LineItems, request.ResponsibleIds);
 
         ApplyPaidFlags(payment, request.PaidDate);
 
@@ -238,7 +246,7 @@ public class InvoicesController : ControllerBase
             .Select(ProjectionRaw)
             .FirstAsync(ct);
 
-        var dto = MapFromRaw(raw);
+        var dto = MapFromRaw(raw, null);
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -277,6 +285,13 @@ public class InvoicesController : ControllerBase
             }
         }
 
+
+        var responsibleValidationError = await ValidateResponsibleIdsAsync(request.ResponsibleIds, ct);
+        if (responsibleValidationError is not null)
+        {
+            return BadRequest(responsibleValidationError);
+        }
+
         payment.Account = number;
         payment.AccountDate = request.Date.Date;
         payment.Date = (request.DueDate ?? request.Date).Date;
@@ -293,7 +308,7 @@ public class InvoicesController : ControllerBase
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
         payment.CounterpartyName = Normalize(request.CounterpartyName);
-        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
+        payment.SystemNotes = MergeInvoiceMetadataIntoSystemNotes(payment.SystemNotes, request.LineItems, request.ResponsibleIds);
 
         ApplyPaidFlags(payment, request.PaidDate);
 
@@ -304,7 +319,7 @@ public class InvoicesController : ControllerBase
             .Select(ProjectionRaw)
             .FirstAsync(ct);
 
-        var dto = MapFromRaw(raw);
+        var dto = MapFromRaw(raw, null);
 
         return Ok(dto);
     }
@@ -466,7 +481,19 @@ public class InvoicesController : ControllerBase
 
         if (responsibleId.HasValue)
         {
-            query = query.Where(x => x.Act != null && x.Act.ResponsibleId == responsibleId.Value);
+            var responsibleToken = responsibleId.Value.ToString();
+            var singleValuePattern = $"%{InvoiceResponsiblesMarker}%[{responsibleToken}]%";
+            var firstValuePattern = $"%{InvoiceResponsiblesMarker}%[{responsibleToken},%";
+            var middleValuePattern = $"%{InvoiceResponsiblesMarker}%,{responsibleToken},%";
+            var lastValuePattern = $"%{InvoiceResponsiblesMarker}%,{responsibleToken}]%";
+
+            query = query.Where(x =>
+                (x.Act != null && x.Act.ResponsibleId == responsibleId.Value)
+                || (x.Payment.SystemNotes != null
+                    && (EF.Functions.Like(x.Payment.SystemNotes, singleValuePattern)
+                        || EF.Functions.Like(x.Payment.SystemNotes, firstValuePattern)
+                        || EF.Functions.Like(x.Payment.SystemNotes, middleValuePattern)
+                        || EF.Functions.Like(x.Payment.SystemNotes, lastValuePattern))));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -617,8 +644,31 @@ public class InvoicesController : ControllerBase
         SystemNotes = x.Payment.SystemNotes,
     };
 
-    private static InvoiceDto MapFromRaw(InvoiceProjectionRaw raw)
+    private InvoiceDto MapFromRaw(InvoiceProjectionRaw raw, IReadOnlyDictionary<int, string>? responsibleDisplayNames)
     {
+        var responsibleIds = ExtractInvoiceResponsibleIds(raw.SystemNotes);
+        if (responsibleIds.Count == 0 && raw.ResponsibleId.HasValue)
+        {
+            responsibleIds.Add(raw.ResponsibleId.Value);
+        }
+
+        var effectiveResponsibleDisplayNames = responsibleDisplayNames;
+        if ((effectiveResponsibleDisplayNames is null || effectiveResponsibleDisplayNames.Count == 0) && responsibleIds.Count > 0)
+        {
+            effectiveResponsibleDisplayNames = _db.Users
+                .AsNoTracking()
+                .Where(user => responsibleIds.Contains(user.Id))
+                .Select(user => new
+                {
+                    user.Id,
+                    DisplayName = FormatResponsibleName(user.FullName, user.Email),
+                })
+                .Where(user => !string.IsNullOrWhiteSpace(user.DisplayName))
+                .ToDictionary(user => user.Id, user => user.DisplayName);
+        }
+
+        var responsibleNames = ResolveResponsibleDisplayNames(responsibleIds, effectiveResponsibleDisplayNames);
+
         return new InvoiceDto
         {
             Id = raw.Id,
@@ -643,8 +693,10 @@ public class InvoicesController : ControllerBase
             ActNumber = raw.ActNumber,
             ActTitle = raw.ActTitle,
             ActStatus = raw.ActStatus,
-            ResponsibleId = raw.ResponsibleId,
-            ResponsibleName = raw.ResponsibleName,
+            ResponsibleId = responsibleIds.Count > 0 ? responsibleIds[0] : raw.ResponsibleId,
+            ResponsibleName = responsibleNames.Count > 0 ? string.Join(", ", responsibleNames) : raw.ResponsibleName,
+            ResponsibleIds = responsibleIds,
+            ResponsibleNames = responsibleNames,
             CounterpartyInn = raw.CounterpartyInn,
             CounterpartyName = raw.CounterpartyName,
             ServiceId = raw.ServiceId,
@@ -687,38 +739,230 @@ public class InvoicesController : ControllerBase
         }
     }
 
-    private static string MergeInvoiceItemsIntoSystemNotes(string? existingSystemNotes, List<InvoiceLineItemRequest>? lineItems)
+    private static List<int> ExtractInvoiceResponsibleIds(string? systemNotes)
     {
-        if (lineItems is null)
+        if (string.IsNullOrWhiteSpace(systemNotes)) return new();
+
+        var markerLine = systemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith(InvoiceResponsiblesMarker, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(markerLine)) return new();
+
+        var json = markerLine[InvoiceResponsiblesMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json)) return new();
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<List<int>>(json);
+            return parsed?
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList() ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static string MergeInvoiceMetadataIntoSystemNotes(
+        string? existingSystemNotes,
+        List<InvoiceLineItemRequest>? lineItems,
+        List<int>? responsibleIds)
+    {
+        if (lineItems is null && responsibleIds is null)
         {
             return existingSystemNotes ?? string.Empty;
         }
 
         var baseLines = (existingSystemNotes ?? string.Empty)
             .Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal))
+            .Where(line =>
+                !string.IsNullOrWhiteSpace(line)
+                && !line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal)
+                && !line.StartsWith(InvoiceResponsiblesMarker, StringComparison.Ordinal))
             .ToList();
 
-        var normalizedItems = lineItems
-            .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
-            .Select(item => new InvoiceLineItemDto
-            {
-                Name = item.Name!.Trim(),
-                Quantity = Math.Max(item.Quantity, 0),
-                Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
-                Price = Math.Max(item.Price, 0),
-            })
-            .ToList();
-
-        if (normalizedItems.Count > 0)
+        if (lineItems is not null)
         {
-            var json = JsonSerializer.Serialize(normalizedItems);
-            baseLines.Add($"{InvoiceItemsMarker} {json}");
+            var normalizedItems = lineItems
+                .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
+                .Select(item => new InvoiceLineItemDto
+                {
+                    Name = item.Name!.Trim(),
+                    Quantity = Math.Max(item.Quantity, 0),
+                    Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
+                    Price = Math.Max(item.Price, 0),
+                })
+                .ToList();
+
+            if (normalizedItems.Count > 0)
+            {
+                var json = JsonSerializer.Serialize(normalizedItems);
+                baseLines.Add($"{InvoiceItemsMarker} {json}");
+            }
+        }
+        else
+        {
+            var existingItems = ExtractInvoiceItems(existingSystemNotes);
+            if (existingItems.Count > 0)
+            {
+                var json = JsonSerializer.Serialize(existingItems);
+                baseLines.Add($"{InvoiceItemsMarker} {json}");
+            }
+        }
+
+        if (responsibleIds is not null)
+        {
+            var normalizedResponsibleIds = responsibleIds
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+
+            if (normalizedResponsibleIds.Count > 0)
+            {
+                var json = JsonSerializer.Serialize(normalizedResponsibleIds);
+                baseLines.Add($"{InvoiceResponsiblesMarker} {json}");
+            }
+        }
+        else
+        {
+            var existingResponsibleIds = ExtractInvoiceResponsibleIds(existingSystemNotes);
+            if (existingResponsibleIds.Count > 0)
+            {
+                var json = JsonSerializer.Serialize(existingResponsibleIds);
+                baseLines.Add($"{InvoiceResponsiblesMarker} {json}");
+            }
         }
 
         return string.Join("\n", baseLines);
     }
 
+
+    private async Task<string?> ValidateResponsibleIdsAsync(List<int>? responsibleIds, CancellationToken ct)
+    {
+        if (responsibleIds is null)
+        {
+            return null;
+        }
+
+        var normalizedResponsibleIds = responsibleIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (normalizedResponsibleIds.Count != responsibleIds.Count)
+        {
+            return "ResponsibleIds must contain only positive unique identifiers.";
+        }
+
+        var existingResponsibleCount = await _db.Users.AsNoTracking()
+            .CountAsync(u => normalizedResponsibleIds.Contains(u.Id), ct);
+
+        return existingResponsibleCount == normalizedResponsibleIds.Count
+            ? null
+            : "Some responsible users were not found.";
+    }
+
+    private async Task<Dictionary<int, string>> BuildResponsibleDisplayNameMapAsync(
+        IReadOnlyCollection<InvoiceProjectionRaw> rawItems,
+        CancellationToken ct)
+    {
+        var ids = rawItems
+            .SelectMany(raw =>
+            {
+                var extracted = ExtractInvoiceResponsibleIds(raw.SystemNotes);
+                if (extracted.Count > 0)
+                {
+                    return extracted;
+                }
+
+                return raw.ResponsibleId.HasValue
+                    ? new[] { raw.ResponsibleId.Value }
+                    : Array.Empty<int>();
+            })
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return new();
+        }
+
+        return await _db.Users
+            .AsNoTracking()
+            .Where(user => ids.Contains(user.Id))
+            .Select(user => new
+            {
+                user.Id,
+                DisplayName = FormatResponsibleName(user.FullName, user.Email),
+            })
+            .Where(user => !string.IsNullOrWhiteSpace(user.DisplayName))
+            .ToDictionaryAsync(user => user.Id, user => user.DisplayName, ct);
+    }
+
+    private static List<string> ResolveResponsibleDisplayNames(IEnumerable<int> responsibleIds, IReadOnlyDictionary<int, string>? responsibleDisplayNames)
+    {
+        var ids = responsibleIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return new();
+        }
+
+        if (responsibleDisplayNames is null || responsibleDisplayNames.Count == 0)
+        {
+            return new();
+        }
+
+        var result = new List<string>(ids.Count);
+        foreach (var id in ids)
+        {
+            if (responsibleDisplayNames.TryGetValue(id, out var displayName) && !string.IsNullOrWhiteSpace(displayName))
+            {
+                result.Add(displayName);
+            }
+        }
+
+        return result;
+    }
+
+    private static string FormatResponsibleName(string? fullName, string? fallbackEmail)
+    {
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return fallbackEmail?.Trim() ?? string.Empty;
+        }
+
+        var parts = fullName
+            .Trim()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length == 0)
+        {
+            return fallbackEmail?.Trim() ?? string.Empty;
+        }
+
+        if (parts.Length == 1)
+        {
+            return parts[0];
+        }
+
+        var lastName = parts[0];
+        var initials = parts
+            .Skip(1)
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .Select(part => $"{char.ToUpperInvariant(part[0])}.")
+            .ToList();
+
+        return initials.Count > 0
+            ? $"{lastName} {string.Join(string.Empty, initials)}"
+            : lastName;
+    }
 
     private static string NormalizeDocumentFormat(string? format)
     {
