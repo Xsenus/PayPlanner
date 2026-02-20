@@ -1,15 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
-import type { Act, ActStatus, Client, Invoice, InvoiceInput, InvoiceLineItem, PaymentKind, PaymentStatus } from '../../types';
+import type {
+  Act,
+  ActStatus,
+  Client,
+  Invoice,
+  InvoiceInput,
+  InvoiceLineItem,
+  PaymentKind,
+  PaymentStatus,
+} from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
 import { useDialog } from '../../hooks/useDialog';
+import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 type FormState = {
   number: string;
@@ -23,6 +34,7 @@ type FormState = {
   actReference: string;
   paidDate: string;
   counterpartyName: string;
+  serviceId: string;
 };
 
 type LineItem = {
@@ -106,6 +118,7 @@ function normalizeInvoiceToForm(
       actReference: '',
       paidDate: '',
       counterpartyName: '',
+      serviceId: '',
     };
   }
 
@@ -121,6 +134,7 @@ function normalizeInvoiceToForm(
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
+    serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
   };
 }
 
@@ -168,6 +182,7 @@ export function InvoiceModal({
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
   const isTypeLocked = lockType && mode === 'create';
+  const { services } = useDictionaries();
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
@@ -189,6 +204,7 @@ export function InvoiceModal({
     amount: '',
     comment: '',
   });
+  const [serviceDictOpen, setServiceDictOpen] = useState(false);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -477,6 +493,7 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
     const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
     const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
@@ -494,6 +511,7 @@ export function InvoiceModal({
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
+      serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       lineItems: lineItems
         .map((item) => ({
@@ -917,7 +935,7 @@ export function InvoiceModal({
                               )}
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                                 <input
@@ -929,6 +947,34 @@ export function InvoiceModal({
                                 />
                               </label>
 
+                              <label className="flex flex-col gap-1 text-sm">
+                                <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
+                                  Услуги
+                                  <button
+                                    type="button"
+                                    onClick={() => setServiceDictOpen(true)}
+                                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Справочник
+                                  </button>
+                                </span>
+                                <select
+                                  value={form.serviceId}
+                                  onChange={handleChange('serviceId')}
+                                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                >
+                                  <option value="">Не выбрано</option>
+                                  {services.map((service) => (
+                                    <option key={service.id} value={service.id}>
+                                      {service.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
                                   {t('invoiceAmount') ?? 'Сумма'}
@@ -1090,6 +1136,7 @@ export function InvoiceModal({
                                 </button>
                               )}
                             </label>
+
                           </div>
                         </section>
 
@@ -1303,6 +1350,18 @@ export function InvoiceModal({
           </div>
         </div>
       )}
+
+      <DictionariesModal
+        open={serviceDictOpen}
+        onClose={() => setServiceDictOpen(false)}
+        initialTab="services"
+        onlyTab="services"
+        onPickItem={(kind, item) => {
+          if (kind !== 'services') return;
+          setForm((prev) => ({ ...prev, serviceId: String(item.id) }));
+          setServiceDictOpen(false);
+        }}
+      />
 
       {createActOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">

@@ -1,7 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource } from '../../types';
+import type {
+  ClientStatus,
+  DealType,
+  IncomeType,
+  PaymentSource,
+  ServiceDictionaryItem,
+} from '../../types';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
@@ -99,8 +105,25 @@ function Tabs<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  if (tabs.length === 1) {
+    return (
+      <div className="flex justify-center">
+        {tabs.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => onChange(t.value)}
+            className={`w-full max-w-md rounded-lg px-3 py-2 text-sm ${
+              value === t.value ? 'bg-white shadow' : 'text-gray-600 hover:bg-white/60'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 rounded-xl bg-gray-100 p-1">
+    <div className={`grid rounded-xl bg-gray-100 p-1 ${tabs.length <= 2 ? 'grid-cols-2' : tabs.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'}`}>
       {tabs.map((t) => (
         <button
           key={t.value}
@@ -141,13 +164,38 @@ function Modal(props: {
   );
 }
 
+function ConfirmModal(props: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { open, title, onClose, children } = props;
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute left-1/2 top-1/2 w-[min(520px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div className="text-lg font-semibold">{title}</div>
+          <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 type VisibleKind =
   | 'deal-types'
   | 'income-income'
   | 'income-expense'
   | 'payment-sources'
+  | 'services'
   | 'client-statuses';
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus;
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
 
 type FullDictItem = {
   id: number;
@@ -172,6 +220,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-income', label: 'Тип дохода' },
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
+  { value: 'services', label: 'Услуги' },
   { value: 'client-statuses', label: 'Статус клиента' },
 ];
 
@@ -185,12 +234,34 @@ function defaultColor(kind: VisibleKind): string {
       return '#EF4444';
     case 'payment-sources':
       return '#8B5CF6';
+    case 'services':
+      return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
   }
 }
 
 const isValidHexColor = (v: string) => /^#[0-9A-Fa-f]{6}$/.test(v);
+
+function prettyErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+
+  // Формат из apiService: "HTTP 400 Bad Request at <url> - <server message>"
+  const marker = ' - ';
+  const markerIdx = raw.indexOf(marker);
+  if (markerIdx >= 0) {
+    const serverPart = raw.slice(markerIdx + marker.length).trim();
+    if (serverPart) return serverPart;
+  }
+
+  // fallback: скрываем техническую часть до " at "
+  const atIdx = raw.indexOf(' at ');
+  if (atIdx > 0) {
+    return raw.slice(0, atIdx).trim();
+  }
+
+  return raw;
+}
 
 function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
   return {
@@ -206,15 +277,25 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
 export interface DictionariesModalProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: VisibleKind;
+  onlyTab?: VisibleKind;
+  onPickItem?: (kind: VisibleKind, item: FullDictItem) => void;
 }
 
-export default function DictionariesModal({ open, onClose }: DictionariesModalProps) {
-  const [activeTab, setActiveTab] = useState<VisibleKind>('deal-types');
+export default function DictionariesModal({
+  open,
+  onClose,
+  initialTab = 'deal-types',
+  onlyTab,
+  onPickItem,
+}: DictionariesModalProps) {
+  const [activeTab, setActiveTab] = useState<VisibleKind>(initialTab);
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
     'deal-types': [],
     'income-income': [],
     'income-expense': [],
     'payment-sources': [],
+    'services': [],
     'client-statuses': [],
   });
   const [busy, setBusy] = useState(false);
@@ -222,6 +303,12 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
   const [confirmDelete, setConfirmDelete] = useState<{ kind: VisibleKind; id: number } | null>(
     null,
   );
+
+  const visibleTabs = useMemo(
+    () => (onlyTab ? TABS.filter((t) => t.value === onlyTab) : TABS),
+    [onlyTab],
+  );
+
 
   const loadKind = useCallback(async (kind: VisibleKind) => {
     setBusy(true);
@@ -243,7 +330,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
         ),
       }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -251,10 +338,11 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
 
   useEffect(() => {
     if (!open) return;
+    setActiveTab(onlyTab ?? initialTab);
     (async () => {
-      await Promise.all(TABS.map((t) => loadKind(t.value)));
+      await Promise.all(visibleTabs.map((t) => loadKind(t.value)));
     })();
-  }, [open, loadKind]);
+  }, [open, loadKind, initialTab, onlyTab, visibleTabs]);
 
   const addNew = (kind: VisibleKind) => {
     setData((prev) => ({
@@ -338,7 +426,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -374,7 +462,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -395,7 +483,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
       emitDictsChanged();
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -563,11 +651,13 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
     item,
     onEdit,
     onDelete,
+    onPick,
     kind,
   }: {
     item: FullDictItem;
     onEdit: () => void;
     onDelete: () => void;
+    onPick?: () => void;
     kind: VisibleKind;
   }) {
     return (
@@ -599,6 +689,11 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
         </div>
         <div className="col-span-2" />
         <div className="col-span-2 flex justify-end gap-2">
+          {onPick && (
+            <Btn variant="secondary" onClick={onPick}>
+              Выбрать
+            </Btn>
+          )}
           <Btn variant="ghost" onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Btn>
@@ -622,7 +717,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
           </Btn>
         }>
         <div className="mb-4">
-          <Tabs tabs={TABS} value={activeTab} onChange={(v) => setActiveTab(v)} />
+          <Tabs tabs={visibleTabs} value={activeTab} onChange={(v) => setActiveTab(v)} />
         </div>
 
         {error && (
@@ -634,7 +729,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
         <div className={busy ? 'pointer-events-none opacity-70' : ''}>
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm text-gray-600">Всего: {data[activeTab]?.length ?? 0}</div>
-            <Btn onClick={() => addNew(activeTab)}>
+            <Btn onClick={() => addNew(onlyTab ?? activeTab)}>
               <Plus className="h-4 w-4" />
               Добавить
             </Btn>
@@ -651,6 +746,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
                     kind={activeTab}
                     onEdit={() => setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))}
                     onDelete={() => setConfirmDelete({ kind: activeTab, id: row.item.id })}
+                    onPick={onPickItem ? () => onPickItem(activeTab, row.item) : undefined}
                   />
                 );
               }
@@ -665,7 +761,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
       </Modal>
 
       {confirmDelete && (
-        <Modal open={true} onClose={() => setConfirmDelete(null)} title="Удалить элемент?">
+        <ConfirmModal open={true} onClose={() => setConfirmDelete(null)} title="Удалить элемент?">
           <div className="space-y-4">
             <p className="text-sm text-gray-700">Действие необратимо. Удалить элемент?</p>
             <div className="flex justify-end gap-2">
@@ -675,7 +771,7 @@ export default function DictionariesModal({ open, onClose }: DictionariesModalPr
               <Btn onClick={doDelete}>Удалить</Btn>
             </div>
           </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </>
   );

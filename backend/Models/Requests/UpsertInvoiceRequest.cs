@@ -41,6 +41,8 @@ public class UpsertInvoiceRequest
 
     public int? PaymentSourceId { get; set; }
 
+    public int? ServiceId { get; set; }
+
     public int? IncomeTypeId { get; set; }
 
     public int? DealTypeId { get; set; }

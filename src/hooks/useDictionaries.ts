@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource, PaymentStatusEntity } from '../types';
+import type {
+  ClientStatus,
+  DealType,
+  IncomeType,
+  PaymentSource,
+  PaymentStatusEntity,
+  ServiceDictionaryItem,
+} from '../types';
 
 const DICTS_CHANGED = 'dicts:changed';
 
@@ -8,6 +15,7 @@ export function useDictionaries() {
   const [dealTypes, setDealTypes] = useState<DealType[]>([]);
   const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
   const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
+  const [services, setServices] = useState<ServiceDictionaryItem[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<PaymentStatusEntity[]>([]);
   const [clientStatuses, setClientStatuses] = useState<ClientStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,11 +25,12 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, statuses, clientStatusesResp] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
         apiService.getDict('payment-sources'),
+        apiService.getDict('services'),
         apiService.getDict('payment-statuses'),
         apiService.getDict('client-statuses'),
       ]);
@@ -34,6 +43,7 @@ export function useDictionaries() {
       setIncomeTypes(Array.from(byId.values()));
 
       setPaymentSources(sources ?? []);
+      setServices((servicesResp ?? []).filter((service) => service.isActive !== false));
       setPaymentStatuses(statuses ?? []);
       setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
     } catch (e) {
@@ -57,6 +67,7 @@ export function useDictionaries() {
     dealTypes,
     incomeTypes,
     paymentSources,
+    services,
     paymentStatuses,
     clientStatuses,
     loading,

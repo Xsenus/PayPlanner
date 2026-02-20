@@ -54,6 +54,16 @@ public class DictionariesReadController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("services")]
+    public async Task<IActionResult> Services(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.Services.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
     [HttpGet("client-statuses")]
     public async Task<IActionResult> ClientStatuses(CancellationToken ct)
     {

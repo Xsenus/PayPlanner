@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource } from '../../types';
+import type { ClientStatus, DealType, IncomeType, PaymentSource, ServiceDictionaryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
@@ -20,8 +20,9 @@ type VisibleKind =
   | 'income-income'
   | 'income-expense'
   | 'payment-sources'
+  | 'services'
   | 'client-statuses';
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus;
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
 
 type FullDictItem = {
   id: number;
@@ -46,6 +47,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-income', label: 'Тип дохода' },
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
+  { value: 'services', label: 'Услуги' },
   { value: 'client-statuses', label: 'Статус клиента' },
 ];
 
@@ -59,12 +61,34 @@ function defaultColor(kind: VisibleKind): string {
       return '#EF4444';
     case 'payment-sources':
       return '#8B5CF6';
+    case 'services':
+      return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
   }
 }
 
+
 const isValidHexColor = (v: string) => /^#[0-9A-Fa-f]{6}$/.test(v);
+
+function prettyErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+
+  const marker = ' - ';
+  const markerIdx = raw.indexOf(marker);
+  if (markerIdx >= 0) {
+    const serverPart = raw.slice(markerIdx + marker.length).trim();
+    if (serverPart) return serverPart;
+  }
+
+  const atIdx = raw.indexOf(' at ');
+  if (atIdx > 0) {
+    return raw.slice(0, atIdx).trim();
+  }
+
+  return raw;
+}
+
 
 function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
   const description = 'description' in x && typeof x.description === 'string' ? x.description : '';
@@ -92,6 +116,7 @@ export const Dictionaries = () => {
     'income-income': [],
     'income-expense': [],
     'payment-sources': [],
+    'services': [],
     'client-statuses': [],
   });
   const [busy, setBusy] = useState(false);
@@ -120,7 +145,7 @@ export const Dictionaries = () => {
         ),
       }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -216,7 +241,7 @@ export const Dictionaries = () => {
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -253,7 +278,7 @@ export const Dictionaries = () => {
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -275,7 +300,7 @@ export const Dictionaries = () => {
       emitDictsChanged();
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
