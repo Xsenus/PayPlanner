@@ -243,6 +243,26 @@ function defaultColor(kind: VisibleKind): string {
 
 const isValidHexColor = (v: string) => /^#[0-9A-Fa-f]{6}$/.test(v);
 
+function prettyErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+
+  // Формат из apiService: "HTTP 400 Bad Request at <url> - <server message>"
+  const marker = ' - ';
+  const markerIdx = raw.indexOf(marker);
+  if (markerIdx >= 0) {
+    const serverPart = raw.slice(markerIdx + marker.length).trim();
+    if (serverPart) return serverPart;
+  }
+
+  // fallback: скрываем техническую часть до " at "
+  const atIdx = raw.indexOf(' at ');
+  if (atIdx > 0) {
+    return raw.slice(0, atIdx).trim();
+  }
+
+  return raw;
+}
+
 function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
   return {
     id: x.id,
@@ -310,7 +330,7 @@ export default function DictionariesModal({
         ),
       }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -406,7 +426,7 @@ export default function DictionariesModal({
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -442,7 +462,7 @@ export default function DictionariesModal({
       });
       emitDictsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -463,7 +483,7 @@ export default function DictionariesModal({
       emitDictsChanged();
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(prettyErrorMessage(e));
     } finally {
       setBusy(false);
     }
