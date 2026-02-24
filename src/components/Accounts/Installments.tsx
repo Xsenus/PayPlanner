@@ -253,29 +253,36 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   const [modalError, setModalError] = useState<string | null>(null);
 
   const [clients, setClients] = useState<Client[]>([]);
+  const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
-  const ensureClients = useCallback(async () => {
+  const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;
-    if (clients.length > 0 && !lookupsError) return;
+    if (clients.length > 0 && actResponsibles.length > 0 && !lookupsError) return;
     setLookupsLoading(true);
     try {
-      const response = await apiService.getClients();
-      setClients(response ?? []);
+      const [clientsResponse, responsiblesResponse] = await Promise.all([
+        clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
+        apiService.getActResponsibles(),
+      ]);
+      if (!clients.length) {
+        setClients(clientsResponse ?? []);
+      }
+      setActResponsibles(responsiblesResponse ?? []);
       setLookupsError(null);
     } catch (err) {
-      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить клиентов');
+      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить справочники');
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, clients.length, lookupsError]);
+  }, [modalOpen, clients, actResponsibles.length, lookupsError]);
 
   useEffect(() => {
     if (modalOpen) {
-      void ensureClients();
+      void ensureLookups();
     }
-  }, [modalOpen, ensureClients]);
+  }, [modalOpen, ensureLookups]);
 
   const openCreateModal = () => {
     setModalMode('create');
@@ -733,6 +740,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
