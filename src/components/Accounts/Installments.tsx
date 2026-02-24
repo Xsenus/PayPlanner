@@ -641,7 +641,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {invoice.responsibleName ? invoice.responsibleName : '—'}
+                          {invoice.responsibles?.length ? invoice.responsibles.map((item) => item.fullName).join(', ') : invoice.responsibleName ? invoice.responsibleName : '—'}
                         </td>
                         <td className="px-4 py-3">{formatDate(invoice.dueDate)}</td>
                         <td className="px-4 py-3">

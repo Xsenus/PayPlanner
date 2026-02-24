@@ -38,4 +38,5 @@ public class User
     public User? ApprovedBy { get; set; }
 
     public ICollection<Act> Acts { get; set; } = new List<Act>();
+    public ICollection<PaymentResponsible> InvoiceResponsibles { get; set; } = new List<PaymentResponsible>();
 }

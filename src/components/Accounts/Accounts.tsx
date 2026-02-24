@@ -795,6 +795,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
@@ -1215,7 +1216,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           )}
                           {visibleColumns.includes('responsible') && (
                             <td className="px-4 py-3 text-center align-middle">
-                              {invoice?.responsibleName ? invoice.responsibleName : '—'}
+                              {invoice?.responsibles?.length ? invoice.responsibles.map((item) => item.fullName).join(', ') : invoice?.responsibleName ? invoice.responsibleName : '—'}
                             </td>
                           )}
                           {visibleColumns.includes('type') && (
@@ -1382,6 +1383,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}

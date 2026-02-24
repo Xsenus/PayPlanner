@@ -3,6 +3,7 @@ import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Pr
 import type {
   Act,
   ActStatus,
+  ActResponsible,
   Client,
   Invoice,
   InvoiceInput,
@@ -35,6 +36,7 @@ type FormState = {
   paidDate: string;
   counterpartyName: string;
   serviceId: string;
+  responsibleIds: string[];
 };
 
 type LineItem = {
@@ -90,6 +92,7 @@ interface InvoiceModalProps {
   submitting: boolean;
   errorMessage?: string | null;
   clients: Client[];
+  responsibles: ActResponsible[];
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
@@ -119,6 +122,7 @@ function normalizeInvoiceToForm(
       paidDate: '',
       counterpartyName: '',
       serviceId: '',
+      responsibleIds: [],
     };
   }
 
@@ -135,6 +139,7 @@ function normalizeInvoiceToForm(
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
     serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
+    responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)),
   };
 }
 
@@ -166,6 +171,7 @@ export function InvoiceModal({
   submitting,
   errorMessage,
   clients,
+  responsibles,
   lookupsLoading,
   lookupsError,
   defaultClientId,
@@ -513,6 +519,7 @@ export function InvoiceModal({
       counterpartyName: counterparty ? counterparty : undefined,
       serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
+      responsibleIds: form.responsibleIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
         .map((item) => ({
           name: item.name.trim(),
@@ -973,6 +980,25 @@ export function InvoiceModal({
                                 </select>
                               </label>
                             </div>
+
+                            <label className="flex flex-col gap-1 text-sm">
+                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственные'}</span>
+                              <select
+                                multiple
+                                value={form.responsibleIds}
+                                onChange={(event) => {
+                                  const values = Array.from(event.target.selectedOptions).map((option) => option.value);
+                                  setForm((prev) => ({ ...prev, responsibleIds: values }));
+                                }}
+                                className="min-h-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                              >
+                                {responsibles.map((responsible) => (
+                                  <option key={responsible.id} value={String(responsible.id)}>
+                                    {responsible.fullName}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">

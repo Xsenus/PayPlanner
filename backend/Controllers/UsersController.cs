@@ -37,7 +37,16 @@ public class UsersController : ControllerBase
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteUser(int id)
-        => await _svc.DeleteUserAsync(id) ? NoContent() : NotFound();
+    {
+        try
+        {
+            return await _svc.DeleteUserAsync(id) ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserInUseAsResponsible")
+        {
+            return Conflict(new { message = "Нельзя удалить пользователя: он назначен ответственным в документах." });
+        }
+    }
 
     [HttpGet("roles")]
     public async Task<IActionResult> GetRoles() => Ok(await _svc.GetAllRolesAsync());

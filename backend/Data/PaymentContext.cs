@@ -228,6 +228,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.PaymentStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasMany(e => e.Responsibles)
+                  .WithOne(pr => pr.Payment)
+                  .HasForeignKey(pr => pr.PaymentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             // ---- Индексы Account
             entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
@@ -248,6 +253,19 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Type, e.Status, e.Date }).HasDatabaseName("IX_Payments_Type_Status_Date");
             entity.HasIndex(e => new { e.ClientId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientCaseId_Date_Type_Status");
+        });
+
+        modelBuilder.Entity<PaymentResponsible>(entity =>
+        {
+            entity.HasKey(x => new { x.PaymentId, x.UserId });
+            entity.ToTable("PaymentResponsibles");
+
+            entity.HasOne(x => x.User)
+                  .WithMany(u => u.InvoiceResponsibles)
+                  .HasForeignKey(x => x.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.UserId).HasDatabaseName("IX_PaymentResponsibles_UserId");
         });
 
         // ------------------ MoneyOperation ------------------
@@ -765,6 +783,7 @@ public class PaymentContext : DbContext
     /// Статусы платежей.
     /// </summary>
     public DbSet<PaymentStatusEntity> PaymentStatuses { get; set; }
+    public DbSet<PaymentResponsible> PaymentResponsibles { get; set; }
 
     /// <summary>
     /// Роли пользователей.
