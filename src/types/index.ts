@@ -333,6 +333,7 @@ export interface Act {
   clientName?: string | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
+  responsibles?: InvoiceResponsible[];
   comment?: string | null;
   createdAt: string;
   updatedAt?: string | null;
@@ -463,6 +464,11 @@ export type PaymentPayload = Omit<
   | 'delayDays'
 >;
 
+export interface InvoiceResponsible {
+  id: number;
+  fullName: string;
+}
+
 export interface Invoice {
   id: number;
   number: string;
@@ -488,12 +494,14 @@ export interface Invoice {
   actStatus?: ActStatus | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
+  responsibles?: InvoiceResponsible[];
   counterpartyInn?: string | null;
   counterpartyName?: string | null;
   serviceId?: number | null;
   serviceName?: string | null;
   paymentStatusName?: string | null;
   lineItems?: InvoiceLineItem[];
+  responsibleIds?: number[];
   createdAt: string;
 }
 
@@ -524,6 +532,7 @@ export interface InvoiceInput {
   paymentStatusEntityId?: number | null;
   paidDate?: string | null;
   lineItems?: InvoiceLineItem[];
+  responsibleIds?: number[];
 }
 
 export interface InvoiceSummaryBucket {

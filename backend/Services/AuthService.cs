@@ -66,7 +66,7 @@ public class AuthService
         Email = user.Email,
         FullName = user.FullName,
 
-        // профиль
+        // ГЇГ°Г®ГґГЁГ«Гј
         FirstName = user.FirstName,
         LastName = user.LastName,
         MiddleName = user.MiddleName,
@@ -82,13 +82,13 @@ public class AuthService
         EmploymentStartDate = user.EmploymentStartDate,
         EmploymentEndDate = user.EmploymentEndDate,
 
-        // статусы/даты
+        // Г±ГІГ ГІГіГ±Г»/Г¤Г ГІГ»
         IsActive = user.IsActive,
         IsApproved = user.IsApproved,
         ApprovedAt = user.ApprovedAt,
         CreatedAt = user.CreatedAt,
 
-        // роль
+        // Г°Г®Г«Гј
         Role = new RoleDto
         {
             Id = user.Role?.Id ?? 0,
@@ -141,14 +141,14 @@ public class AuthService
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(request.Password))
             throw new ArgumentException("Email and Password are required.");
 
-        // Не создаём дубликаты
+        // ГЌГҐ Г±Г®Г§Г¤Г ВёГ¬ Г¤ГіГЎГ«ГЁГЄГ ГІГ»
         var emailExists = await _context.Users
             .AsNoTracking()
             .AnyAsync(u => u.Email == email);
         if (emailExists)
             return null;
 
-        // Проверяем валидность роли
+        // ГЏГ°Г®ГўГҐГ°ГїГҐГ¬ ГўГ Г«ГЁГ¤Г­Г®Г±ГІГј Г°Г®Г«ГЁ
         var roleExists = await _context.Roles
             .AsNoTracking()
             .AnyAsync(r => r.Id == request.RoleId);
@@ -204,7 +204,7 @@ public class AuthService
         if (user == null)
             return null;
 
-        // ---- strings: если поле пришло (!= null) — применяем (с trim). Пустая строка допустима для "очистки".
+        // ---- strings: ГҐГ±Г«ГЁ ГЇГ®Г«ГҐ ГЇГ°ГЁГёГ«Г® (!= null) вЂ” ГЇГ°ГЁГ¬ГҐГ­ГїГҐГ¬ (Г± trim). ГЏГіГ±ГІГ Гї Г±ГІГ°Г®ГЄГ  Г¤Г®ГЇГіГ±ГІГЁГ¬Г  Г¤Г«Гї "Г®Г·ГЁГ±ГІГЄГЁ".
         if (request.FullName != null) user.FullName = request.FullName.Trim();
         if (request.FirstName != null) user.FirstName = request.FirstName.Trim();
         if (request.LastName != null) user.LastName = request.LastName.Trim();
@@ -217,7 +217,7 @@ public class AuthService
         if (request.Messenger != null) user.Messenger = request.Messenger.Trim();
         if (request.Viber != null) user.Viber = request.Viber.Trim();
 
-        // ---- dates/bools: применяем, если HasValue
+        // ---- dates/bools: ГЇГ°ГЁГ¬ГҐГ­ГїГҐГ¬, ГҐГ±Г«ГЁ HasValue
         if (request.DateOfBirth.HasValue)
         {
             if (request.DateOfBirth > DateTime.UtcNow.Date)
@@ -263,6 +263,18 @@ public class AuthService
         var user = await _context.Users.FindAsync(id);
         if (user == null) return false;
 
+        var hasActUsage = await _context.Acts.AsNoTracking().AnyAsync(a => a.ResponsibleId == id);
+        if (hasActUsage)
+        {
+            throw new InvalidOperationException("UserInUseAsResponsible");
+        }
+
+        var hasInvoiceUsage = await _context.PaymentResponsibles.AsNoTracking().AnyAsync(pr => pr.UserId == id);
+        if (hasInvoiceUsage)
+        {
+            throw new InvalidOperationException("UserInUseAsResponsible");
+        }
+
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
         return true;
@@ -272,7 +284,7 @@ public class AuthService
     {
         var q = _context.Users.Include(u => u.Role).AsQueryable();
 
-        // Дополнен фильтр "inactive" (из второго варианта), остальное — как было.
+        // Г„Г®ГЇГ®Г«Г­ГҐГ­ ГґГЁГ«ГјГІГ° "inactive" (ГЁГ§ ГўГІГ®Г°Г®ГЈГ® ГўГ Г°ГЁГ Г­ГІГ ), Г®Г±ГІГ Г«ГјГ­Г®ГҐ вЂ” ГЄГ ГЄ ГЎГ»Г«Г®.
         if (status == "pending") q = q.Where(u => !u.IsApproved);
         else if (status == "approved") q = q.Where(u => u.IsApproved);
         else if (status == "inactive") q = q.Where(u => !u.IsActive);
@@ -297,7 +309,7 @@ public class AuthService
         var user = await _context.Users.Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Email == emailNorm);
 
-        // Не раскрываем существование пользователя — вернём null (401 на фронте).
+        // ГЌГҐ Г°Г Г±ГЄГ°Г»ГўГ ГҐГ¬ Г±ГіГ№ГҐГ±ГІГўГ®ГўГ Г­ГЁГҐ ГЇГ®Г«ГјГ§Г®ГўГ ГІГҐГ«Гї вЂ” ГўГҐГ°Г­ВёГ¬ null (401 Г­Г  ГґГ°Г®Г­ГІГҐ).
         if (user == null) return null;
 
         if (!user.IsActive)

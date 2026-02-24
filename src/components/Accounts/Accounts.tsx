@@ -364,20 +364,26 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
-  const ensureClients = useCallback(async () => {
+  const ensureInvoiceLookups = useCallback(async () => {
     if (!modalOpen && !pageEditingInvoice) return;
-    if (clients.length > 0 && !lookupsError) return;
+    if (clients.length > 0 && actResponsibles.length > 0 && !lookupsError) return;
     setLookupsLoading(true);
     try {
-      const response = await apiService.getClients();
-      setClients(response ?? []);
+      const [clientsResponse, responsiblesResponse] = await Promise.all([
+        clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
+        apiService.getActResponsibles(),
+      ]);
+      if (!clients.length) {
+        setClients(clientsResponse ?? []);
+      }
+      setActResponsibles(responsiblesResponse ?? []);
       setLookupsError(null);
     } catch (err) {
-      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить клиентов');
+      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить справочники');
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, pageEditingInvoice, clients.length, lookupsError]);
+  }, [modalOpen, pageEditingInvoice, clients, actResponsibles.length, lookupsError]);
 
   const ensureActLookups = useCallback(async () => {
     if (!actModalOpen) return;
@@ -403,9 +409,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
   useEffect(() => {
     if (modalOpen || pageEditingInvoice) {
-      void ensureClients();
+      void ensureInvoiceLookups();
     }
-  }, [modalOpen, pageEditingInvoice, ensureClients]);
+  }, [modalOpen, pageEditingInvoice, ensureInvoiceLookups]);
 
   useEffect(() => {
     if (actModalOpen) {
@@ -795,6 +801,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
@@ -821,7 +828,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500"
             >
               <Plus className="h-4 w-4" />
-              {t('addInvoice') ?? 'Добавить счёт'}
+              {t('invoiceAdd') ?? 'Добавить счёт'}
             </button>
           )}
         </div>
@@ -1215,7 +1222,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           )}
                           {visibleColumns.includes('responsible') && (
                             <td className="px-4 py-3 text-center align-middle">
-                              {invoice?.responsibleName ? invoice.responsibleName : '—'}
+                              {invoice?.responsibles?.length ? invoice.responsibles.map((item) => item.fullName).join(', ') : invoice?.responsibleName ? invoice.responsibleName : '—'}
                             </td>
                           )}
                           {visibleColumns.includes('type') && (
@@ -1382,6 +1389,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}

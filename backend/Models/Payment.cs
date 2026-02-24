@@ -159,6 +159,11 @@ namespace PayPlanner.Api.Models
         public int? PaymentStatusId { get; set; }
 
         /// <summary>
+        /// Назначенные ответственные пользователи по счёту.
+        /// </summary>
+        public ICollection<PaymentResponsible> Responsibles { get; set; } = new List<PaymentResponsible>();
+
+        /// <summary>
         /// Статус платежа (ожидается/выполнен/просрочен и т. д.).
         /// </summary>
         public PaymentStatus Status { get; set; }

@@ -27,6 +27,7 @@ public class InvoiceDto
     public string? ActTitle { get; set; }
     public ActStatus? ActStatus { get; set; }
     public string? ResponsibleName { get; set; }
+    public List<InvoiceResponsibleDto> Responsibles { get; set; } = new();
     public int? ResponsibleId { get; set; }
     public string? CounterpartyInn { get; set; }
     public string? CounterpartyName { get; set; }
@@ -43,4 +44,10 @@ public class InvoiceLineItemDto
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = "шт";
     public decimal Price { get; set; }
+}
+
+public class InvoiceResponsibleDto
+{
+    public int Id { get; set; }
+    public string FullName { get; set; } = string.Empty;
 }

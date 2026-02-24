@@ -62,6 +62,16 @@ public class InvoicesController : ControllerBase
             .ToListAsync(ct);
 
         var items = rawItems.Select(MapFromRaw).ToList();
+        var responsiblesMap = await LoadResponsiblesMapAsync(items.Select(i => i.Id), ct);
+        foreach (var item in items)
+        {
+            item.Responsibles = responsiblesMap.GetValueOrDefault(item.Id, new List<InvoiceResponsibleDto>());
+            if (item.Responsibles.Count > 0)
+            {
+                item.ResponsibleId = item.Responsibles[0].Id;
+                item.ResponsibleName = item.Responsibles[0].FullName;
+            }
+        }
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -228,6 +238,20 @@ public class InvoicesController : ControllerBase
 
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
+        var responsibleIds = NormalizeResponsibleIds(request.ResponsibleIds);
+        if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
+        {
+            return BadRequest("One or more responsible users were not found.");
+        }
+
+        foreach (var responsibleId in responsibleIds)
+        {
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                UserId = responsibleId,
+            });
+        }
+
         ApplyPaidFlags(payment, request.PaidDate);
 
         _db.Payments.Add(payment);
@@ -239,6 +263,13 @@ public class InvoicesController : ControllerBase
             .FirstAsync(ct);
 
         var dto = MapFromRaw(raw);
+        var responsiblesMap = await LoadResponsiblesMapAsync(new[] { payment.Id }, ct);
+        dto.Responsibles = responsiblesMap.GetValueOrDefault(payment.Id, new List<InvoiceResponsibleDto>());
+        if (dto.Responsibles.Count > 0)
+        {
+            dto.ResponsibleId = dto.Responsibles[0].Id;
+            dto.ResponsibleName = dto.Responsibles[0].FullName;
+        }
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -251,7 +282,9 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var payment = await _db.Payments
+            .Include(p => p.Responsibles)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
@@ -295,6 +328,33 @@ public class InvoicesController : ControllerBase
         payment.CounterpartyName = Normalize(request.CounterpartyName);
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
+        var responsibleIds = NormalizeResponsibleIds(request.ResponsibleIds);
+        if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
+        {
+            return BadRequest("One or more responsible users were not found.");
+        }
+
+        var forRemoval = payment.Responsibles.Where(r => !responsibleIds.Contains(r.UserId)).ToList();
+        foreach (var row in forRemoval)
+        {
+            payment.Responsibles.Remove(row);
+        }
+
+        var existingResponsibleIds = payment.Responsibles.Select(r => r.UserId).ToHashSet();
+        foreach (var responsibleId in responsibleIds)
+        {
+            if (existingResponsibleIds.Contains(responsibleId))
+            {
+                continue;
+            }
+
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                PaymentId = payment.Id,
+                UserId = responsibleId,
+            });
+        }
+
         ApplyPaidFlags(payment, request.PaidDate);
 
         await _db.SaveChangesAsync(ct);
@@ -305,6 +365,13 @@ public class InvoicesController : ControllerBase
             .FirstAsync(ct);
 
         var dto = MapFromRaw(raw);
+        var responsiblesMap = await LoadResponsiblesMapAsync(new[] { payment.Id }, ct);
+        dto.Responsibles = responsiblesMap.GetValueOrDefault(payment.Id, new List<InvoiceResponsibleDto>());
+        if (dto.Responsibles.Count > 0)
+        {
+            dto.ResponsibleId = dto.Responsibles[0].Id;
+            dto.ResponsibleName = dto.Responsibles[0].FullName;
+        }
 
         return Ok(dto);
     }
@@ -411,6 +478,8 @@ public class InvoicesController : ControllerBase
     {
         var payments = _db.Payments.AsNoTracking()
             .WithPaymentIncludes()
+            .Include(p => p.Responsibles)
+                .ThenInclude(pr => pr.User)
             .Where(p => p.Account != null && p.Account != "");
 
         var acts = _db.Acts.AsNoTracking()
@@ -719,6 +788,64 @@ public class InvoicesController : ControllerBase
         return string.Join("\n", baseLines);
     }
 
+
+    private async Task<Dictionary<int, List<InvoiceResponsibleDto>>> LoadResponsiblesMapAsync(IEnumerable<int> paymentIds, CancellationToken ct)
+    {
+        var ids = paymentIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, List<InvoiceResponsibleDto>>();
+        }
+
+        var rows = await _db.PaymentResponsibles
+            .AsNoTracking()
+            .Include(pr => pr.User)
+            .Where(pr => ids.Contains(pr.PaymentId))
+            .OrderBy(pr => pr.User!.LastName)
+            .ThenBy(pr => pr.User!.FirstName)
+            .ThenBy(pr => pr.User!.MiddleName)
+            .ThenBy(pr => pr.User!.FullName)
+            .Select(pr => new
+            {
+                pr.PaymentId,
+                pr.UserId,
+                FullName = string.IsNullOrWhiteSpace(pr.User!.LastName)
+                    ? (string.IsNullOrWhiteSpace(pr.User.FullName) ? pr.User.Email : pr.User.FullName)
+                    : ($"{pr.User.LastName} {((string.IsNullOrWhiteSpace(pr.User.FirstName) ? string.Empty : pr.User.FirstName[0] + "."))}{((string.IsNullOrWhiteSpace(pr.User.MiddleName) ? string.Empty : pr.User.MiddleName[0] + "."))}").Trim(),
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(x => x.PaymentId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => new InvoiceResponsibleDto
+                {
+                    Id = x.UserId,
+                    FullName = x.FullName,
+                }).ToList());
+    }
+
+    private async Task<bool> EnsureResponsibleIdsExistAsync(HashSet<int> responsibleIds, CancellationToken ct)
+    {
+        if (responsibleIds.Count == 0)
+        {
+            return true;
+        }
+
+        var existingCount = await _db.Users
+            .AsNoTracking()
+            .CountAsync(u => responsibleIds.Contains(u.Id), ct);
+
+        return existingCount == responsibleIds.Count;
+    }
+
+    private static HashSet<int> NormalizeResponsibleIds(List<int>? responsibleIds)
+    {
+        return responsibleIds is null
+            ? new HashSet<int>()
+            : responsibleIds.Where(x => x > 0).ToHashSet();
+    }
 
     private static string NormalizeDocumentFormat(string? format)
     {
