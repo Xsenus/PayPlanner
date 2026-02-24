@@ -139,7 +139,7 @@ function normalizeInvoiceToForm(
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
     serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
-    responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)),
+    responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)).slice(0, 1),
   };
 }
 
@@ -519,7 +519,7 @@ export function InvoiceModal({
       counterpartyName: counterparty ? counterparty : undefined,
       serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
-      responsibleIds: form.responsibleIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
+      responsibleIds: form.responsibleIds.slice(0, 1).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
         .map((item) => ({
           name: item.name.trim(),
@@ -984,25 +984,21 @@ export function InvoiceModal({
                             </div>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственные'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственный'}</span>
                               <select
-                                multiple
-                                value={form.responsibleIds}
+                                value={form.responsibleIds[0] ?? ''}
                                 onChange={(event) => {
-                                  const values = Array.from(event.target.selectedOptions).map((option) => option.value);
-                                  setForm((prev) => ({ ...prev, responsibleIds: values }));
+                                  const nextValue = event.target.value;
+                                  setForm((prev) => ({ ...prev, responsibleIds: nextValue ? [nextValue] : [] }));
                                 }}
-                                className="min-h-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                               >
-                                {responsibles.length === 0 ? (
-                                  <option value="" disabled>Список ответственных пуст</option>
-                                ) : (
-                                  responsibles.map((responsible) => (
-                                    <option key={responsible.id} value={String(responsible.id)}>
-                                      {responsible.fullName}
-                                    </option>
-                                  ))
-                                )}
+                                <option value="">Не выбрано</option>
+                                {responsibles.map((responsible) => (
+                                  <option key={responsible.id} value={String(responsible.id)}>
+                                    {responsible.fullName}
+                                  </option>
+                                ))}
                               </select>
                             </label>
 
@@ -1031,7 +1027,7 @@ export function InvoiceModal({
                               </label>
 
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
                                 <select
                                   value={form.status}
                                   onChange={handleChange('status')}
