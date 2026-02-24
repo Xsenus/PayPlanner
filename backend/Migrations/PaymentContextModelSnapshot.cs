@@ -1071,6 +1071,22 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Payments");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentResponsible", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PaymentId", "UserId");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_PaymentResponsibles_UserId");
+
+                    b.ToTable("PaymentResponsibles", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentSource", b =>
                 {
                     b.Property<int>("Id")
@@ -1803,6 +1819,25 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Service");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentResponsible", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany("Responsibles")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany("InvoiceResponsibles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Payment");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.PowerOfAttorney", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -1919,6 +1954,11 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Clients");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
+                {
+                    b.Navigation("Responsibles");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentSource", b =>
                 {
                     b.Navigation("Payments");
@@ -1944,6 +1984,8 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("InvoiceResponsibles");
                 });
 #pragma warning restore 612, 618
         }
