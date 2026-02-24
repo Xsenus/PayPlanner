@@ -746,7 +746,7 @@ export function InvoiceModal({
         {isPageMode && mode === 'edit' && (
           <div className="flex items-center gap-2">
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
-            {pageViewMode && (
+            {pageViewMode ? (
               <button
                 type="button"
                 onClick={() => setPageViewMode(false)}
@@ -756,6 +756,25 @@ export function InvoiceModal({
               >
                 <Pencil className="h-4 w-4" />
               </button>
+            ) : (
+              <>
+                <button
+                  type="submit"
+                  form="invoice-edit-form"
+                  disabled={submitting}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPageViewMode(true)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+                >
+                  {t('cancel') ?? 'Отмена'}
+                </button>
+              </>
             )}
           </div>
         )}
@@ -888,7 +907,7 @@ export function InvoiceModal({
           </div>
         </div>
       ) : (
-      <form onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
+      <form id="invoice-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[75vh] overflow-y-auto px-6 py-5'} space-y-6`}>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
             <div className="space-y-6">
               <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
@@ -982,25 +1001,6 @@ export function InvoiceModal({
                                 </select>
                               </label>
                             </div>
-
-                            <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственный'}</span>
-                              <select
-                                value={form.responsibleIds[0] ?? ''}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-                                  setForm((prev) => ({ ...prev, responsibleIds: nextValue ? [nextValue] : [] }));
-                                }}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                              >
-                                <option value="">Не выбрано</option>
-                                {responsibles.map((responsible) => (
-                                  <option key={responsible.id} value={String(responsible.id)}>
-                                    {responsible.fullName}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
@@ -1171,6 +1171,34 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              {t('invoiceResponsible') ?? 'Ответственный'}
+                            </span>
+                          </header>
+                          <div className="mt-4">
+                            <label className="flex flex-col gap-1 text-sm">
+                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственный'}</span>
+                              <select
+                                value={form.responsibleIds[0] ?? ''}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setForm((prev) => ({ ...prev, responsibleIds: nextValue ? [nextValue] : [] }));
+                                }}
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                              >
+                                <option value="">Не выбрано</option>
+                                {responsibles.map((responsible) => (
+                                  <option key={responsible.id} value={String(responsible.id)}>
+                                    {responsible.fullName}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        </section>
+
+              <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+                          <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                               {t('invoiceScheduleTitle') ?? 'Сроки и оплата'}
                             </span>
               
@@ -1322,29 +1350,31 @@ export function InvoiceModal({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (isPageMode && mode === 'edit') {
-                  setPageViewMode(true);
-                  return;
-                }
-                onClose();
-              }}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              {t('cancel') ?? 'Отмена'}
-            </button>
-          </div>
+          {!(isPageMode && mode === 'edit') && (
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isPageMode && mode === 'edit') {
+                    setPageViewMode(true);
+                    return;
+                  }
+                  onClose();
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+              >
+                {t('cancel') ?? 'Отмена'}
+              </button>
+            </div>
+          )}
       </form>
       )}
 
