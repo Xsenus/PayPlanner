@@ -746,15 +746,17 @@ export function InvoiceModal({
         {isPageMode && mode === 'edit' && (
           <div className="flex items-center gap-2">
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
-            <button
-              type="button"
-              onClick={() => setPageViewMode((prev) => !prev)}
-              className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
-              aria-label={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
-              title={pageViewMode ? 'Редактировать счёт' : 'Вернуться к просмотру'}
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
+            {pageViewMode && (
+              <button
+                type="button"
+                onClick={() => setPageViewMode(false)}
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+                aria-label="Редактировать счёт"
+                title="Редактировать счёт"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
           </div>
         )}
         {!isPageMode && (
@@ -944,7 +946,7 @@ export function InvoiceModal({
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                                 <input
                                   type="text"
                                   value={form.number}
@@ -955,7 +957,7 @@ export function InvoiceModal({
                               </label>
 
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
+                                <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
                                   Услуги
                                   <button
                                     type="button"
@@ -992,17 +994,21 @@ export function InvoiceModal({
                                 }}
                                 className="min-h-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                               >
-                                {responsibles.map((responsible) => (
-                                  <option key={responsible.id} value={String(responsible.id)}>
-                                    {responsible.fullName}
-                                  </option>
-                                ))}
+                                {responsibles.length === 0 ? (
+                                  <option value="" disabled>Список ответственных пуст</option>
+                                ) : (
+                                  responsibles.map((responsible) => (
+                                    <option key={responsible.id} value={String(responsible.id)}>
+                                      {responsible.fullName}
+                                    </option>
+                                  ))
+                                )}
                               </select>
                             </label>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="font-medium text-slate-700 flex items-center justify-between gap-2">
+                                <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
                                   {t('invoiceAmount') ?? 'Сумма'}
                                   {isIncome && (
                                     <button
@@ -1331,7 +1337,13 @@ export function InvoiceModal({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                if (isPageMode && mode === 'edit') {
+                  setPageViewMode(true);
+                  return;
+                }
+                onClose();
+              }}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
             >
               {t('cancel') ?? 'Отмена'}
