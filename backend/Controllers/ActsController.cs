@@ -239,6 +239,13 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        Payment? invoice = null;
+        if (request.InvoiceId.HasValue)
+        {
+            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
+            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
+        }
+
         act.Number = request.Number.Trim();
         act.Title = Normalize(request.Title);
         act.Date = request.Date.Date;
@@ -299,9 +306,3 @@ public class ActsController : ControllerBase
         UpdatedAt = act.UpdatedAt,
     };
 }
-        Payment? invoice = null;
-        if (request.InvoiceId.HasValue)
-        {
-            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
-            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
-        }
