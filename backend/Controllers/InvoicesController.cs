@@ -200,6 +200,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
+        if (contractValidationError is not null)
+        {
+            return contractValidationError;
+        }
+
         var number = Normalize(request.Number);
         if (string.IsNullOrEmpty(number))
         {
@@ -218,6 +224,7 @@ public class InvoicesController : ControllerBase
         var payment = new Payment
         {
             Account = number,
+            DocumentKind = DocumentKind.Invoice,
             AccountDate = request.Date.Date,
             Date = (request.DueDate ?? request.Date).Date,
             Amount = request.Amount,
@@ -226,6 +233,7 @@ public class InvoicesController : ControllerBase
             Description = Normalize(request.Description) ?? string.Empty,
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
+            ContractId = request.ContractId,
             ClientCaseId = request.ClientCaseId,
             PaymentSourceId = request.PaymentSourceId,
             ServiceId = request.ServiceId,
@@ -295,6 +303,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
+        if (contractValidationError is not null)
+        {
+            return contractValidationError;
+        }
+
         var number = Normalize(request.Number);
         if (string.IsNullOrEmpty(number))
         {
@@ -311,6 +325,7 @@ public class InvoicesController : ControllerBase
         }
 
         payment.Account = number;
+        payment.DocumentKind = DocumentKind.Invoice;
         payment.AccountDate = request.Date.Date;
         payment.Date = (request.DueDate ?? request.Date).Date;
         payment.Amount = request.Amount;
@@ -319,6 +334,7 @@ public class InvoicesController : ControllerBase
         payment.Description = Normalize(request.Description) ?? string.Empty;
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
+        payment.ContractId = request.ContractId;
         payment.ClientCaseId = request.ClientCaseId;
         payment.PaymentSourceId = request.PaymentSourceId;
         payment.ServiceId = request.ServiceId;
@@ -480,20 +496,26 @@ public class InvoicesController : ControllerBase
             .WithPaymentIncludes()
             .Include(p => p.Responsibles)
                 .ThenInclude(pr => pr.User)
-            .Where(p => p.Account != null && p.Account != "");
+            .Where(p => p.Account != null && p.Account != "" && p.DocumentKind == DocumentKind.Invoice);
 
         var acts = _db.Acts.AsNoTracking()
             .Include(a => a.Client)
             .Include(a => a.Responsible);
 
         return from payment in payments
-               join act in acts on payment.Account equals act.InvoiceNumber into actGroup
-               from act in actGroup
+               join linkedById in acts on payment.Id equals linkedById.InvoiceId into actByIdGroup
+               from actById in actByIdGroup
                    .OrderByDescending(a => a.Date)
                    .ThenByDescending(a => a.Id)
                    .Take(1)
                    .DefaultIfEmpty()
-               select new InvoiceQueryItem { Payment = payment, Act = act };
+               join linkedByNumber in acts on payment.Account equals linkedByNumber.InvoiceNumber into actByNumberGroup
+               from actByNumber in actByNumberGroup
+                   .OrderByDescending(a => a.Date)
+                   .ThenByDescending(a => a.Id)
+                   .Take(1)
+                   .DefaultIfEmpty()
+               select new InvoiceQueryItem { Payment = payment, Act = actById ?? actByNumber };
     }
 
     private static IQueryable<InvoiceQueryItem> ApplyFilters(
@@ -637,6 +659,20 @@ public class InvoicesController : ControllerBase
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int clientId, CancellationToken ct)
+    {
+        if (!contractId.HasValue) return null;
+
+        var contractExists = await _db.Contracts.AsNoTracking().AnyAsync(c => c.Id == contractId.Value, ct);
+        if (!contractExists) return BadRequest($"Unknown contractId {contractId.Value}");
+
+        var linkExists = await _db.Set<ClientContract>().AsNoTracking()
+            .AnyAsync(x => x.ContractId == contractId.Value && x.ClientId == clientId, ct);
+        if (!linkExists) return BadRequest("Client is not linked to selected contract.");
+
+        return null;
+    }
+
     private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw
     {
         Id = x.Payment.Id,
@@ -649,6 +685,7 @@ public class InvoicesController : ControllerBase
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
+        ContractId = x.Payment.ContractId,
         ClientName = x.Payment.Client != null ? x.Payment.Client.Name : null,
         ClientCompany = x.Payment.Client != null ? x.Payment.Client.Company : null,
         ClientStatusId = x.Payment.Client != null ? x.Payment.Client.ClientStatusId : null,
@@ -683,6 +720,7 @@ public class InvoicesController : ControllerBase
         ServiceName = x.Payment.Service != null ? x.Payment.Service.Name : null,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
         CreatedAt = x.Payment.CreatedAt,
+        DocumentKind = x.Payment.DocumentKind,
         SystemNotes = x.Payment.SystemNotes,
     };
 
@@ -700,6 +738,7 @@ public class InvoicesController : ControllerBase
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
+            ContractId = raw.ContractId,
             ClientName = raw.ClientName,
             ClientCompany = raw.ClientCompany,
             ClientStatusId = raw.ClientStatusId,
@@ -720,6 +759,7 @@ public class InvoicesController : ControllerBase
             ServiceName = raw.ServiceName,
             PaymentStatusName = raw.PaymentStatusName,
             CreatedAt = raw.CreatedAt,
+            DocumentKind = raw.DocumentKind,
             LineItems = ExtractInvoiceItems(raw.SystemNotes),
         };
     }
@@ -936,6 +976,7 @@ public class InvoicesController : ControllerBase
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }
+        public int? ContractId { get; init; }
         public string? ClientName { get; init; }
         public string? ClientCompany { get; init; }
         public int? ClientStatusId { get; init; }
@@ -956,6 +997,7 @@ public class InvoicesController : ControllerBase
         public string? ServiceName { get; init; }
         public string? PaymentStatusName { get; init; }
         public DateTime CreatedAt { get; init; }
+        public DocumentKind DocumentKind { get; init; }
         public string? SystemNotes { get; init; }
     }
 

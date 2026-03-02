@@ -58,6 +58,8 @@ public class ActsController : ControllerBase
                 Date = a.Date,
                 Amount = a.Amount,
                 InvoiceNumber = a.InvoiceNumber,
+                InvoiceId = a.InvoiceId,
+                ContractId = a.Invoice != null ? a.Invoice.ContractId : null,
                 CounterpartyInn = a.CounterpartyInn,
                 Status = a.Status,
                 ClientId = a.ClientId,
@@ -86,6 +88,8 @@ public class ActsController : ControllerBase
                 Date = a.Date,
                 Amount = a.Amount,
                 InvoiceNumber = a.InvoiceNumber,
+                InvoiceId = a.InvoiceId,
+                ContractId = a.Invoice != null ? a.Invoice.ContractId : null,
                 CounterpartyInn = a.CounterpartyInn,
                 Status = a.Status,
                 ClientId = a.ClientId,
@@ -187,13 +191,21 @@ public class ActsController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        Payment? invoice = null;
+        if (request.InvoiceId.HasValue)
+        {
+            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
+            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
+        }
+
         var act = new Act
         {
             Number = request.Number.Trim(),
             Title = Normalize(request.Title),
             Date = request.Date.Date,
             Amount = request.Amount,
-            InvoiceNumber = Normalize(request.InvoiceNumber),
+            InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
+            InvoiceId = request.InvoiceId,
             CounterpartyInn = Normalize(request.CounterpartyInn),
             Status = request.Status,
             ClientId = request.ClientId,
@@ -208,6 +220,7 @@ public class ActsController : ControllerBase
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
+        await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
 
         return Created($"/api/acts/{act.Id}", Map(act));
     }
@@ -230,7 +243,8 @@ public class ActsController : ControllerBase
         act.Title = Normalize(request.Title);
         act.Date = request.Date.Date;
         act.Amount = request.Amount;
-        act.InvoiceNumber = Normalize(request.InvoiceNumber);
+        act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;
+        act.InvoiceId = request.InvoiceId;
         act.CounterpartyInn = Normalize(request.CounterpartyInn);
         act.Status = request.Status;
         act.ClientId = request.ClientId;
@@ -242,6 +256,7 @@ public class ActsController : ControllerBase
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
+        await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
 
         return Ok(Map(act));
     }
@@ -271,6 +286,8 @@ public class ActsController : ControllerBase
         Date = act.Date,
         Amount = act.Amount,
         InvoiceNumber = act.InvoiceNumber,
+        InvoiceId = act.InvoiceId,
+        ContractId = act.Invoice?.ContractId,
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
         ClientId = act.ClientId,
@@ -282,3 +299,9 @@ public class ActsController : ControllerBase
         UpdatedAt = act.UpdatedAt,
     };
 }
+        Payment? invoice = null;
+        if (request.InvoiceId.HasValue)
+        {
+            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
+            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
+        }

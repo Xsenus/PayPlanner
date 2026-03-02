@@ -28,6 +28,7 @@ type FormState = {
   date: string;
   amount: string;
   invoiceNumber: string;
+  invoiceId: string;
   counterpartyInn: string;
   status: ActStatus;
   clientId: string;
@@ -54,6 +55,7 @@ function normalizeActToForm(
           ? String(initialValues.amount)
           : '',
       invoiceNumber: initialValues?.invoiceNumber ?? '',
+      invoiceId: initialValues?.invoiceId ? String(initialValues.invoiceId) : '',
       counterpartyInn: initialValues?.counterpartyInn ?? '',
       status: (initialValues?.status as ActStatus) ?? 'Created',
       clientId: initialValues?.clientId
@@ -76,6 +78,7 @@ function normalizeActToForm(
     date: toDateInputValue(act.date) || toDateInputValue(new Date()),
     amount: act.amount !== undefined && act.amount !== null ? String(act.amount) : '',
     invoiceNumber: act.invoiceNumber ?? '',
+    invoiceId: act.invoiceId ? String(act.invoiceId) : '',
     counterpartyInn: act.counterpartyInn ?? '',
     status: act.status,
     clientId: act.clientId ? String(act.clientId) : defaultClientId ? String(defaultClientId) : '',
@@ -170,6 +173,7 @@ export function ActModal({
       date: fromInputToApiDate(form.date) ?? form.date,
       amount: parsedAmount,
       invoiceNumber: form.invoiceNumber.trim() ? form.invoiceNumber.trim() : undefined,
+      invoiceId: form.invoiceId ? Number(form.invoiceId) : undefined,
       counterpartyInn: form.counterpartyInn.trim() ? form.counterpartyInn.trim() : undefined,
       status: form.status,
       clientId: form.clientId ? Number(form.clientId) : undefined,

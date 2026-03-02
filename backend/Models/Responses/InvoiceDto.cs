@@ -14,6 +14,7 @@ public class InvoiceDto
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }
+    public int? ContractId { get; set; }
     public string? ClientName { get; set; }
     public string? ClientCompany { get; set; }
     public int? ClientStatusId { get; set; }
@@ -35,6 +36,7 @@ public class InvoiceDto
     public string? ServiceName { get; set; }
     public string? PaymentStatusName { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DocumentKind DocumentKind { get; set; }
     public List<InvoiceLineItemDto> LineItems { get; set; } = new();
 }
 

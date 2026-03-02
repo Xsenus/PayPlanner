@@ -8,6 +8,8 @@ public class Act
     public DateTime Date { get; set; }
     public decimal Amount { get; set; }
     public string? InvoiceNumber { get; set; }
+    public int? InvoiceId { get; set; }
+    public Payment? Invoice { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; } = ActStatus.Created;
     public int? ClientId { get; set; }

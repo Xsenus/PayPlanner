@@ -45,11 +45,17 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ResponsibleId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.Invoice)
+                  .WithMany()
+                  .HasForeignKey(e => e.InvoiceId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Acts_Date");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_Acts_Status");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_Acts_ClientId");
             entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
+            entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Acts_InvoiceId");
         });
 
         // ------------------ Contract ------------------
@@ -173,6 +179,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.DocumentKind).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.Notes).HasMaxLength(1000);
@@ -190,6 +197,11 @@ public class PaymentContext : DbContext
             entity.HasOne(e => e.Client)
                   .WithMany(c => c.Payments)
                   .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.Contract)
+                  .WithMany()
+                  .HasForeignKey(e => e.ContractId)
                   .OnDelete(DeleteBehavior.SetNull);
 
             // Связь с делом клиента
@@ -246,6 +258,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.PaymentSourceId).HasDatabaseName("IX_Payments_PaymentSourceId");
             entity.HasIndex(e => e.ServiceId).HasDatabaseName("IX_Payments_ServiceId");
             entity.HasIndex(e => e.PaymentStatusId).HasDatabaseName("IX_Payments_PaymentStatusId");
+            entity.HasIndex(e => e.ContractId).HasDatabaseName("IX_Payments_ContractId");
+            entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
             entity.HasIndex(e => new { e.ClientId, e.Date }).HasDatabaseName("IX_Payments_ClientId_Date");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date }).HasDatabaseName("IX_Payments_ClientCaseId_Date");
             entity.HasIndex(e => new { e.IsPaid, e.Date }).HasDatabaseName("IX_Payments_IsPaid_Date");
