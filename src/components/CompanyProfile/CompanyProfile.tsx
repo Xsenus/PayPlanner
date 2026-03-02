@@ -219,6 +219,16 @@ export function CompanyProfile() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
+  const sanitizeEmail = (value?: string | null): string | null => {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailPattern.test(normalized) ? normalized : null;
+  };
+
   useEffect(() => {
     if (legalEntities.length === 0) return;
     if (profileLegalEntityId !== null) return;
@@ -268,7 +278,10 @@ export function CompanyProfile() {
     try {
       setProfileSaving(true);
       setProfileMessage(null);
-      await updateLegalEntity(profileLegalEntityId, legalEntityForm);
+      await updateLegalEntity(profileLegalEntityId, {
+        ...legalEntityForm,
+        email: sanitizeEmail(legalEntityForm.email),
+      });
       setProfileMessage('Профиль компании синхронизирован с юридическим лицом.');
     } catch (error) {
       setProfileMessage(error instanceof Error ? error.message : 'Не удалось сохранить профиль компании.');
