@@ -3858,6 +3858,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           submitting={invoiceSubmitting}
           errorMessage={invoiceModalError}
           clients={invoiceModalClients}
+          responsibles={actResponsibles}
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}

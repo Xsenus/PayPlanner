@@ -171,7 +171,7 @@ export function InvoiceModal({
   submitting,
   errorMessage,
   clients,
-  responsibles,
+  responsibles = [],
   lookupsLoading,
   lookupsError,
   defaultClientId,
