@@ -495,22 +495,16 @@ public class InvoicesController : ControllerBase
         var payments = _db.Payments.AsNoTracking()
             .Where(p => p.Account != null && p.Account != "" && p.DocumentKind == DocumentKind.Invoice);
 
-        var acts = _db.Acts.AsNoTracking();
-
-        return from payment in payments
-               join linkedById in acts on payment.Id equals linkedById.InvoiceId into actByIdGroup
-               from actById in actByIdGroup
-                   .OrderByDescending(a => a.Date)
-                   .ThenByDescending(a => a.Id)
-                   .Take(1)
-                   .DefaultIfEmpty()
-               join linkedByNumber in acts on payment.Account equals linkedByNumber.InvoiceNumber into actByNumberGroup
-               from actByNumber in actByNumberGroup
-                   .OrderByDescending(a => a.Date)
-                   .ThenByDescending(a => a.Id)
-                   .Take(1)
-                   .DefaultIfEmpty()
-               select new InvoiceQueryItem { Payment = payment, Act = actById ?? actByNumber };
+        return payments.Select(payment => new InvoiceQueryItem
+        {
+            Payment = payment,
+            Act = _db.Acts.AsNoTracking()
+                .Where(a => a.InvoiceId == payment.Id
+                    || (a.InvoiceId == null && a.InvoiceNumber != null && a.InvoiceNumber == payment.Account))
+                .OrderByDescending(a => a.Date)
+                .ThenByDescending(a => a.Id)
+                .FirstOrDefault(),
+        });
     }
 
     private static IQueryable<InvoiceQueryItem> ApplyFilters(
