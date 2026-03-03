@@ -493,7 +493,11 @@ public class InvoicesController : ControllerBase
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
     {
         var payments = _db.Payments.AsNoTracking()
-            .WithPaymentIncludes()
+            .Include(p => p.Client)
+                .ThenInclude(c => c.ClientStatus)
+            .Include(p => p.ClientCase)
+            .Include(p => p.Service)
+            .Include(p => p.PaymentStatusEntity)
             .Include(p => p.Responsibles)
                 .ThenInclude(pr => pr.User)
             .Where(p => p.Account != null && p.Account != "" && p.DocumentKind == DocumentKind.Invoice);

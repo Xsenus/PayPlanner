@@ -31,6 +31,13 @@ import { useDialog } from '../../hooks/useDialog';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 
+const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
+
+function getDisplayNotes(notes?: string | null): string {
+  if (!notes) return '';
+  return notes.startsWith(CLIENT_PROFILE_NOTES_PREFIX) ? '' : notes;
+}
+
 function statusOrder(statusRaw?: string): number {
   const s = (statusRaw ?? '').toLowerCase();
   if (s.includes('open')) return 0;
@@ -889,8 +896,8 @@ export function Clients() {
           <span className="text-xs text-gray-400">—</span>
         );
       case 'notes':
-        return client.notes ? (
-          <span className="text-sm text-gray-700 block truncate">{client.notes}</span>
+        return getDisplayNotes(client.notes) ? (
+          <span className="text-sm text-gray-700 block truncate">{getDisplayNotes(client.notes)}</span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         );
@@ -1559,8 +1566,8 @@ export function Clients() {
                       </button>
                     )}
                   </div>
-                  {client.notes && (
-                    <p className="mt-4 text-sm text-gray-500 line-clamp-2">{client.notes}</p>
+                  {getDisplayNotes(client.notes) && (
+                    <p className="mt-4 text-sm text-gray-500 line-clamp-2">{getDisplayNotes(client.notes)}</p>
                   )}
                 </div>
               );
