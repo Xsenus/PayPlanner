@@ -493,18 +493,9 @@ public class InvoicesController : ControllerBase
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
     {
         var payments = _db.Payments.AsNoTracking()
-            .Include(p => p.Client)
-                .ThenInclude(c => c.ClientStatus)
-            .Include(p => p.ClientCase)
-            .Include(p => p.Service)
-            .Include(p => p.PaymentStatusEntity)
-            .Include(p => p.Responsibles)
-                .ThenInclude(pr => pr.User)
             .Where(p => p.Account != null && p.Account != "" && p.DocumentKind == DocumentKind.Invoice);
 
-        var acts = _db.Acts.AsNoTracking()
-            .Include(a => a.Client)
-            .Include(a => a.Responsible);
+        var acts = _db.Acts.AsNoTracking();
 
         return from payment in payments
                join linkedById in acts on payment.Id equals linkedById.InvoiceId into actByIdGroup
