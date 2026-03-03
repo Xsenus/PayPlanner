@@ -5,6 +5,7 @@ import type {
   ActStatus,
   ActResponsible,
   Client,
+  Contract,
   Invoice,
   InvoiceInput,
   InvoiceLineItem,
@@ -31,6 +32,7 @@ type FormState = {
   type: PaymentKind;
   status: PaymentStatus;
   clientId: string;
+  contractId: string;
   description: string;
   actReference: string;
   paidDate: string;
@@ -117,6 +119,7 @@ function normalizeInvoiceToForm(
       type: resolvedType,
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
+      contractId: '',
       description: '',
       actReference: '',
       paidDate: '',
@@ -134,6 +137,7 @@ function normalizeInvoiceToForm(
     type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
+    contractId: invoice.contractId ? String(invoice.contractId) : '',
     description: invoice.description ?? '',
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
@@ -211,6 +215,9 @@ export function InvoiceModal({
     comment: '',
   });
   const [serviceDictOpen, setServiceDictOpen] = useState(false);
+  const [contractOptions, setContractOptions] = useState<Contract[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
+  const [contractsError, setContractsError] = useState<string | null>(null);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -285,6 +292,52 @@ export function InvoiceModal({
   }, [clientPickerSearch, clients]);
 
   const isIncome = form.type === 'Income';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadContractsByClient() {
+      if (!open || !form.clientId) {
+        setContractOptions([]);
+        setContractsError(null);
+        return;
+      }
+
+      const clientId = Number.parseInt(form.clientId, 10);
+      if (!Number.isFinite(clientId) || clientId <= 0) {
+        setContractOptions([]);
+        setContractsError(null);
+        return;
+      }
+
+      setContractsLoading(true);
+      setContractsError(null);
+      try {
+        const response = await apiService.getContracts({ clientId, page: 1, pageSize: 200, sortBy: 'date', sortDir: 'desc' });
+        if (!cancelled) {
+          setContractOptions(response.items ?? []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setContractOptions([]);
+          setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры');
+        }
+      } finally {
+        if (!cancelled) setContractsLoading(false);
+      }
+    }
+
+    void loadContractsByClient();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.clientId]);
+
+  useEffect(() => {
+    if (!form.contractId) return;
+    if (contractOptions.some((contract) => String(contract.id) === form.contractId)) return;
+    setForm((prev) => ({ ...prev, contractId: '' }));
+  }, [contractOptions, form.contractId]);
 
   useEffect(() => {
     if (open) {
@@ -513,6 +566,7 @@ export function InvoiceModal({
       type: form.type,
       status: statusOverride ?? form.status,
       clientId: Number(form.clientId),
+      contractId: form.contractId ? Number(form.contractId) : undefined,
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       actId: selectedAct ? selectedAct.id : null,
@@ -1131,6 +1185,25 @@ export function InvoiceModal({
                                   Открыть карточку клиента
                                 </button>
                               )}
+                            </label>
+
+                            <label className="flex flex-col gap-1 text-sm">
+                              <span className="font-medium text-slate-700">Договор</span>
+                              <select
+                                value={form.contractId}
+                                onChange={handleChange('contractId')}
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                disabled={!form.clientId || contractsLoading}
+                              >
+                                <option value="">Без договора</option>
+                                {contractOptions.map((contract) => (
+                                  <option key={contract.id} value={String(contract.id)}>
+                                    {contract.number}{contract.title ? ` — ${contract.title}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              {contractsLoading && <span className="text-xs text-slate-500">Загрузка договоров...</span>}
+                              {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
