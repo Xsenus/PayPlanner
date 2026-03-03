@@ -45,6 +45,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("InvoiceNumber")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
@@ -75,6 +78,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_Acts_Date");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_Acts_InvoiceId");
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Acts_Number");
@@ -941,6 +947,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CounterpartyName")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -957,6 +966,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentKind")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("IncomeTypeId")
@@ -1017,6 +1030,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("AccountDate")
                         .HasDatabaseName("IX_Payments_AccountDate");
 
+                    b.HasIndex("ContractId")
+                        .HasDatabaseName("IX_Payments_ContractId");
+
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_Payments_CreatedAt");
 
@@ -1025,6 +1041,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("DealTypeId")
                         .HasDatabaseName("IX_Payments_DealTypeId");
+
+                    b.HasIndex("DocumentKind")
+                        .HasDatabaseName("IX_Payments_DocumentKind");
 
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
@@ -1625,12 +1644,19 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "Responsible")
                         .WithMany("Acts")
                         .HasForeignKey("ResponsibleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Client");
+
+                    b.Navigation("Invoice");
 
                     b.Navigation("Responsible");
                 });
@@ -1779,6 +1805,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.DealType", "DealType")
                         .WithMany("Payments")
                         .HasForeignKey("DealTypeId")
@@ -1807,6 +1838,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("ClientCase");
+
+                    b.Navigation("Contract");
 
                     b.Navigation("DealType");
 

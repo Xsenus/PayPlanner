@@ -28,6 +28,8 @@ public class UpsertInvoiceRequest
     [Required]
     public int ClientId { get; set; }
 
+    public int? ContractId { get; set; }
+
     public int? ClientCaseId { get; set; }
 
     [MaxLength(500)]

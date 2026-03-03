@@ -11,6 +11,8 @@ public class ActDto
     public DateTime Date { get; set; }
     public decimal Amount { get; set; }
     public string? InvoiceNumber { get; set; }
+    public int? InvoiceId { get; set; }
+    public int? ContractId { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; }
     public int? ClientId { get; set; }

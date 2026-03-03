@@ -718,6 +718,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
     setActModalInvoice(row);
     setActInitialValues({
+      invoiceId: row.invoice?.id ?? null,
       invoiceNumber: row.accountNumber,
       number: row.invoice?.actNumber ?? row.accountNumber,
       amount: row.totalAmount,
@@ -737,6 +738,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setActiveAct(act);
     setActModalInvoice(row);
     setActInitialValues({
+      invoiceId: act.invoiceId ?? row.invoice?.id ?? null,
       invoiceNumber: act.invoiceNumber ?? row.accountNumber,
       number: act.number,
       title: act.title ?? '',
@@ -769,11 +771,13 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       if (actModalMode === 'edit' && activeAct) {
         await apiService.updateAct(activeAct.id, {
           ...payload,
+          invoiceId: payload.invoiceId ?? actModalInvoice?.invoice?.id,
           invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
         });
       } else {
         await apiService.createAct({
           ...payload,
+          invoiceId: payload.invoiceId ?? actModalInvoice?.invoice?.id,
           invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
         });
       }

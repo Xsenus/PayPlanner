@@ -63,6 +63,8 @@ public class ContractsController : ControllerBase
 
         ApplyLinks(contract, normalized.Clients, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
 
+        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
+
         _db.Contracts.Add(contract);
         await _db.SaveChangesAsync(ct);
 
@@ -100,6 +102,8 @@ public class ContractsController : ControllerBase
         SyncLinks(contract.ContractActs, normalized.ActIds, id, actId => new ContractAct { ContractId = id, ActId = actId }, (l, v) => l.ActId == v);
         SyncLinks(contract.ContractInvoices, normalized.InvoiceIds, id, invoiceId => new ContractInvoice { ContractId = id, InvoiceId = invoiceId }, (l, v) => l.InvoiceId == v);
         SyncLinks(contract.ContractPayments, normalized.PaymentIds, id, paymentId => new ContractPayment { ContractId = id, PaymentId = paymentId }, (l, v) => l.PaymentId == v);
+
+        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
 
         await _db.SaveChangesAsync(ct);
         var dto = await BuildContractsQuery().Where(c => c.Id == contract.Id).Select(MapToDtoExpression).FirstAsync(ct);
@@ -171,7 +175,7 @@ public class ContractsController : ControllerBase
         var invoiceIds = NormalizeIds(request.InvoiceIds);
         if (invoiceIds.Count > 0)
         {
-            var existing = await _db.Payments.AsNoTracking().Where(x => invoiceIds.Contains(x.Id) && x.Account != null && x.Account != "").Select(x => x.Id).ToListAsync(ct);
+            var existing = await _db.Payments.AsNoTracking().Where(x => invoiceIds.Contains(x.Id) && x.Account != null && x.Account != "" && x.DocumentKind == DocumentKind.Invoice).Select(x => x.Id).ToListAsync(ct);
             if (existing.Count != invoiceIds.Count) return (BadRequest($"Не найдены счета: {string.Join(", ", invoiceIds.Except(existing))}"), null, [], [], [], []);
         }
 
@@ -211,6 +215,18 @@ public class ContractsController : ControllerBase
         foreach (var link in existing.Where(link => !targetIds.Any(id => match(link, id))).ToList()) existing.Remove(link);
         foreach (var id in targetIds)
             if (!existing.Any(link => match(link, id))) existing.Add(create(id));
+    }
+
+    private async Task AssignCanonicalContractLinks(Contract contract, List<int> invoiceIds, List<int> paymentIds, CancellationToken ct)
+    {
+        var targetIds = invoiceIds.Concat(paymentIds).Distinct().ToList();
+        if (targetIds.Count == 0) return;
+
+        var payments = await _db.Payments.Where(x => targetIds.Contains(x.Id)).ToListAsync(ct);
+        foreach (var payment in payments)
+        {
+            payment.ContractId = contract.Id;
+        }
     }
 
     private static IQueryable<Contract> ApplyFilters(IQueryable<Contract> query, DateTime? from, DateTime? to, int? clientId, string? search)

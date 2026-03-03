@@ -44,6 +44,21 @@ namespace PayPlanner.Api.Models
         public int? ClientId { get; set; }
 
         /// <summary>
+        /// Каноническая ссылка на договор (если документ относится к договору).
+        /// </summary>
+        public int? ContractId { get; set; }
+
+        /// <summary>
+        /// Навигация на договор.
+        /// </summary>
+        public Contract? Contract { get; set; }
+
+        /// <summary>
+        /// Тип документа в общем платежном реестре.
+        /// </summary>
+        public DocumentKind DocumentKind { get; set; } = DocumentKind.Payment;
+
+        /// <summary>
         /// Дата и время создания записи (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

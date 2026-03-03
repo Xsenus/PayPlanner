@@ -65,6 +65,10 @@ public class PaymentsController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        if (model.DocumentKind == default)
+        {
+            model.DocumentKind = string.IsNullOrWhiteSpace(model.Account) ? DocumentKind.Accrual : DocumentKind.Invoice;
+        }
         model.SystemNotes = model.SystemNotes ?? string.Empty;
         model.RescheduleCount = Math.Max(0, model.RescheduleCount);
         if (model.LastPaymentDate is null && model.PaidDate.HasValue)
@@ -126,6 +130,9 @@ public class PaymentsController : ControllerBase
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
         e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+        e.DocumentKind = model.DocumentKind == default
+            ? (string.IsNullOrWhiteSpace(e.Account) ? DocumentKind.Accrual : DocumentKind.Invoice)
+            : model.DocumentKind;
         e.AccountDate = model.AccountDate;
         e.PaidDate = model.PaidDate;
         e.PaidAmount = model.PaidAmount;

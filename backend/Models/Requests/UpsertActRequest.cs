@@ -21,6 +21,8 @@ public class UpsertActRequest
     [MaxLength(100)]
     public string? InvoiceNumber { get; set; }
 
+    public int? InvoiceId { get; set; }
+
     [MaxLength(32)]
     public string? CounterpartyInn { get; set; }
 
@@ -28,6 +30,8 @@ public class UpsertActRequest
     public ActStatus Status { get; set; } = ActStatus.Created;
 
     public int? ClientId { get; set; }
+
+    public int? ContractId { get; set; }
 
     public int? ResponsibleId { get; set; }
 

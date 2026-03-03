@@ -319,6 +319,7 @@ export interface PaymentStatusEntity {
 }
 
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
+export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
 
 export interface Act {
   id: number;
@@ -327,6 +328,8 @@ export interface Act {
   date: string;
   amount: number;
   invoiceNumber?: string | null;
+  invoiceId?: number | null;
+  contractId?: number | null;
   counterpartyInn?: string | null;
   status: ActStatus;
   clientId?: number | null;
@@ -345,6 +348,8 @@ export interface ActInput {
   date: string;
   amount: number;
   invoiceNumber?: string | null;
+  invoiceId?: number | null;
+  contractId?: number | null;
   counterpartyInn?: string | null;
   status: ActStatus;
   clientId?: number | null;
@@ -434,6 +439,8 @@ export interface Payment {
   delayDays?: number | null;
   createdAt: string;
   clientId?: number | null;
+  contractId?: number | null;
+  documentKind?: DocumentKind;
   clientCaseId?: number | null;
   dealTypeId?: number | null;
   incomeTypeId?: number | null;
@@ -480,6 +487,8 @@ export interface Invoice {
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;
+  contractId?: number | null;
+  documentKind?: DocumentKind;
   clientName?: string | null;
   clientCompany?: string | null;
   clientStatusId?: number | null;
@@ -520,6 +529,7 @@ export interface InvoiceInput {
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   clientId: number;
+  contractId?: number | null;
   clientCaseId?: number | null;
   description?: string | null;
   actReference?: string | null;
