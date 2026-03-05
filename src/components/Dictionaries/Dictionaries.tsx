@@ -614,6 +614,10 @@ export const Dictionaries = () => {
             <div className="space-y-1">
               {TABS.map((t) => {
                 const isActive = activeTab === t.value;
+                const rows = data[t.value] ?? [];
+                const activeCount = rows.filter((r) => r.item.isActive).length;
+                const inactiveCount = rows.length - activeCount;
+
                 return (
                   <button
                     key={t.value}
@@ -625,7 +629,10 @@ export const Dictionaries = () => {
                     }`}>
                     <div className="font-medium">{t.label}</div>
                     <div className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
-                      {data[t.value]?.length ?? 0} записей
+                      {rows.length} записей
+                    </div>
+                    <div className={`text-[11px] ${isActive ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Активно: {activeCount} · Отключено: {inactiveCount}
                     </div>
                   </button>
                 );
