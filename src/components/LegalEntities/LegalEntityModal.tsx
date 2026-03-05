@@ -4,9 +4,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   Loader2,
-  Mail,
-  MapPin,
-  Phone,
   Search,
   Plus,
   X,
@@ -770,6 +767,73 @@ export function LegalEntityModal({
     }
   };
 
+  const clientsSection = (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+            {t('legalEntityClients') || 'Клиенты юридического лица'}
+          </h3>
+          <p className="text-xs text-gray-500">
+            {t('legalEntityClientsHint') || 'Выберите клиентов, которые относятся к этому юридическому лицу.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          disabled={readOnly}
+          className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
+          <Plus className="h-4 w-4" />
+          {t('addClient') || 'Добавить клиента'}
+        </button>
+      </div>
+
+      <div className="mt-3 overflow-x-auto">
+        <table className="min-w-full divide-y text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">ФИО</th>
+              <th className="px-3 py-2 text-left">Компания</th>
+              <th className="px-3 py-2 text-left">Контакты</th>
+              <th className="px-3 py-2 text-right">Действия</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {selectedClients.map((client) => (
+              <tr key={client.id}>
+                <td className="px-3 py-2">
+                  <div className="font-medium text-gray-900">{client.name}</div>
+                  <div className="mt-1"><ClientStatusBadge status={client.clientStatus} /></div>
+                </td>
+                <td className="px-3 py-2">{client.company || '—'}</td>
+                <td className="px-3 py-2 text-xs text-gray-600">
+                  <div>{client.phone || '—'}</div>
+                  <div>{client.email || '—'}</div>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveClient(client.id)}
+                    disabled={readOnly}
+                    className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60">
+                    <X className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {selectedClients.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                  {t('nothingFound') || 'Ничего не найдено'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   if (!isOpen) return null;
 
   const content = (
@@ -899,138 +963,10 @@ export function LegalEntityModal({
                 />
               </div>
             </div>
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">
-                  {t('legalEntityAddress') || 'Адрес'}
-                </label>
-                <div className="relative">
-                  <MapPin className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    name="address"
-                    value={formState.address}
-                    onChange={handleInputChange}
-                    disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityPhone') || 'Телефон'}
-                  </label>
-                  <div className="relative">
-                    <Phone className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      name="phone"
-                      value={formState.phone}
-                      onChange={handleInputChange}
-                      disabled={readOnly}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityEmail') || 'Email'}
-                  </label>
-                  <div className="relative">
-                    <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <input
-                      type="email"
-                      name="email"
-                      value={formState.email}
-                      onChange={handleInputChange}
-                      disabled={readOnly}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">
-                  {t('legalEntityNotes') || 'Заметки'}
-                </label>
-                <textarea
-                  name="notes"
-                  value={formState.notes}
-                  onChange={handleInputChange}
-                  rows={3}
-                  disabled={readOnly}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
+            {clientsSection}
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
-                <div>
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
-                    {t('legalEntityClients') || 'Клиенты юридического лица'}
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    {t('legalEntityClientsHint') || 'Выберите клиентов, которые относятся к этому юридическому лицу.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
-                  <Plus className="h-4 w-4" />
-                  {t('addClient') || 'Добавить клиента'}
-                </button>
-              </div>
-
-              <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full divide-y text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">ФИО</th>
-                      <th className="px-3 py-2 text-left">Компания</th>
-                      <th className="px-3 py-2 text-left">Контакты</th>
-                      <th className="px-3 py-2 text-right">Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {selectedClients.map((client) => (
-                      <tr key={client.id}>
-                        <td className="px-3 py-2">
-                          <div className="font-medium text-gray-900">{client.name}</div>
-                          <div className="mt-1"><ClientStatusBadge status={client.clientStatus} /></div>
-                        </td>
-                        <td className="px-3 py-2">{client.company || '—'}</td>
-                        <td className="px-3 py-2 text-xs text-gray-600">
-                          <div>{client.phone || '—'}</div>
-                          <div>{client.email || '—'}</div>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveClient(client.id)}
-                            disabled={readOnly}
-                            className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60">
-                            <X className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {selectedClients.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                          {t('nothingFound') || 'Ничего не найдено'}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <div className="grid gap-6">
             <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
               <h3 className="text-sm font-semibold text-blue-900">
                 {t('legalEntityDadataTitle') || 'Заполнить по данным DaData'}
