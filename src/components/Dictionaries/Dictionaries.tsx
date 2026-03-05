@@ -600,80 +600,96 @@ export const Dictionaries = () => {
           )}
         </div>
 
-        <div className="mb-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 bg-slate-100 p-1.5 rounded-xl">
-            {TABS.map((t) => (
-              <button
-                key={t.value}
-                onClick={() => setActiveTab(t.value)}
-                className={`rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                  activeTab === t.value
-                    ? 'bg-white text-slate-900 shadow'
-                    : 'text-slate-600 hover:bg-white/60'
-                }`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
           </div>
         )}
 
-        <div className={busy ? 'pointer-events-none opacity-70' : ''}>
-          <div className="mb-4 flex items-center justify-between">
-            <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
-
-            {canEdit && (
-              <button
-                onClick={() => addNew(activeTab)}
-                className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">
-                <Plus className="h-4 w-4" />
-                Добавить
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            {(data[activeTab] ?? []).map((row, idx) => {
-              const key = row._key;
-              if (row.mode === 'view') {
+        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] ${busy ? 'pointer-events-none opacity-70' : ''}`}>
+          <aside className="rounded-2xl border bg-white p-2 lg:sticky lg:top-6 h-fit">
+            <div className="mb-2 px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Наименования
+            </div>
+            <div className="space-y-1">
+              {TABS.map((t) => {
+                const isActive = activeTab === t.value;
                 return (
-                  <ViewRow
-                    key={key}
-                    item={row.item}
-                    kind={activeTab}
-                    onEdit={() =>
-                      canEdit && setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))
-                    }
-                    onDelete={() =>
-                      canEdit && setConfirmDelete({ kind: activeTab, id: row.item.id })
-                    }
-                  />
+                  <button
+                    key={t.value}
+                    onClick={() => setActiveTab(t.value)}
+                    className={`w-full rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}>
+                    <div className="font-medium">{t.label}</div>
+                    <div className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
+                      {data[t.value]?.length ?? 0} записей
+                    </div>
+                  </button>
                 );
-              }
-              if (row.mode === 'edit') {
+              })}
+            </div>
+          </aside>
+
+          <section className="rounded-2xl border bg-white p-4 sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">
+                  {TABS.find((t) => t.value === activeTab)?.label}
+                </div>
+                <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
+              </div>
+
+              {canEdit && (
+                <button
+                  onClick={() => addNew(activeTab)}
+                  className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">
+                  <Plus className="h-4 w-4" />
+                  Добавить
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {(data[activeTab] ?? []).map((row, idx) => {
+                const key = row._key;
+                if (row.mode === 'view') {
+                  return (
+                    <ViewRow
+                      key={key}
+                      item={row.item}
+                      kind={activeTab}
+                      onEdit={() =>
+                        canEdit && setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))
+                      }
+                      onDelete={() =>
+                        canEdit && setConfirmDelete({ kind: activeTab, id: row.item.id })
+                      }
+                    />
+                  );
+                }
+                if (row.mode === 'edit') {
+                  return canEdit ? (
+                    <EditRow key={key} idx={idx} kind={activeTab} item={row.item} />
+                  ) : (
+                    <ViewRow
+                      key={key}
+                      item={row.item}
+                      kind={activeTab}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                    />
+                  );
+                }
+                // 'new'
                 return canEdit ? (
-                  <EditRow key={key} idx={idx} kind={activeTab} item={row.item} />
-                ) : (
-                  <ViewRow
-                    key={key}
-                    item={row.item}
-                    kind={activeTab}
-                    onEdit={() => {}}
-                    onDelete={() => {}}
-                  />
-                );
-              }
-              // 'new'
-              return canEdit ? (
-                <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />
-              ) : null;
-            })}
-          </div>
+                  <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />
+                ) : null;
+              })}
+            </div>
+          </section>
         </div>
 
         {canEdit && confirmDelete && (
