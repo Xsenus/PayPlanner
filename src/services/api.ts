@@ -15,7 +15,14 @@ export type DictKind =
   | 'payment-sources'
   | 'services'
   | 'client-statuses'
-  | 'payment-statuses';
+  | 'payment-statuses'
+  | 'countries'
+  | 'base-currencies'
+  | 'service-languages'
+  | 'organization-forms'
+  | 'timezones'
+  | 'tax-systems'
+  | 'tax-system-modes';
 
 export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? DealType
@@ -27,6 +34,20 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? ServiceDictionaryItem
   : K extends 'client-statuses'
   ? ClientStatus
+  : K extends 'countries'
+  ? BaseDictItem
+  : K extends 'base-currencies'
+  ? BaseDictItem
+  : K extends 'service-languages'
+  ? BaseDictItem
+  : K extends 'organization-forms'
+  ? BaseDictItem
+  : K extends 'timezones'
+  ? BaseDictItem
+  : K extends 'tax-systems'
+  ? BaseDictItem
+  : K extends 'tax-system-modes'
+  ? BaseDictItem
   : PaymentStatusEntity;
 
 function pathForKind(kind: DictKind): string {

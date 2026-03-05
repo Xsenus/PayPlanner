@@ -54,6 +54,78 @@ public class DictionariesReadController : ControllerBase
         return Ok(result);
     }
 
+
+    [HttpGet("countries")]
+    public async Task<IActionResult> Countries(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.Countries.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("base-currencies")]
+    public async Task<IActionResult> BaseCurrencies(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.BaseCurrencies.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("service-languages")]
+    public async Task<IActionResult> ServiceLanguages(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.ServiceLanguages.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("organization-forms")]
+    public async Task<IActionResult> OrganizationForms(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.OrganizationForms.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("timezones")]
+    public async Task<IActionResult> Timezones(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.Timezones.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+
+    [HttpGet("tax-systems")]
+    public async Task<IActionResult> TaxSystems(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.TaxSystems.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("tax-system-modes")]
+    public async Task<IActionResult> TaxSystemModes(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.TaxSystemModes.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
     [HttpGet("services")]
     public async Task<IActionResult> Services(CancellationToken ct)
     {

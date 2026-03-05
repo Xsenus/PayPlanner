@@ -59,6 +59,7 @@ namespace PayPlanner.Api.Services
         {
             await EnsureIncomeTypeSchemaAsync(context);
             await EnsureServiceDictionarySchemaAsync(context);
+            await EnsureLegalEntityProfileDictionarySchemaAsync(context);
 
             try
             {
@@ -155,6 +156,76 @@ namespace PayPlanner.Api.Services
                 await context.SaveChangesAsync();
             }
 
+
+            if (!await context.Countries.AnyAsync())
+            {
+                context.Countries.AddRange(
+                    new CountryDictionaryItem { Name = "Россия", Description = "Российская Федерация", ColorHex = "#2563EB" },
+                    new CountryDictionaryItem { Name = "Казахстан", Description = "Республика Казахстан", ColorHex = "#0EA5E9" },
+                    new CountryDictionaryItem { Name = "Беларусь", Description = "Республика Беларусь", ColorHex = "#1D4ED8" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.BaseCurrencies.AnyAsync())
+            {
+                context.BaseCurrencies.AddRange(
+                    new BaseCurrencyDictionaryItem { Name = "RUB", Description = "Российский рубль", ColorHex = "#16A34A" },
+                    new BaseCurrencyDictionaryItem { Name = "USD", Description = "Доллар США", ColorHex = "#059669" },
+                    new BaseCurrencyDictionaryItem { Name = "EUR", Description = "Евро", ColorHex = "#15803D" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.ServiceLanguages.AnyAsync())
+            {
+                context.ServiceLanguages.AddRange(
+                    new ServiceLanguageDictionaryItem { Name = "Русский", Description = "Русский язык", ColorHex = "#9333EA" },
+                    new ServiceLanguageDictionaryItem { Name = "English", Description = "English language", ColorHex = "#7E22CE" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.OrganizationForms.AnyAsync())
+            {
+                context.OrganizationForms.AddRange(
+                    new OrganizationFormDictionaryItem { Name = "ООО", Description = "Общество с ограниченной ответственностью", ColorHex = "#F59E0B" },
+                    new OrganizationFormDictionaryItem { Name = "ИП", Description = "Индивидуальный предприниматель", ColorHex = "#D97706" },
+                    new OrganizationFormDictionaryItem { Name = "АО", Description = "Акционерное общество", ColorHex = "#B45309" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.Timezones.AnyAsync())
+            {
+                context.Timezones.AddRange(
+                    new TimezoneDictionaryItem { Name = "Europe/Moscow", Description = "Москва (UTC+3)", ColorHex = "#0EA5E9" },
+                    new TimezoneDictionaryItem { Name = "Asia/Yekaterinburg", Description = "Екатеринбург (UTC+5)", ColorHex = "#0284C7" },
+                    new TimezoneDictionaryItem { Name = "Asia/Novosibirsk", Description = "Новосибирск (UTC+7)", ColorHex = "#0369A1" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.TaxSystems.AnyAsync())
+            {
+                context.TaxSystems.AddRange(
+                    new TaxSystemDictionaryItem { Name = "ОСНО", Description = "Общая система налогообложения", ColorHex = "#0EA5E9" },
+                    new TaxSystemDictionaryItem { Name = "УСН", Description = "Упрощенная система налогообложения", ColorHex = "#0284C7" },
+                    new TaxSystemDictionaryItem { Name = "ПСН", Description = "Патентная система налогообложения", ColorHex = "#0369A1" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.TaxSystemModes.AnyAsync())
+            {
+                context.TaxSystemModes.AddRange(
+                    new TaxSystemModeDictionaryItem { Name = "Доходы", Description = "УСН: доходы", ColorHex = "#0891B2" },
+                    new TaxSystemModeDictionaryItem { Name = "Доходы минус расходы", Description = "УСН: доходы-расходы", ColorHex = "#0E7490" },
+                    new TaxSystemModeDictionaryItem { Name = "Без НДС", Description = "Режим без НДС", ColorHex = "#155E75" }
+                );
+                await context.SaveChangesAsync();
+            }
+
             if (!await context.Services.AnyAsync())
             {
                 context.Services.AddRange(
@@ -204,6 +275,34 @@ namespace PayPlanner.Api.Services
                 }
 
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_Payments_ServiceId\" ON \"Payments\" (\"ServiceId\");", cancellationToken);
+            }
+            finally
+            {
+                if (shouldClose && connection.State == ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
+
+        private static async Task EnsureLegalEntityProfileDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            try
+            {
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"CountryDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_CountryDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"BaseCurrencyDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_BaseCurrencyDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"ServiceLanguageDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_ServiceLanguageDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"OrganizationFormDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_OrganizationFormDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"TimezoneDictionaryItems\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_TimezoneDictionaryItems\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
             }
             finally
             {

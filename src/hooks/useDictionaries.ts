@@ -8,6 +8,7 @@ import type {
   PaymentStatusEntity,
   ServiceDictionaryItem,
 } from '../types';
+import type { BaseDictItem } from '../types/dictionaries';
 
 const DICTS_CHANGED = 'dicts:changed';
 
@@ -18,6 +19,13 @@ export function useDictionaries() {
   const [services, setServices] = useState<ServiceDictionaryItem[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<PaymentStatusEntity[]>([]);
   const [clientStatuses, setClientStatuses] = useState<ClientStatus[]>([]);
+  const [countries, setCountries] = useState<BaseDictItem[]>([]);
+  const [baseCurrencies, setBaseCurrencies] = useState<BaseDictItem[]>([]);
+  const [serviceLanguages, setServiceLanguages] = useState<BaseDictItem[]>([]);
+  const [organizationForms, setOrganizationForms] = useState<BaseDictItem[]>([]);
+  const [timezones, setTimezones] = useState<BaseDictItem[]>([]);
+  const [taxSystems, setTaxSystems] = useState<BaseDictItem[]>([]);
+  const [taxSystemModes, setTaxSystemModes] = useState<BaseDictItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +33,7 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
@@ -33,6 +41,13 @@ export function useDictionaries() {
         apiService.getDict('services'),
         apiService.getDict('payment-statuses'),
         apiService.getDict('client-statuses'),
+        apiService.getDict('countries'),
+        apiService.getDict('base-currencies'),
+        apiService.getDict('service-languages'),
+        apiService.getDict('organization-forms'),
+        apiService.getDict('timezones'),
+        apiService.getDict('tax-systems'),
+        apiService.getDict('tax-system-modes'),
       ]);
 
       setDealTypes(deal ?? []);
@@ -46,6 +61,13 @@ export function useDictionaries() {
       setServices((servicesResp ?? []).filter((service) => service.isActive !== false));
       setPaymentStatuses(statuses ?? []);
       setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
+      setCountries((countriesResp ?? []).filter((item) => item.isActive !== false));
+      setBaseCurrencies((baseCurrenciesResp ?? []).filter((item) => item.isActive !== false));
+      setServiceLanguages((serviceLanguagesResp ?? []).filter((item) => item.isActive !== false));
+      setOrganizationForms((organizationFormsResp ?? []).filter((item) => item.isActive !== false));
+      setTimezones((timezonesResp ?? []).filter((item) => item.isActive !== false));
+      setTaxSystems((taxSystemsResp ?? []).filter((item) => item.isActive !== false));
+      setTaxSystemModes((taxSystemModesResp ?? []).filter((item) => item.isActive !== false));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
     } finally {
@@ -70,6 +92,13 @@ export function useDictionaries() {
     services,
     paymentStatuses,
     clientStatuses,
+    countries,
+    baseCurrencies,
+    serviceLanguages,
+    organizationForms,
+    timezones,
+    taxSystems,
+    taxSystemModes,
     loading,
     error,
     refresh,

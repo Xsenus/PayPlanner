@@ -169,6 +169,274 @@ public class DictionariesAdminController : ControllerBase
         return Ok(new { e.Id, e.IsActive });
     }
 
+
+    // CountryDictionaryItem
+    [HttpPost("countries")]
+    public async Task<IActionResult> CreateCountry([FromBody] CountryDictionaryItem m)
+    {
+        _db.Countries.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/countries/{m.Id}", m);
+    }
+    [HttpPut("countries/{id:int}")]
+    public async Task<IActionResult> UpdateCountry(int id, [FromBody] CountryDictionaryItem m)
+    {
+        var e = await _db.Countries.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("countries/{id:int}")]
+    public async Task<IActionResult> DeleteCountry(int id)
+    {
+        var e = await _db.Countries.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Country == e.Name))
+            return InUseError(e.Name);
+        _db.Countries.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("countries/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleCountry(int id)
+    {
+        var e = await _db.Countries.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // BaseCurrencyDictionaryItem
+    [HttpPost("base-currencies")]
+    public async Task<IActionResult> CreateBaseCurrency([FromBody] BaseCurrencyDictionaryItem m)
+    {
+        _db.BaseCurrencies.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/base-currencies/{m.Id}", m);
+    }
+    [HttpPut("base-currencies/{id:int}")]
+    public async Task<IActionResult> UpdateBaseCurrency(int id, [FromBody] BaseCurrencyDictionaryItem m)
+    {
+        var e = await _db.BaseCurrencies.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("base-currencies/{id:int}")]
+    public async Task<IActionResult> DeleteBaseCurrency(int id)
+    {
+        var e = await _db.BaseCurrencies.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.BaseCurrency == e.Name))
+            return InUseError(e.Name);
+        _db.BaseCurrencies.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("base-currencies/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleBaseCurrency(int id)
+    {
+        var e = await _db.BaseCurrencies.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // ServiceLanguageDictionaryItem
+    [HttpPost("service-languages")]
+    public async Task<IActionResult> CreateServiceLanguage([FromBody] ServiceLanguageDictionaryItem m)
+    {
+        _db.ServiceLanguages.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/service-languages/{m.Id}", m);
+    }
+    [HttpPut("service-languages/{id:int}")]
+    public async Task<IActionResult> UpdateServiceLanguage(int id, [FromBody] ServiceLanguageDictionaryItem m)
+    {
+        var e = await _db.ServiceLanguages.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("service-languages/{id:int}")]
+    public async Task<IActionResult> DeleteServiceLanguage(int id)
+    {
+        var e = await _db.ServiceLanguages.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.ServiceLanguage == e.Name))
+            return InUseError(e.Name);
+        _db.ServiceLanguages.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("service-languages/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleServiceLanguage(int id)
+    {
+        var e = await _db.ServiceLanguages.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // OrganizationFormDictionaryItem
+    [HttpPost("organization-forms")]
+    public async Task<IActionResult> CreateOrganizationForm([FromBody] OrganizationFormDictionaryItem m)
+    {
+        _db.OrganizationForms.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/organization-forms/{m.Id}", m);
+    }
+    [HttpPut("organization-forms/{id:int}")]
+    public async Task<IActionResult> UpdateOrganizationForm(int id, [FromBody] OrganizationFormDictionaryItem m)
+    {
+        var e = await _db.OrganizationForms.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("organization-forms/{id:int}")]
+    public async Task<IActionResult> DeleteOrganizationForm(int id)
+    {
+        var e = await _db.OrganizationForms.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.OrganizationForm == e.Name))
+            return InUseError(e.Name);
+        _db.OrganizationForms.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("organization-forms/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleOrganizationForm(int id)
+    {
+        var e = await _db.OrganizationForms.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // TimezoneDictionaryItem
+    [HttpPost("timezones")]
+    public async Task<IActionResult> CreateTimezone([FromBody] TimezoneDictionaryItem m)
+    {
+        _db.Timezones.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/timezones/{m.Id}", m);
+    }
+    [HttpPut("timezones/{id:int}")]
+    public async Task<IActionResult> UpdateTimezone(int id, [FromBody] TimezoneDictionaryItem m)
+    {
+        var e = await _db.Timezones.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("timezones/{id:int}")]
+    public async Task<IActionResult> DeleteTimezone(int id)
+    {
+        var e = await _db.Timezones.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Timezone == e.Name))
+            return InUseError(e.Name);
+        _db.Timezones.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("timezones/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleTimezone(int id)
+    {
+        var e = await _db.Timezones.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+
+    // TaxSystemDictionaryItem
+    [HttpPost("tax-systems")]
+    public async Task<IActionResult> CreateTaxSystem([FromBody] TaxSystemDictionaryItem m)
+    {
+        _db.TaxSystems.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/tax-systems/{m.Id}", m);
+    }
+    [HttpPut("tax-systems/{id:int}")]
+    public async Task<IActionResult> UpdateTaxSystem(int id, [FromBody] TaxSystemDictionaryItem m)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("tax-systems/{id:int}")]
+    public async Task<IActionResult> DeleteTaxSystem(int id)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.TaxSystem == e.Name))
+            return InUseError(e.Name);
+        _db.TaxSystems.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("tax-systems/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleTaxSystem(int id)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // TaxSystemModeDictionaryItem
+    [HttpPost("tax-system-modes")]
+    public async Task<IActionResult> CreateTaxSystemMode([FromBody] TaxSystemModeDictionaryItem m)
+    {
+        _db.TaxSystemModes.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/tax-system-modes/{m.Id}", m);
+    }
+    [HttpPut("tax-system-modes/{id:int}")]
+    public async Task<IActionResult> UpdateTaxSystemMode(int id, [FromBody] TaxSystemModeDictionaryItem m)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("tax-system-modes/{id:int}")]
+    public async Task<IActionResult> DeleteTaxSystemMode(int id)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.TaxSystemMode == e.Name))
+            return InUseError(e.Name);
+        _db.TaxSystemModes.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("tax-system-modes/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleTaxSystemMode(int id)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
     // ClientStatusEntity
     [HttpPost("client-statuses")]
     public async Task<IActionResult> CreateClientStatus([FromBody] ClientStatusEntity m)

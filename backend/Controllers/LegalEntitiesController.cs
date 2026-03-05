@@ -23,6 +23,12 @@ public class LegalEntitiesController : ControllerBase
         _enrichmentService = enrichmentService;
     }
 
+    private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
+    {
+        if (!responsibleUserId.HasValue) return true;
+        return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == responsibleUserId.Value && u.IsActive, ct);
+    }
+
     private async Task ApplyClientLinksAsync(int legalEntityId, IReadOnlyCollection<int> desiredClientIds, CancellationToken ct)
     {
         var desired = desiredClientIds.ToHashSet();
@@ -62,12 +68,52 @@ public class LegalEntitiesController : ControllerBase
             Phone = entity.Phone,
             Email = entity.Email,
             Director = entity.Director,
+            ResponsibleUserId = entity.ResponsibleUserId,
+            ResponsibleUserName = entity.ResponsibleUser?.FullName,
             Country = entity.Country,
             BaseCurrency = entity.BaseCurrency,
             ServiceLanguage = entity.ServiceLanguage,
             OrganizationForm = entity.OrganizationForm,
             Timezone = entity.Timezone,
             TaxSystem = entity.TaxSystem,
+            TaxSystemMode = entity.TaxSystemMode,
+            IncomeTaxRate = entity.IncomeTaxRate,
+            IncomeExpenseTaxRate = entity.IncomeExpenseTaxRate,
+            VatWithoutVat = entity.VatWithoutVat,
+            Okved = entity.Okved,
+            Okpo = entity.Okpo,
+            Okato = entity.Okato,
+            Oktmo = entity.Oktmo,
+            Okogu = entity.Okogu,
+            Okfs = entity.Okfs,
+            Okopf = entity.Okopf,
+            Pfr = entity.Pfr,
+            Fss = entity.Fss,
+            CharterCapital = entity.CharterCapital,
+            TaxRegistrationDate = entity.TaxRegistrationDate,
+            TaxOfficeCode = entity.TaxOfficeCode,
+            TaxRegion = entity.TaxRegion,
+            IfnsName = entity.IfnsName,
+            TaxOfficePhone = entity.TaxOfficePhone,
+            TreasuryInn = entity.TreasuryInn,
+            TreasuryKpp = entity.TreasuryKpp,
+            TreasuryRecipientName = entity.TreasuryRecipientName,
+            TreasuryBankBik = entity.TreasuryBankBik,
+            TreasuryBankName = entity.TreasuryBankName,
+            TreasuryAccountNumber = entity.TreasuryAccountNumber,
+            TreasuryCorrAccountNumber = entity.TreasuryCorrAccountNumber,
+            TreasuryKbk = entity.TreasuryKbk,
+            BankAccountsJson = entity.BankAccountsJson,
+            CashRegistersJson = entity.CashRegistersJson,
+            CardsJson = entity.CardsJson,
+            RequisitesEnglishJson = entity.RequisitesEnglishJson,
+            LogoDataUrl = entity.LogoDataUrl,
+            SealDataUrl = entity.SealDataUrl,
+            DirectorSignatureDataUrl = entity.DirectorSignatureDataUrl,
+            DocumentDirectorJson = entity.DocumentDirectorJson,
+            ChiefAccountantJson = entity.ChiefAccountantJson,
+            ContactPhonesJson = entity.ContactPhonesJson,
+            ContactEmailsJson = entity.ContactEmailsJson,
             Notes = entity.Notes,
             ClientsCount = entity.Clients.Count,
             CreatedAt = entity.CreatedAt,
@@ -217,6 +263,40 @@ public class LegalEntitiesController : ControllerBase
         });
     }
 
+
+    private void ApplyLegalEntityAddresses(LegalEntity entity, List<LegalEntityAddressRequest>? addresses)
+    {
+        if (addresses is null) return;
+
+        var normalized = addresses
+            .Where(a => !string.IsNullOrWhiteSpace(a.Value))
+            .Select(a => new AddressRecord
+            {
+                Type = Enum.IsDefined(typeof(AddressType), a.Type) ? (AddressType)a.Type : AddressType.Other,
+                Value = a.Value!.Trim(),
+                IsPrimary = a.IsPrimary,
+                LegalEntityId = entity.Id,
+            })
+            .ToList();
+
+        var existing = entity.Addresses.ToList();
+        if (existing.Count > 0)
+        {
+            _db.AddressRecords.RemoveRange(existing);
+            entity.Addresses.Clear();
+        }
+
+        if (normalized.Count > 0)
+        {
+            if (!normalized.Any(a => a.IsPrimary))
+            {
+                normalized[0].IsPrimary = true;
+            }
+            _db.AddressRecords.AddRange(normalized);
+            foreach (var item in normalized) entity.Addresses.Add(item);
+        }
+    }
+
     [HttpPost]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
@@ -224,6 +304,12 @@ public class LegalEntitiesController : ControllerBase
         {
             return BadRequest("Необходимо указать краткое название");
         }
+
+        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        {
+            return BadRequest("Указанный ответственный не найден или неактивен");
+        }
+
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
@@ -242,12 +328,51 @@ public class LegalEntitiesController : ControllerBase
             Phone = NormalizeOptional(request.Phone),
             Email = NormalizeOptional(request.Email),
             Director = NormalizeOptional(request.Director),
+            ResponsibleUserId = request.ResponsibleUserId,
             Country = NormalizeOptional(request.Country),
             BaseCurrency = NormalizeOptional(request.BaseCurrency),
             ServiceLanguage = NormalizeOptional(request.ServiceLanguage),
             OrganizationForm = NormalizeOptional(request.OrganizationForm),
             Timezone = NormalizeOptional(request.Timezone),
             TaxSystem = NormalizeOptional(request.TaxSystem),
+            TaxSystemMode = NormalizeOptional(request.TaxSystemMode),
+            IncomeTaxRate = NormalizeOptional(request.IncomeTaxRate),
+            IncomeExpenseTaxRate = NormalizeOptional(request.IncomeExpenseTaxRate),
+            VatWithoutVat = request.VatWithoutVat,
+            Okved = NormalizeOptional(request.Okved),
+            Okpo = NormalizeOptional(request.Okpo),
+            Okato = NormalizeOptional(request.Okato),
+            Oktmo = NormalizeOptional(request.Oktmo),
+            Okogu = NormalizeOptional(request.Okogu),
+            Okfs = NormalizeOptional(request.Okfs),
+            Okopf = NormalizeOptional(request.Okopf),
+            Pfr = NormalizeOptional(request.Pfr),
+            Fss = NormalizeOptional(request.Fss),
+            CharterCapital = NormalizeOptional(request.CharterCapital),
+            TaxRegistrationDate = NormalizeOptional(request.TaxRegistrationDate),
+            TaxOfficeCode = NormalizeOptional(request.TaxOfficeCode),
+            TaxRegion = NormalizeOptional(request.TaxRegion),
+            IfnsName = NormalizeOptional(request.IfnsName),
+            TaxOfficePhone = NormalizeOptional(request.TaxOfficePhone),
+            TreasuryInn = NormalizeOptional(request.TreasuryInn),
+            TreasuryKpp = NormalizeOptional(request.TreasuryKpp),
+            TreasuryRecipientName = NormalizeOptional(request.TreasuryRecipientName),
+            TreasuryBankBik = NormalizeOptional(request.TreasuryBankBik),
+            TreasuryBankName = NormalizeOptional(request.TreasuryBankName),
+            TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber),
+            TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber),
+            TreasuryKbk = NormalizeOptional(request.TreasuryKbk),
+            BankAccountsJson = NormalizeOptional(request.BankAccountsJson),
+            CashRegistersJson = NormalizeOptional(request.CashRegistersJson),
+            CardsJson = NormalizeOptional(request.CardsJson),
+            RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson),
+            LogoDataUrl = NormalizeOptional(request.LogoDataUrl),
+            SealDataUrl = NormalizeOptional(request.SealDataUrl),
+            DirectorSignatureDataUrl = NormalizeOptional(request.DirectorSignatureDataUrl),
+            DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson),
+            ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson),
+            ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson),
+            ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson),
             Notes = NormalizeOptional(request.Notes),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -259,11 +384,14 @@ public class LegalEntitiesController : ControllerBase
         if (clientIds.Count > 0)
         {
             await ApplyClientLinksAsync(entity.Id, clientIds, ct);
-            await _db.SaveChangesAsync(ct);
         }
+
+        ApplyLegalEntityAddresses(entity, request.Addresses);
+        await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
+        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
         return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity));
     }
 
@@ -273,6 +401,7 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
@@ -332,6 +461,7 @@ public class LegalEntitiesController : ControllerBase
         var query = _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .AsNoTracking()
             .AsQueryable();
 
@@ -359,6 +489,7 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 
@@ -410,10 +541,16 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
+        }
+
+        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        {
+            return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
@@ -431,20 +568,61 @@ public class LegalEntitiesController : ControllerBase
         entity.Phone = NormalizeOptional(request.Phone);
         entity.Email = NormalizeOptional(request.Email);
         entity.Director = NormalizeOptional(request.Director);
+        entity.ResponsibleUserId = request.ResponsibleUserId;
         entity.Country = NormalizeOptional(request.Country);
         entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
         entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);
         entity.OrganizationForm = NormalizeOptional(request.OrganizationForm);
         entity.Timezone = NormalizeOptional(request.Timezone);
         entity.TaxSystem = NormalizeOptional(request.TaxSystem);
+        entity.TaxSystemMode = NormalizeOptional(request.TaxSystemMode);
+        entity.IncomeTaxRate = NormalizeOptional(request.IncomeTaxRate);
+        entity.IncomeExpenseTaxRate = NormalizeOptional(request.IncomeExpenseTaxRate);
+        entity.VatWithoutVat = request.VatWithoutVat;
+        entity.Okved = NormalizeOptional(request.Okved);
+        entity.Okpo = NormalizeOptional(request.Okpo);
+        entity.Okato = NormalizeOptional(request.Okato);
+        entity.Oktmo = NormalizeOptional(request.Oktmo);
+        entity.Okogu = NormalizeOptional(request.Okogu);
+        entity.Okfs = NormalizeOptional(request.Okfs);
+        entity.Okopf = NormalizeOptional(request.Okopf);
+        entity.Pfr = NormalizeOptional(request.Pfr);
+        entity.Fss = NormalizeOptional(request.Fss);
+        entity.CharterCapital = NormalizeOptional(request.CharterCapital);
+        entity.TaxRegistrationDate = NormalizeOptional(request.TaxRegistrationDate);
+        entity.TaxOfficeCode = NormalizeOptional(request.TaxOfficeCode);
+        entity.TaxRegion = NormalizeOptional(request.TaxRegion);
+        entity.IfnsName = NormalizeOptional(request.IfnsName);
+        entity.TaxOfficePhone = NormalizeOptional(request.TaxOfficePhone);
+        entity.TreasuryInn = NormalizeOptional(request.TreasuryInn);
+        entity.TreasuryKpp = NormalizeOptional(request.TreasuryKpp);
+        entity.TreasuryRecipientName = NormalizeOptional(request.TreasuryRecipientName);
+        entity.TreasuryBankBik = NormalizeOptional(request.TreasuryBankBik);
+        entity.TreasuryBankName = NormalizeOptional(request.TreasuryBankName);
+        entity.TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber);
+        entity.TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber);
+        entity.TreasuryKbk = NormalizeOptional(request.TreasuryKbk);
+        entity.BankAccountsJson = NormalizeOptional(request.BankAccountsJson);
+        entity.CashRegistersJson = NormalizeOptional(request.CashRegistersJson);
+        entity.CardsJson = NormalizeOptional(request.CardsJson);
+        entity.RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson);
+        entity.LogoDataUrl = NormalizeOptional(request.LogoDataUrl);
+        entity.SealDataUrl = NormalizeOptional(request.SealDataUrl);
+        entity.DirectorSignatureDataUrl = NormalizeOptional(request.DirectorSignatureDataUrl);
+        entity.DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson);
+        entity.ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson);
+        entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);
+        entity.ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson);
         entity.Notes = NormalizeOptional(request.Notes);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
+        ApplyLegalEntityAddresses(entity, request.Addresses);
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
+        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
         return Ok(MapDetail(entity));
     }
 
