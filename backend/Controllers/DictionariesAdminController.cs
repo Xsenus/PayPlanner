@@ -17,6 +17,149 @@ public class DictionariesAdminController : ControllerBase
     private IActionResult InUseError(string title)
         => BadRequest($"Нельзя удалить элемент справочника \"{title}\", так как он используется в данных.");
 
+    private static string CanonicalizeDictionaryName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        return new string(value.Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+    }
+
+    private sealed record SimpleDictionaryMeta(
+        Func<CancellationToken, Task<List<object>>> LoadAsNoTrackingAsync,
+        Func<CancellationToken, Task<List<object>>> LoadTrackingAsync,
+        Action<LegalEntity, string?> AssignLegalEntityField,
+        Func<LegalEntity, string?> ReadLegalEntityField,
+        Func<object, int> GetId,
+        Func<object, string> GetName,
+        Func<object, string> GetDescription,
+        Func<object, string> GetColorHex,
+        Func<object, bool> GetIsActive,
+        Action<object, string> SetName,
+        Action<object, string> SetDescription,
+        Action<object, string> SetColorHex,
+        Action<object, bool> SetIsActive,
+        Action<object> AddEntity,
+        Action<object> RemoveEntity);
+
+    private SimpleDictionaryMeta? ResolveSimpleDictionaryMeta(string kind)
+    {
+        return kind switch
+        {
+            "countries" => new(
+                ct => _db.Countries.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.Countries.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.Country = v,
+                le => le.Country,
+                x => ((CountryDictionaryItem)x).Id,
+                x => ((CountryDictionaryItem)x).Name,
+                x => ((CountryDictionaryItem)x).Description,
+                x => ((CountryDictionaryItem)x).ColorHex,
+                x => ((CountryDictionaryItem)x).IsActive,
+                (x, v) => ((CountryDictionaryItem)x).Name = v,
+                (x, v) => ((CountryDictionaryItem)x).Description = v,
+                (x, v) => ((CountryDictionaryItem)x).ColorHex = v,
+                (x, v) => ((CountryDictionaryItem)x).IsActive = v,
+                x => _db.Countries.Add((CountryDictionaryItem)x),
+                x => _db.Countries.Remove((CountryDictionaryItem)x)),
+            "base-currencies" => new(
+                ct => _db.BaseCurrencies.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.BaseCurrencies.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.BaseCurrency = v,
+                le => le.BaseCurrency,
+                x => ((BaseCurrencyDictionaryItem)x).Id,
+                x => ((BaseCurrencyDictionaryItem)x).Name,
+                x => ((BaseCurrencyDictionaryItem)x).Description,
+                x => ((BaseCurrencyDictionaryItem)x).ColorHex,
+                x => ((BaseCurrencyDictionaryItem)x).IsActive,
+                (x, v) => ((BaseCurrencyDictionaryItem)x).Name = v,
+                (x, v) => ((BaseCurrencyDictionaryItem)x).Description = v,
+                (x, v) => ((BaseCurrencyDictionaryItem)x).ColorHex = v,
+                (x, v) => ((BaseCurrencyDictionaryItem)x).IsActive = v,
+                x => _db.BaseCurrencies.Add((BaseCurrencyDictionaryItem)x),
+                x => _db.BaseCurrencies.Remove((BaseCurrencyDictionaryItem)x)),
+            "service-languages" => new(
+                ct => _db.ServiceLanguages.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.ServiceLanguages.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.ServiceLanguage = v,
+                le => le.ServiceLanguage,
+                x => ((ServiceLanguageDictionaryItem)x).Id,
+                x => ((ServiceLanguageDictionaryItem)x).Name,
+                x => ((ServiceLanguageDictionaryItem)x).Description,
+                x => ((ServiceLanguageDictionaryItem)x).ColorHex,
+                x => ((ServiceLanguageDictionaryItem)x).IsActive,
+                (x, v) => ((ServiceLanguageDictionaryItem)x).Name = v,
+                (x, v) => ((ServiceLanguageDictionaryItem)x).Description = v,
+                (x, v) => ((ServiceLanguageDictionaryItem)x).ColorHex = v,
+                (x, v) => ((ServiceLanguageDictionaryItem)x).IsActive = v,
+                x => _db.ServiceLanguages.Add((ServiceLanguageDictionaryItem)x),
+                x => _db.ServiceLanguages.Remove((ServiceLanguageDictionaryItem)x)),
+            "organization-forms" => new(
+                ct => _db.OrganizationForms.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.OrganizationForms.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.OrganizationForm = v,
+                le => le.OrganizationForm,
+                x => ((OrganizationFormDictionaryItem)x).Id,
+                x => ((OrganizationFormDictionaryItem)x).Name,
+                x => ((OrganizationFormDictionaryItem)x).Description,
+                x => ((OrganizationFormDictionaryItem)x).ColorHex,
+                x => ((OrganizationFormDictionaryItem)x).IsActive,
+                (x, v) => ((OrganizationFormDictionaryItem)x).Name = v,
+                (x, v) => ((OrganizationFormDictionaryItem)x).Description = v,
+                (x, v) => ((OrganizationFormDictionaryItem)x).ColorHex = v,
+                (x, v) => ((OrganizationFormDictionaryItem)x).IsActive = v,
+                x => _db.OrganizationForms.Add((OrganizationFormDictionaryItem)x),
+                x => _db.OrganizationForms.Remove((OrganizationFormDictionaryItem)x)),
+            "timezones" => new(
+                ct => _db.Timezones.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.Timezones.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.Timezone = v,
+                le => le.Timezone,
+                x => ((TimezoneDictionaryItem)x).Id,
+                x => ((TimezoneDictionaryItem)x).Name,
+                x => ((TimezoneDictionaryItem)x).Description,
+                x => ((TimezoneDictionaryItem)x).ColorHex,
+                x => ((TimezoneDictionaryItem)x).IsActive,
+                (x, v) => ((TimezoneDictionaryItem)x).Name = v,
+                (x, v) => ((TimezoneDictionaryItem)x).Description = v,
+                (x, v) => ((TimezoneDictionaryItem)x).ColorHex = v,
+                (x, v) => ((TimezoneDictionaryItem)x).IsActive = v,
+                x => _db.Timezones.Add((TimezoneDictionaryItem)x),
+                x => _db.Timezones.Remove((TimezoneDictionaryItem)x)),
+            "tax-systems" => new(
+                ct => _db.TaxSystems.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.TaxSystems.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.TaxSystem = v,
+                le => le.TaxSystem,
+                x => ((TaxSystemDictionaryItem)x).Id,
+                x => ((TaxSystemDictionaryItem)x).Name,
+                x => ((TaxSystemDictionaryItem)x).Description,
+                x => ((TaxSystemDictionaryItem)x).ColorHex,
+                x => ((TaxSystemDictionaryItem)x).IsActive,
+                (x, v) => ((TaxSystemDictionaryItem)x).Name = v,
+                (x, v) => ((TaxSystemDictionaryItem)x).Description = v,
+                (x, v) => ((TaxSystemDictionaryItem)x).ColorHex = v,
+                (x, v) => ((TaxSystemDictionaryItem)x).IsActive = v,
+                x => _db.TaxSystems.Add((TaxSystemDictionaryItem)x),
+                x => _db.TaxSystems.Remove((TaxSystemDictionaryItem)x)),
+            "tax-system-modes" => new(
+                ct => _db.TaxSystemModes.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.TaxSystemModes.Select(item => (object)item).ToListAsync(ct),
+                (le, v) => le.TaxSystemMode = v,
+                le => le.TaxSystemMode,
+                x => ((TaxSystemModeDictionaryItem)x).Id,
+                x => ((TaxSystemModeDictionaryItem)x).Name,
+                x => ((TaxSystemModeDictionaryItem)x).Description,
+                x => ((TaxSystemModeDictionaryItem)x).ColorHex,
+                x => ((TaxSystemModeDictionaryItem)x).IsActive,
+                (x, v) => ((TaxSystemModeDictionaryItem)x).Name = v,
+                (x, v) => ((TaxSystemModeDictionaryItem)x).Description = v,
+                (x, v) => ((TaxSystemModeDictionaryItem)x).ColorHex = v,
+                (x, v) => ((TaxSystemModeDictionaryItem)x).IsActive = v,
+                x => _db.TaxSystemModes.Add((TaxSystemModeDictionaryItem)x),
+                x => _db.TaxSystemModes.Remove((TaxSystemModeDictionaryItem)x)),
+            _ => null,
+        };
+    }
+
     // DealType
     [HttpPost("deal-types")]
     public async Task<IActionResult> CreateDealType([FromBody] DealType m)
@@ -515,4 +658,176 @@ public class DictionariesAdminController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(new { e.Id, e.IsActive });
     }
+
+    [HttpGet("simple/{kind}/duplicates")]
+    public async Task<ActionResult<IReadOnlyList<SimpleDictionaryDuplicateGroupDto>>> GetSimpleDictionaryDuplicates(string kind)
+    {
+        var meta = ResolveSimpleDictionaryMeta(kind);
+        if (meta is null) return NotFound("Неподдерживаемый справочник");
+
+        var items = await meta.LoadAsNoTrackingAsync(CancellationToken.None);
+        var result = items
+            .Select(item => new SimpleDictionaryDuplicateItemDto
+            {
+                Id = meta.GetId(item),
+                Name = meta.GetName(item),
+                Description = meta.GetDescription(item),
+                ColorHex = meta.GetColorHex(item),
+                IsActive = meta.GetIsActive(item),
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .GroupBy(item => CanonicalizeDictionaryName(item.Name))
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key) && group.Count() > 1)
+            .OrderBy(group => group.First().Name)
+            .Select(group => new SimpleDictionaryDuplicateGroupDto
+            {
+                Canonical = group.Key,
+                Items = group.OrderBy(item => item.Name).ThenBy(item => item.Id).ToList()
+            })
+            .ToList();
+
+        return Ok(result);
+    }
+
+    [HttpPost("simple/{kind}/merge")]
+    public async Task<ActionResult<SimpleDictionaryMergeResultDto>> MergeSimpleDictionaryDuplicates(string kind,
+        [FromBody] MergeSimpleDictionaryDuplicatesRequest request,
+        CancellationToken ct)
+    {
+        var meta = ResolveSimpleDictionaryMeta(kind);
+        if (meta is null) return NotFound("Неподдерживаемый справочник");
+
+        var sourceIds = (request.SourceIds ?? new List<int>()).Distinct().ToList();
+        if (sourceIds.Count < 2)
+            return BadRequest("Нужно выбрать минимум 2 значения для объединения");
+
+        var allItems = await meta.LoadTrackingAsync(ct);
+        var selected = allItems.Where(item => sourceIds.Contains(meta.GetId(item))).ToList();
+        if (selected.Count != sourceIds.Count)
+            return BadRequest("Часть выбранных значений не найдена");
+
+        var primary = request.PreferredId.HasValue
+            ? selected.FirstOrDefault(item => meta.GetId(item) == request.PreferredId.Value)
+            : selected[0];
+        if (primary is null)
+            return BadRequest("PreferredId должен входить в список SourceIds");
+
+        var targetName = string.IsNullOrWhiteSpace(request.Name) ? meta.GetName(primary) : request.Name.Trim();
+        if (string.IsNullOrWhiteSpace(targetName))
+            return BadRequest("Итоговое имя не может быть пустым");
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var targetDescription = string.IsNullOrWhiteSpace(request.Description)
+                ? meta.GetDescription(primary)
+                : request.Description.Trim();
+            var targetColor = string.IsNullOrWhiteSpace(request.ColorHex)
+                ? meta.GetColorHex(primary)
+                : request.ColorHex.Trim();
+            var targetIsActive = request.IsActive ?? meta.GetIsActive(primary);
+
+            var created = CreateSimpleDictionaryEntity(kind, targetName, targetDescription, targetColor, targetIsActive);
+            meta.AddEntity(created);
+
+            var oldNames = selected
+                .Select(meta.GetName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            var legalEntitiesToUpdate = (await _db.LegalEntities.ToListAsync(ct))
+                .Where(entity => oldNames.Contains((meta.ReadLegalEntityField(entity) ?? string.Empty).Trim(), StringComparer.Ordinal))
+                .ToList();
+
+            foreach (var entity in legalEntitiesToUpdate)
+            {
+                meta.AssignLegalEntityField(entity, targetName);
+                entity.UpdatedAt = DateTime.UtcNow;
+            }
+
+            foreach (var item in selected)
+            {
+                meta.RemoveEntity(item);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            return Ok(new SimpleDictionaryMergeResultDto
+            {
+                Kind = kind,
+                CreatedId = GetSimpleDictionaryEntityId(created),
+                Name = targetName,
+                ReplacedInLegalEntities = legalEntitiesToUpdate.Count,
+                RemovedIds = sourceIds,
+            });
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    private static object CreateSimpleDictionaryEntity(string kind, string name, string description, string colorHex, bool isActive)
+        => kind switch
+        {
+            "countries" => new CountryDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "base-currencies" => new BaseCurrencyDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "service-languages" => new ServiceLanguageDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "organization-forms" => new OrganizationFormDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "timezones" => new TimezoneDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "tax-systems" => new TaxSystemDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "tax-system-modes" => new TaxSystemModeDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            _ => throw new InvalidOperationException($"Unsupported kind: {kind}")
+        };
+
+    private static int GetSimpleDictionaryEntityId(object entity)
+        => entity switch
+        {
+            CountryDictionaryItem x => x.Id,
+            BaseCurrencyDictionaryItem x => x.Id,
+            ServiceLanguageDictionaryItem x => x.Id,
+            OrganizationFormDictionaryItem x => x.Id,
+            TimezoneDictionaryItem x => x.Id,
+            TaxSystemDictionaryItem x => x.Id,
+            TaxSystemModeDictionaryItem x => x.Id,
+            _ => 0
+        };
+}
+
+public sealed class MergeSimpleDictionaryDuplicatesRequest
+{
+    public List<int> SourceIds { get; set; } = new();
+    public int? PreferredId { get; set; }
+    public string? Name { get; set; }
+    public string? Description { get; set; }
+    public string? ColorHex { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+public sealed class SimpleDictionaryDuplicateItemDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string ColorHex { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+}
+
+public sealed class SimpleDictionaryDuplicateGroupDto
+{
+    public string Canonical { get; set; } = string.Empty;
+    public List<SimpleDictionaryDuplicateItemDto> Items { get; set; } = new();
+}
+
+public sealed class SimpleDictionaryMergeResultDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public int CreatedId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int ReplacedInLegalEntities { get; set; }
+    public List<int> RemovedIds { get; set; } = new();
 }

@@ -62,6 +62,11 @@ export function useLegalEntities() {
     [],
   );
 
+  const findLegalEntityById = useCallback(
+    async (payload: { query: string; kpp?: string }) => apiService.findLegalEntityById(payload),
+    [],
+  );
+
   const sorted = useMemo(
     () =>
       [...legalEntities].sort((a, b) =>
@@ -80,5 +85,6 @@ export function useLegalEntities() {
     deleteLegalEntity,
     getLegalEntity,
     suggestLegalEntities,
+    findLegalEntityById,
   };
 }

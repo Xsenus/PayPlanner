@@ -248,8 +248,59 @@ namespace PayPlanner.Api.Services.LegalEntities
                 ManagementName: s.Management?.Name,
                 ManagementPost: s.Management?.Post,
                 AddressValue: s.Address?.Value,
-                AddressUnrestrictedValue: s.Address?.UnrestrictedValue
+                AddressUnrestrictedValue: s.Address?.UnrestrictedValue,
+                Country: s.Address?.Data?.Country,
+                RegionWithType: s.Address?.Data?.RegionWithType,
+                CityWithType: s.Address?.Data?.CityWithType,
+                StreetWithType: s.Address?.Data?.StreetWithType,
+                House: s.Address?.Data?.House,
+                Flat: s.Address?.Data?.Flat,
+                PostalCode: s.Address?.Data?.PostalCode,
+                Okato: s.Okato,
+                Oktmo: s.Oktmo,
+                Okpo: s.Okpo,
+                Okogu: s.Okogu,
+                Okfs: s.Okfs,
+                TaxSystem: s.Finance?.TaxSystem,
+                Phones: ExtractContactValues(s.Phones),
+                Emails: ExtractContactValues(s.Emails)
             );
+        }
+
+        private static IReadOnlyList<string> ExtractContactValues(IEnumerable<JsonElement>? contacts)
+        {
+            if (contacts is null)
+                return Array.Empty<string>();
+
+            return contacts
+                .SelectMany(ExtractContactCandidates)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static IEnumerable<string?> ExtractContactCandidates(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                yield return element.GetString();
+                yield break;
+            }
+
+            if (element.ValueKind != JsonValueKind.Object)
+                yield break;
+
+            if (element.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String)
+            {
+                yield return source.GetString();
+            }
+
+            if (element.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                yield return value.GetString();
+            }
         }
 
 
@@ -359,8 +410,8 @@ namespace PayPlanner.Api.Services.LegalEntities
                         s.Data?.Kpp,
                         s.Data?.Ogrn,
                         s.Data?.Address?.Value,
-                        s.Data?.Phones?.FirstOrDefault(),
-                        s.Data?.Emails?.FirstOrDefault(),
+                        ExtractContactValues(s.Data?.Phones).FirstOrDefault(),
+                        ExtractContactValues(s.Data?.Emails).FirstOrDefault(),
                         s.Data?.Management?.Name))
                     .Where(x => !string.IsNullOrWhiteSpace(x.ShortName))
                     .ToList();
@@ -451,11 +502,26 @@ namespace PayPlanner.Api.Services.LegalEntities
             [JsonPropertyName("address")]
             public AddressData? Address { get; set; }
 
+            [JsonPropertyName("okato")]
+            public string? Okato { get; set; }
+
+            [JsonPropertyName("oktmo")]
+            public string? Oktmo { get; set; }
+
+            [JsonPropertyName("okpo")]
+            public string? Okpo { get; set; }
+
+            [JsonPropertyName("okogu")]
+            public string? Okogu { get; set; }
+
+            [JsonPropertyName("okfs")]
+            public string? Okfs { get; set; }
+
             [JsonPropertyName("branch_count")]
             public int? BranchCount { get; set; }
 
             [JsonPropertyName("emails")]
-            public List<string>? Emails { get; set; }
+            public List<JsonElement>? Emails { get; set; }
             [JsonPropertyName("inn")]
             public string? Inn { get; set; }
 
@@ -471,6 +537,9 @@ namespace PayPlanner.Api.Services.LegalEntities
             [JsonPropertyName("ogrn")]
             public string? Ogrn { get; set; }
 
+            [JsonPropertyName("finance")]
+            public FinanceData? Finance { get; set; }
+
             [JsonPropertyName("okved")]
             public string? Okved { get; set; }
 
@@ -481,7 +550,7 @@ namespace PayPlanner.Api.Services.LegalEntities
             public OpfData? Opf { get; set; }
 
             [JsonPropertyName("phones")]
-            public List<string>? Phones { get; set; }
+            public List<JsonElement>? Phones { get; set; }
 
             [JsonPropertyName("state")]
             public StateData? State { get; set; }
@@ -509,6 +578,39 @@ namespace PayPlanner.Api.Services.LegalEntities
             public string? UnrestrictedValue { get; set; }
             [JsonPropertyName("value")]
             public string? Value { get; set; }
+
+            [JsonPropertyName("data")]
+            public AddressDetailsData? Data { get; set; }
+        }
+
+        private sealed class AddressDetailsData
+        {
+            [JsonPropertyName("country")]
+            public string? Country { get; set; }
+
+            [JsonPropertyName("region_with_type")]
+            public string? RegionWithType { get; set; }
+
+            [JsonPropertyName("city_with_type")]
+            public string? CityWithType { get; set; }
+
+            [JsonPropertyName("street_with_type")]
+            public string? StreetWithType { get; set; }
+
+            [JsonPropertyName("house")]
+            public string? House { get; set; }
+
+            [JsonPropertyName("flat")]
+            public string? Flat { get; set; }
+
+            [JsonPropertyName("postal_code")]
+            public string? PostalCode { get; set; }
+        }
+
+        private sealed class FinanceData
+        {
+            [JsonPropertyName("tax_system")]
+            public string? TaxSystem { get; set; }
         }
 
         private sealed class ManagementData

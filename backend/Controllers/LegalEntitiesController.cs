@@ -164,6 +164,71 @@ public class LegalEntitiesController : ControllerBase
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private async Task EnsureAndNormalizeDictionaryValuesAsync(LegalEntity entity, CancellationToken ct)
+    {
+        entity.Country = await ResolveDictionaryValueAsync(_db.Countries, entity.Country, "Добавлено автоматически", "#2563EB", ct);
+        entity.BaseCurrency = await ResolveDictionaryValueAsync(_db.BaseCurrencies, entity.BaseCurrency, "Добавлено автоматически", "#16A34A", ct);
+        entity.ServiceLanguage = await ResolveDictionaryValueAsync(_db.ServiceLanguages, entity.ServiceLanguage, "Добавлено автоматически", "#14B8A6", ct);
+        entity.OrganizationForm = await ResolveDictionaryValueAsync(_db.OrganizationForms, entity.OrganizationForm, "Добавлено автоматически", "#F59E0B", ct);
+        entity.Timezone = await ResolveDictionaryValueAsync(_db.Timezones, entity.Timezone, "Добавлено автоматически", "#8B5CF6", ct);
+        entity.TaxSystem = await ResolveDictionaryValueAsync(_db.TaxSystems, entity.TaxSystem, "Добавлено автоматически", "#0284C7", ct);
+        entity.TaxSystemMode = await ResolveDictionaryValueAsync(_db.TaxSystemModes, entity.TaxSystemMode, "Добавлено автоматически", "#0EA5E9", ct);
+    }
+
+    private async Task<string?> ResolveDictionaryValueAsync<TEntity>(DbSet<TEntity> set, string? rawValue,
+        string defaultDescription, string defaultColor, CancellationToken ct)
+        where TEntity : class, new()
+    {
+        var normalized = NormalizeOptional(rawValue);
+        if (normalized is null)
+            return null;
+
+        var normalizedKey = CanonicalizeDictionaryName(normalized);
+        var existing = await set
+            .AsNoTracking()
+            .Select(item => new { Entity = item, Name = EF.Property<string>(item, "Name") })
+            .ToListAsync(ct);
+
+        var matched = existing.FirstOrDefault(item => CanonicalizeDictionaryName(item.Name) == normalizedKey);
+
+        if (matched is not null)
+        {
+            return NormalizeOptional(matched.Name);
+        }
+
+        var created = new TEntity();
+        SetProperty(created, "Name", normalized);
+        SetProperty(created, "Description", defaultDescription);
+        SetProperty(created, "ColorHex", defaultColor);
+        SetProperty(created, "IsActive", true);
+        SetProperty(created, "CreatedAt", DateTime.UtcNow);
+        set.Add(created);
+        return normalized;
+    }
+
+    private static string CanonicalizeDictionaryName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Where(char.IsLetterOrDigit)
+            .ToArray();
+
+        return new string(chars);
+    }
+
+    private static void SetProperty(object target, string propertyName, object value)
+    {
+        var propertyInfo = target.GetType().GetProperty(propertyName);
+        if (propertyInfo is null || !propertyInfo.CanWrite)
+            return;
+
+        propertyInfo.SetValue(target, value);
+    }
+
     private async Task<(IReadOnlyCollection<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
         CancellationToken ct)
@@ -187,6 +252,25 @@ public class LegalEntitiesController : ControllerBase
         }
 
         return (existingIds, null);
+    }
+
+    private async Task<ActionResult?> ValidateInnUniquenessAsync(string? inn, int? excludeEntityId, CancellationToken ct)
+    {
+        var normalizedInn = NormalizeOptional(inn);
+        if (normalizedInn is null)
+            return null;
+
+        var duplicate = await _db.LegalEntities
+            .AsNoTracking()
+            .Where(item => item.Inn != null && item.Inn.Trim() == normalizedInn)
+            .Where(item => !excludeEntityId.HasValue || item.Id != excludeEntityId.Value)
+            .Select(item => new { item.Id, item.ShortName, item.Inn })
+            .FirstOrDefaultAsync(ct);
+
+        if (duplicate is null)
+            return null;
+
+        return Conflict($"Юридическое лицо с ИНН {duplicate.Inn} уже существует (ID: {duplicate.Id}, {duplicate.ShortName}).");
     }
 
     /// <summary>
@@ -310,6 +394,12 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
+        var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, excludeEntityId: null, ct);
+        if (duplicateInnError is not null)
+        {
+            return duplicateInnError;
+        }
+
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
@@ -378,6 +468,7 @@ public class LegalEntitiesController : ControllerBase
             UpdatedAt = DateTime.UtcNow,
         };
 
+        await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         _db.LegalEntities.Add(entity);
         await _db.SaveChangesAsync(ct);
 
@@ -406,6 +497,12 @@ public class LegalEntitiesController : ControllerBase
         if (entity is null)
         {
             return NotFound();
+        }
+
+        var linkedClientsCount = entity.Clients.Count;
+        if (linkedClientsCount > 0)
+        {
+            return Conflict($"Нельзя удалить юридическое лицо, пока к нему привязаны клиенты ({linkedClientsCount}). Сначала отвяжите клиентов.");
         }
 
         foreach (var client in entity.Clients)
@@ -449,7 +546,22 @@ public class LegalEntitiesController : ControllerBase
             Director = details.ManagementName,
             DirectorPost = details.ManagementPost,
             Address = details.AddressValue,
-            AddressUnrestricted = details.AddressUnrestrictedValue
+            AddressUnrestricted = details.AddressUnrestrictedValue,
+            Country = details.Country,
+            RegionWithType = details.RegionWithType,
+            CityWithType = details.CityWithType,
+            StreetWithType = details.StreetWithType,
+            House = details.House,
+            Flat = details.Flat,
+            PostalCode = details.PostalCode,
+            Okato = details.Okato,
+            Oktmo = details.Oktmo,
+            Okpo = details.Okpo,
+            Okogu = details.Okogu,
+            Okfs = details.Okfs,
+            TaxSystem = details.TaxSystem,
+            Phones = details.Phones,
+            Emails = details.Emails
         };
 
         return Ok(dto);
@@ -553,6 +665,12 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
+        var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, id, ct);
+        if (duplicateInnError is not null)
+        {
+            return duplicateInnError;
+        }
+
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
@@ -616,6 +734,7 @@ public class LegalEntitiesController : ControllerBase
         entity.Notes = NormalizeOptional(request.Notes);
         entity.UpdatedAt = DateTime.UtcNow;
 
+        await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
         ApplyLegalEntityAddresses(entity, request.Addresses);
         await _db.SaveChangesAsync(ct);
@@ -1012,21 +1131,36 @@ public sealed record LegalEntityDetailsDto
 {
     public string? Address { get; init; }
     public string? AddressUnrestricted { get; init; }
+    public string? Country { get; init; }
+    public string? RegionWithType { get; init; }
+    public string? CityWithType { get; init; }
+    public string? StreetWithType { get; init; }
+    public string? House { get; init; }
+    public string? Flat { get; init; }
+    public string? PostalCode { get; init; }
     public int? BranchCount { get; init; }
     public string? Director { get; init; }
     public string? DirectorPost { get; init; }
+    public IReadOnlyList<string> Emails { get; init; } = Array.Empty<string>();
     public string? FullName { get; init; }
     public string? Inn { get; init; }
     public string? Kpp { get; init; }
     public DateTimeOffset? LiquidationDate { get; init; }
     public string? Ogrn { get; init; }
+    public string? Okato { get; init; }
+    public string? Oktmo { get; init; }
+    public string? Okpo { get; init; }
+    public string? Okogu { get; init; }
+    public string? Okfs { get; init; }
     public string? Okved { get; init; }
     public string? OkvedType { get; init; }
     public string? OpfFull { get; init; }
     public string? OpfShort { get; init; }
+    public IReadOnlyList<string> Phones { get; init; } = Array.Empty<string>();
     public DateTimeOffset? RegistrationDate { get; init; }
     public string ShortName { get; init; } = string.Empty;
     public string? Status { get; init; }
+    public string? TaxSystem { get; init; }
 }
 
 public sealed record CleanAddressRequest(string Address);

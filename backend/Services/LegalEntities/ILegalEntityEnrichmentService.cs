@@ -71,7 +71,22 @@ public sealed record LegalEntityDetails(
     string? ManagementName,
     string? ManagementPost,
     string? AddressValue,
-    string? AddressUnrestrictedValue);
+    string? AddressUnrestrictedValue,
+    string? Country,
+    string? RegionWithType,
+    string? CityWithType,
+    string? StreetWithType,
+    string? House,
+    string? Flat,
+    string? PostalCode,
+    string? Okato,
+    string? Oktmo,
+    string? Okpo,
+    string? Okogu,
+    string? Okfs,
+    string? TaxSystem,
+    IReadOnlyList<string> Phones,
+    IReadOnlyList<string> Emails);
 
 public sealed record CleanedAddress(
     string? Source,

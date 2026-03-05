@@ -21,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
+import { useDialog } from '../../hooks/useDialog';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from './LegalEntityModal';
 
@@ -61,6 +62,7 @@ export function LegalEntities() {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const legalPermissions = permissions.legalEntities;
+  const { confirm, alert } = useDialog();
 
   const {
     legalEntities,
@@ -71,6 +73,7 @@ export function LegalEntities() {
     deleteLegalEntity,
     getLegalEntity,
     suggestLegalEntities,
+    findLegalEntityById,
   } = useLegalEntities();
   const { clients, loading: clientsLoading } = useClients();
 
@@ -158,6 +161,42 @@ export function LegalEntities() {
     setEditing(null);
     setReadOnlyMode(false);
     setActionError(null);
+  };
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const marker = ' - ';
+    const markerIndex = raw.indexOf(marker);
+    if (markerIndex >= 0) {
+      const serverMessage = raw.slice(markerIndex + marker.length).trim();
+      if (serverMessage) return serverMessage;
+    }
+    return raw || fallback;
+  };
+
+  const handleDeleteDirect = async (entity: LegalEntitySummary) => {
+    if (!canDelete) return;
+    const approved = await confirm({
+      title: 'Подтверждение удаления',
+      description: `Удалить юридическое лицо "${entity.shortName}"?`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    try {
+      await deleteLegalEntity(entity.id);
+      setActionError(null);
+    } catch (error) {
+      const description = extractErrorMessage(error, 'Не удалось удалить юридическое лицо');
+      setActionError(description);
+      await alert({
+        title: 'Удаление недоступно',
+        description,
+        variant: 'error',
+      });
+    }
   };
 
   const clientsList: Client[] = useMemo(() => clients, [clients]);
@@ -250,6 +289,7 @@ export function LegalEntities() {
           initial={editing}
           clients={clientsList}
           suggest={suggestLegalEntities}
+          findById={findLegalEntityById}
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
           mode="page"
@@ -386,7 +426,7 @@ export function LegalEntities() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openDetailPage(entity.id, true)}
+                  onClick={() => { void handleDeleteDirect(entity); }}
                   disabled={!canDelete}
                   title={t('delete') || 'Удалить'}
                   aria-label={t('delete') || 'Удалить'}
@@ -490,7 +530,7 @@ export function LegalEntities() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => openDetailPage(entity.id, true)}
+                        onClick={() => { void handleDeleteDirect(entity); }}
                         disabled={!canDelete}
                         className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300">
                         <Trash2 size={14} />
