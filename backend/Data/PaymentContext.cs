@@ -776,6 +776,17 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // ------------------ FormFieldRequirements ------------------
+        modelBuilder.Entity<FormFieldRequirement>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Section).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FieldKey).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.Section, e.FieldKey }).IsUnique().HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
+        });
     }
 
     /// <summary>
@@ -890,6 +901,8 @@ public class PaymentContext : DbContext
     /// Пользовательские настройки.
     /// </summary>
     public DbSet<UserSetting> UserSettings { get; set; }
+
+    public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
 
     /// <summary>
     /// Пользователи системы.

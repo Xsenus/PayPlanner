@@ -2,8 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
 import type { LegacyAddressMigrationResult } from '../../services/api';
 
-type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge';
+type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
+
+const FORM_REQUIREMENT_SECTIONS = [
+  { key: 'clients', title: 'Клиенты', fields: [{ key: 'Name', label: 'Имя клиента' }, { key: 'Email', label: 'Email' }, { key: 'Phone', label: 'Телефон' }] },
+  { key: 'legal-entities', title: 'Юридические лица', fields: [{ key: 'ShortName', label: 'Краткое название' }, { key: 'Inn', label: 'ИНН' }, { key: 'Kpp', label: 'КПП' }, { key: 'Oktmo', label: 'ОКТМО' }] },
+  { key: 'payments', title: 'Платежи', fields: [{ key: 'Date', label: 'Дата' }, { key: 'Amount', label: 'Сумма' }, { key: 'ClientId', label: 'Клиент' }, { key: 'Description', label: 'Описание' }] },
+  { key: 'contract-invoices', title: 'Счета договора', fields: [{ key: 'Number', label: 'Номер счета' }, { key: 'Date', label: 'Дата счета' }, { key: 'Amount', label: 'Сумма' }, { key: 'ClientId', label: 'Клиент' }] },
+  { key: 'acts', title: 'Акты', fields: [{ key: 'Number', label: 'Номер акта' }, { key: 'Date', label: 'Дата акта' }, { key: 'Amount', label: 'Сумма' }] },
+] as const;
 
 export function AppSettings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
@@ -22,13 +30,43 @@ export function AppSettings() {
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const [selectedGroupKey, setSelectedGroupKey] = useState<string>('');
   const [preferredId, setPreferredId] = useState<number | null>(null);
+  const [requiredFieldKeys, setRequiredFieldKeys] = useState<Set<string>>(new Set());
+  const [requirementsLoading, setRequirementsLoading] = useState(false);
+  const [requirementsMessage, setRequirementsMessage] = useState<string | null>(null);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
+    if (activeSection === 'form-requirements') return 'Обязательные поля форм';
     return 'Импорт · Перенос адресов';
   }, [activeSection]);
+
+  const loadFormRequirements = async () => {
+    setRequirementsLoading(true);
+    setRequirementsMessage(null);
+    try {
+      const data = await apiService.getFormRequirements();
+      setRequiredFieldKeys(new Set((data ?? []).filter((x) => x.isRequired).map((x) => `${x.section}:${x.fieldKey}`)));
+    } catch (e) {
+      setRequirementsMessage(e instanceof Error ? e.message : 'Не удалось загрузить обязательные поля');
+    } finally {
+      setRequirementsLoading(false);
+    }
+  };
+
+  const toggleRequiredField = async (section: string, fieldKey: string, isRequired: boolean) => {
+    setRequirementsLoading(true);
+    setRequirementsMessage(null);
+    try {
+      await apiService.upsertFormRequirement({ section, fieldKey, isRequired });
+      await loadFormRequirements();
+      setRequirementsMessage('Настройки обязательных полей сохранены');
+    } catch (e) {
+      setRequirementsMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройку');
+      setRequirementsLoading(false);
+    }
+  };
 
   const loadDuplicates = async (kind: MergeKind) => {
     setMergeLoading(true);
@@ -133,6 +171,9 @@ export function AppSettings() {
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
     }
+    if (activeSection === 'form-requirements') {
+      void loadFormRequirements();
+    }
   }, [activeSection, mergeKind]);
 
   return (
@@ -165,6 +206,18 @@ export function AppSettings() {
                 }`}
               >
                 Ключи интеграций
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('form-requirements')}
+                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  activeSection === 'form-requirements'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
+                }`}
+              >
+                Обязательные поля форм
               </button>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
@@ -207,6 +260,8 @@ export function AppSettings() {
                   ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
                   : activeSection === 'integrations'
                     ? 'Хранение и управление ключами доступа к внешним сервисам.'
+                    : activeSection === 'form-requirements'
+                      ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
                     : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
@@ -257,6 +312,35 @@ export function AppSettings() {
                     {credentialsMessage}
                   </div>
                 )}
+              </div>
+            )}
+
+            {activeSection === 'form-requirements' && (
+              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
+                {FORM_REQUIREMENT_SECTIONS.map((section) => (
+                  <div key={section.key} className="rounded-xl border border-gray-200 p-4">
+                    <h4 className="text-sm font-semibold text-gray-900 mb-3">{section.title}</h4>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {section.fields.map((field) => {
+                        const id = `${section.key}:${field.key}`;
+                        const checked = requiredFieldKeys.has(id);
+                        return (
+                          <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={requirementsLoading}
+                              onChange={(event) => void toggleRequiredField(section.key, field.key, event.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>{field.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {requirementsMessage && <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{requirementsMessage}</div>}
               </div>
             )}
 

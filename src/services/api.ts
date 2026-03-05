@@ -67,6 +67,13 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface FormFieldRequirementDto {
+  section: string;
+  fieldKey: string;
+  isRequired: boolean;
+  updatedAt: string;
+}
+
 export interface LegacyAddressMigrationDetail {
   ownerType?: 'legal' | 'client' | string;
   ownerId?: number;
@@ -296,6 +303,18 @@ export class ApiService {
     return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+    });
+  }
+
+  async getFormRequirements(section?: string) {
+    const q = buildQuery({ section });
+    return this.request<FormFieldRequirementDto[]>(`/form-requirements${q}`);
+  }
+
+  async upsertFormRequirement(payload: { section: string; fieldKey: string; isRequired: boolean }) {
+    return this.request<FormFieldRequirementDto>('/form-requirements', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
   }
 

@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDialog } from '../../hooks/useDialog';
 import type { Client, ClientInput } from '../../types';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export function ClientModal({
   const { confirm } = useDialog();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { isRequired } = useFormRequirements('clients', isOpen);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -141,36 +143,36 @@ export function ClientModal({
 
           <form onSubmit={handleSubmit} className="space-y-4" action="#">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} {isRequired('Name') ? '*' : ''}</label>
               <input
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Name') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')} {isRequired('Email') ? '*' : ''}</label>
               <input
                 type="email"
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Email') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')} {isRequired('Phone') ? '*' : ''}</label>
               <input
                 type="tel"
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Phone') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 

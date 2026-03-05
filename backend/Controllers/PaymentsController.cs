@@ -15,7 +15,12 @@ namespace PayPlanner.Api.Controllers;
 public class PaymentsController : ControllerBase
 {
     private readonly PaymentContext _db;
-    public PaymentsController(PaymentContext db) => _db = db;
+    private readonly IFormRequirementsService _formRequirements;
+    public PaymentsController(PaymentContext db, IFormRequirementsService formRequirements)
+    {
+        _db = db;
+        _formRequirements = formRequirements;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -57,6 +62,9 @@ public class PaymentsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Payment model)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("payments", model);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (model.IncomeTypeId.HasValue)
         {
             var it = await _db.IncomeTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
@@ -87,6 +95,9 @@ public class PaymentsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Payment model)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
 

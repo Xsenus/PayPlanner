@@ -59,6 +59,7 @@ export function PaymentModal({
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
+  const { isRequired } = useFormRequirements('payments', isOpen);
 
   const [loading, setLoading] = useState(false);
   const [cases, setCases] = useState<ClientCase[]>([]);
@@ -761,7 +762,7 @@ export function PaymentModal({
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('amount')}</p>
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('amount')} {isRequired('Amount') ? '*' : ''}</p>
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-semibold text-gray-900">{amountNum.toFixed(2)}</span>
                   <span className="text-xs text-gray-500" title={t('plannedScheduleDate') ?? 'Плановая дата по графику'}>
@@ -893,7 +894,7 @@ export function PaymentModal({
                       value={formData.date}
                       onChange={handleChange}
                       required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Date') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                     />
                   </div>
                   <div className="lg:col-span-6">
@@ -922,7 +923,7 @@ export function PaymentModal({
                       onBlur={formatAmountOnBlur}
                       onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
                       inputMode="decimal"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Amount') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                       placeholder="0.00"
                     />
                   </div>
@@ -1072,7 +1073,7 @@ export function PaymentModal({
                 <div className="space-y-4">
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <label className="block text-sm font-medium text-gray-700">{t('client')}</label>
+                      <label className="block text-sm font-medium text-gray-700">{t('client')} {isRequired('ClientId') ? '*' : ''}</label>
                       {selectedClient?.clientStatus ? (
                         <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
                       ) : null}
@@ -1389,14 +1390,14 @@ export function PaymentModal({
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('description')}
+                  {t('description')} {isRequired('Description') ? '*' : ''}
                 </label>
                 <textarea
                   name="description"
                   value={formData.description}
                   onChange={handleChange}
                   rows={3}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${isRequired('Description') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                   placeholder={t('paymentDescription')}
                 />
               </div>

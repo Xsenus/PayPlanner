@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Controllers;
@@ -17,11 +18,13 @@ public class ClientsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichment;
+    private readonly IFormRequirementsService _formRequirements;
 
-    public ClientsController(PaymentContext db, ILegalEntityEnrichmentService enrichment)
+    public ClientsController(PaymentContext db, ILegalEntityEnrichmentService enrichment, IFormRequirementsService formRequirements)
     {
         _db = db;
         _enrichment = enrichment;
+        _formRequirements = formRequirements;
     }
 
     [HttpGet]
@@ -169,6 +172,9 @@ public class ClientsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients", model);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (model.LegalEntityId.HasValue)
         {
             var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
@@ -214,6 +220,9 @@ public class ClientsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Client model)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", model);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         var e = await _db.Clients.FindAsync(id);
         if (e is null) return NotFound();
         if (model.LegalEntityId.HasValue)
