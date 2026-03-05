@@ -124,6 +124,8 @@ interface EnglishRequisites {
   middleName: string;
 }
 
+type FinanceTab = 'bank' | 'cash' | 'cards';
+
 const EMPTY_BANK_ACCOUNT: BankAccountItem = {
   bank: '',
   name: '',
@@ -256,6 +258,7 @@ export function LegalEntityModal({
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
   const [sealDataUrl, setSealDataUrl] = useState<string>('');
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
+  const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -1000,118 +1003,159 @@ export function LegalEntityModal({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Банковские счета / Кассы / Карты</h3>
-            <div className="grid gap-3 md:grid-cols-3">
-              <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить банковский счет</button>
-              <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить кассу</button>
-              <button type="button" disabled={readOnly} onClick={() => setCards((prev) => [...prev, { ...EMPTY_CARD }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить карту</button>
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex flex-wrap gap-5 border-b border-slate-200 px-6 pt-4">
+              {([
+                { id: 'bank', label: 'Банковские счета' },
+                { id: 'cash', label: 'Кассы' },
+                { id: 'cards', label: 'Карты' },
+              ] as Array<{ id: FinanceTab; label: string }>).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setFinanceTab(tab.id)}
+                  className={`pb-3 text-sm font-semibold transition ${
+                    financeTab === tab.id
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}>
+                  {tab.label}
+                </button>
+              ))}
             </div>
-
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Банковские счета ({bankAccounts.length})</div>
-              <div className="space-y-2">
-                {bankAccounts.map((item, idx) => (
-                  <div key={`bank-${idx}`} className="grid gap-2 md:grid-cols-6">
-                    <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <div className="flex gap-2">
-                      <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                      <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">✕</button>
-                    </div>
+            <div className="p-6">
+              <div className="rounded-xl border border-slate-200">
+                <div className="grid grid-cols-6 gap-4 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <span>Банк</span>
+                  <span>Название</span>
+                  <span>БИК</span>
+                  <span>Валюта</span>
+                  <span>Р/с</span>
+                  <span>Тип</span>
+                </div>
+                {financeTab === 'bank' && bankAccounts.length > 0 ? (
+                  <div className="divide-y divide-slate-200">
+                    {bankAccounts.map((item, idx) => (
+                      <div key={`bank-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
+                        <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <div className="flex gap-2">
+                          <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                          <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Кассы ({cashRegisters.length})</div>
-              <div className="space-y-2">
-                {cashRegisters.map((item, idx) => (
-                  <div key={`cash-${idx}`} className="grid gap-2 md:grid-cols-4">
-                    <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">Удалить</button>
+                ) : financeTab === 'cash' && cashRegisters.length > 0 ? (
+                  <div className="divide-y divide-slate-200">
+                    {cashRegisters.map((item, idx) => (
+                      <div key={`cash-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
+                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
+                        <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
+                        <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">Удалить</button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Карты ({cards.length})</div>
-              <div className="space-y-2">
-                {cards.map((item, idx) => (
-                  <div key={`card-${idx}`} className="grid gap-2 md:grid-cols-5">
-                    <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Номер" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Держатель" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
-                    <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">Удалить</button>
+                ) : financeTab === 'cards' && cards.length > 0 ? (
+                  <div className="divide-y divide-slate-200">
+                    {cards.map((item, idx) => (
+                      <div key={`card-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
+                        <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
+                        <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                        <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">Удалить</button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <div className="px-4 py-6 text-sm text-slate-500">Ничего не найдено.</div>
+                )}
               </div>
+
+              <button
+                type="button"
+                disabled={readOnly}
+                onClick={() => {
+                  if (financeTab === 'bank') setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }]);
+                  if (financeTab === 'cash') setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }]);
+                  if (financeTab === 'cards') setCards((prev) => [...prev, { ...EMPTY_CARD }]);
+                }}
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:bg-blue-300">
+                + {financeTab === 'bank' ? 'Добавить банковский счет' : financeTab === 'cash' ? 'Добавить кассу' : 'Добавить карту'}
+              </button>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Реквизиты на английском</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Логотип / Печать / Подпись руководителя</h3>
-            <div className="mt-3 grid gap-4 md:grid-cols-3 text-sm">
-              <div>
-                <div>Логотип компании</div>
-                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
-                {logoDataUrl && <img src={logoDataUrl} alt="Логотип" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="text-sm font-semibold text-slate-700">Логотип компании</div>
+              <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
+                {logoDataUrl ? <img src={logoDataUrl} alt="Логотип" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
-              <div>
-                <div>Печать компании</div>
-                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
-                {sealDataUrl && <img src={sealDataUrl} alt="Печать" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
+              <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 545x185. Форматы: JPG, JPEG, PNG.</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="text-sm font-semibold text-slate-700">Печать компании</div>
+              <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
+                {sealDataUrl ? <img src={sealDataUrl} alt="Печать" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
-              <div>
-                <div>Подпись руководителя</div>
-                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
-                {directorSignatureDataUrl && <img src={directorSignatureDataUrl} alt="Подпись" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
+              <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 200x200. Форматы: JPG, JPEG, PNG.</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="text-sm font-semibold text-slate-700">Подпись руководителя</div>
+              <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
+                {directorSignatureDataUrl ? <img src={directorSignatureDataUrl} alt="Подпись" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
+              <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG.</div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Руководитель для документов</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={documentDirector.position} onChange={(e) => updatePersonInfo(setDocumentDirector, 'position', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} />
-              <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-2xl font-semibold text-slate-900">Руководитель (для документов)</h3>
+              <div className="mt-4 grid gap-4">
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Должность</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Генеральный директор" value={documentDirector.position} onChange={(e) => updatePersonInfo(setDocumentDirector, 'position', e.target.value)} disabled={readOnly} /></label>
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Фамилия</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Швыдченко" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} /></label>
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Имя</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Сергей" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} /></label>
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Отчество</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Николаевич" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} /></label>
+                <label className="flex items-center gap-2 text-base text-slate-700"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} className="h-5 w-5" /> Нет отчества</label>
+              </div>
             </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Главный бухгалтер</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={chiefAccountant.position} onChange={(e) => updatePersonInfo(setChiefAccountant, 'position', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} />
-              <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-2xl font-semibold text-slate-900">Главный бухгалтер (для документов)</h3>
+              <div className="mt-4 flex items-center justify-between text-base text-slate-700"><span>Совпадает с руководителем</span><label className="flex items-center gap-2"><input type="checkbox" checked={false} readOnly className="h-5 w-5" /> ✓ Активно</label></div>
+              <div className="mt-4 grid gap-4">
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Фамилия</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Швыдченко" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} /></label>
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Имя</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Сергей" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} /></label>
+                <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Отчество</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Николаевич" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} /></label>
+                <label className="flex items-center gap-2 text-base text-slate-700"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} className="h-5 w-5" /> Нет отчества</label>
+              </div>
             </div>
           </div>
 
