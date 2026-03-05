@@ -805,10 +805,10 @@ export function LegalEntityModal({
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
-            <div className="rounded-xl border border-gray-200 p-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
                     {t('legalEntityClients') || 'Клиенты юридического лица'}
                   </h3>
                   <p className="text-xs text-gray-500">
@@ -937,8 +937,8 @@ export function LegalEntityModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Расширенные реквизиты (из профиля компании)</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Расширенные реквизиты (из профиля компании)</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               {[
                 ['country', 'Страна'],
@@ -1000,27 +1000,27 @@ export function LegalEntityModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900">Банковские счета / Кассы / Карты</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Банковские счета / Кассы / Карты</h3>
             <div className="grid gap-3 md:grid-cols-3">
-              <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить банковский счет</button>
-              <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить кассу</button>
-              <button type="button" disabled={readOnly} onClick={() => setCards((prev) => [...prev, { ...EMPTY_CARD }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить карту</button>
+              <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить банковский счет</button>
+              <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить кассу</button>
+              <button type="button" disabled={readOnly} onClick={() => setCards((prev) => [...prev, { ...EMPTY_CARD }])} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить карту</button>
             </div>
 
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-700">Банковские счета ({bankAccounts.length})</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Банковские счета ({bankAccounts.length})</div>
               <div className="space-y-2">
                 {bankAccounts.map((item, idx) => (
                   <div key={`bank-${idx}`} className="grid gap-2 md:grid-cols-6">
-                    <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded border px-2 py-1" />
-                    <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded border px-2 py-1" />
-                    <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded border px-2 py-1" />
-                    <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
-                    <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded border px-2 py-1" />
+                    <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
                     <div className="flex gap-2">
-                      <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded border px-2 py-1" />
-                      <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">✕</button>
+                      <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                      <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">✕</button>
                     </div>
                   </div>
                 ))}
@@ -1028,90 +1028,90 @@ export function LegalEntityModal({
             </div>
 
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-700">Кассы ({cashRegisters.length})</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Кассы ({cashRegisters.length})</div>
               <div className="space-y-2">
                 {cashRegisters.map((item, idx) => (
                   <div key={`cash-${idx}`} className="grid gap-2 md:grid-cols-4">
-                    <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded border px-2 py-1" />
-                    <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
-                    <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded border px-2 py-1" />
-                    <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">Удалить</button>
+                    <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">Удалить</button>
                   </div>
                 ))}
               </div>
             </div>
 
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-700">Карты ({cards.length})</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Карты ({cards.length})</div>
               <div className="space-y-2">
                 {cards.map((item, idx) => (
                   <div key={`card-${idx}`} className="grid gap-2 md:grid-cols-5">
-                    <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Номер" className="rounded border px-2 py-1" />
-                    <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded border px-2 py-1" />
-                    <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
-                    <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Держатель" className="rounded border px-2 py-1" />
-                    <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">Удалить</button>
+                    <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Номер" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Держатель" className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" />
+                    <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600 hover:bg-rose-50">Удалить</button>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Реквизиты на английском</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Реквизиты на английском</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <input className="rounded border px-2 py-1" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Логотип / Печать / Подпись руководителя</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Логотип / Печать / Подпись руководителя</h3>
             <div className="mt-3 grid gap-4 md:grid-cols-3 text-sm">
               <div>
                 <div>Логотип компании</div>
-                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
-                {logoDataUrl && <img src={logoDataUrl} alt="Логотип" className="mt-2 h-16 w-auto rounded border" />}
+                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
+                {logoDataUrl && <img src={logoDataUrl} alt="Логотип" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
               </div>
               <div>
                 <div>Печать компании</div>
-                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
-                {sealDataUrl && <img src={sealDataUrl} alt="Печать" className="mt-2 h-16 w-auto rounded border" />}
+                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
+                {sealDataUrl && <img src={sealDataUrl} alt="Печать" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
               </div>
               <div>
                 <div>Подпись руководителя</div>
-                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
-                {directorSignatureDataUrl && <img src={directorSignatureDataUrl} alt="Подпись" className="mt-2 h-16 w-auto rounded border" />}
+                <input type="file" accept="image/*" className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
+                {directorSignatureDataUrl && <img src={directorSignatureDataUrl} alt="Подпись" className="mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />}
               </div>
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Руководитель для документов</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Руководитель для документов</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <input className="rounded border px-2 py-1" placeholder="Должность" value={documentDirector.position} onChange={(e) => updatePersonInfo(setDocumentDirector, 'position', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Имя" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Отчество" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={documentDirector.position} onChange={(e) => updatePersonInfo(setDocumentDirector, 'position', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} />
+              <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Главный бухгалтер</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Главный бухгалтер</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <input className="rounded border px-2 py-1" placeholder="Должность" value={chiefAccountant.position} onChange={(e) => updatePersonInfo(setChiefAccountant, 'position', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Имя" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded border px-2 py-1" placeholder="Отчество" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Должность" value={chiefAccountant.position} onChange={(e) => updatePersonInfo(setChiefAccountant, 'position', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Фамилия" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Имя" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100" placeholder="Отчество" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} />
+              <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
             </div>
           </div>
 
