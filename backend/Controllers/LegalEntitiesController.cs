@@ -6,7 +6,6 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.LegalEntities;
-using System.Linq.Expressions;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -165,55 +164,6 @@ public class LegalEntitiesController : ControllerBase
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task EnsureLegalEntityDictionaryItemsAsync(LegalEntity entity, CancellationToken ct)
-    {
-        await EnsureSimpleDictionaryItemAsync(_db.Countries, entity.Country, "Добавлено автоматически", "#2563EB", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.BaseCurrencies, entity.BaseCurrency, "Добавлено автоматически", "#16A34A", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.ServiceLanguages, entity.ServiceLanguage, "Добавлено автоматически", "#14B8A6", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.OrganizationForms, entity.OrganizationForm, "Добавлено автоматически", "#F59E0B", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.Timezones, entity.Timezone, "Добавлено автоматически", "#8B5CF6", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.TaxSystems, entity.TaxSystem, "Добавлено автоматически", "#0284C7", ct);
-        await EnsureSimpleDictionaryItemAsync(_db.TaxSystemModes, entity.TaxSystemMode, "Добавлено автоматически", "#0EA5E9", ct);
-    }
-
-    private static async Task EnsureSimpleDictionaryItemAsync<TEntity>(DbSet<TEntity> set, string? value,
-        string defaultDescription, string defaultColor, CancellationToken ct)
-        where TEntity : class, new()
-    {
-        var normalized = NormalizeOptional(value);
-        if (normalized is null) return;
-
-        var exists = await set.AsNoTracking().AnyAsync(BuildNameEqualsExpression<TEntity>(normalized), ct);
-        if (exists) return;
-
-        var entity = new TEntity();
-        SetProperty(entity, "Name", normalized);
-        SetProperty(entity, "Description", defaultDescription);
-        SetProperty(entity, "ColorHex", defaultColor);
-        SetProperty(entity, "IsActive", true);
-        SetProperty(entity, "CreatedAt", DateTime.UtcNow);
-        set.Add(entity);
-    }
-
-    private static Expression<Func<TEntity, bool>> BuildNameEqualsExpression<TEntity>(string value)
-    {
-        var param = Expression.Parameter(typeof(TEntity), "x");
-        var nameProperty = Expression.Property(param, "Name");
-        var toLowerMethod = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
-        var normalizedName = Expression.Call(nameProperty, toLowerMethod);
-        var constant = Expression.Constant(value.ToLower(), typeof(string));
-        var compare = Expression.Equal(normalizedName, constant);
-        return Expression.Lambda<Func<TEntity, bool>>(compare, param);
-    }
-
-    private static void SetProperty(object target, string propertyName, object value)
-    {
-        var propertyInfo = target.GetType().GetProperty(propertyName);
-        if (propertyInfo is null || !propertyInfo.CanWrite)
-            return;
-
-        propertyInfo.SetValue(target, value);
-    }
 
     private async Task<(IReadOnlyCollection<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
@@ -430,7 +380,6 @@ public class LegalEntitiesController : ControllerBase
         };
 
         _db.LegalEntities.Add(entity);
-        await EnsureLegalEntityDictionaryItemsAsync(entity, ct);
         await _db.SaveChangesAsync(ct);
 
         if (clientIds.Count > 0)
@@ -685,7 +634,6 @@ public class LegalEntitiesController : ControllerBase
 
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
         ApplyLegalEntityAddresses(entity, request.Addresses);
-        await EnsureLegalEntityDictionaryItemsAsync(entity, ct);
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
