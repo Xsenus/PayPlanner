@@ -52,11 +52,8 @@ public class FormRequirementsService : IFormRequirementsService
         if (value is null) return true;
         if (value is string s) return string.IsNullOrWhiteSpace(s);
         if (value is DateTime dt) return dt == default;
-        if (value is DateTime? ndt) return !ndt.HasValue || ndt.Value == default;
         if (value is int i) return i <= 0;
-        if (value is int? ni) return !ni.HasValue || ni.Value <= 0;
         if (value is decimal d) return d <= 0;
-        if (value is decimal? nd) return !nd.HasValue || nd.Value <= 0;
         if (type != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(type))
         {
             var enumerable = (System.Collections.IEnumerable)value;
