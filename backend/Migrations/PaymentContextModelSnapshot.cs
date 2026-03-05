@@ -196,6 +196,47 @@ namespace PayPlanner.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_BaseCurrencyDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_BaseCurrencyDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_BaseCurrencyDictionaryItems_IsActive_Name");
+
+                    b.ToTable("BaseCurrencies");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>
                 {
                     b.Property<int>("Id")
@@ -541,6 +582,47 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ContractPayments", (string)null);
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CountryDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_CountryDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_CountryDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_CountryDictionaryItems_IsActive_Name");
+
+                    b.ToTable("Countries");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
                 {
                     b.Property<int>("Id")
@@ -644,8 +726,36 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BankAccountsJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BaseCurrency")
                         .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CardsJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CashRegistersJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CharterCapital")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ChiefAccountantJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContactEmailsJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContactPhonesJson")
+                        .HasMaxLength(8000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Country")
@@ -661,12 +771,36 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DirectorSignatureDataUrl")
+                        .HasMaxLength(12000000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentDirectorJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Email")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Fss")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FullName")
                         .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IfnsName")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IncomeExpenseTaxRate")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IncomeTaxRate")
+                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Inn")
@@ -677,6 +811,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LogoDataUrl")
+                        .HasMaxLength(12000000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
@@ -685,12 +823,55 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Okato")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Okfs")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Okogu")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Okopf")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Okpo")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Oktmo")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Okved")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("OrganizationForm")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Pfr")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Phone")
                         .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequisitesEnglishJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SealDataUrl")
+                        .HasMaxLength(12000000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ServiceLanguage")
@@ -702,7 +883,27 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TaxOfficeCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxOfficePhone")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxRegion")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxRegistrationDate")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("TaxSystem")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxSystemMode")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
@@ -710,8 +911,43 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TreasuryAccountNumber")
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryBankBik")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryBankName")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryCorrAccountNumber")
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryKbk")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryKpp")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TreasuryRecipientName")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool?>("VatWithoutVat")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 
@@ -720,6 +956,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Kpp")
                         .HasDatabaseName("IX_LegalEntities_Kpp");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
 
                     b.HasIndex("ShortName")
                         .HasDatabaseName("IX_LegalEntities_ShortName");
@@ -923,6 +1162,47 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_OksoDictionaryItems_IsActive_Name");
 
                     b.ToTable("OksoDictionaryItems");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.OrganizationFormDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_OrganizationFormDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_OrganizationFormDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_OrganizationFormDictionaryItems_IsActive_Name");
+
+                    b.ToTable("OrganizationForms");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
@@ -1360,6 +1640,170 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Services");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceLanguageDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_ServiceLanguageDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_ServiceLanguageDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_ServiceLanguageDictionaryItems_IsActive_Name");
+
+                    b.ToTable("ServiceLanguages");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_TaxSystemDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_TaxSystemDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_TaxSystemDictionaryItems_IsActive_Name");
+
+                    b.ToTable("TaxSystems");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemModeDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_TaxSystemModeDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_TaxSystemModeDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_TaxSystemModeDictionaryItems_IsActive_Name");
+
+                    b.ToTable("TaxSystemModes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TimezoneDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_TimezoneDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_TimezoneDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_TimezoneDictionaryItems_IsActive_Name");
+
+                    b.ToTable("Timezones");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.Property<int>("Id")
@@ -1791,6 +2235,16 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
