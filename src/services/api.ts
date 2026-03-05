@@ -98,6 +98,36 @@ export interface LegacyAddressMigrationResult {
   details: LegacyAddressMigrationDetail[];
 }
 
+export interface SimpleDictionaryDuplicateItem {
+  id: number;
+  name: string;
+  description: string;
+  colorHex: string;
+  isActive: boolean;
+}
+
+export interface SimpleDictionaryDuplicateGroup {
+  canonical: string;
+  items: SimpleDictionaryDuplicateItem[];
+}
+
+export interface MergeSimpleDictionaryDuplicatesPayload {
+  sourceIds: number[];
+  preferredId?: number;
+  name?: string;
+  description?: string;
+  colorHex?: string;
+  isActive?: boolean;
+}
+
+export interface SimpleDictionaryMergeResult {
+  kind: string;
+  createdId: number;
+  name: string;
+  replacedInLegalEntities: number;
+  removedIds: number[];
+}
+
 type SortDir = 'asc' | 'desc';
 type ActsSortKey =
   | 'date'
@@ -571,6 +601,20 @@ export class ApiService {
     return this.request<LegacyAddressMigrationResult>('/legal-entities/migrate-legacy-addresses', {
       method: 'POST',
       body: JSON.stringify({ validateWithDadata }),
+    });
+  }
+
+  async getSimpleDictionaryDuplicates(kind: 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes') {
+    return this.request<SimpleDictionaryDuplicateGroup[]>(`/dictionaries/simple/${kind}/duplicates`);
+  }
+
+  async mergeSimpleDictionaryDuplicates(
+    kind: 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes',
+    payload: MergeSimpleDictionaryDuplicatesPayload,
+  ) {
+    return this.request<SimpleDictionaryMergeResult>(`/dictionaries/simple/${kind}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 

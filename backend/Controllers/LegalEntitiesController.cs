@@ -183,14 +183,17 @@ public class LegalEntitiesController : ControllerBase
         if (normalized is null)
             return null;
 
-        var normalizedKey = normalized.ToLower();
+        var normalizedKey = CanonicalizeDictionaryName(normalized);
         var existing = await set
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => EF.Property<string>(item, "Name").ToLower() == normalizedKey, ct);
+            .Select(item => new { Entity = item, Name = EF.Property<string>(item, "Name") })
+            .ToListAsync(ct);
 
-        if (existing is not null)
+        var matched = existing.FirstOrDefault(item => CanonicalizeDictionaryName(item.Name) == normalizedKey);
+
+        if (matched is not null)
         {
-            return NormalizeOptional(GetStringProperty(existing, "Name"));
+            return NormalizeOptional(matched.Name);
         }
 
         var created = new TEntity();
@@ -203,6 +206,20 @@ public class LegalEntitiesController : ControllerBase
         return normalized;
     }
 
+    private static string CanonicalizeDictionaryName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Where(char.IsLetterOrDigit)
+            .ToArray();
+
+        return new string(chars);
+    }
+
     private static void SetProperty(object target, string propertyName, object value)
     {
         var propertyInfo = target.GetType().GetProperty(propertyName);
@@ -211,16 +228,6 @@ public class LegalEntitiesController : ControllerBase
 
         propertyInfo.SetValue(target, value);
     }
-
-    private static string? GetStringProperty(object target, string propertyName)
-    {
-        var propertyInfo = target.GetType().GetProperty(propertyName);
-        if (propertyInfo is null || !propertyInfo.CanRead)
-            return null;
-
-        return propertyInfo.GetValue(target) as string;
-    }
-
 
     private async Task<(IReadOnlyCollection<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
@@ -245,6 +252,25 @@ public class LegalEntitiesController : ControllerBase
         }
 
         return (existingIds, null);
+    }
+
+    private async Task<ActionResult?> ValidateInnUniquenessAsync(string? inn, int? excludeEntityId, CancellationToken ct)
+    {
+        var normalizedInn = NormalizeOptional(inn);
+        if (normalizedInn is null)
+            return null;
+
+        var duplicate = await _db.LegalEntities
+            .AsNoTracking()
+            .Where(item => item.Inn != null && item.Inn.Trim() == normalizedInn)
+            .Where(item => !excludeEntityId.HasValue || item.Id != excludeEntityId.Value)
+            .Select(item => new { item.Id, item.ShortName, item.Inn })
+            .FirstOrDefaultAsync(ct);
+
+        if (duplicate is null)
+            return null;
+
+        return Conflict($"Юридическое лицо с ИНН {duplicate.Inn} уже существует (ID: {duplicate.Id}, {duplicate.ShortName}).");
     }
 
     /// <summary>
@@ -366,6 +392,12 @@ public class LegalEntitiesController : ControllerBase
         if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден или неактивен");
+        }
+
+        var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, excludeEntityId: null, ct);
+        if (duplicateInnError is not null)
+        {
+            return duplicateInnError;
         }
 
 
@@ -625,6 +657,12 @@ public class LegalEntitiesController : ControllerBase
         if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден или неактивен");
+        }
+
+        var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, id, ct);
+        if (duplicateInnError is not null)
+        {
+            return duplicateInnError;
         }
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);

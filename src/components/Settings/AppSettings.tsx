@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
 import type { LegacyAddressMigrationResult } from '../../services/api';
 
-type SettingsSection = 'general' | 'integrations' | 'import-addresses';
+type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge';
+type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 
 export function AppSettings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
@@ -14,12 +15,69 @@ export function AppSettings() {
   const [dadataSecret, setDadataSecret] = useState('');
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [credentialsMessage, setCredentialsMessage] = useState<string | null>(null);
+  const [mergeKind, setMergeKind] = useState<MergeKind>('organization-forms');
+  const [duplicates, setDuplicates] = useState<Array<{ canonical: string; items: Array<{ id: number; name: string; description: string; colorHex: string; isActive: boolean }> }>>([]);
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null);
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string>('');
+  const [preferredId, setPreferredId] = useState<number | null>(null);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
+    if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
     return 'Импорт · Перенос адресов';
   }, [activeSection]);
+
+  const loadDuplicates = async (kind: MergeKind) => {
+    setMergeLoading(true);
+    setMergeError(null);
+    setMergeMessage(null);
+    try {
+      const data = await apiService.getSimpleDictionaryDuplicates(kind);
+      setDuplicates(data ?? []);
+      const first = (data ?? [])[0];
+      setSelectedGroupKey(first?.canonical ?? '');
+      setPreferredId(first?.items?.[0]?.id ?? null);
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : 'Не удалось загрузить дубли');
+      setDuplicates([]);
+      setSelectedGroupKey('');
+      setPreferredId(null);
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
+  const runMerge = async () => {
+    const group = duplicates.find((item) => item.canonical === selectedGroupKey);
+    if (!group || group.items.length < 2 || !preferredId) {
+      setMergeError('Выберите группу дублей и базовое значение');
+      return;
+    }
+    setMergeLoading(true);
+    setMergeError(null);
+    setMergeMessage(null);
+    try {
+      const primary = group.items.find((item) => item.id === preferredId) ?? group.items[0];
+      const result = await apiService.mergeSimpleDictionaryDuplicates(mergeKind, {
+        sourceIds: group.items.map((item) => item.id),
+        preferredId: primary.id,
+        name: primary.name,
+        description: primary.description,
+        colorHex: primary.colorHex,
+        isActive: primary.isActive,
+      });
+      setMergeMessage(`Объединение выполнено: создано "${result.name}", обновлено юрлиц: ${result.replacedInLegalEntities}`);
+      await loadDuplicates(mergeKind);
+      window.dispatchEvent(new CustomEvent('dicts:changed'));
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : 'Не удалось выполнить объединение');
+    } finally {
+      setMergeLoading(false);
+    }
+  };
 
 
   const loadDaDataCredentials = async () => {
@@ -72,7 +130,10 @@ export function AppSettings() {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
     }
-  }, [activeSection]);
+    if (activeSection === 'dictionary-merge') {
+      void loadDuplicates(mergeKind);
+    }
+  }, [activeSection, mergeKind]);
 
   return (
     <div className="p-6 lg:p-8">
@@ -120,6 +181,21 @@ export function AppSettings() {
                   ↳ Перенос адресов
                 </button>
               </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
+                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Справочники</div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('dictionary-merge')}
+                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    activeSection === 'dictionary-merge'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-white border border-transparent'
+                  }`}
+                >
+                  ↳ Объединение дублей
+                </button>
+              </div>
             </nav>
           </aside>
 
@@ -131,6 +207,8 @@ export function AppSettings() {
                   ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
                   : activeSection === 'integrations'
                     ? 'Хранение и управление ключами доступа к внешним сервисам.'
+                    : activeSection === 'dictionary-merge'
+                      ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
                     : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
               </p>
             </div>
@@ -306,6 +384,100 @@ export function AppSettings() {
                   </div>
                 )}
               </>
+            )}
+
+            {activeSection === 'dictionary-merge' && (
+              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <label className="text-sm text-gray-700">
+                    <span className="mb-1 block">Справочник</span>
+                    <select
+                      value={mergeKind}
+                      onChange={(event) => setMergeKind(event.target.value as MergeKind)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                    >
+                      <option value="organization-forms">Формы организации</option>
+                      <option value="countries">Страны</option>
+                      <option value="base-currencies">Базовые валюты</option>
+                      <option value="service-languages">Языки сервиса</option>
+                      <option value="timezones">Часовые пояса</option>
+                      <option value="tax-systems">Системы налогообложения</option>
+                      <option value="tax-system-modes">Режимы налогообложения</option>
+                    </select>
+                  </label>
+
+                  <label className="text-sm text-gray-700 md:col-span-2">
+                    <span className="mb-1 block">Группа дублей</span>
+                    <select
+                      value={selectedGroupKey}
+                      onChange={(event) => {
+                        const canonical = event.target.value;
+                        setSelectedGroupKey(canonical);
+                        const group = duplicates.find((item) => item.canonical === canonical);
+                        setPreferredId(group?.items?.[0]?.id ?? null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                    >
+                      <option value="">Выберите группу</option>
+                      {duplicates.map((group) => (
+                        <option key={group.canonical} value={group.canonical}>
+                          {group.items.map((item) => item.name).join(' / ')}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {selectedGroupKey && (
+                  <div className="rounded-xl border border-gray-200 p-4">
+                    <p className="mb-2 text-sm font-medium text-gray-800">Выберите базовое значение</p>
+                    <div className="space-y-2">
+                      {(duplicates.find((item) => item.canonical === selectedGroupKey)?.items ?? []).map((item) => (
+                        <label key={item.id} className="flex items-start gap-2 text-sm text-gray-700">
+                          <input
+                            type="radio"
+                            checked={preferredId === item.id}
+                            onChange={() => setPreferredId(item.id)}
+                            className="mt-1"
+                          />
+                          <span>
+                            <b>{item.name}</b>
+                            <span className="text-gray-500"> · {item.description || '—'}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={runMerge}
+                    disabled={mergeLoading || !selectedGroupKey}
+                    className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {mergeLoading ? 'Объединяем…' : 'Объединить выбранные дубли'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadDuplicates(mergeKind)}
+                    disabled={mergeLoading}
+                    className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Обновить список
+                  </button>
+                </div>
+
+                {mergeError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{mergeError}</div>}
+                {mergeMessage && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{mergeMessage}</div>}
+
+                {!mergeLoading && duplicates.length === 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                    Дубли в выбранном справочнике не найдены.
+                  </div>
+                )}
+              </div>
             )}
           </section>
         </div>
