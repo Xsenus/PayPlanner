@@ -164,6 +164,63 @@ public class LegalEntitiesController : ControllerBase
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private async Task EnsureAndNormalizeDictionaryValuesAsync(LegalEntity entity, CancellationToken ct)
+    {
+        entity.Country = await ResolveDictionaryValueAsync(_db.Countries, entity.Country, "Добавлено автоматически", "#2563EB", ct);
+        entity.BaseCurrency = await ResolveDictionaryValueAsync(_db.BaseCurrencies, entity.BaseCurrency, "Добавлено автоматически", "#16A34A", ct);
+        entity.ServiceLanguage = await ResolveDictionaryValueAsync(_db.ServiceLanguages, entity.ServiceLanguage, "Добавлено автоматически", "#14B8A6", ct);
+        entity.OrganizationForm = await ResolveDictionaryValueAsync(_db.OrganizationForms, entity.OrganizationForm, "Добавлено автоматически", "#F59E0B", ct);
+        entity.Timezone = await ResolveDictionaryValueAsync(_db.Timezones, entity.Timezone, "Добавлено автоматически", "#8B5CF6", ct);
+        entity.TaxSystem = await ResolveDictionaryValueAsync(_db.TaxSystems, entity.TaxSystem, "Добавлено автоматически", "#0284C7", ct);
+        entity.TaxSystemMode = await ResolveDictionaryValueAsync(_db.TaxSystemModes, entity.TaxSystemMode, "Добавлено автоматически", "#0EA5E9", ct);
+    }
+
+    private async Task<string?> ResolveDictionaryValueAsync<TEntity>(DbSet<TEntity> set, string? rawValue,
+        string defaultDescription, string defaultColor, CancellationToken ct)
+        where TEntity : class, new()
+    {
+        var normalized = NormalizeOptional(rawValue);
+        if (normalized is null)
+            return null;
+
+        var normalizedKey = normalized.ToLower();
+        var existing = await set
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => EF.Property<string>(item, "Name").ToLower() == normalizedKey, ct);
+
+        if (existing is not null)
+        {
+            return NormalizeOptional(GetStringProperty(existing, "Name"));
+        }
+
+        var created = new TEntity();
+        SetProperty(created, "Name", normalized);
+        SetProperty(created, "Description", defaultDescription);
+        SetProperty(created, "ColorHex", defaultColor);
+        SetProperty(created, "IsActive", true);
+        SetProperty(created, "CreatedAt", DateTime.UtcNow);
+        set.Add(created);
+        return normalized;
+    }
+
+    private static void SetProperty(object target, string propertyName, object value)
+    {
+        var propertyInfo = target.GetType().GetProperty(propertyName);
+        if (propertyInfo is null || !propertyInfo.CanWrite)
+            return;
+
+        propertyInfo.SetValue(target, value);
+    }
+
+    private static string? GetStringProperty(object target, string propertyName)
+    {
+        var propertyInfo = target.GetType().GetProperty(propertyName);
+        if (propertyInfo is null || !propertyInfo.CanRead)
+            return null;
+
+        return propertyInfo.GetValue(target) as string;
+    }
+
 
     private async Task<(IReadOnlyCollection<int> ClientIds, ActionResult? Error)> ValidateClientIdsAsync(
         IEnumerable<int> clientIds,
@@ -379,6 +436,7 @@ public class LegalEntitiesController : ControllerBase
             UpdatedAt = DateTime.UtcNow,
         };
 
+        await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         _db.LegalEntities.Add(entity);
         await _db.SaveChangesAsync(ct);
 
@@ -632,6 +690,7 @@ public class LegalEntitiesController : ControllerBase
         entity.Notes = NormalizeOptional(request.Notes);
         entity.UpdatedAt = DateTime.UtcNow;
 
+        await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
         ApplyLegalEntityAddresses(entity, request.Addresses);
         await _db.SaveChangesAsync(ct);
