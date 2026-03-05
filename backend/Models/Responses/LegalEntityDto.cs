@@ -30,6 +30,42 @@ public class LegalEntityListItemDto
     public string? OrganizationForm { get; set; }
     public string? Timezone { get; set; }
     public string? TaxSystem { get; set; }
+    public string? TaxSystemMode { get; set; }
+    public string? IncomeTaxRate { get; set; }
+    public string? IncomeExpenseTaxRate { get; set; }
+    public bool? VatWithoutVat { get; set; }
+    public string? Okved { get; set; }
+    public string? Okpo { get; set; }
+    public string? Okato { get; set; }
+    public string? Oktmo { get; set; }
+    public string? Okogu { get; set; }
+    public string? Okfs { get; set; }
+    public string? Okopf { get; set; }
+    public string? Pfr { get; set; }
+    public string? Fss { get; set; }
+    public string? CharterCapital { get; set; }
+    public string? TaxRegistrationDate { get; set; }
+    public string? TaxOfficeCode { get; set; }
+    public string? TaxRegion { get; set; }
+    public string? IfnsName { get; set; }
+    public string? TaxOfficePhone { get; set; }
+    public string? TreasuryInn { get; set; }
+    public string? TreasuryKpp { get; set; }
+    public string? TreasuryRecipientName { get; set; }
+    public string? TreasuryBankBik { get; set; }
+    public string? TreasuryBankName { get; set; }
+    public string? TreasuryAccountNumber { get; set; }
+    public string? TreasuryCorrAccountNumber { get; set; }
+    public string? TreasuryKbk { get; set; }
+    public string? BankAccountsJson { get; set; }
+    public string? CashRegistersJson { get; set; }
+    public string? CardsJson { get; set; }
+    public string? RequisitesEnglishJson { get; set; }
+    public string? LogoDataUrl { get; set; }
+    public string? SealDataUrl { get; set; }
+    public string? DirectorSignatureDataUrl { get; set; }
+    public string? DocumentDirectorJson { get; set; }
+    public string? ChiefAccountantJson { get; set; }
     public string? Notes { get; set; }
     public int ClientsCount { get; set; }
     public DateTime CreatedAt { get; set; }

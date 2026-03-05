@@ -45,7 +45,134 @@ interface FormState {
   phone: string;
   email: string;
   director: string;
+  country: string;
+  baseCurrency: string;
+  serviceLanguage: string;
+  organizationForm: string;
+  timezone: string;
+  taxSystem: string;
+  taxSystemMode: string;
+  incomeTaxRate: string;
+  incomeExpenseTaxRate: string;
+  vatWithoutVat: boolean;
+  okved: string;
+  okpo: string;
+  okato: string;
+  oktmo: string;
+  okogu: string;
+  okfs: string;
+  okopf: string;
+  pfr: string;
+  fss: string;
+  charterCapital: string;
+  taxRegistrationDate: string;
+  taxOfficeCode: string;
+  taxRegion: string;
+  ifnsName: string;
+  taxOfficePhone: string;
+  treasuryInn: string;
+  treasuryKpp: string;
+  treasuryRecipientName: string;
+  treasuryBankBik: string;
+  treasuryBankName: string;
+  treasuryAccountNumber: string;
+  treasuryCorrAccountNumber: string;
+  treasuryKbk: string;
   notes: string;
+}
+
+
+interface BankAccountItem {
+  bank: string;
+  name: string;
+  bik: string;
+  currency: string;
+  accountNumber: string;
+  accountType: string;
+}
+
+interface CashRegisterItem {
+  name: string;
+  currency: string;
+  access: string;
+}
+
+interface CardItem {
+  number: string;
+  bank: string;
+  currency: string;
+  holder: string;
+}
+
+interface PersonDocInfo {
+  position: string;
+  lastName: string;
+  firstName: string;
+  middleName: string;
+  noMiddleName: boolean;
+}
+
+interface EnglishRequisites {
+  organizationName: string;
+  fullName: string;
+  form: string;
+  legalAddress: string;
+  actualAddress: string;
+  position: string;
+  lastName: string;
+  firstName: string;
+  middleName: string;
+}
+
+const EMPTY_BANK_ACCOUNT: BankAccountItem = {
+  bank: '',
+  name: '',
+  bik: '',
+  currency: 'RUB',
+  accountNumber: '',
+  accountType: '',
+};
+
+const EMPTY_CASH_REGISTER: CashRegisterItem = {
+  name: '',
+  currency: 'RUB',
+  access: '',
+};
+
+const EMPTY_CARD: CardItem = {
+  number: '',
+  bank: '',
+  currency: 'RUB',
+  holder: '',
+};
+
+const EMPTY_PERSON_DOC: PersonDocInfo = {
+  position: '',
+  lastName: '',
+  firstName: '',
+  middleName: '',
+  noMiddleName: false,
+};
+
+const EMPTY_ENGLISH_REQUISITES: EnglishRequisites = {
+  organizationName: '',
+  fullName: '',
+  form: '',
+  legalAddress: '',
+  actualAddress: '',
+  position: '',
+  lastName: '',
+  firstName: '',
+  middleName: '',
+};
+
+function parseJsonOrDefault<T>(json: string | null | undefined, fallback: T): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 const DEFAULT_STATE: FormState = {
@@ -58,6 +185,39 @@ const DEFAULT_STATE: FormState = {
   phone: '',
   email: '',
   director: '',
+  country: '',
+  baseCurrency: '',
+  serviceLanguage: '',
+  organizationForm: '',
+  timezone: '',
+  taxSystem: '',
+  taxSystemMode: '',
+  incomeTaxRate: '',
+  incomeExpenseTaxRate: '',
+  vatWithoutVat: false,
+  okved: '',
+  okpo: '',
+  okato: '',
+  oktmo: '',
+  okogu: '',
+  okfs: '',
+  okopf: '',
+  pfr: '',
+  fss: '',
+  charterCapital: '',
+  taxRegistrationDate: '',
+  taxOfficeCode: '',
+  taxRegion: '',
+  ifnsName: '',
+  taxOfficePhone: '',
+  treasuryInn: '',
+  treasuryKpp: '',
+  treasuryRecipientName: '',
+  treasuryBankBik: '',
+  treasuryBankName: '',
+  treasuryAccountNumber: '',
+  treasuryCorrAccountNumber: '',
+  treasuryKbk: '',
   notes: '',
 };
 
@@ -87,6 +247,15 @@ export function LegalEntityModal({
   const [suggestions, setSuggestions] = useState<LegalEntitySuggestion[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountItem[]>([]);
+  const [cashRegisters, setCashRegisters] = useState<CashRegisterItem[]>([]);
+  const [cards, setCards] = useState<CardItem[]>([]);
+  const [englishRequisites, setEnglishRequisites] = useState<EnglishRequisites>(EMPTY_ENGLISH_REQUISITES);
+  const [documentDirector, setDocumentDirector] = useState<PersonDocInfo>(EMPTY_PERSON_DOC);
+  const [chiefAccountant, setChiefAccountant] = useState<PersonDocInfo>(EMPTY_PERSON_DOC);
+  const [logoDataUrl, setLogoDataUrl] = useState<string>('');
+  const [sealDataUrl, setSealDataUrl] = useState<string>('');
+  const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -119,12 +288,63 @@ export function LegalEntityModal({
         phone: initial.phone ?? '',
         email: initial.email ?? '',
         director: initial.director ?? '',
+        country: initial.country ?? '',
+        baseCurrency: initial.baseCurrency ?? '',
+        serviceLanguage: initial.serviceLanguage ?? '',
+        organizationForm: initial.organizationForm ?? '',
+        timezone: initial.timezone ?? '',
+        taxSystem: initial.taxSystem ?? '',
+        taxSystemMode: initial.taxSystemMode ?? '',
+        incomeTaxRate: initial.incomeTaxRate ?? '',
+        incomeExpenseTaxRate: initial.incomeExpenseTaxRate ?? '',
+        vatWithoutVat: initial.vatWithoutVat ?? false,
+        okved: initial.okved ?? '',
+        okpo: initial.okpo ?? '',
+        okato: initial.okato ?? '',
+        oktmo: initial.oktmo ?? '',
+        okogu: initial.okogu ?? '',
+        okfs: initial.okfs ?? '',
+        okopf: initial.okopf ?? '',
+        pfr: initial.pfr ?? '',
+        fss: initial.fss ?? '',
+        charterCapital: initial.charterCapital ?? '',
+        taxRegistrationDate: initial.taxRegistrationDate ?? '',
+        taxOfficeCode: initial.taxOfficeCode ?? '',
+        taxRegion: initial.taxRegion ?? '',
+        ifnsName: initial.ifnsName ?? '',
+        taxOfficePhone: initial.taxOfficePhone ?? '',
+        treasuryInn: initial.treasuryInn ?? '',
+        treasuryKpp: initial.treasuryKpp ?? '',
+        treasuryRecipientName: initial.treasuryRecipientName ?? '',
+        treasuryBankBik: initial.treasuryBankBik ?? '',
+        treasuryBankName: initial.treasuryBankName ?? '',
+        treasuryAccountNumber: initial.treasuryAccountNumber ?? '',
+        treasuryCorrAccountNumber: initial.treasuryCorrAccountNumber ?? '',
+        treasuryKbk: initial.treasuryKbk ?? '',
         notes: initial.notes ?? '',
       });
       setClientIds((initial.clients ?? []).map((c) => c.id));
+      setBankAccounts(parseJsonOrDefault<BankAccountItem[]>(initial.bankAccountsJson, []));
+      setCashRegisters(parseJsonOrDefault<CashRegisterItem[]>(initial.cashRegistersJson, []));
+      setCards(parseJsonOrDefault<CardItem[]>(initial.cardsJson, []));
+      setEnglishRequisites(parseJsonOrDefault<EnglishRequisites>(initial.requisitesEnglishJson, EMPTY_ENGLISH_REQUISITES));
+      setDocumentDirector(parseJsonOrDefault<PersonDocInfo>(initial.documentDirectorJson, EMPTY_PERSON_DOC));
+      setChiefAccountant(parseJsonOrDefault<PersonDocInfo>(initial.chiefAccountantJson, EMPTY_PERSON_DOC));
+      setLogoDataUrl(initial.logoDataUrl ?? "");
+      setSealDataUrl(initial.sealDataUrl ?? "");
+      setDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
     } else {
       setFormState(DEFAULT_STATE);
       setClientIds([]);
+      setBankAccounts([]);
+      setCashRegisters([]);
+      setCards([]);
+      setEnglishRequisites(EMPTY_ENGLISH_REQUISITES);
+      setDocumentDirector(EMPTY_PERSON_DOC);
+      setChiefAccountant(EMPTY_PERSON_DOC);
+      setLogoDataUrl("");
+      setSealDataUrl("");
+      setDirectorSignatureDataUrl("");
     }
     setError(null);
     setSuggestions([]);
@@ -156,8 +376,9 @@ export function LegalEntityModal({
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
-    const { name, value } = e.target;
-    setFormState((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type } = e.target;
+    const parsed = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
+    setFormState((prev) => ({ ...prev, [name]: parsed }));
   };
 
   const handleAddClient = (id: number) => {
@@ -166,6 +387,30 @@ export function LegalEntityModal({
 
   const handleRemoveClient = (id: number) => {
     setClientIds((prev) => prev.filter((clientId) => clientId !== id));
+  };
+
+  const handleImageUpload = (
+    file: File | null,
+    setter: (value: string) => void,
+  ) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setter(typeof reader.result === 'string' ? reader.result : '');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const updateEnglishRequisites = (key: keyof EnglishRequisites, value: string) => {
+    setEnglishRequisites((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updatePersonInfo = (
+    setter: (value: ((prev: PersonDocInfo) => PersonDocInfo)) => void,
+    key: keyof PersonDocInfo,
+    value: string | boolean,
+  ) => {
+    setter((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleSuggest = async () => {
@@ -230,6 +475,48 @@ export function LegalEntityModal({
         phone: normalize(formState.phone),
         email: normalize(formState.email),
         director: normalize(formState.director),
+        country: normalize(formState.country),
+        baseCurrency: normalize(formState.baseCurrency),
+        serviceLanguage: normalize(formState.serviceLanguage),
+        organizationForm: normalize(formState.organizationForm),
+        timezone: normalize(formState.timezone),
+        taxSystem: normalize(formState.taxSystem),
+        taxSystemMode: normalize(formState.taxSystemMode),
+        incomeTaxRate: normalize(formState.incomeTaxRate),
+        incomeExpenseTaxRate: normalize(formState.incomeExpenseTaxRate),
+        vatWithoutVat: formState.vatWithoutVat,
+        okved: normalize(formState.okved),
+        okpo: normalize(formState.okpo),
+        okato: normalize(formState.okato),
+        oktmo: normalize(formState.oktmo),
+        okogu: normalize(formState.okogu),
+        okfs: normalize(formState.okfs),
+        okopf: normalize(formState.okopf),
+        pfr: normalize(formState.pfr),
+        fss: normalize(formState.fss),
+        charterCapital: normalize(formState.charterCapital),
+        taxRegistrationDate: normalize(formState.taxRegistrationDate),
+        taxOfficeCode: normalize(formState.taxOfficeCode),
+        taxRegion: normalize(formState.taxRegion),
+        ifnsName: normalize(formState.ifnsName),
+        taxOfficePhone: normalize(formState.taxOfficePhone),
+        treasuryInn: normalize(formState.treasuryInn),
+        treasuryKpp: normalize(formState.treasuryKpp),
+        treasuryRecipientName: normalize(formState.treasuryRecipientName),
+        treasuryBankBik: normalize(formState.treasuryBankBik),
+        treasuryBankName: normalize(formState.treasuryBankName),
+        treasuryAccountNumber: normalize(formState.treasuryAccountNumber),
+        treasuryCorrAccountNumber: normalize(formState.treasuryCorrAccountNumber),
+        treasuryKbk: normalize(formState.treasuryKbk),
+        bankAccountsJson: bankAccounts.length > 0 ? JSON.stringify(bankAccounts) : null,
+        cashRegistersJson: cashRegisters.length > 0 ? JSON.stringify(cashRegisters) : null,
+        cardsJson: cards.length > 0 ? JSON.stringify(cards) : null,
+        requisitesEnglishJson: JSON.stringify(englishRequisites),
+        logoDataUrl: logoDataUrl || null,
+        sealDataUrl: sealDataUrl || null,
+        directorSignatureDataUrl: directorSignatureDataUrl || null,
+        documentDirectorJson: JSON.stringify(documentDirector),
+        chiefAccountantJson: JSON.stringify(chiefAccountant),
         notes: normalize(formState.notes),
         clientIds,
       };
@@ -239,19 +526,62 @@ export function LegalEntityModal({
         return;
       }
       const saved = await onSubmit(payload);
-      setFormState({
+      setFormState((prev) => ({
+        ...prev,
         shortName: saved.shortName ?? payload.shortName,
-        fullName: saved.fullName ?? formState.fullName,
-        inn: saved.inn ?? formState.inn,
-        kpp: saved.kpp ?? formState.kpp,
-        ogrn: saved.ogrn ?? formState.ogrn,
-        address: saved.address ?? formState.address,
-        phone: saved.phone ?? formState.phone,
-        email: saved.email ?? formState.email,
-        director: saved.director ?? formState.director,
-        notes: saved.notes ?? formState.notes,
-      });
+        fullName: saved.fullName ?? prev.fullName,
+        inn: saved.inn ?? prev.inn,
+        kpp: saved.kpp ?? prev.kpp,
+        ogrn: saved.ogrn ?? prev.ogrn,
+        address: saved.address ?? prev.address,
+        phone: saved.phone ?? prev.phone,
+        email: saved.email ?? prev.email,
+        director: saved.director ?? prev.director,
+        country: saved.country ?? prev.country,
+        baseCurrency: saved.baseCurrency ?? prev.baseCurrency,
+        serviceLanguage: saved.serviceLanguage ?? prev.serviceLanguage,
+        organizationForm: saved.organizationForm ?? prev.organizationForm,
+        timezone: saved.timezone ?? prev.timezone,
+        taxSystem: saved.taxSystem ?? prev.taxSystem,
+        taxSystemMode: saved.taxSystemMode ?? prev.taxSystemMode,
+        incomeTaxRate: saved.incomeTaxRate ?? prev.incomeTaxRate,
+        incomeExpenseTaxRate: saved.incomeExpenseTaxRate ?? prev.incomeExpenseTaxRate,
+        vatWithoutVat: saved.vatWithoutVat ?? prev.vatWithoutVat,
+        okved: saved.okved ?? prev.okved,
+        okpo: saved.okpo ?? prev.okpo,
+        okato: saved.okato ?? prev.okato,
+        oktmo: saved.oktmo ?? prev.oktmo,
+        okogu: saved.okogu ?? prev.okogu,
+        okfs: saved.okfs ?? prev.okfs,
+        okopf: saved.okopf ?? prev.okopf,
+        pfr: saved.pfr ?? prev.pfr,
+        fss: saved.fss ?? prev.fss,
+        charterCapital: saved.charterCapital ?? prev.charterCapital,
+        taxRegistrationDate: saved.taxRegistrationDate ?? prev.taxRegistrationDate,
+        taxOfficeCode: saved.taxOfficeCode ?? prev.taxOfficeCode,
+        taxRegion: saved.taxRegion ?? prev.taxRegion,
+        ifnsName: saved.ifnsName ?? prev.ifnsName,
+        taxOfficePhone: saved.taxOfficePhone ?? prev.taxOfficePhone,
+        treasuryInn: saved.treasuryInn ?? prev.treasuryInn,
+        treasuryKpp: saved.treasuryKpp ?? prev.treasuryKpp,
+        treasuryRecipientName: saved.treasuryRecipientName ?? prev.treasuryRecipientName,
+        treasuryBankBik: saved.treasuryBankBik ?? prev.treasuryBankBik,
+        treasuryBankName: saved.treasuryBankName ?? prev.treasuryBankName,
+        treasuryAccountNumber: saved.treasuryAccountNumber ?? prev.treasuryAccountNumber,
+        treasuryCorrAccountNumber: saved.treasuryCorrAccountNumber ?? prev.treasuryCorrAccountNumber,
+        treasuryKbk: saved.treasuryKbk ?? prev.treasuryKbk,
+        notes: saved.notes ?? prev.notes,
+      }));
       setClientIds((saved.clients ?? []).map((c) => c.id));
+      setBankAccounts(parseJsonOrDefault<BankAccountItem[]>(saved.bankAccountsJson, bankAccounts));
+      setCashRegisters(parseJsonOrDefault<CashRegisterItem[]>(saved.cashRegistersJson, cashRegisters));
+      setCards(parseJsonOrDefault<CardItem[]>(saved.cardsJson, cards));
+      setEnglishRequisites(parseJsonOrDefault<EnglishRequisites>(saved.requisitesEnglishJson, englishRequisites));
+      setDocumentDirector(parseJsonOrDefault<PersonDocInfo>(saved.documentDirectorJson, documentDirector));
+      setChiefAccountant(parseJsonOrDefault<PersonDocInfo>(saved.chiefAccountantJson, chiefAccountant));
+      setLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
+      setSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
+      setDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
       if (!isPageMode) {
         onClose();
       }
@@ -604,6 +934,184 @@ export function LegalEntityModal({
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Расширенные реквизиты (из профиля компании)</h3>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              {[
+                ['country', 'Страна'],
+                ['baseCurrency', 'Базовая валюта'],
+                ['serviceLanguage', 'Язык сервиса'],
+                ['organizationForm', 'Форма организации'],
+                ['timezone', 'Часовой пояс'],
+                ['taxSystem', 'Система налогообложения'],
+                ['taxSystemMode', 'Режим налогообложения'],
+                ['incomeTaxRate', 'Ставка (доход)'],
+                ['incomeExpenseTaxRate', 'Ставка (доход-расход)'],
+                ['okved', 'ОКВЭД'],
+                ['okpo', 'ОКПО'],
+                ['okato', 'ОКАТО'],
+                ['oktmo', 'ОКТМО'],
+                ['okogu', 'ОКОГУ'],
+                ['okfs', 'ОКФС'],
+                ['okopf', 'ОКОПФ'],
+                ['pfr', 'ПФР'],
+                ['fss', 'ФСС'],
+                ['charterCapital', 'Уставный капитал'],
+                ['taxRegistrationDate', 'Дата постановки на учет'],
+                ['taxOfficeCode', 'Код налоговой'],
+                ['taxRegion', 'Регион налоговой'],
+                ['ifnsName', 'Наименование ИФНС'],
+                ['taxOfficePhone', 'Телефон налоговой'],
+                ['treasuryInn', 'ИНН получателя (ЕНС)'],
+                ['treasuryKpp', 'КПП получателя (ЕНС)'],
+                ['treasuryRecipientName', 'Получатель (ЕНС)'],
+                ['treasuryBankBik', 'БИК банка (ЕНС)'],
+                ['treasuryBankName', 'Банк (ЕНС)'],
+                ['treasuryAccountNumber', 'Счет получателя (ЕНС)'],
+                ['treasuryCorrAccountNumber', 'Кор. счет (ЕНС)'],
+                ['treasuryKbk', 'КБК (ЕНС)'],
+              ].map(([name, label]) => (
+                <div key={name as string}>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
+                  <input
+                    type="text"
+                    name={name as string}
+                    value={(formState as Record<string, string | boolean>)[name as string] as string}
+                    onChange={handleInputChange}
+                    disabled={readOnly}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ))}
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="vatWithoutVat"
+                  checked={formState.vatWithoutVat}
+                  onChange={handleInputChange}
+                  disabled={readOnly}
+                  className="h-4 w-4"
+                />
+                Без НДС
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">Банковские счета / Кассы / Карты</h3>
+            <div className="grid gap-3 md:grid-cols-3">
+              <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить банковский счет</button>
+              <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить кассу</button>
+              <button type="button" disabled={readOnly} onClick={() => setCards((prev) => [...prev, { ...EMPTY_CARD }])} className="rounded-lg border px-3 py-2 text-sm">+ Добавить карту</button>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-700">Банковские счета ({bankAccounts.length})</div>
+              <div className="space-y-2">
+                {bankAccounts.map((item, idx) => (
+                  <div key={`bank-${idx}`} className="grid gap-2 md:grid-cols-6">
+                    <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded border px-2 py-1" />
+                    <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded border px-2 py-1" />
+                    <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded border px-2 py-1" />
+                    <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
+                    <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded border px-2 py-1" />
+                    <div className="flex gap-2">
+                      <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded border px-2 py-1" />
+                      <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-700">Кассы ({cashRegisters.length})</div>
+              <div className="space-y-2">
+                {cashRegisters.map((item, idx) => (
+                  <div key={`cash-${idx}`} className="grid gap-2 md:grid-cols-4">
+                    <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded border px-2 py-1" />
+                    <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
+                    <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded border px-2 py-1" />
+                    <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">Удалить</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-700">Карты ({cards.length})</div>
+              <div className="space-y-2">
+                {cards.map((item, idx) => (
+                  <div key={`card-${idx}`} className="grid gap-2 md:grid-cols-5">
+                    <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Номер" className="rounded border px-2 py-1" />
+                    <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded border px-2 py-1" />
+                    <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded border px-2 py-1" />
+                    <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Держатель" className="rounded border px-2 py-1" />
+                    <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded border px-2">Удалить</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Реквизиты на английском</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <input className="rounded border px-2 py-1" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Логотип / Печать / Подпись руководителя</h3>
+            <div className="mt-3 grid gap-4 md:grid-cols-3 text-sm">
+              <div>
+                <div>Логотип компании</div>
+                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
+                {logoDataUrl && <img src={logoDataUrl} alt="Логотип" className="mt-2 h-16 w-auto rounded border" />}
+              </div>
+              <div>
+                <div>Печать компании</div>
+                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
+                {sealDataUrl && <img src={sealDataUrl} alt="Печать" className="mt-2 h-16 w-auto rounded border" />}
+              </div>
+              <div>
+                <div>Подпись руководителя</div>
+                <input type="file" accept="image/*" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
+                {directorSignatureDataUrl && <img src={directorSignatureDataUrl} alt="Подпись" className="mt-2 h-16 w-auto rounded border" />}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Руководитель для документов</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-5">
+              <input className="rounded border px-2 py-1" placeholder="Должность" value={documentDirector.position} onChange={(e) => updatePersonInfo(setDocumentDirector, 'position', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Имя" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Отчество" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Главный бухгалтер</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-5">
+              <input className="rounded border px-2 py-1" placeholder="Должность" value={chiefAccountant.position} onChange={(e) => updatePersonInfo(setChiefAccountant, 'position', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Фамилия" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Имя" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} />
+              <input className="rounded border px-2 py-1" placeholder="Отчество" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} />Нет отчества</label>
             </div>
           </div>
 
