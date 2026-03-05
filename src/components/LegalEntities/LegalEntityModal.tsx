@@ -130,34 +130,11 @@ interface EnglishRequisites {
   middleName: string;
 }
 
-type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
 type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
 const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
-
-const EMPTY_BANK_ACCOUNT: BankAccountItem = {
-  bank: '',
-  name: '',
-  bik: '',
-  currency: 'RUB',
-  accountNumber: '',
-  accountType: '',
-};
-
-const EMPTY_CASH_REGISTER: CashRegisterItem = {
-  name: '',
-  currency: 'RUB',
-  access: '',
-};
-
-const EMPTY_CARD: CardItem = {
-  number: '',
-  bank: '',
-  currency: 'RUB',
-  holder: '',
-};
 
 const EMPTY_PERSON_DOC: PersonDocInfo = {
   position: '',
@@ -373,7 +350,6 @@ export function LegalEntityModal({
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
   const [sealDataUrl, setSealDataUrl] = useState<string>('');
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
-  const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
   const [addressEntries, setAddressEntries] = useState<ClientAddressEntryFormValue[]>([]);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, DadataAddressSuggestion[]>>({});
