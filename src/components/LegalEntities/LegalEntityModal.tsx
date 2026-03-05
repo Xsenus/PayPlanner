@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -307,6 +307,7 @@ export function LegalEntityModal({
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
   const [addressEntries, setAddressEntries] = useState<ClientAddressEntryFormValue[]>([]);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, DadataAddressSuggestion[]>>({});
+  const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [contactPhones, setContactPhones] = useState<string[]>([]);
   const [contactEmails, setContactEmails] = useState<string[]>([]);
 
@@ -425,6 +426,10 @@ export function LegalEntityModal({
     setPickerSearch('');
   }, [initial, isOpen]);
 
+  useEffect(() => () => {
+    Object.values(addressSuggestionTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+  }, []);
+
   const selectedClients = useMemo(
     () => clients.filter((client) => clientIds.includes(client.id)),
     [clientIds, clients],
@@ -497,18 +502,22 @@ export function LegalEntityModal({
     }));
   };
 
-  const scheduleAddressSuggestions = async (index: number, query: string) => {
-    const normalized = query.trim();
-    if (normalized.length < 3) {
-      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-      return;
-    }
-    try {
-      const items = await apiService.suggestClientAddresses(normalized, 5);
-      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: items ?? [] }));
-    } catch {
-      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-    }
+  const scheduleAddressSuggestions = (index: number, query: string) => {
+    const timers = addressSuggestionTimersRef.current;
+    if (timers[index]) window.clearTimeout(timers[index]);
+    timers[index] = window.setTimeout(async () => {
+      const normalized = query.trim();
+      if (normalized.length < 3) {
+        setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+        return;
+      }
+      try {
+        const items = await apiService.suggestClientAddresses(normalized, 7);
+        setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: items ?? [] }));
+      } catch {
+        setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+      }
+    }, 350);
   };
 
   const fillAddressEntryByDaData = async (index: number, rawInput?: string) => {
@@ -518,13 +527,40 @@ export function LegalEntityModal({
     setAddressEntries((prev) => prev.map((entry, i) => i === index ? ({
       ...entry,
       fullAddress: cleaned.result ?? source,
-      postalCode: cleaned.postalCode ?? entry.postalCode,
-      region: cleaned.regionWithType ?? entry.region,
-      city: cleaned.cityWithType ?? entry.city,
-      street: cleaned.streetWithType ?? entry.street,
-      house: cleaned.house ?? entry.house,
-      flat: cleaned.flat ?? entry.flat,
+      postalCode: cleaned.postalCode ?? '',
+      region: cleaned.regionWithType ?? '',
+      district: '',
+      city: cleaned.cityWithType ?? '',
+      settlement: cleaned.settlementWithType ?? '',
+      street: cleaned.streetWithType ?? '',
+      house: cleaned.house ?? '',
+      flat: cleaned.flat ?? '',
     }) : entry));
+  };
+
+  const applyAddressSuggestion = async (index: number, suggestion: DadataAddressSuggestion) => {
+    const selected = (suggestion.unrestrictedValue ?? suggestion.value ?? '').trim();
+    if (!selected) return;
+
+    setAddressEntries((prev) => prev.map((entry, i) => i === index ? ({
+      ...entry,
+      fullAddress: selected,
+      postalCode: suggestion.postalCode ?? '',
+      region: suggestion.regionWithType ?? '',
+      district: suggestion.areaWithType ?? '',
+      city: suggestion.cityWithType ?? '',
+      settlement: suggestion.settlementWithType ?? '',
+      street: suggestion.streetWithType ?? '',
+      house: suggestion.house ?? '',
+      flat: suggestion.flat ?? '',
+    }) : entry));
+    setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+
+    try {
+      await fillAddressEntryByDaData(index, selected);
+    } catch {
+      // fallback from suggestion above is already applied
+    }
   };
 
   const handleSuggest = async () => {
@@ -1188,12 +1224,9 @@ export function LegalEntityModal({
                   onRemoveEntry={(index) => setAddressEntries((prev) => prev.length > 1 ? prev.filter((_, i) => i !== index) : [createEmptyLegalEntityAddressEntry()])}
                   onAddEntry={() => setAddressEntries((prev) => [...prev, createEmptyLegalEntityAddressEntry()])}
                   onToggleAdditionalType={toggleAdditionalAddressType}
-                  onScheduleSuggestions={(index, query) => { void scheduleAddressSuggestions(index, query); }}
+                  onScheduleSuggestions={scheduleAddressSuggestions}
                   onFindAddress={(index) => { void fillAddressEntryByDaData(index); }}
-                  onApplySuggestion={async (index, suggestion) => {
-                    setAddressEntries((prev) => prev.map((entry, i) => i === index ? { ...entry, fullAddress: suggestion.unrestrictedValue ?? suggestion.value } : entry));
-                    await fillAddressEntryByDaData(index, suggestion.unrestrictedValue ?? suggestion.value);
-                  }}
+                  onApplySuggestion={applyAddressSuggestion}
                 />
               )}
 
