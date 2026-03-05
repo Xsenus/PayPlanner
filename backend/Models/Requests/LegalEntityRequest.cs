@@ -144,13 +144,13 @@ public class LegalEntityRequest
     [MaxLength(8000)]
     public string? RequisitesEnglishJson { get; set; }
 
-    [MaxLength(4000000)]
+    [MaxLength(12000000)]
     public string? LogoDataUrl { get; set; }
 
-    [MaxLength(4000000)]
+    [MaxLength(12000000)]
     public string? SealDataUrl { get; set; }
 
-    [MaxLength(4000000)]
+    [MaxLength(12000000)]
     public string? DirectorSignatureDataUrl { get; set; }
 
     [MaxLength(8000)]

@@ -127,6 +127,8 @@ interface EnglishRequisites {
 type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english';
 
+const MAX_IMAGE_DATA_URL_LENGTH = 12_000_000;
+
 const EMPTY_BANK_ACCOUNT: BankAccountItem = {
   bank: '',
   name: '',
@@ -470,6 +472,12 @@ export function LegalEntityModal({
         const trimmed = value.trim();
         return trimmed || null;
       };
+      if (logoDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH || sealDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH || directorSignatureDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
+        setError('Изображение слишком большое. Пожалуйста, уменьшите размер файла логотипа/печати/подписи.');
+        setLoading(false);
+        return;
+      }
+
       const payload: LegalEntityInput = {
         shortName,
         fullName: normalize(formState.fullName),

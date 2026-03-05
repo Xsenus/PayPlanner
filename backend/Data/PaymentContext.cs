@@ -189,9 +189,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CashRegistersJson).HasMaxLength(8000);
             entity.Property(e => e.CardsJson).HasMaxLength(8000);
             entity.Property(e => e.RequisitesEnglishJson).HasMaxLength(8000);
-            entity.Property(e => e.LogoDataUrl).HasMaxLength(4000000);
-            entity.Property(e => e.SealDataUrl).HasMaxLength(4000000);
-            entity.Property(e => e.DirectorSignatureDataUrl).HasMaxLength(4000000);
+            entity.Property(e => e.LogoDataUrl).HasMaxLength(12000000);
+            entity.Property(e => e.SealDataUrl).HasMaxLength(12000000);
+            entity.Property(e => e.DirectorSignatureDataUrl).HasMaxLength(12000000);
             entity.Property(e => e.DocumentDirectorJson).HasMaxLength(8000);
             entity.Property(e => e.ChiefAccountantJson).HasMaxLength(8000);
             entity.Property(e => e.Notes).HasMaxLength(1000);
