@@ -125,6 +125,7 @@ interface EnglishRequisites {
 }
 
 type FinanceTab = 'bank' | 'cash' | 'cards';
+type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english';
 
 const EMPTY_BANK_ACCOUNT: BankAccountItem = {
   bank: '',
@@ -259,6 +260,7 @@ export function LegalEntityModal({
   const [sealDataUrl, setSealDataUrl] = useState<string>('');
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
   const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
+  const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -940,172 +942,129 @@ export function LegalEntityModal({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Расширенные реквизиты (из профиля компании)</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
-              {[
-                ['country', 'Страна'],
-                ['baseCurrency', 'Базовая валюта'],
-                ['serviceLanguage', 'Язык сервиса'],
-                ['organizationForm', 'Форма организации'],
-                ['timezone', 'Часовой пояс'],
-                ['taxSystem', 'Система налогообложения'],
-                ['taxSystemMode', 'Режим налогообложения'],
-                ['incomeTaxRate', 'Ставка (доход)'],
-                ['incomeExpenseTaxRate', 'Ставка (доход-расход)'],
-                ['okved', 'ОКВЭД'],
-                ['okpo', 'ОКПО'],
-                ['okato', 'ОКАТО'],
-                ['oktmo', 'ОКТМО'],
-                ['okogu', 'ОКОГУ'],
-                ['okfs', 'ОКФС'],
-                ['okopf', 'ОКОПФ'],
-                ['pfr', 'ПФР'],
-                ['fss', 'ФСС'],
-                ['charterCapital', 'Уставный капитал'],
-                ['taxRegistrationDate', 'Дата постановки на учет'],
-                ['taxOfficeCode', 'Код налоговой'],
-                ['taxRegion', 'Регион налоговой'],
-                ['ifnsName', 'Наименование ИФНС'],
-                ['taxOfficePhone', 'Телефон налоговой'],
-                ['treasuryInn', 'ИНН получателя (ЕНС)'],
-                ['treasuryKpp', 'КПП получателя (ЕНС)'],
-                ['treasuryRecipientName', 'Получатель (ЕНС)'],
-                ['treasuryBankBik', 'БИК банка (ЕНС)'],
-                ['treasuryBankName', 'Банк (ЕНС)'],
-                ['treasuryAccountNumber', 'Счет получателя (ЕНС)'],
-                ['treasuryCorrAccountNumber', 'Кор. счет (ЕНС)'],
-                ['treasuryKbk', 'КБК (ЕНС)'],
-              ].map(([name, label]) => (
-                <div key={name as string}>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
-                  <input
-                    type="text"
-                    name={name as string}
-                    value={(formState as Record<string, string | boolean>)[name as string] as string}
-                    onChange={handleInputChange}
-                    disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              ))}
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  name="vatWithoutVat"
-                  checked={formState.vatWithoutVat}
-                  onChange={handleInputChange}
-                  disabled={readOnly}
-                  className="h-4 w-4"
-                />
-                Без НДС
-              </label>
-            </div>
-          </div>
-
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="flex flex-wrap gap-5 border-b border-slate-200 px-6 pt-4">
-              {([
-                { id: 'bank', label: 'Банковские счета' },
-                { id: 'cash', label: 'Кассы' },
-                { id: 'cards', label: 'Карты' },
-              ] as Array<{ id: FinanceTab; label: string }>).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setFinanceTab(tab.id)}
-                  className={`pb-3 text-sm font-semibold transition ${
-                    financeTab === tab.id
-                      ? 'border-b-2 border-blue-600 text-blue-600'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}>
-                  {tab.label}
-                </button>
-              ))}
+            <div className="border-b border-slate-200 px-6 pt-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Расширенные реквизиты (из профиля компании)</h3>
+              <div className="mt-3 flex flex-wrap gap-5">
+                {([
+                  { id: 'base', label: 'Основные' },
+                  { id: 'tax', label: 'Налогообложение' },
+                  { id: 'codes', label: 'Коды и фонды' },
+                  { id: 'treasury', label: 'Реквизиты ЕНС' },
+                  { id: 'english', label: 'Реквизиты на английском' },
+                ] as Array<{ id: RequisitesTab; label: string }>).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setRequisitesTab(tab.id)}
+                    className={`pb-3 text-sm font-semibold transition ${
+                      requisitesTab === tab.id
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="p-6">
-              <div className="rounded-xl border border-slate-200">
-                <div className="grid grid-cols-6 gap-4 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  <span>Банк</span>
-                  <span>Название</span>
-                  <span>БИК</span>
-                  <span>Валюта</span>
-                  <span>Р/с</span>
-                  <span>Тип</span>
+              {requisitesTab === 'base' && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    ['country', 'Страна'],
+                    ['baseCurrency', 'Базовая валюта'],
+                    ['serviceLanguage', 'Язык сервиса'],
+                    ['organizationForm', 'Форма организации'],
+                    ['timezone', 'Часовой пояс'],
+                  ].map(([name, label]) => (
+                    <div key={name as string}>
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  ))}
                 </div>
-                {financeTab === 'bank' && bankAccounts.length > 0 ? (
-                  <div className="divide-y divide-slate-200">
-                    {bankAccounts.map((item, idx) => (
-                      <div key={`bank-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
-                        <input value={item.bank} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.name} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.bik} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, bik: e.target.value } : x))} disabled={readOnly} placeholder="БИК" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.currency} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.accountNumber} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountNumber: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <div className="flex gap-2">
-                          <input value={item.accountType} onChange={(e) => setBankAccounts((prev) => prev.map((x, i) => i === idx ? { ...x, accountType: e.target.value } : x))} disabled={readOnly} placeholder="Тип" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                          <button type="button" disabled={readOnly} onClick={() => setBankAccounts((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : financeTab === 'cash' && cashRegisters.length > 0 ? (
-                  <div className="divide-y divide-slate-200">
-                    {cashRegisters.map((item, idx) => (
-                      <div key={`cash-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
-                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
-                        <input value={item.name} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
-                        <input value={item.currency} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.access} onChange={(e) => setCashRegisters((prev) => prev.map((x, i) => i === idx ? { ...x, access: e.target.value } : x))} disabled={readOnly} placeholder="Доступ" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <button type="button" disabled={readOnly} onClick={() => setCashRegisters((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">Удалить</button>
-                      </div>
-                    ))}
-                  </div>
-                ) : financeTab === 'cards' && cards.length > 0 ? (
-                  <div className="divide-y divide-slate-200">
-                    {cards.map((item, idx) => (
-                      <div key={`card-${idx}`} className="grid grid-cols-6 gap-4 px-4 py-3">
-                        <input value={item.bank} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, bank: e.target.value } : x))} disabled={readOnly} placeholder="Банк" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.holder} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, holder: e.target.value } : x))} disabled={readOnly} placeholder="Название" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-400">—</span>
-                        <input value={item.currency} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, currency: e.target.value } : x))} disabled={readOnly} placeholder="Валюта" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <input value={item.number} onChange={(e) => setCards((prev) => prev.map((x, i) => i === idx ? { ...x, number: e.target.value } : x))} disabled={readOnly} placeholder="Р/с" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                        <button type="button" disabled={readOnly} onClick={() => setCards((prev) => prev.filter((_, i) => i !== idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">Удалить</button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-4 py-6 text-sm text-slate-500">Ничего не найдено.</div>
-                )}
-              </div>
+              )}
 
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => {
-                  if (financeTab === 'bank') setBankAccounts((prev) => [...prev, { ...EMPTY_BANK_ACCOUNT }]);
-                  if (financeTab === 'cash') setCashRegisters((prev) => [...prev, { ...EMPTY_CASH_REGISTER }]);
-                  if (financeTab === 'cards') setCards((prev) => [...prev, { ...EMPTY_CARD }]);
-                }}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:bg-blue-300">
-                + {financeTab === 'bank' ? 'Добавить банковский счет' : financeTab === 'cash' ? 'Добавить кассу' : 'Добавить карту'}
-              </button>
-            </div>
-          </div>
+              {requisitesTab === 'tax' && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    ['taxSystem', 'Система налогообложения'],
+                    ['taxSystemMode', 'Режим налогообложения'],
+                    ['incomeTaxRate', 'Ставка (доход)'],
+                    ['incomeExpenseTaxRate', 'Ставка (доход-расход)'],
+                    ['charterCapital', 'Уставный капитал'],
+                    ['taxRegistrationDate', 'Дата постановки на учет'],
+                    ['taxOfficeCode', 'Код налоговой'],
+                    ['taxRegion', 'Регион налоговой'],
+                    ['ifnsName', 'Наименование ИФНС'],
+                    ['taxOfficePhone', 'Телефон налоговой'],
+                  ].map(([name, label]) => (
+                    <div key={name as string}>
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  ))}
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" name="vatWithoutVat" checked={formState.vatWithoutVat} onChange={handleInputChange} disabled={readOnly} className="h-4 w-4" />
+                    Без НДС
+                  </label>
+                </div>
+              )}
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Реквизиты на английском</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
-              <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
+              {requisitesTab === 'codes' && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    ['okved', 'ОКВЭД'],
+                    ['okpo', 'ОКПО'],
+                    ['okato', 'ОКАТО'],
+                    ['oktmo', 'ОКТМО'],
+                    ['okogu', 'ОКОГУ'],
+                    ['okfs', 'ОКФС'],
+                    ['okopf', 'ОКОПФ'],
+                    ['pfr', 'ПФР'],
+                    ['fss', 'ФСС'],
+                  ].map(([name, label]) => (
+                    <div key={name as string}>
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {requisitesTab === 'treasury' && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    ['treasuryInn', 'ИНН получателя (ЕНС)'],
+                    ['treasuryKpp', 'КПП получателя (ЕНС)'],
+                    ['treasuryRecipientName', 'Получатель (ЕНС)'],
+                    ['treasuryBankBik', 'БИК банка (ЕНС)'],
+                    ['treasuryBankName', 'Банк (ЕНС)'],
+                    ['treasuryAccountNumber', 'Счет получателя (ЕНС)'],
+                    ['treasuryCorrAccountNumber', 'Кор. счет (ЕНС)'],
+                    ['treasuryKbk', 'КБК (ЕНС)'],
+                  ].map(([name, label]) => (
+                    <div key={name as string}>
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {requisitesTab === 'english' && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Название организации" value={englishRequisites.organizationName} onChange={(e) => updateEnglishRequisites('organizationName', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Полное наименование" value={englishRequisites.fullName} onChange={(e) => updateEnglishRequisites('fullName', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Форма" value={englishRequisites.form} onChange={(e) => updateEnglishRequisites('form', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" placeholder="Юридический адрес" value={englishRequisites.legalAddress} onChange={(e) => updateEnglishRequisites('legalAddress', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фактический адрес" value={englishRequisites.actualAddress} onChange={(e) => updateEnglishRequisites('actualAddress', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Должность" value={englishRequisites.position} onChange={(e) => updateEnglishRequisites('position', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Фамилия" value={englishRequisites.lastName} onChange={(e) => updateEnglishRequisites('lastName', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Имя" value={englishRequisites.firstName} onChange={(e) => updateEnglishRequisites('firstName', e.target.value)} disabled={readOnly} />
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Отчество" value={englishRequisites.middleName} onChange={(e) => updateEnglishRequisites('middleName', e.target.value)} disabled={readOnly} />
+                </div>
+              )}
             </div>
           </div>
 
