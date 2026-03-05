@@ -20,6 +20,8 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
 import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
+import { useDictionaries } from '../../hooks/useDictionaries';
+import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -126,6 +128,7 @@ interface EnglishRequisites {
 
 type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
+type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones';
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
 const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
@@ -359,6 +362,9 @@ export function LegalEntityModal({
   const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [contactPhones, setContactPhones] = useState<string[]>([]);
   const [contactEmails, setContactEmails] = useState<string[]>([]);
+  const [dictModalOpen, setDictModalOpen] = useState(false);
+  const [dictModalTab, setDictModalTab] = useState<LegalEntityDictTab>('countries');
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -478,6 +484,12 @@ export function LegalEntityModal({
   useEffect(() => () => {
     Object.values(addressSuggestionTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
   }, []);
+
+  useEffect(() => {
+    if (!saveToast) return;
+    const timer = window.setTimeout(() => setSaveToast(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [saveToast]);
 
   const selectedClients = useMemo(
     () => clients.filter((client) => clientIds.includes(client.id)),
@@ -795,6 +807,7 @@ export function LegalEntityModal({
       setAddressEntries((saved.addresses ?? []).map((a) => ({ ...createEmptyLegalEntityAddressEntry(), type: mapAddressTypeToForm(a.type), fullAddress: a.value ?? '', postalCode: a.postalCode ?? '', region: a.regionWithType ?? '', city: a.cityWithType ?? '', street: a.streetWithType ?? '', house: a.house ?? '', flat: a.flat ?? '' })));
       setContactPhones(parseJsonOrDefault<string[]>(saved.contactPhonesJson, contactPhones));
       setContactEmails(parseJsonOrDefault<string[]>(saved.contactEmailsJson, contactEmails));
+      setSaveToast('Юридическое лицо успешно сохранено.');
       if (!isPageMode) {
         onClose();
       }
@@ -1002,6 +1015,12 @@ export function LegalEntityModal({
           </div>
         )}
 
+        {saveToast && (
+          <div className="fixed right-6 top-6 z-[1200] rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">
+            {saveToast}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="px-6 pb-6 pt-4 space-y-6">
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-4">
@@ -1118,19 +1137,45 @@ export function LegalEntityModal({
             </div>
             <div className="p-6">
               {requisitesTab === 'base' && (
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {[
-                    ['country', 'Страна'],
-                    ['baseCurrency', 'Базовая валюта'],
-                    ['serviceLanguage', 'Язык сервиса'],
-                    ['organizationForm', 'Форма организации'],
-                    ['timezone', 'Часовой пояс'],
-                  ].map(([name, label]) => (
-                    <div key={name as string}>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                  ))}
+                    { key: 'country', label: 'Страна', dict: 'countries', options: countries },
+                    { key: 'baseCurrency', label: 'Базовая валюта', dict: 'base-currencies', options: baseCurrencies },
+                    { key: 'serviceLanguage', label: 'Язык сервиса', dict: 'service-languages', options: serviceLanguages },
+                    { key: 'organizationForm', label: 'Форма организации', dict: 'organization-forms', options: organizationForms },
+                    { key: 'timezone', label: 'Часовой пояс', dict: 'timezones', options: timezones },
+                  ].map((item) => {
+                    const value = (formState as Record<string, string | boolean>)[item.key] as string;
+                    const hasCurrent = !!value && item.options.some((opt) => opt.name === value);
+                    return (
+                      <div key={item.key}>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <label className="block text-sm font-medium text-gray-700">{item.label}</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDictModalTab(item.dict as LegalEntityDictTab);
+                              setDictModalOpen(true);
+                            }}
+                            className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                            Справочник
+                          </button>
+                        </div>
+                        <select
+                          name={item.key}
+                          value={value}
+                          onChange={handleInputChange}
+                          disabled={readOnly}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">Не выбрано</option>
+                          {!hasCurrent && value ? <option value={value}>{value}</option> : null}
+                          {item.options.map((opt) => (
+                            <option key={opt.id} value={opt.name}>{opt.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -1340,6 +1385,28 @@ export function LegalEntityModal({
             </div>
           </div>
         </form>
+
+        <DictionariesModal
+          open={dictModalOpen}
+          onClose={() => setDictModalOpen(false)}
+          initialTab={dictModalTab}
+          onlyTab={dictModalTab}
+          onPickItem={(kind, item) => {
+            const map: Record<string, keyof FormState> = {
+              'countries': 'country',
+              'base-currencies': 'baseCurrency',
+              'service-languages': 'serviceLanguage',
+              'organization-forms': 'organizationForm',
+              'timezones': 'timezone',
+            };
+            const target = map[kind];
+            if (target) {
+              setFormState((prev) => ({ ...prev, [target]: item.name }));
+            }
+            setDictModalOpen(false);
+          }}
+        />
+
 
         {pickerOpen && (
           <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">

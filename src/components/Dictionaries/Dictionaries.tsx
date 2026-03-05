@@ -21,7 +21,12 @@ type VisibleKind =
   | 'income-expense'
   | 'payment-sources'
   | 'services'
-  | 'client-statuses';
+  | 'client-statuses'
+  | 'countries'
+  | 'base-currencies'
+  | 'service-languages'
+  | 'organization-forms'
+  | 'timezones';
 type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
 
 type FullDictItem = {
@@ -49,6 +54,11 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'payment-sources', label: 'Источник платежа' },
   { value: 'services', label: 'Услуги' },
   { value: 'client-statuses', label: 'Статус клиента' },
+  { value: 'countries', label: 'Страны' },
+  { value: 'base-currencies', label: 'Базовые валюты' },
+  { value: 'service-languages', label: 'Языки сервиса' },
+  { value: 'organization-forms', label: 'Формы организации' },
+  { value: 'timezones', label: 'Часовые пояса' },
 ];
 
 function defaultColor(kind: VisibleKind): string {
@@ -65,6 +75,16 @@ function defaultColor(kind: VisibleKind): string {
       return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
+    case 'countries':
+      return '#2563EB';
+    case 'base-currencies':
+      return '#16A34A';
+    case 'service-languages':
+      return '#9333EA';
+    case 'organization-forms':
+      return '#F59E0B';
+    case 'timezones':
+      return '#0EA5E9';
   }
 }
 
@@ -118,6 +138,11 @@ export const Dictionaries = () => {
     'payment-sources': [],
     'services': [],
     'client-statuses': [],
+    'countries': [],
+    'base-currencies': [],
+    'service-languages': [],
+    'organization-forms': [],
+    'timezones': [],
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

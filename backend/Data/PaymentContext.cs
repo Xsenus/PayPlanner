@@ -21,6 +21,19 @@ public class PaymentContext : DbContext
     /// </summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+
+        void ConfigureSimpleDictionary<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity, string baseIndexName)
+            where TEntity : class
+        {
+            entity.HasKey("Id");
+            entity.Property("Name").HasMaxLength(100).IsRequired();
+            entity.Property("Description").HasMaxLength(500);
+            entity.Property("ColorHex").HasMaxLength(7);
+            entity.HasIndex("IsActive").HasDatabaseName($"IX_{baseIndexName}_IsActive");
+            entity.HasIndex("Name").HasDatabaseName($"IX_{baseIndexName}_Name");
+            entity.HasIndex("IsActive", "Name").HasDatabaseName($"IX_{baseIndexName}_IsActive_Name");
+        }
+
         // ------------------ Act ------------------
         modelBuilder.Entity<Act>(entity =>
         {
@@ -564,6 +577,12 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_ServiceDictionaryItems_IsActive_Name");
         });
 
+        modelBuilder.Entity<CountryDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "CountryDictionaryItems"));
+        modelBuilder.Entity<BaseCurrencyDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "BaseCurrencyDictionaryItems"));
+        modelBuilder.Entity<ServiceLanguageDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "ServiceLanguageDictionaryItems"));
+        modelBuilder.Entity<OrganizationFormDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "OrganizationFormDictionaryItems"));
+        modelBuilder.Entity<TimezoneDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TimezoneDictionaryItems"));
+
         // ------------------ ClientStatusEntity ------------------
         modelBuilder.Entity<ClientStatusEntity>(entity =>
         {
@@ -824,6 +843,12 @@ public class PaymentContext : DbContext
     /// Справочник услуг.
     /// </summary>
     public DbSet<ServiceDictionaryItem> Services { get; set; }
+
+    public DbSet<CountryDictionaryItem> Countries { get; set; }
+    public DbSet<BaseCurrencyDictionaryItem> BaseCurrencies { get; set; }
+    public DbSet<ServiceLanguageDictionaryItem> ServiceLanguages { get; set; }
+    public DbSet<OrganizationFormDictionaryItem> OrganizationForms { get; set; }
+    public DbSet<TimezoneDictionaryItem> Timezones { get; set; }
 
     /// <summary>
     /// Статусы клиентов.
