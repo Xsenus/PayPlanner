@@ -340,7 +340,18 @@ export function LegalEntityModal({
   onBack,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
-  const { confirm } = useDialog();
+  const { confirm, alert } = useDialog();
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const marker = ' - ';
+    const markerIndex = raw.indexOf(marker);
+    if (markerIndex >= 0) {
+      const serverMessage = raw.slice(markerIndex + marker.length).trim();
+      if (serverMessage) return serverMessage;
+    }
+    return raw || fallback;
+  };
   const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
@@ -913,7 +924,13 @@ export function LegalEntityModal({
         onClose();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('saveError') || 'Не удалось сохранить');
+      const message = extractErrorMessage(err, t('saveError') || 'Не удалось сохранить');
+      setError(message);
+      await alert({
+        title: 'Ошибка сохранения',
+        description: message,
+        variant: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -929,7 +946,13 @@ export function LegalEntityModal({
       await onDelete();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('legalEntityDeleteError') || 'Не удалось удалить запись');
+      const message = extractErrorMessage(err, t('legalEntityDeleteError') || 'Не удалось удалить запись');
+      setError(message);
+      await alert({
+        title: 'Удаление недоступно',
+        description: message,
+        variant: 'error',
+      });
     } finally {
       setDeleting(false);
     }

@@ -499,6 +499,12 @@ public class LegalEntitiesController : ControllerBase
             return NotFound();
         }
 
+        var linkedClientsCount = entity.Clients.Count;
+        if (linkedClientsCount > 0)
+        {
+            return Conflict($"Нельзя удалить юридическое лицо, пока к нему привязаны клиенты ({linkedClientsCount}). Сначала отвяжите клиентов.");
+        }
+
         foreach (var client in entity.Clients)
         {
             client.LegalEntityId = null;
