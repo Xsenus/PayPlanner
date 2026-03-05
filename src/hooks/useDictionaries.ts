@@ -24,6 +24,8 @@ export function useDictionaries() {
   const [serviceLanguages, setServiceLanguages] = useState<BaseDictItem[]>([]);
   const [organizationForms, setOrganizationForms] = useState<BaseDictItem[]>([]);
   const [timezones, setTimezones] = useState<BaseDictItem[]>([]);
+  const [taxSystems, setTaxSystems] = useState<BaseDictItem[]>([]);
+  const [taxSystemModes, setTaxSystemModes] = useState<BaseDictItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +33,7 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
@@ -44,6 +46,8 @@ export function useDictionaries() {
         apiService.getDict('service-languages'),
         apiService.getDict('organization-forms'),
         apiService.getDict('timezones'),
+        apiService.getDict('tax-systems'),
+        apiService.getDict('tax-system-modes'),
       ]);
 
       setDealTypes(deal ?? []);
@@ -62,6 +66,8 @@ export function useDictionaries() {
       setServiceLanguages((serviceLanguagesResp ?? []).filter((item) => item.isActive !== false));
       setOrganizationForms((organizationFormsResp ?? []).filter((item) => item.isActive !== false));
       setTimezones((timezonesResp ?? []).filter((item) => item.isActive !== false));
+      setTaxSystems((taxSystemsResp ?? []).filter((item) => item.isActive !== false));
+      setTaxSystemModes((taxSystemModesResp ?? []).filter((item) => item.isActive !== false));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
     } finally {
@@ -91,6 +97,8 @@ export function useDictionaries() {
     serviceLanguages,
     organizationForms,
     timezones,
+    taxSystems,
+    taxSystemModes,
     loading,
     error,
     refresh,

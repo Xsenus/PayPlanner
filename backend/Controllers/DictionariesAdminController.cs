@@ -360,6 +360,83 @@ public class DictionariesAdminController : ControllerBase
         return Ok(new { e.Id, e.IsActive });
     }
 
+
+    // TaxSystemDictionaryItem
+    [HttpPost("tax-systems")]
+    public async Task<IActionResult> CreateTaxSystem([FromBody] TaxSystemDictionaryItem m)
+    {
+        _db.TaxSystems.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/tax-systems/{m.Id}", m);
+    }
+    [HttpPut("tax-systems/{id:int}")]
+    public async Task<IActionResult> UpdateTaxSystem(int id, [FromBody] TaxSystemDictionaryItem m)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("tax-systems/{id:int}")]
+    public async Task<IActionResult> DeleteTaxSystem(int id)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.TaxSystem == e.Name))
+            return InUseError(e.Name);
+        _db.TaxSystems.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("tax-systems/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleTaxSystem(int id)
+    {
+        var e = await _db.TaxSystems.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // TaxSystemModeDictionaryItem
+    [HttpPost("tax-system-modes")]
+    public async Task<IActionResult> CreateTaxSystemMode([FromBody] TaxSystemModeDictionaryItem m)
+    {
+        _db.TaxSystemModes.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/tax-system-modes/{m.Id}", m);
+    }
+    [HttpPut("tax-system-modes/{id:int}")]
+    public async Task<IActionResult> UpdateTaxSystemMode(int id, [FromBody] TaxSystemModeDictionaryItem m)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("tax-system-modes/{id:int}")]
+    public async Task<IActionResult> DeleteTaxSystemMode(int id)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.TaxSystemMode == e.Name))
+            return InUseError(e.Name);
+        _db.TaxSystemModes.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("tax-system-modes/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleTaxSystemMode(int id)
+    {
+        var e = await _db.TaxSystemModes.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
     // ClientStatusEntity
     [HttpPost("client-statuses")]
     public async Task<IActionResult> CreateClientStatus([FromBody] ClientStatusEntity m)

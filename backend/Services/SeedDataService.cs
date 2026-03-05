@@ -206,6 +206,26 @@ namespace PayPlanner.Api.Services
                 await context.SaveChangesAsync();
             }
 
+            if (!await context.TaxSystems.AnyAsync())
+            {
+                context.TaxSystems.AddRange(
+                    new TaxSystemDictionaryItem { Name = "ОСНО", Description = "Общая система налогообложения", ColorHex = "#0EA5E9" },
+                    new TaxSystemDictionaryItem { Name = "УСН", Description = "Упрощенная система налогообложения", ColorHex = "#0284C7" },
+                    new TaxSystemDictionaryItem { Name = "ПСН", Description = "Патентная система налогообложения", ColorHex = "#0369A1" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.TaxSystemModes.AnyAsync())
+            {
+                context.TaxSystemModes.AddRange(
+                    new TaxSystemModeDictionaryItem { Name = "Доходы", Description = "УСН: доходы", ColorHex = "#0891B2" },
+                    new TaxSystemModeDictionaryItem { Name = "Доходы минус расходы", Description = "УСН: доходы-расходы", ColorHex = "#0E7490" },
+                    new TaxSystemModeDictionaryItem { Name = "Без НДС", Description = "Режим без НДС", ColorHex = "#155E75" }
+                );
+                await context.SaveChangesAsync();
+            }
+
             if (!await context.Services.AnyAsync())
             {
                 context.Services.AddRange(

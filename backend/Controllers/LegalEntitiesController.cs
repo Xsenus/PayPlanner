@@ -23,6 +23,12 @@ public class LegalEntitiesController : ControllerBase
         _enrichmentService = enrichmentService;
     }
 
+    private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
+    {
+        if (!responsibleUserId.HasValue) return true;
+        return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == responsibleUserId.Value && u.IsActive, ct);
+    }
+
     private async Task ApplyClientLinksAsync(int legalEntityId, IReadOnlyCollection<int> desiredClientIds, CancellationToken ct)
     {
         var desired = desiredClientIds.ToHashSet();
@@ -62,6 +68,8 @@ public class LegalEntitiesController : ControllerBase
             Phone = entity.Phone,
             Email = entity.Email,
             Director = entity.Director,
+            ResponsibleUserId = entity.ResponsibleUserId,
+            ResponsibleUserName = entity.ResponsibleUser?.FullName,
             Country = entity.Country,
             BaseCurrency = entity.BaseCurrency,
             ServiceLanguage = entity.ServiceLanguage,
@@ -297,6 +305,12 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Необходимо указать краткое название");
         }
 
+        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        {
+            return BadRequest("Указанный ответственный не найден или неактивен");
+        }
+
+
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
@@ -314,6 +328,7 @@ public class LegalEntitiesController : ControllerBase
             Phone = NormalizeOptional(request.Phone),
             Email = NormalizeOptional(request.Email),
             Director = NormalizeOptional(request.Director),
+            ResponsibleUserId = request.ResponsibleUserId,
             Country = NormalizeOptional(request.Country),
             BaseCurrency = NormalizeOptional(request.BaseCurrency),
             ServiceLanguage = NormalizeOptional(request.ServiceLanguage),
@@ -376,6 +391,7 @@ public class LegalEntitiesController : ControllerBase
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
+        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
         return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity));
     }
 
@@ -385,6 +401,7 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
@@ -444,6 +461,7 @@ public class LegalEntitiesController : ControllerBase
         var query = _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .AsNoTracking()
             .AsQueryable();
 
@@ -471,6 +489,7 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 
@@ -522,10 +541,16 @@ public class LegalEntitiesController : ControllerBase
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
+        }
+
+        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        {
+            return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
@@ -543,6 +568,7 @@ public class LegalEntitiesController : ControllerBase
         entity.Phone = NormalizeOptional(request.Phone);
         entity.Email = NormalizeOptional(request.Email);
         entity.Director = NormalizeOptional(request.Director);
+        entity.ResponsibleUserId = request.ResponsibleUserId;
         entity.Country = NormalizeOptional(request.Country);
         entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
         entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);
@@ -596,6 +622,7 @@ public class LegalEntitiesController : ControllerBase
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
+        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
         return Ok(MapDetail(entity));
     }
 

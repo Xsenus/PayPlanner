@@ -92,6 +92,8 @@ export interface LegalEntitySummary {
   phone?: string | null;
   email?: string | null;
   director?: string | null;
+  responsibleUserId?: number | null;
+  responsibleUserName?: string | null;
   country?: string | null;
   baseCurrency?: string | null;
   serviceLanguage?: string | null;
@@ -170,6 +172,7 @@ export interface LegalEntityInput {
   phone?: string | null;
   email?: string | null;
   director?: string | null;
+  responsibleUserId?: number | null;
   country?: string | null;
   baseCurrency?: string | null;
   serviceLanguage?: string | null;

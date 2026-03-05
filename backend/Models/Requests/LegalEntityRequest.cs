@@ -34,6 +34,8 @@ public class LegalEntityRequest
     [MaxLength(200)]
     public string? Director { get; set; }
 
+    public int? ResponsibleUserId { get; set; }
+
     [MaxLength(100)]
     public string? Country { get; set; }
 

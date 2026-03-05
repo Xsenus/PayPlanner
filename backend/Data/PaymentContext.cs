@@ -217,9 +217,15 @@ public class PaymentContext : DbContext
                   .HasForeignKey(c => c.LegalEntityId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ResponsibleUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ResponsibleUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.ShortName).HasDatabaseName("IX_LegalEntities_ShortName");
             entity.HasIndex(e => e.Inn).HasDatabaseName("IX_LegalEntities_Inn");
             entity.HasIndex(e => e.Kpp).HasDatabaseName("IX_LegalEntities_Kpp");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
         });
 
         // ------------------ Payment ------------------
@@ -582,6 +588,8 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ServiceLanguageDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "ServiceLanguageDictionaryItems"));
         modelBuilder.Entity<OrganizationFormDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "OrganizationFormDictionaryItems"));
         modelBuilder.Entity<TimezoneDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TimezoneDictionaryItems"));
+        modelBuilder.Entity<TaxSystemDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemDictionaryItems"));
+        modelBuilder.Entity<TaxSystemModeDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemModeDictionaryItems"));
 
         // ------------------ ClientStatusEntity ------------------
         modelBuilder.Entity<ClientStatusEntity>(entity =>
@@ -849,6 +857,8 @@ public class PaymentContext : DbContext
     public DbSet<ServiceLanguageDictionaryItem> ServiceLanguages { get; set; }
     public DbSet<OrganizationFormDictionaryItem> OrganizationForms { get; set; }
     public DbSet<TimezoneDictionaryItem> Timezones { get; set; }
+    public DbSet<TaxSystemDictionaryItem> TaxSystems { get; set; }
+    public DbSet<TaxSystemModeDictionaryItem> TaxSystemModes { get; set; }
 
     /// <summary>
     /// Статусы клиентов.

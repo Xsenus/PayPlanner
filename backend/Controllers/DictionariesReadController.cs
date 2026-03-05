@@ -105,6 +105,27 @@ public class DictionariesReadController : ControllerBase
         return Ok(result);
     }
 
+
+    [HttpGet("tax-systems")]
+    public async Task<IActionResult> TaxSystems(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.TaxSystems.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("tax-system-modes")]
+    public async Task<IActionResult> TaxSystemModes(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.TaxSystemModes.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
     [HttpGet("services")]
     public async Task<IActionResult> Services(CancellationToken ct)
     {

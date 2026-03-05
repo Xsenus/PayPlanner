@@ -15,6 +15,7 @@ import type {
   LegalEntityInput,
   LegalEntitySuggestion,
   DadataAddressSuggestion,
+  ActResponsible,
 } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
@@ -47,6 +48,7 @@ interface FormState {
   phone: string;
   email: string;
   director: string;
+  responsibleUserId: string;
   country: string;
   baseCurrency: string;
   serviceLanguage: string;
@@ -128,7 +130,7 @@ interface EnglishRequisites {
 
 type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
-type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones';
+type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
 const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
@@ -284,6 +286,7 @@ const DEFAULT_STATE: FormState = {
   phone: '',
   email: '',
   director: '',
+  responsibleUserId: '',
   country: '',
   baseCurrency: '',
   serviceLanguage: '',
@@ -335,7 +338,7 @@ export function LegalEntityModal({
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
-  const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones } = useDictionaries();
+  const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -366,6 +369,7 @@ export function LegalEntityModal({
   const [dictModalOpen, setDictModalOpen] = useState(false);
   const [dictModalTab, setDictModalTab] = useState<LegalEntityDictTab>('countries');
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -398,6 +402,7 @@ export function LegalEntityModal({
         phone: initial.phone ?? '',
         email: initial.email ?? '',
         director: initial.director ?? '',
+        responsibleUserId: initial.responsibleUserId ? String(initial.responsibleUserId) : '',
         country: initial.country ?? '',
         baseCurrency: initial.baseCurrency ?? '',
         serviceLanguage: initial.serviceLanguage ?? '',
@@ -492,6 +497,11 @@ export function LegalEntityModal({
     return () => window.clearTimeout(timer);
   }, [saveToast]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    void apiService.getActResponsibles().then((items) => setResponsibles(items ?? [])).catch(() => setResponsibles([]));
+  }, [isOpen]);
+
   const selectedClients = useMemo(
     () => clients.filter((client) => clientIds.includes(client.id)),
     [clientIds, clients],
@@ -512,7 +522,7 @@ export function LegalEntityModal({
   }, [clientIds, clients, pickerSearch]);
 
   const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const { name, value, type } = e.target;
     const parsed = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
@@ -695,6 +705,7 @@ export function LegalEntityModal({
         phone: normalize(formState.phone),
         email: normalize(formState.email),
         director: normalize(formState.director),
+        responsibleUserId: formState.responsibleUserId ? Number(formState.responsibleUserId) : null,
         country: normalize(formState.country),
         baseCurrency: normalize(formState.baseCurrency),
         serviceLanguage: normalize(formState.serviceLanguage),
@@ -760,6 +771,7 @@ export function LegalEntityModal({
         phone: saved.phone ?? prev.phone,
         email: saved.email ?? prev.email,
         director: saved.director ?? prev.director,
+        responsibleUserId: saved.responsibleUserId ? String(saved.responsibleUserId) : prev.responsibleUserId,
         country: saved.country ?? prev.country,
         baseCurrency: saved.baseCurrency ?? prev.baseCurrency,
         serviceLanguage: saved.serviceLanguage ?? prev.serviceLanguage,
@@ -1093,18 +1105,34 @@ export function LegalEntityModal({
                   />
                 </div>
               </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">
-                  {t('legalEntityDirector') || 'Руководитель'}
-                </label>
-                <input
-                  type="text"
-                  name="director"
-                  value={formState.director}
-                  onChange={handleInputChange}
-                  disabled={readOnly}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    {t('legalEntityDirector') || 'Руководитель'}
+                  </label>
+                  <input
+                    type="text"
+                    name="director"
+                    value={formState.director}
+                    onChange={handleInputChange}
+                    disabled={readOnly}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Ответственный</label>
+                  <select
+                    name="responsibleUserId"
+                    value={formState.responsibleUserId}
+                    onChange={handleInputChange}
+                    disabled={readOnly}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Не выбрано</option>
+                    {responsibles.map((item) => (
+                      <option key={item.id} value={item.id}>{item.fullName}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
             {dadataSection}
@@ -1182,9 +1210,29 @@ export function LegalEntityModal({
 
               {requisitesTab === 'tax' && (
                 <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <label className="block text-sm font-medium text-gray-700">Система налогообложения</label>
+                      <button type="button" onClick={() => { setDictModalTab('tax-systems'); setDictModalOpen(true); }} className="text-xs font-medium text-blue-600 hover:text-blue-700">Справочник</button>
+                    </div>
+                    <select name="taxSystem" value={formState.taxSystem} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">Не выбрано</option>
+                      {!taxSystems.some((x) => x.name === formState.taxSystem) && formState.taxSystem ? <option value={formState.taxSystem}>{formState.taxSystem}</option> : null}
+                      {taxSystems.map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <label className="block text-sm font-medium text-gray-700">Режим налогообложения</label>
+                      <button type="button" onClick={() => { setDictModalTab('tax-system-modes'); setDictModalOpen(true); }} className="text-xs font-medium text-blue-600 hover:text-blue-700">Справочник</button>
+                    </div>
+                    <select name="taxSystemMode" value={formState.taxSystemMode} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">Не выбрано</option>
+                      {!taxSystemModes.some((x) => x.name === formState.taxSystemMode) && formState.taxSystemMode ? <option value={formState.taxSystemMode}>{formState.taxSystemMode}</option> : null}
+                      {taxSystemModes.map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}
+                    </select>
+                  </div>
                   {[
-                    ['taxSystem', 'Система налогообложения'],
-                    ['taxSystemMode', 'Режим налогообложения'],
                     ['incomeTaxRate', 'Ставка (доход)'],
                     ['incomeExpenseTaxRate', 'Ставка (доход-расход)'],
                     ['charterCapital', 'Уставный капитал'],
@@ -1399,6 +1447,8 @@ export function LegalEntityModal({
               'service-languages': 'serviceLanguage',
               'organization-forms': 'organizationForm',
               'timezones': 'timezone',
+              'tax-systems': 'taxSystem',
+              'tax-system-modes': 'taxSystemMode',
             };
             const target = map[kind];
             if (target) {

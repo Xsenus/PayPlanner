@@ -20,7 +20,9 @@ export type DictKind =
   | 'base-currencies'
   | 'service-languages'
   | 'organization-forms'
-  | 'timezones';
+  | 'timezones'
+  | 'tax-systems'
+  | 'tax-system-modes';
 
 export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? DealType
@@ -41,6 +43,10 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   : K extends 'organization-forms'
   ? BaseDictItem
   : K extends 'timezones'
+  ? BaseDictItem
+  : K extends 'tax-systems'
+  ? BaseDictItem
+  : K extends 'tax-system-modes'
   ? BaseDictItem
   : PaymentStatusEntity;
 

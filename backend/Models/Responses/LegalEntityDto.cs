@@ -24,6 +24,8 @@ public class LegalEntityListItemDto
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Director { get; set; }
+    public int? ResponsibleUserId { get; set; }
+    public string? ResponsibleUserName { get; set; }
     public string? Country { get; set; }
     public string? BaseCurrency { get; set; }
     public string? ServiceLanguage { get; set; }
@@ -91,6 +93,8 @@ public class LegalEntitySuggestionDto
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Director { get; set; }
+    public int? ResponsibleUserId { get; set; }
+    public string? ResponsibleUserName { get; set; }
 }
 
 public class AddressRecordDto

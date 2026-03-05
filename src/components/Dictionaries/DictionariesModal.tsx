@@ -199,7 +199,9 @@ type VisibleKind =
   | 'base-currencies'
   | 'service-languages'
   | 'organization-forms'
-  | 'timezones';
+  | 'timezones'
+  | 'tax-systems'
+  | 'tax-system-modes';
 type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
 
 type FullDictItem = {
@@ -232,6 +234,8 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'service-languages', label: 'Языки сервиса' },
   { value: 'organization-forms', label: 'Формы организации' },
   { value: 'timezones', label: 'Часовые пояса' },
+  { value: 'tax-systems', label: 'Системы налогообложения' },
+  { value: 'tax-system-modes', label: 'Режимы налогообложения' },
 ];
 
 function defaultColor(kind: VisibleKind): string {
@@ -258,6 +262,10 @@ function defaultColor(kind: VisibleKind): string {
       return '#F59E0B';
     case 'timezones':
       return '#0EA5E9';
+    case 'tax-systems':
+      return '#0EA5E9';
+    case 'tax-system-modes':
+      return '#0284C7';
   }
 }
 
@@ -322,6 +330,8 @@ export default function DictionariesModal({
     'service-languages': [],
     'organization-forms': [],
     'timezones': [],
+    'tax-systems': [],
+    'tax-system-modes': [],
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
