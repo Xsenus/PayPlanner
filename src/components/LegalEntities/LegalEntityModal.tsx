@@ -888,6 +888,76 @@ export function LegalEntityModal({
     </div>
   );
 
+  const dadataSection = (
+    <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
+      <h3 className="text-sm font-semibold text-blue-900">
+        {t('legalEntityDadataTitle') || 'Заполнить по данным DaData'}
+      </h3>
+      <p className="mt-1 text-xs text-blue-700/80">
+        {t('legalEntityDadataDescription') ||
+          'Введите ИНН, название или адрес компании, чтобы автоматически заполнить основные поля.'}
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-blue-400" />
+          <input
+            type="text"
+            value={dadataQuery}
+            onChange={(e) => setDadataQuery(e.target.value)}
+            placeholder={t('legalEntityDadataPlaceholder') || 'Например: 7707083893 или ООО Пример'}
+            className="w-full rounded-lg border border-blue-200 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={handleSuggest}
+          disabled={suggestLoading || readOnly}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300">
+          {suggestLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+          {t('legalEntityDadataSearch') || 'Найти'}
+        </button>
+      </div>
+      {suggestError && (
+        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+          {suggestError}
+        </div>
+      )}
+      <div className="mt-3 space-y-2">
+        {suggestions.map((suggestion, idx) => (
+          <button
+            key={`${suggestion.inn ?? suggestion.shortName}-${idx}`}
+            type="button"
+            onClick={() => applySuggestion(suggestion)}
+            className="w-full rounded-lg border border-blue-200 bg-white px-4 py-3 text-left text-sm shadow-sm transition hover:border-blue-400 hover:shadow">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-medium text-blue-900">{suggestion.shortName}</div>
+                {suggestion.fullName && (
+                  <div className="text-xs text-blue-700">{suggestion.fullName}</div>
+                )}
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700/80">
+                  {suggestion.inn && <span>ИНН: {suggestion.inn}</span>}
+                  {suggestion.kpp && <span>КПП: {suggestion.kpp}</span>}
+                  {suggestion.ogrn && <span>ОГРН: {suggestion.ogrn}</span>}
+                </div>
+                {suggestion.address && (
+                  <div className="mt-1 text-xs text-blue-700/80">{suggestion.address}</div>
+                )}
+              </div>
+              <CheckCircle2 className="h-5 w-5 text-blue-500" />
+            </div>
+          </button>
+        ))}
+        {!suggestLoading && suggestions.length === 0 && !suggestError && (
+          <div className="rounded-lg border border-dashed border-blue-200 p-3 text-center text-xs text-blue-700/80">
+            {t('legalEntityDadataHint') || 'Результаты появятся после выполнения поиска.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+
   if (!isOpen) return null;
 
   const content = (
@@ -1017,81 +1087,11 @@ export function LegalEntityModal({
                 />
               </div>
             </div>
-            {clientsSection}
+            {dadataSection}
           </div>
-
-          <div className="grid gap-6">
-            <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
-              <h3 className="text-sm font-semibold text-blue-900">
-                {t('legalEntityDadataTitle') || 'Заполнить по данным DaData'}
-              </h3>
-              <p className="mt-1 text-xs text-blue-700/80">
-                {t('legalEntityDadataDescription') ||
-                  'Введите ИНН, название или адрес компании, чтобы автоматически заполнить основные поля.'}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-blue-400" />
-                  <input
-                    type="text"
-                    value={dadataQuery}
-                    onChange={(e) => setDadataQuery(e.target.value)}
-                    placeholder={t('legalEntityDadataPlaceholder') || 'Например: 7707083893 или ООО Пример'}
-                    className="w-full rounded-lg border border-blue-200 px-3 py-2 pl-9 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSuggest}
-                  disabled={suggestLoading || readOnly}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300">
-                  {suggestLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {t('legalEntityDadataSearch') || 'Найти'}
-                </button>
-              </div>
-              {suggestError && (
-                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-                  {suggestError}
-                </div>
-              )}
-              <div className="mt-3 space-y-2">
-                {suggestions.map((suggestion, idx) => (
-                  <button
-                    key={`${suggestion.inn ?? suggestion.shortName}-${idx}`}
-                    type="button"
-                    onClick={() => applySuggestion(suggestion)}
-                    className="w-full rounded-lg border border-blue-200 bg-white px-4 py-3 text-left text-sm shadow-sm transition hover:border-blue-400 hover:shadow">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-medium text-blue-900">{suggestion.shortName}</div>
-                        {suggestion.fullName && (
-                          <div className="text-xs text-blue-700">{suggestion.fullName}</div>
-                        )}
-                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700/80">
-                          {suggestion.inn && <span>ИНН: {suggestion.inn}</span>}
-                          {suggestion.kpp && <span>КПП: {suggestion.kpp}</span>}
-                          {suggestion.ogrn && <span>ОГРН: {suggestion.ogrn}</span>}
-                        </div>
-                        {suggestion.address && (
-                          <div className="mt-1 text-xs text-blue-700/80">{suggestion.address}</div>
-                        )}
-                      </div>
-                      <CheckCircle2 className="h-5 w-5 text-blue-500" />
-                    </div>
-                  </button>
-                ))}
-                {!suggestLoading && suggestions.length === 0 && !suggestError && (
-                  <div className="rounded-lg border border-dashed border-blue-200 p-3 text-center text-xs text-blue-700/80">
-                    {t('legalEntityDadataHint') || 'Результаты появятся после выполнения поиска.'}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 px-6 pt-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Расширенные реквизиты (из профиля компании)</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Реквизиты компании</h3>
               <div className="mt-3 flex flex-wrap gap-5">
                 {([
                   { id: 'base', label: 'Основные' },
@@ -1254,6 +1254,8 @@ export function LegalEntityModal({
               )}
             </div>
           </div>
+
+          {clientsSection}
 
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
