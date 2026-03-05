@@ -127,7 +127,8 @@ interface EnglishRequisites {
 type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
 
-const MAX_IMAGE_DATA_URL_LENGTH = 12_000_000;
+const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
+const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
 
 const EMPTY_BANK_ACCOUNT: BankAccountItem = {
   bank: '',
@@ -209,6 +210,57 @@ const mapAddressTypeFromForm = (type: string): number => {
   if (type == 'legal') return 2;
   return 3;
 };
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Не удалось обработать изображение.'));
+    image.src = dataUrl;
+  });
+}
+
+async function convertImageToFittingDataUrl(file: File, maxLength: number): Promise<string> {
+  const original = await readFileAsDataUrl(file);
+  if (original.length <= maxLength) return original;
+
+  const image = await loadImageElement(original);
+  const baseMaxSide = 1600;
+  const maxSide = Math.max(image.width, image.height) || 1;
+  const firstScale = Math.min(1, baseMaxSide / maxSide);
+  const scales = [firstScale, firstScale * 0.85, firstScale * 0.72, firstScale * 0.6, firstScale * 0.5]
+    .map((value) => Math.max(0.2, value));
+  const qualities = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42];
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Браузер не поддерживает обработку изображений.');
+
+  for (const scale of scales) {
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of qualities) {
+      const candidate = canvas.toDataURL('image/jpeg', quality);
+      if (candidate.length <= maxLength) {
+        return candidate;
+      }
+    }
+  }
+
+  throw new Error('Изображение слишком большое даже после сжатия. Выберите файл меньшего размера.');
+}
 
 function parseJsonOrDefault<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
@@ -462,16 +514,18 @@ export function LegalEntityModal({
     setClientIds((prev) => prev.filter((clientId) => clientId !== id));
   };
 
-  const handleImageUpload = (
+  const handleImageUpload = async (
     file: File | null,
     setter: (value: string) => void,
   ) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setter(typeof reader.result === 'string' ? reader.result : '');
-    };
-    reader.readAsDataURL(file);
+    setError(null);
+    try {
+      const optimized = await convertImageToFittingDataUrl(file, TARGET_IMAGE_DATA_URL_LENGTH);
+      setter(optimized);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить изображение.');
+    }
   };
 
   const updateEnglishRequisites = (key: keyof EnglishRequisites, value: string) => {
@@ -612,8 +666,8 @@ export function LegalEntityModal({
         const trimmed = value.trim();
         return trimmed || null;
       };
-      if (logoDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH || sealDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH || directorSignatureDataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-        setError('Изображение слишком большое. Пожалуйста, уменьшите размер файла логотипа/печати/подписи.');
+      if (logoDataUrl.length > BACKEND_IMAGE_DATA_URL_MAX_LENGTH || sealDataUrl.length > BACKEND_IMAGE_DATA_URL_MAX_LENGTH || directorSignatureDataUrl.length > BACKEND_IMAGE_DATA_URL_MAX_LENGTH) {
+        setError('Изображение превышает допустимый размер на сервере. Выберите файл меньшего размера.');
         setLoading(false);
         return;
       }
@@ -1205,7 +1259,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Логотип компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl)} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl); }} />
                 {logoDataUrl ? <img src={logoDataUrl} alt="Логотип" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 545x185. Форматы: JPG, JPEG, PNG.</div>
@@ -1213,7 +1267,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Печать компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl)} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl); }} />
                 {sealDataUrl ? <img src={sealDataUrl} alt="Печать" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 200x200. Форматы: JPG, JPEG, PNG.</div>
@@ -1221,7 +1275,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Подпись руководителя</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl)} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl); }} />
                 {directorSignatureDataUrl ? <img src={directorSignatureDataUrl} alt="Подпись" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG.</div>
