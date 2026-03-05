@@ -17,8 +17,11 @@ import type {
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntitySuggestion,
+  DadataAddressSuggestion,
 } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
+import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 
 interface LegalEntityModalProps {
@@ -124,12 +127,6 @@ interface EnglishRequisites {
   middleName: string;
 }
 
-interface LegalEntityAddressInput {
-  type: number;
-  value: string;
-  isPrimary: boolean;
-}
-
 type FinanceTab = 'bank' | 'cash' | 'cards';
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
 
@@ -175,6 +172,45 @@ const EMPTY_ENGLISH_REQUISITES: EnglishRequisites = {
   lastName: '',
   firstName: '',
   middleName: '',
+};
+
+const ADDRESS_TYPE_OPTIONS = [
+  { value: 'registration', label: 'Адрес регистрации' },
+  { value: 'actual', label: 'Фактический адрес' },
+  { value: 'legal', label: 'Юридический адрес' },
+  { value: 'other', label: 'Иной адрес' },
+] as const;
+
+const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2';
+
+const createEmptyLegalEntityAddressEntry = (): ClientAddressEntryFormValue => ({
+  type: 'legal',
+  additionalTypes: [],
+  fullAddress: '',
+  postalCode: '',
+  region: '',
+  district: '',
+  city: '',
+  settlement: '',
+  street: '',
+  house: '',
+  flat: '',
+  validFrom: '',
+  validTo: '',
+});
+
+const mapAddressTypeToForm = (type: number): string => {
+  if (type == 0) return 'registration';
+  if (type == 1) return 'actual';
+  if (type == 2) return 'legal';
+  return 'other';
+};
+
+const mapAddressTypeFromForm = (type: string): number => {
+  if (type == 'registration') return 0;
+  if (type == 'actual') return 1;
+  if (type == 'legal') return 2;
+  return 3;
 };
 
 function parseJsonOrDefault<T>(json: string | null | undefined, fallback: T): T {
@@ -269,7 +305,8 @@ export function LegalEntityModal({
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
   const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
-  const [addressEntries, setAddressEntries] = useState<LegalEntityAddressInput[]>([]);
+  const [addressEntries, setAddressEntries] = useState<ClientAddressEntryFormValue[]>([]);
+  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, DadataAddressSuggestion[]>>({});
   const [contactPhones, setContactPhones] = useState<string[]>([]);
   const [contactEmails, setContactEmails] = useState<string[]>([]);
 
@@ -349,7 +386,18 @@ export function LegalEntityModal({
       setLogoDataUrl(initial.logoDataUrl ?? "");
       setSealDataUrl(initial.sealDataUrl ?? "");
       setDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
-      setAddressEntries((initial.addresses ?? []).map((a) => ({ type: a.type, value: a.value ?? "", isPrimary: a.isPrimary })));
+      setAddressEntries((initial.addresses ?? []).map((a) => ({
+        ...createEmptyLegalEntityAddressEntry(),
+        type: mapAddressTypeToForm(a.type),
+        fullAddress: a.value ?? '',
+        postalCode: a.postalCode ?? '',
+        region: a.regionWithType ?? '',
+        city: a.cityWithType ?? '',
+        street: a.streetWithType ?? '',
+        house: a.house ?? '',
+        flat: a.flat ?? '',
+        additionalTypes: [],
+      })));
       setContactPhones(parseJsonOrDefault<string[]>(initial.contactPhonesJson, initial.phone ? [initial.phone] : []));
       setContactEmails(parseJsonOrDefault<string[]>(initial.contactEmailsJson, initial.email ? [initial.email] : []));
     } else {
@@ -364,7 +412,8 @@ export function LegalEntityModal({
       setLogoDataUrl("");
       setSealDataUrl("");
       setDirectorSignatureDataUrl("");
-      setAddressEntries([]);
+      setAddressEntries([createEmptyLegalEntityAddressEntry()]);
+      setAddressSuggestionsByIndex({});
       setContactPhones([]);
       setContactEmails([]);
     }
@@ -433,6 +482,49 @@ export function LegalEntityModal({
     value: string | boolean,
   ) => {
     setter((prev) => ({ ...prev, [key]: value }));
+  };
+
+
+  const updateAddressFormEntry = (index: number, key: keyof ClientAddressEntryFormValue, value: string) => {
+    setAddressEntries((prev) => prev.map((entry, i) => (i === index ? { ...entry, [key]: value } : entry)));
+  };
+
+  const toggleAdditionalAddressType = (index: number, type: string) => {
+    setAddressEntries((prev) => prev.map((entry, i) => {
+      if (i !== index) return entry;
+      const exists = entry.additionalTypes.includes(type);
+      return { ...entry, additionalTypes: exists ? entry.additionalTypes.filter((x) => x !== type) : [...entry.additionalTypes, type] };
+    }));
+  };
+
+  const scheduleAddressSuggestions = async (index: number, query: string) => {
+    const normalized = query.trim();
+    if (normalized.length < 3) {
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+      return;
+    }
+    try {
+      const items = await apiService.suggestClientAddresses(normalized, 5);
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: items ?? [] }));
+    } catch {
+      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
+    }
+  };
+
+  const fillAddressEntryByDaData = async (index: number, rawInput?: string) => {
+    const source = (rawInput ?? addressEntries[index]?.fullAddress ?? '').trim();
+    if (!source) return;
+    const cleaned = await apiService.cleanAddress(source);
+    setAddressEntries((prev) => prev.map((entry, i) => i === index ? ({
+      ...entry,
+      fullAddress: cleaned.result ?? source,
+      postalCode: cleaned.postalCode ?? entry.postalCode,
+      region: cleaned.regionWithType ?? entry.region,
+      city: cleaned.cityWithType ?? entry.city,
+      street: cleaned.streetWithType ?? entry.street,
+      house: cleaned.house ?? entry.house,
+      flat: cleaned.flat ?? entry.flat,
+    }) : entry));
   };
 
   const handleSuggest = async () => {
@@ -548,7 +640,7 @@ export function LegalEntityModal({
         contactPhonesJson: JSON.stringify(contactPhones.filter((x) => x.trim())),
         contactEmailsJson: JSON.stringify(contactEmails.filter((x) => x.trim())),
         notes: normalize(formState.notes),
-        addresses: addressEntries.filter((a) => a.value.trim()).map((a) => ({ type: a.type, value: a.value.trim(), isPrimary: a.isPrimary })),
+        addresses: addressEntries.filter((a) => a.fullAddress.trim()).map((a, idx) => ({ type: mapAddressTypeFromForm(a.type), value: a.fullAddress.trim(), isPrimary: idx === 0 })),
         clientIds,
       };
       if (!payload.shortName) {
@@ -613,7 +705,7 @@ export function LegalEntityModal({
       setLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
       setSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
       setDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
-      setAddressEntries((saved.addresses ?? []).map((a) => ({ type: a.type, value: a.value ?? "", isPrimary: a.isPrimary })));
+      setAddressEntries((saved.addresses ?? []).map((a) => ({ ...createEmptyLegalEntityAddressEntry(), type: mapAddressTypeToForm(a.type), fullAddress: a.value ?? '', postalCode: a.postalCode ?? '', region: a.regionWithType ?? '', city: a.cityWithType ?? '', street: a.streetWithType ?? '', house: a.house ?? '', flat: a.flat ?? '' })));
       setContactPhones(parseJsonOrDefault<string[]>(saved.contactPhonesJson, contactPhones));
       setContactEmails(parseJsonOrDefault<string[]>(saved.contactEmailsJson, contactEmails));
       if (!isPageMode) {
@@ -1086,25 +1178,23 @@ export function LegalEntityModal({
 
 
               {requisitesTab === 'addresses' && (
-                <div className="space-y-3">
-                  <button type="button" onClick={() => setAddressEntries((prev) => [...prev, { type: 2, value: '', isPrimary: prev.length === 0 }])} disabled={readOnly} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить адрес</button>
-                  {addressEntries.length === 0 ? <div className="text-sm text-slate-500">Адреса не добавлены.</div> : null}
-                  {addressEntries.map((entry, idx) => (
-                    <div key={`addr-${idx}`} className="grid gap-3 md:grid-cols-6">
-                      <select value={entry.type} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => i === idx ? { ...x, type: Number(e.target.value) } : x))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-                        <option value={2}>Юридический</option>
-                        <option value={1}>Фактический</option>
-                        <option value={0}>Регистрации</option>
-                        <option value={3}>Прочий</option>
-                      </select>
-                      <input value={entry.value} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => i === idx ? { ...x, value: e.target.value } : x))} placeholder="Адрес" className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-4" />
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={entry.isPrimary} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => ({ ...x, isPrimary: i === idx ? e.target.checked : e.target.checked ? false : x.isPrimary })))} />Основной</label>
-                        <button type="button" disabled={readOnly} onClick={() => setAddressEntries((prev) => prev.filter((_, i) => i != idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ClientAddressEntriesForm
+                  entries={addressEntries}
+                  canEdit={!readOnly}
+                  dateInputClassName={DATE_INPUT_CLASS}
+                  addressTypeOptions={[...ADDRESS_TYPE_OPTIONS]}
+                  suggestionsByIndex={addressSuggestionsByIndex}
+                  onUpdateEntry={updateAddressFormEntry}
+                  onRemoveEntry={(index) => setAddressEntries((prev) => prev.length > 1 ? prev.filter((_, i) => i !== index) : [createEmptyLegalEntityAddressEntry()])}
+                  onAddEntry={() => setAddressEntries((prev) => [...prev, createEmptyLegalEntityAddressEntry()])}
+                  onToggleAdditionalType={toggleAdditionalAddressType}
+                  onScheduleSuggestions={(index, query) => { void scheduleAddressSuggestions(index, query); }}
+                  onFindAddress={(index) => { void fillAddressEntryByDaData(index); }}
+                  onApplySuggestion={async (index, suggestion) => {
+                    setAddressEntries((prev) => prev.map((entry, i) => i === index ? { ...entry, fullAddress: suggestion.unrestrictedValue ?? suggestion.value } : entry));
+                    await fillAddressEntryByDaData(index, suggestion.unrestrictedValue ?? suggestion.value);
+                  }}
+                />
               )}
 
               {requisitesTab === 'contacts' && (
