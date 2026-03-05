@@ -194,6 +194,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.DirectorSignatureDataUrl).HasMaxLength(12000000);
             entity.Property(e => e.DocumentDirectorJson).HasMaxLength(8000);
             entity.Property(e => e.ChiefAccountantJson).HasMaxLength(8000);
+            entity.Property(e => e.ContactPhonesJson).HasMaxLength(8000);
+            entity.Property(e => e.ContactEmailsJson).HasMaxLength(8000);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 

@@ -162,6 +162,12 @@ public class LegalEntity
     [MaxLength(8000)]
     public string? ChiefAccountantJson { get; set; }
 
+    [MaxLength(8000)]
+    public string? ContactPhonesJson { get; set; }
+
+    [MaxLength(8000)]
+    public string? ContactEmailsJson { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 

@@ -134,6 +134,8 @@ export interface LegalEntitySummary {
   directorSignatureDataUrl?: string | null;
   documentDirectorJson?: string | null;
   chiefAccountantJson?: string | null;
+  contactPhonesJson?: string | null;
+  contactEmailsJson?: string | null;
   notes?: string | null;
   clientsCount: number;
   createdAt: string;
@@ -210,6 +212,8 @@ export interface LegalEntityInput {
   directorSignatureDataUrl?: string | null;
   documentDirectorJson?: string | null;
   chiefAccountantJson?: string | null;
+  contactPhonesJson?: string | null;
+  contactEmailsJson?: string | null;
   notes?: string | null;
   clientIds: number[];
 }

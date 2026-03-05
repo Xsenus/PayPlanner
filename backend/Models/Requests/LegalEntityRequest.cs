@@ -159,8 +159,26 @@ public class LegalEntityRequest
     [MaxLength(8000)]
     public string? ChiefAccountantJson { get; set; }
 
+    [MaxLength(8000)]
+    public string? ContactPhonesJson { get; set; }
+
+    [MaxLength(8000)]
+    public string? ContactEmailsJson { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
     public List<int> ClientIds { get; set; } = new();
+
+    public List<LegalEntityAddressRequest>? Addresses { get; set; }
+}
+
+public class LegalEntityAddressRequest
+{
+    public int Type { get; set; }
+
+    [MaxLength(500)]
+    public string? Value { get; set; }
+
+    public bool IsPrimary { get; set; }
 }

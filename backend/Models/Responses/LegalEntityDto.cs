@@ -66,6 +66,8 @@ public class LegalEntityListItemDto
     public string? DirectorSignatureDataUrl { get; set; }
     public string? DocumentDirectorJson { get; set; }
     public string? ChiefAccountantJson { get; set; }
+    public string? ContactPhonesJson { get; set; }
+    public string? ContactEmailsJson { get; set; }
     public string? Notes { get; set; }
     public int ClientsCount { get; set; }
     public DateTime CreatedAt { get; set; }

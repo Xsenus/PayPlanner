@@ -104,6 +104,8 @@ public class LegalEntitiesController : ControllerBase
             DirectorSignatureDataUrl = entity.DirectorSignatureDataUrl,
             DocumentDirectorJson = entity.DocumentDirectorJson,
             ChiefAccountantJson = entity.ChiefAccountantJson,
+            ContactPhonesJson = entity.ContactPhonesJson,
+            ContactEmailsJson = entity.ContactEmailsJson,
             Notes = entity.Notes,
             ClientsCount = entity.Clients.Count,
             CreatedAt = entity.CreatedAt,
@@ -253,6 +255,40 @@ public class LegalEntitiesController : ControllerBase
         });
     }
 
+
+    private void ApplyLegalEntityAddresses(LegalEntity entity, List<LegalEntityAddressRequest>? addresses)
+    {
+        if (addresses is null) return;
+
+        var normalized = addresses
+            .Where(a => !string.IsNullOrWhiteSpace(a.Value))
+            .Select(a => new AddressRecord
+            {
+                Type = Enum.IsDefined(typeof(AddressType), a.Type) ? (AddressType)a.Type : AddressType.Other,
+                Value = a.Value!.Trim(),
+                IsPrimary = a.IsPrimary,
+                LegalEntityId = entity.Id,
+            })
+            .ToList();
+
+        var existing = entity.Addresses.ToList();
+        if (existing.Count > 0)
+        {
+            _db.AddressRecords.RemoveRange(existing);
+            entity.Addresses.Clear();
+        }
+
+        if (normalized.Count > 0)
+        {
+            if (!normalized.Any(a => a.IsPrimary))
+            {
+                normalized[0].IsPrimary = true;
+            }
+            _db.AddressRecords.AddRange(normalized);
+            foreach (var item in normalized) entity.Addresses.Add(item);
+        }
+    }
+
     [HttpPost]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
@@ -320,6 +356,8 @@ public class LegalEntitiesController : ControllerBase
             DirectorSignatureDataUrl = NormalizeOptional(request.DirectorSignatureDataUrl),
             DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson),
             ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson),
+            ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson),
+            ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson),
             Notes = NormalizeOptional(request.Notes),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -331,8 +369,10 @@ public class LegalEntitiesController : ControllerBase
         if (clientIds.Count > 0)
         {
             await ApplyClientLinksAsync(entity.Id, clientIds, ct);
-            await _db.SaveChangesAsync(ct);
         }
+
+        ApplyLegalEntityAddresses(entity, request.Addresses);
+        await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
@@ -545,10 +585,13 @@ public class LegalEntitiesController : ControllerBase
         entity.DirectorSignatureDataUrl = NormalizeOptional(request.DirectorSignatureDataUrl);
         entity.DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson);
         entity.ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson);
+        entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);
+        entity.ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson);
         entity.Notes = NormalizeOptional(request.Notes);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
+        ApplyLegalEntityAddresses(entity, request.Addresses);
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);

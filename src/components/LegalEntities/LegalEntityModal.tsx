@@ -124,8 +124,14 @@ interface EnglishRequisites {
   middleName: string;
 }
 
+interface LegalEntityAddressInput {
+  type: number;
+  value: string;
+  isPrimary: boolean;
+}
+
 type FinanceTab = 'bank' | 'cash' | 'cards';
-type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english';
+type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
 
 const MAX_IMAGE_DATA_URL_LENGTH = 12_000_000;
 
@@ -263,6 +269,9 @@ export function LegalEntityModal({
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
   const [financeTab, setFinanceTab] = useState<FinanceTab>('bank');
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
+  const [addressEntries, setAddressEntries] = useState<LegalEntityAddressInput[]>([]);
+  const [contactPhones, setContactPhones] = useState<string[]>([]);
+  const [contactEmails, setContactEmails] = useState<string[]>([]);
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
@@ -340,6 +349,9 @@ export function LegalEntityModal({
       setLogoDataUrl(initial.logoDataUrl ?? "");
       setSealDataUrl(initial.sealDataUrl ?? "");
       setDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
+      setAddressEntries((initial.addresses ?? []).map((a) => ({ type: a.type, value: a.value ?? "", isPrimary: a.isPrimary })));
+      setContactPhones(parseJsonOrDefault<string[]>(initial.contactPhonesJson, initial.phone ? [initial.phone] : []));
+      setContactEmails(parseJsonOrDefault<string[]>(initial.contactEmailsJson, initial.email ? [initial.email] : []));
     } else {
       setFormState(DEFAULT_STATE);
       setClientIds([]);
@@ -352,6 +364,9 @@ export function LegalEntityModal({
       setLogoDataUrl("");
       setSealDataUrl("");
       setDirectorSignatureDataUrl("");
+      setAddressEntries([]);
+      setContactPhones([]);
+      setContactEmails([]);
     }
     setError(null);
     setSuggestions([]);
@@ -530,7 +545,10 @@ export function LegalEntityModal({
         directorSignatureDataUrl: directorSignatureDataUrl || null,
         documentDirectorJson: JSON.stringify(documentDirector),
         chiefAccountantJson: JSON.stringify(chiefAccountant),
+        contactPhonesJson: JSON.stringify(contactPhones.filter((x) => x.trim())),
+        contactEmailsJson: JSON.stringify(contactEmails.filter((x) => x.trim())),
         notes: normalize(formState.notes),
+        addresses: addressEntries.filter((a) => a.value.trim()).map((a) => ({ type: a.type, value: a.value.trim(), isPrimary: a.isPrimary })),
         clientIds,
       };
       if (!payload.shortName) {
@@ -595,6 +613,9 @@ export function LegalEntityModal({
       setLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
       setSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
       setDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
+      setAddressEntries((saved.addresses ?? []).map((a) => ({ type: a.type, value: a.value ?? "", isPrimary: a.isPrimary })));
+      setContactPhones(parseJsonOrDefault<string[]>(saved.contactPhonesJson, contactPhones));
+      setContactEmails(parseJsonOrDefault<string[]>(saved.contactEmailsJson, contactEmails));
       if (!isPageMode) {
         onClose();
       }
@@ -960,6 +981,8 @@ export function LegalEntityModal({
                   { id: 'codes', label: 'Коды и фонды' },
                   { id: 'treasury', label: 'Реквизиты ЕНС' },
                   { id: 'english', label: 'Реквизиты на английском' },
+                  { id: 'addresses', label: 'Адреса' },
+                  { id: 'contacts', label: 'Контакты' },
                 ] as Array<{ id: RequisitesTab; label: string }>).map((tab) => (
                   <button
                     key={tab.id}
@@ -1057,6 +1080,49 @@ export function LegalEntityModal({
                       <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   ))}
+                </div>
+              )}
+
+
+
+              {requisitesTab === 'addresses' && (
+                <div className="space-y-3">
+                  <button type="button" onClick={() => setAddressEntries((prev) => [...prev, { type: 2, value: '', isPrimary: prev.length === 0 }])} disabled={readOnly} className="rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить адрес</button>
+                  {addressEntries.length === 0 ? <div className="text-sm text-slate-500">Адреса не добавлены.</div> : null}
+                  {addressEntries.map((entry, idx) => (
+                    <div key={`addr-${idx}`} className="grid gap-3 md:grid-cols-6">
+                      <select value={entry.type} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => i === idx ? { ...x, type: Number(e.target.value) } : x))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <option value={2}>Юридический</option>
+                        <option value={1}>Фактический</option>
+                        <option value={0}>Регистрации</option>
+                        <option value={3}>Прочий</option>
+                      </select>
+                      <input value={entry.value} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => i === idx ? { ...x, value: e.target.value } : x))} placeholder="Адрес" className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-4" />
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={entry.isPrimary} disabled={readOnly} onChange={(e) => setAddressEntries((prev) => prev.map((x, i) => ({ ...x, isPrimary: i === idx ? e.target.checked : e.target.checked ? false : x.isPrimary })))} />Основной</label>
+                        <button type="button" disabled={readOnly} onClick={() => setAddressEntries((prev) => prev.filter((_, i) => i != idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {requisitesTab === 'contacts' && (
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div>
+                    <div className="mb-2 text-sm font-medium text-gray-700">Телефоны</div>
+                    <button type="button" onClick={() => setContactPhones((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить телефон</button>
+                    <div className="space-y-2">
+                      {contactPhones.map((v, idx) => <div key={`ph-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactPhones((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /><button type="button" disabled={readOnly} onClick={() => setContactPhones((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button></div>)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-sm font-medium text-gray-700">Email</div>
+                    <button type="button" onClick={() => setContactEmails((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить email</button>
+                    <div className="space-y-2">
+                      {contactEmails.map((v, idx) => <div key={`em-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactEmails((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /><button type="button" disabled={readOnly} onClick={() => setContactEmails((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button></div>)}
+                    </div>
+                  </div>
                 </div>
               )}
 
