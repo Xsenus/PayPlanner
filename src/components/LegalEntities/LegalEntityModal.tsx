@@ -335,6 +335,7 @@ export function LegalEntityModal({
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
+  const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones } = useDictionaries();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
