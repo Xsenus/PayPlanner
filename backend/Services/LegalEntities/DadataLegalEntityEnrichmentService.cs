@@ -268,13 +268,17 @@ namespace PayPlanner.Api.Services.LegalEntities
         }
 
         private static IReadOnlyList<string> ExtractContactValues(IEnumerable<JsonElement>? contacts)
-            => contacts?
+        {
+            if (contacts is null)
+                return Array.Empty<string>();
+
+            return contacts
                 .SelectMany(ExtractContactCandidates)
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .Select(value => value!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList()
-               ?? Array.Empty<string>();
+                .ToList();
+        }
 
         private static IEnumerable<string?> ExtractContactCandidates(JsonElement element)
         {
