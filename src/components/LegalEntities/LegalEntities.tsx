@@ -71,6 +71,7 @@ export function LegalEntities() {
     deleteLegalEntity,
     getLegalEntity,
     suggestLegalEntities,
+    findLegalEntityById,
   } = useLegalEntities();
   const { clients, loading: clientsLoading } = useClients();
 
@@ -250,6 +251,7 @@ export function LegalEntities() {
           initial={editing}
           clients={clientsList}
           suggest={suggestLegalEntities}
+          findById={findLegalEntityById}
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
           mode="page"

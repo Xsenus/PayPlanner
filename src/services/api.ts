@@ -559,6 +559,13 @@ export class ApiService {
     });
   }
 
+  async findLegalEntityById(payload: { query: string; kpp?: string }) {
+    return this.request<LegalEntityDadataDetails>(`/legal-entities/find-by-id`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
 
   async migrateLegacyLegalEntityAddresses(validateWithDadata = true) {
     return this.request<LegacyAddressMigrationResult>('/legal-entities/migrate-legacy-addresses', {
@@ -1054,6 +1061,7 @@ import type {
   ClientInput,
   LegalEntityDetail,
   LegalEntityInput,
+  LegalEntityDadataDetails,
   LegalEntitySuggestion,
   LegalEntitySummary,
   InstallmentRequest,

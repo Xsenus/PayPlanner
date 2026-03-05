@@ -162,6 +162,41 @@ export interface LegalEntitySuggestion {
   director?: string | null;
 }
 
+export interface LegalEntityDadataDetails {
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  ogrn?: string | null;
+  opfShort?: string | null;
+  opfFull?: string | null;
+  status?: string | null;
+  registrationDate?: string | null;
+  liquidationDate?: string | null;
+  okved?: string | null;
+  okvedType?: string | null;
+  branchCount?: number | null;
+  director?: string | null;
+  directorPost?: string | null;
+  address?: string | null;
+  addressUnrestricted?: string | null;
+  country?: string | null;
+  regionWithType?: string | null;
+  cityWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  flat?: string | null;
+  postalCode?: string | null;
+  okato?: string | null;
+  oktmo?: string | null;
+  okpo?: string | null;
+  okogu?: string | null;
+  okfs?: string | null;
+  taxSystem?: string | null;
+  phones?: string[];
+  emails?: string[];
+}
+
 export interface LegalEntityInput {
   shortName: string;
   fullName?: string | null;

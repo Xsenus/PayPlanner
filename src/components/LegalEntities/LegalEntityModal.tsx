@@ -14,6 +14,7 @@ import type {
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntitySuggestion,
+  LegalEntityDadataDetails,
   DadataAddressSuggestion,
   ActResponsible,
 } from '../../types';
@@ -32,6 +33,7 @@ interface LegalEntityModalProps {
   initial?: LegalEntityDetail | null;
   clients: Client[];
   suggest: (payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>;
+  findById: (payload: { query: string; kpp?: string }) => Promise<LegalEntityDadataDetails>;
   allowEdit: boolean;
   allowDelete: boolean;
   mode?: 'modal' | 'page';
@@ -331,6 +333,7 @@ export function LegalEntityModal({
   initial,
   clients,
   suggest,
+  findById,
   allowEdit,
   allowDelete,
   mode = 'modal',
@@ -660,7 +663,9 @@ export function LegalEntityModal({
     }
   };
 
-  const applySuggestion = (suggestion: LegalEntitySuggestion) => {
+  const applySuggestion = async (suggestion: LegalEntitySuggestion) => {
+    const baseAddress = suggestion.address?.trim();
+
     setFormState((prev) => ({
       ...prev,
       shortName: suggestion.shortName || prev.shortName,
@@ -673,6 +678,89 @@ export function LegalEntityModal({
       email: suggestion.email ?? prev.email,
       director: suggestion.director ?? prev.director,
     }));
+
+    if (baseAddress) {
+      setAddressEntries((prev) => {
+        if (prev.some((entry) => entry.fullAddress.trim() === baseAddress)) {
+          return prev;
+        }
+        return [{
+          ...createEmptyLegalEntityAddressEntry(),
+          type: 'legal',
+          fullAddress: baseAddress,
+        }, ...prev];
+      });
+    }
+
+    const query = (suggestion.inn || suggestion.ogrn || dadataQuery).trim();
+    if (!query) return;
+
+    try {
+      const details = await findById({ query, kpp: suggestion.kpp ?? undefined });
+      const normalizedAddress = (details.addressUnrestricted || details.address || '').trim();
+
+      setFormState((prev) => ({
+        ...prev,
+        shortName: details.shortName || prev.shortName,
+        fullName: details.fullName ?? prev.fullName,
+        inn: details.inn ?? prev.inn,
+        kpp: details.kpp ?? prev.kpp,
+        ogrn: details.ogrn ?? prev.ogrn,
+        address: normalizedAddress || prev.address,
+        director: details.director ?? prev.director,
+        country: details.country ?? prev.country,
+        organizationForm: details.opfShort ?? details.opfFull ?? prev.organizationForm,
+        taxSystem: details.taxSystem ?? prev.taxSystem,
+        okved: details.okved ?? prev.okved,
+        okpo: details.okpo ?? prev.okpo,
+        okato: details.okato ?? prev.okato,
+        oktmo: details.oktmo ?? prev.oktmo,
+        okogu: details.okogu ?? prev.okogu,
+        okfs: details.okfs ?? prev.okfs,
+      }));
+
+      if (details.phones && details.phones.length > 0) {
+        setContactPhones((prev) => Array.from(new Set([...prev, ...details.phones!.filter((x) => x.trim())])));
+      }
+      if (details.emails && details.emails.length > 0) {
+        setContactEmails((prev) => Array.from(new Set([...prev, ...details.emails!.filter((x) => x.trim())])));
+      }
+
+      if (normalizedAddress) {
+        setAddressEntries((prev) => {
+          const existingIndex = prev.findIndex((entry) =>
+            entry.fullAddress.trim() === normalizedAddress ||
+            entry.fullAddress.trim() === (details.address ?? '').trim());
+
+          if (existingIndex >= 0) {
+            return prev.map((entry, idx) => (idx === existingIndex ? {
+              ...entry,
+              fullAddress: normalizedAddress,
+              postalCode: details.postalCode ?? entry.postalCode,
+              region: details.regionWithType ?? entry.region,
+              city: details.cityWithType ?? entry.city,
+              street: details.streetWithType ?? entry.street,
+              house: details.house ?? entry.house,
+              flat: details.flat ?? entry.flat,
+            } : entry));
+          }
+
+          return [{
+            ...createEmptyLegalEntityAddressEntry(),
+            type: 'legal',
+            fullAddress: normalizedAddress,
+            postalCode: details.postalCode ?? '',
+            region: details.regionWithType ?? '',
+            city: details.cityWithType ?? '',
+            street: details.streetWithType ?? '',
+            house: details.house ?? '',
+            flat: details.flat ?? '',
+          }, ...prev];
+        });
+      }
+    } catch {
+      // fallback to suggest data already applied
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -953,7 +1041,7 @@ export function LegalEntityModal({
           <button
             key={`${suggestion.inn ?? suggestion.shortName}-${idx}`}
             type="button"
-            onClick={() => applySuggestion(suggestion)}
+            onClick={() => { void applySuggestion(suggestion); }}
             className="w-full rounded-lg border border-blue-200 bg-white px-4 py-3 text-left text-sm shadow-sm transition hover:border-blue-400 hover:shadow">
             <div className="flex items-start justify-between gap-2">
               <div>
