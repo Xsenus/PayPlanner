@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
