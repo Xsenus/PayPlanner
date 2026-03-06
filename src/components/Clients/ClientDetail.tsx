@@ -764,16 +764,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
   const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
 
+  const hasMeaningfulValue = (value: unknown): boolean => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (Array.isArray(value)) return value.some((item) => hasMeaningfulValue(item));
+    if (typeof value === 'object') {
+      return Object.values(value as Record<string, unknown>).some((item) => hasMeaningfulValue(item));
+    }
+    return Boolean(value);
+  };
+
   const requiredInputClass = (requiredKey: string, value: unknown) => {
     if (!isRequired(requiredKey)) return 'border-gray-300 focus:ring-emerald-500 focus:border-emerald-500';
 
-    const filled = Array.isArray(value)
-      ? value.some((item) => (typeof item === 'string' ? item.trim().length > 0 : Boolean(item)))
-      : typeof value === 'string'
-        ? value.trim().length > 0
-        : value !== null && value !== undefined && value !== '';
-
-    return filled
+    return hasMeaningfulValue(value)
       ? 'border-emerald-400 focus:ring-emerald-200 focus:border-emerald-500'
       : 'border-red-400 focus:ring-red-200 focus:border-red-500';
   };
@@ -781,7 +785,36 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const requiredMark = (requiredKey: string) => (isRequired(requiredKey) ? ' *' : '');
 
   const isRequiredListMissing = (requiredKey: string, values: unknown[]) =>
-    isRequired(requiredKey) && !values.some((item) => (typeof item === 'string' ? item.trim().length > 0 : Boolean(item)));
+    isRequired(requiredKey) && !values.some((item) => hasMeaningfulValue(item));
+
+  const fieldLabels: Record<string, string> = {
+    Emails: 'Email',
+    Relatives: 'Родственники',
+    ClientStatusId: 'Статус клиента',
+    LastName: 'Фамилия',
+    FirstName: 'Имя',
+    Inn: 'ИНН',
+    Snils: 'СНИЛС',
+    Comment: 'Комментарий',
+  };
+
+  const formatApiValidationError = (error: unknown, fallback: string) => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const marker = ' - ';
+    const markerIndex = raw.indexOf(marker);
+    const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+
+    try {
+      const parsed = JSON.parse(payload) as { message?: string; missingFields?: string[] };
+      const base = parsed.message?.trim() || fallback;
+      const missing = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
+      if (missing.length === 0) return base;
+      const mapped = missing.map((field) => fieldLabels[field] ?? field).join(', ');
+      return `${base}: ${mapped}`;
+    } catch {
+      return raw || fallback;
+    }
+  };
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
@@ -1115,7 +1148,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       setClientData(updated);
       setClientName(updated.name ?? `Client #${clientId}`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Не удалось обновить клиента';
+      const message = formatApiValidationError(err, 'Не удалось обновить клиента');
       await alert({ title: 'Ошибка', description: message, variant: 'error' });
       throw err instanceof Error ? err : new Error(message);
     }
