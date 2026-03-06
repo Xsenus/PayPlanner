@@ -16,14 +16,108 @@ public class FormRequirementsController : ControllerBase
 {
     private readonly PaymentContext _db;
 
-    private static readonly (string Key, string Title, Type ModelType)[] SectionModels =
+    private sealed record FieldDef(string Key, string Label);
+    private sealed record SectionDef(string Key, string Title, Type ModelType, IReadOnlyList<FieldDef> Fields);
+
+    private static readonly SectionDef[] Sections =
     {
-        ("clients", "Клиенты", typeof(Client)),
-        ("legal-entities", "Юридические лица", typeof(LegalEntityRequest)),
-        ("payments", "Платежи", typeof(Payment)),
-        ("contract-invoices", "Счета договора", typeof(UpsertInvoiceRequest)),
-        ("acts", "Акты", typeof(UpsertActRequest)),
-        ("contracts", "Договоры", typeof(UpsertContractRequest)),
+        new(
+            "clients",
+            "Клиенты",
+            typeof(Client),
+            new List<FieldDef>
+            {
+                new("Name", "Имя"),
+                new("Email", "Email"),
+                new("Phone", "Телефон"),
+                new("Notes", "Комментарий"),
+            }),
+        new(
+            "legal-entities",
+            "Юридические лица",
+            typeof(LegalEntityRequest),
+            new List<FieldDef>
+            {
+                new("ShortName", "Краткое название"),
+                new("FullName", "Полное название"),
+                new("Inn", "ИНН"),
+                new("Kpp", "КПП"),
+                new("Ogrn", "ОГРН"),
+                new("Director", "Руководитель"),
+                new("Email", "Email"),
+                new("Phone", "Телефон"),
+                new("Address", "Адрес"),
+                new("Oktmo", "ОКТМО"),
+                new("Okato", "ОКАТО"),
+                new("Okpo", "ОКПО"),
+                new("Okved", "ОКВЭД"),
+                new("TaxOfficeCode", "Код налоговой"),
+                new("TaxRegion", "Регион налоговой"),
+                new("IfnsName", "Наименование ИФНС"),
+                new("TreasuryInn", "ИНН получателя"),
+                new("TreasuryKpp", "КПП получателя"),
+                new("TreasuryBankBik", "БИК банка"),
+                new("TreasuryAccountNumber", "Счет получателя"),
+            }),
+        new(
+            "payments",
+            "Платежи",
+            typeof(Payment),
+            new List<FieldDef>
+            {
+                new("Date", "Ожидаемая дата"),
+                new("PlannedDate", "Плановая дата"),
+                new("Amount", "Сумма"),
+                new("PaidAmount", "Оплаченная сумма"),
+                new("Description", "Описание"),
+                new("Notes", "Комментарий"),
+                new("Account", "Счет"),
+                new("AccountDate", "Дата счета"),
+            }),
+        new(
+            "contract-invoices",
+            "Счета договора",
+            typeof(UpsertInvoiceRequest),
+            new List<FieldDef>
+            {
+                new("Number", "Номер счета"),
+                new("Date", "Дата выставления"),
+                new("DueDate", "Срок оплаты"),
+                new("Amount", "Сумма"),
+                new("Description", "Основание"),
+                new("ActReference", "Ссылка на акт"),
+                new("CounterpartyName", "Контрагент"),
+            }),
+        new(
+            "acts",
+            "Акты",
+            typeof(UpsertActRequest),
+            new List<FieldDef>
+            {
+                new("Number", "Номер акта"),
+                new("Date", "Дата акта"),
+                new("Amount", "Сумма"),
+                new("Title", "Название"),
+                new("InvoiceNumber", "Номер счета"),
+                new("CounterpartyInn", "ИНН контрагента"),
+                new("Comment", "Комментарий"),
+            }),
+        new(
+            "contracts",
+            "Договоры",
+            typeof(UpsertContractRequest),
+            new List<FieldDef>
+            {
+                new("Number", "Номер договора"),
+                new("Date", "Дата договора"),
+                new("Title", "Название"),
+                new("Description", "Описание"),
+                new("Amount", "Сумма"),
+                new("ValidUntil", "Действует до"),
+                new("StartDate", "Дата начала"),
+                new("TerminationDate", "Дата расторжения"),
+                new("Clients", "Клиенты"),
+            }),
     };
 
     public FormRequirementsController(PaymentContext db) => _db = db;
@@ -55,20 +149,22 @@ public class FormRequirementsController : ControllerBase
     [HttpGet("sections")]
     public ActionResult<List<FormRequirementSectionMetadataDto>> GetSections()
     {
-        var data = SectionModels.Select(section => new FormRequirementSectionMetadataDto
+        var data = Sections.Select(section =>
         {
-            Key = section.Key,
-            Title = section.Title,
-            Fields = section.ModelType
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(p => p.CanRead && IsSupportedFieldType(p.PropertyType) && !IsExcludedProperty(p.Name))
-                .OrderBy(p => p.Name)
-                .Select(p => new FormRequirementFieldMetadataDto
-                {
-                    Key = p.Name,
-                    Label = HumanizePropertyName(p.Name),
-                })
-                .ToList(),
+            var props = section.ModelType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+
+            var fields = section.Fields
+                .Where(f => props.ContainsKey(f.Key))
+                .Select(f => new FormRequirementFieldMetadataDto { Key = f.Key, Label = f.Label })
+                .ToList();
+
+            return new FormRequirementSectionMetadataDto
+            {
+                Key = section.Key,
+                Title = section.Title,
+                Fields = fields,
+            };
         }).ToList();
 
         return Ok(data);
@@ -113,74 +209,5 @@ public class FormRequirementsController : ControllerBase
             IsRequired = item.IsRequired,
             UpdatedAt = item.UpdatedAt,
         });
-    }
-
-    private static bool IsExcludedProperty(string name)
-    {
-        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Id", "CreatedAt", "UpdatedAt", "CreatedBy", "UpdatedBy"
-        };
-        return excluded.Contains(name);
-    }
-
-    private static bool IsSupportedFieldType(Type type)
-    {
-        var underlying = Nullable.GetUnderlyingType(type) ?? type;
-        if (underlying.IsEnum) return true;
-        if (underlying == typeof(string)) return true;
-        if (underlying == typeof(bool)) return true;
-        if (underlying == typeof(int)) return true;
-        if (underlying == typeof(long)) return true;
-        if (underlying == typeof(short)) return true;
-        if (underlying == typeof(decimal)) return true;
-        if (underlying == typeof(double)) return true;
-        if (underlying == typeof(float)) return true;
-        if (underlying == typeof(DateTime)) return true;
-        if (underlying == typeof(Guid)) return true;
-        return false;
-    }
-
-    private static string HumanizePropertyName(string key)
-    {
-        var acronyms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Inn"] = "ИНН",
-            ["Kpp"] = "КПП",
-            ["Ogrn"] = "ОГРН",
-            ["Oktmo"] = "ОКТМО",
-            ["Okato"] = "ОКАТО",
-            ["Okpo"] = "ОКПО",
-            ["Okogu"] = "ОКОГУ",
-            ["Okfs"] = "ОКФС",
-            ["Okopf"] = "ОКОПФ",
-            ["Okved"] = "ОКВЭД",
-            ["Pfr"] = "ПФР",
-            ["Fss"] = "ФСС",
-            ["Vat"] = "НДС",
-            ["Ifns"] = "ИФНС",
-            ["Kbk"] = "КБК",
-            ["Bik"] = "БИК",
-        };
-
-        if (acronyms.TryGetValue(key, out var full)) return full;
-
-        foreach (var item in acronyms)
-        {
-            if (key.Contains(item.Key, StringComparison.OrdinalIgnoreCase))
-            {
-                key = key.Replace(item.Key, item.Value, StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        var chars = new List<char>();
-        for (var i = 0; i < key.Length; i++)
-        {
-            var c = key[i];
-            if (i > 0 && char.IsUpper(c) && !char.IsUpper(key[i - 1])) chars.Add(' ');
-            chars.Add(c);
-        }
-
-        return string.Join(' ', new string(chars.ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 }

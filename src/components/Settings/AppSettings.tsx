@@ -24,6 +24,7 @@ export function AppSettings() {
   const [preferredId, setPreferredId] = useState<number | null>(null);
   const [requiredFieldKeys, setRequiredFieldKeys] = useState<Set<string>>(new Set());
   const [formRequirementSections, setFormRequirementSections] = useState<FormRequirementSectionMetadataDto[]>([]);
+  const [selectedRequirementsSection, setSelectedRequirementsSection] = useState<string>('');
   const [requirementsLoading, setRequirementsLoading] = useState(false);
   const [requirementsMessage, setRequirementsMessage] = useState<string | null>(null);
 
@@ -45,6 +46,9 @@ export function AppSettings() {
       ]);
       setRequiredFieldKeys(new Set((data ?? []).filter((x) => x.isRequired).map((x) => `${x.section}:${x.fieldKey}`)));
       setFormRequirementSections(sections ?? []);
+      if ((sections ?? []).length > 0) {
+        setSelectedRequirementsSection((prev) => prev || sections[0].key);
+      }
     } catch (e) {
       setRequirementsMessage(e instanceof Error ? e.message : 'Не удалось загрузить обязательные поля');
     } finally {
@@ -175,7 +179,7 @@ export function AppSettings() {
 
   return (
     <div className="p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
           <aside className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 h-fit">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Настройки</h2>
@@ -319,29 +323,52 @@ export function AppSettings() {
                     Нет доступных полей для настройки.
                   </div>
                 )}
-                {formRequirementSections.map((section) => (
-                  <div key={section.key} className="rounded-xl border border-gray-200 p-4">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-3">{section.title}</h4>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {section.fields.map((field) => {
-                        const id = `${section.key}:${field.key}`;
-                        const checked = requiredFieldKeys.has(id);
-                        return (
-                          <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              disabled={requirementsLoading}
-                              onChange={(event) => void toggleRequiredField(section.key, field.key, event.target.checked)}
-                              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span>{field.label}</span>
-                          </label>
-                        );
-                      })}
+                {formRequirementSections.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-3">
+                      {formRequirementSections.map((section) => (
+                        <button
+                          key={section.key}
+                          type="button"
+                          onClick={() => setSelectedRequirementsSection(section.key)}
+                          className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                            selectedRequirementsSection === section.key
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'text-gray-700 hover:bg-gray-50 border border-gray-200'
+                          }`}
+                        >
+                          {section.title}
+                        </button>
+                      ))}
                     </div>
+
+                    {formRequirementSections
+                      .filter((section) => section.key === selectedRequirementsSection)
+                      .map((section) => (
+                        <div key={section.key} className="rounded-xl border border-gray-200 p-4">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-3">{section.title}</h4>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {section.fields.map((field) => {
+                              const id = `${section.key}:${field.key}`;
+                              const checked = requiredFieldKeys.has(id);
+                              return (
+                                <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={requirementsLoading}
+                                    onChange={(event) => void toggleRequiredField(section.key, field.key, event.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span>{field.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
                   </div>
-                ))}
+                )}
                 {requirementsMessage && <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{requirementsMessage}</div>}
               </div>
             )}
