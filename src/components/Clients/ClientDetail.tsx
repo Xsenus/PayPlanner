@@ -787,12 +787,19 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const isRequiredListMissing = (requiredKey: string, values: unknown[]) =>
     isRequired(requiredKey) && !values.some((item) => hasMeaningfulValue(item));
 
+  const hasMissingRequiredList = (requiredKeys: string[] | undefined, values: unknown[]) =>
+    Boolean(requiredKeys?.some((requiredKey) => isRequiredListMissing(requiredKey, values)));
+
+  const hasAnyRequiredList = (requiredKeys: string[] | undefined) =>
+    Boolean(requiredKeys?.some((requiredKey) => isRequired(requiredKey)));
+
   const fieldLabels: Record<string, string> = {
     Emails: 'Email',
     Relatives: 'Родственники',
     ClientStatusId: 'Статус клиента',
     LastName: 'Фамилия',
     FirstName: 'Имя',
+    MiddleName: 'Отчество',
     Inn: 'ИНН',
     Snils: 'СНИЛС',
     Comment: 'Комментарий',
@@ -2470,8 +2477,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <input type="text" name="firstName" value={clientFormState.firstName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('FirstName', clientFormState.firstName)}`} />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Отчество</label>
-                      <input type="text" name="middleName" value={clientFormState.middleName} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{'Отчество' + requiredMark('MiddleName')}</label>
+                      <input type="text" name="middleName" value={clientFormState.middleName} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('MiddleName', clientFormState.middleName)}`} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Пол</label>
@@ -2508,16 +2515,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <div className="md:col-span-2">
                     <div className="mb-3 flex flex-wrap gap-2">
                       {[
-                        { id: 'main', label: 'Контакты', requiredKey: 'Phones', values: [...clientFormState.phones, ...clientFormState.emails] },
-                        { id: 'passports', label: 'Паспорта', requiredKey: 'Passports', values: clientFormState.passportEntries },
-                        { id: 'addresses', label: 'Адреса', requiredKey: 'Addresses', values: clientFormState.addressEntries },
-                        { id: 'education', label: 'Образование (ОКСО)', requiredKey: 'Education', values: clientFormState.education },
-                        { id: 'professions', label: 'Профессии (ОКПДТР)', requiredKey: 'Professions', values: clientFormState.professions },
-                        { id: 'workplaces', label: 'Работа и должности', requiredKey: 'Workplaces', values: clientFormState.workplaces },
-                        { id: 'relatives', label: 'Родственники', requiredKey: 'Relatives', values: clientFormState.relatives },
-                        { id: 'birthCertificates', label: 'Свидетельства о рождении', requiredKey: 'BirthCertificates', values: clientFormState.birthCertificateEntries },
-                        { id: 'militaryIds', label: 'Военные билеты', requiredKey: 'MilitaryIds', values: clientFormState.militaryIdEntries },
-                        { id: 'poa', label: 'Доверенности', requiredKey: 'PowersOfAttorney', values: powersOfAttorney },
+                        { id: 'main', label: 'Контакты', requiredKeys: ['Phones', 'Emails'], values: [...clientFormState.phones, ...clientFormState.emails] },
+                        { id: 'passports', label: 'Паспорта', requiredKeys: ['Passports'], values: clientFormState.passportEntries },
+                        { id: 'addresses', label: 'Адреса', requiredKeys: ['Addresses'], values: clientFormState.addressEntries },
+                        { id: 'education', label: 'Образование (ОКСО)', requiredKeys: ['Education'], values: clientFormState.education },
+                        { id: 'professions', label: 'Профессии (ОКПДТР)', requiredKeys: ['Professions'], values: clientFormState.professions },
+                        { id: 'workplaces', label: 'Работа и должности', requiredKeys: ['Workplaces'], values: clientFormState.workplaces },
+                        { id: 'relatives', label: 'Родственники', requiredKeys: ['Relatives'], values: clientFormState.relatives },
+                        { id: 'birthCertificates', label: 'Свидетельства о рождении', requiredKeys: ['BirthCertificates'], values: clientFormState.birthCertificateEntries },
+                        { id: 'militaryIds', label: 'Военные билеты', requiredKeys: ['MilitaryIds'], values: clientFormState.militaryIdEntries },
+                        { id: 'poa', label: 'Доверенности', requiredKeys: ['PowersOfAttorney'], values: powersOfAttorney },
                       ].map((tab) => (
                         <button
                           key={tab.id}
@@ -2525,8 +2532,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           onClick={() => setActiveProfileGroup(tab.id as typeof activeProfileGroup)}
                           className={`rounded-lg border px-3 py-1.5 text-sm ${(() => {
                             const isActive = activeProfileGroup === tab.id;
-                            const missing = tab.requiredKey ? isRequiredListMissing(tab.requiredKey, tab.values ?? []) : false;
-                            const requiredAndFilled = Boolean(tab.requiredKey) && isRequired(tab.requiredKey) && !missing;
+                            const missing = hasMissingRequiredList(tab.requiredKeys, tab.values ?? []);
+                            const requiredAndFilled = hasAnyRequiredList(tab.requiredKeys) && !missing;
                             if (isActive && missing) return 'border-red-500 bg-red-50 text-red-700';
                             if (isActive && requiredAndFilled) return 'border-emerald-500 bg-emerald-50 text-emerald-700';
                             if (isActive) return 'border-emerald-500 bg-emerald-50 text-emerald-700';
@@ -2535,7 +2542,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                             return 'border-gray-300 text-gray-700';
                           })()}`}
                         >
-                          {tab.label}{tab.requiredKey && isRequired(tab.requiredKey) ? ' *' : ''}
+                          {tab.label}{hasAnyRequiredList(tab.requiredKeys) ? ' *' : ''}
                         </button>
                       ))}
                     </div>

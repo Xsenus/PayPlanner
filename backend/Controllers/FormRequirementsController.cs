@@ -36,8 +36,6 @@ public class FormRequirementsController : ControllerBase
             new List<FieldDef>
             {
                 new("Name", "Имя", "Основные"),
-                new("Email", "Email", "Основные"),
-                new("Phone", "Телефон", "Основные"),
                 new("Company", "Компания", "Основные"),
                 new("Address", "Адрес", "Основные"),
                 new("Notes", "Комментарий", "Основные"),

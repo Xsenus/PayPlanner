@@ -221,6 +221,10 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] Client model)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
+        missingUpdate = missingUpdate
+            .Where(field => !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(field, "Phone", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
         var e = await _db.Clients.FindAsync(id);
