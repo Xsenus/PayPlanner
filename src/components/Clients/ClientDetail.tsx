@@ -763,7 +763,6 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
   const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
-  const { isRequired } = useFormRequirements('clients', activeSection === 'profile');
 
   const requiredInputClass = (requiredKey: string, value: unknown) => {
     if (!isRequired(requiredKey)) return 'border-gray-300 focus:ring-emerald-500 focus:border-emerald-500';
@@ -1273,6 +1272,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       if (fallback) setActiveSection(fallback);
     }
   }, [activeSection, sectionPermissions]);
+
+  const { isRequired } = useFormRequirements('clients', activeSection === 'profile');
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
