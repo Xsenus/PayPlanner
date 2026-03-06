@@ -320,14 +320,48 @@ export function LegalEntityModal({
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
 
+  const legalEntityFieldLabels: Record<string, string> = {
+    ShortName: t('legalEntityShortName') || 'Краткое название',
+    FullName: t('legalEntityFullName') || 'Полное название',
+    Inn: t('legalEntityInn') || 'ИНН',
+    Kpp: t('legalEntityKpp') || 'КПП',
+    Ogrn: t('legalEntityOgrn') || 'ОГРН',
+    Address: t('legalEntityAddress') || 'Адрес',
+    Director: t('legalEntityDirector') || 'Руководитель',
+    Phone: t('legalEntityPhone') || 'Телефон',
+    Email: t('legalEntityEmail') || 'Email',
+    Oktmo: 'ОКТМО',
+  };
+
+  const formatValidationMessage = (payload: { message?: string; missingFields?: string[] }): string => {
+    const base = payload.message?.trim() || 'Не удалось сохранить';
+    const missing = Array.isArray(payload.missingFields) ? payload.missingFields : [];
+    if (missing.length === 0) return base;
+    const fieldNames = missing.map((field) => legalEntityFieldLabels[field] ?? field).join(', ');
+    return `${base}: ${fieldNames}`;
+  };
+
   const extractErrorMessage = (error: unknown, fallback: string) => {
     const raw = error instanceof Error ? error.message : String(error);
     const marker = ' - ';
     const markerIndex = raw.indexOf(marker);
     if (markerIndex >= 0) {
       const serverMessage = raw.slice(markerIndex + marker.length).trim();
-      if (serverMessage) return serverMessage;
+      if (serverMessage) {
+        try {
+          return formatValidationMessage(JSON.parse(serverMessage) as { message?: string; missingFields?: string[] });
+        } catch {
+          return serverMessage;
+        }
+      }
     }
+
+    try {
+      return formatValidationMessage(JSON.parse(raw) as { message?: string; missingFields?: string[] });
+    } catch {
+      // noop
+    }
+
     return raw || fallback;
   };
   const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries();
@@ -1186,7 +1220,7 @@ export function LegalEntityModal({
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityOgrn') || 'ОГРН'}
+                    {t('legalEntityOgrn') || 'ОГРН'}{isRequired('Ogrn') ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -1194,7 +1228,7 @@ export function LegalEntityModal({
                     value={formState.ogrn}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className={requiredInputClass('ogrn')}
                   />
                 </div>
               </div>
