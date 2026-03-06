@@ -4,6 +4,7 @@ import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { Loader2, X } from 'lucide-react';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 
 interface ActModalProps {
   open: boolean;
@@ -108,6 +109,7 @@ export function ActModal({
   initialValues,
 }: ActModalProps) {
   const { t } = useTranslation();
+  const { isRequired } = useFormRequirements('acts', open);
   const [form, setForm] = useState<FormState>(() =>
     normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues),
   );
@@ -216,35 +218,35 @@ export function ActModal({
         <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
+              <span className="font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'} {isRequired('Number') ? '*' : ''}</span>
               <input
                 type="text"
                 value={form.number}
                 onChange={handleChange('number')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${isRequired('Number') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
                 required
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
+              <span className="font-medium text-slate-700">{t('actDate') ?? 'Дата'} {isRequired('Date') ? '*' : ''}</span>
               <input
                 type="date"
                 value={form.date}
                 onChange={handleChange('date')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
                 required
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actAmount') ?? 'Сумма'}</span>
+              <span className="font-medium text-slate-700">{t('actAmount') ?? 'Сумма'} {isRequired('Amount') ? '*' : ''}</span>
               <input
                 type="number"
                 step="0.01"
                 value={form.amount}
                 onChange={handleChange('amount')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
                 placeholder="0.00"
               />
             </label>

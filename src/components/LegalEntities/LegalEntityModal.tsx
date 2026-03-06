@@ -23,6 +23,7 @@ import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from '../C
 import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useDictionaries } from '../../hooks/useDictionaries';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 interface LegalEntityModalProps {
@@ -319,17 +320,52 @@ export function LegalEntityModal({
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
 
+  const legalEntityFieldLabels: Record<string, string> = {
+    ShortName: t('legalEntityShortName') || 'Краткое название',
+    FullName: t('legalEntityFullName') || 'Полное название',
+    Inn: t('legalEntityInn') || 'ИНН',
+    Kpp: t('legalEntityKpp') || 'КПП',
+    Ogrn: t('legalEntityOgrn') || 'ОГРН',
+    Address: t('legalEntityAddress') || 'Адрес',
+    Director: t('legalEntityDirector') || 'Руководитель',
+    Phone: t('legalEntityPhone') || 'Телефон',
+    Email: t('legalEntityEmail') || 'Email',
+    Oktmo: 'ОКТМО',
+  };
+
+  const formatValidationMessage = (payload: { message?: string; missingFields?: string[] }): string => {
+    const base = payload.message?.trim() || 'Не удалось сохранить';
+    const missing = Array.isArray(payload.missingFields) ? payload.missingFields : [];
+    if (missing.length === 0) return base;
+    const fieldNames = missing.map((field) => legalEntityFieldLabels[field] ?? field).join(', ');
+    return `${base}: ${fieldNames}`;
+  };
+
   const extractErrorMessage = (error: unknown, fallback: string) => {
     const raw = error instanceof Error ? error.message : String(error);
     const marker = ' - ';
     const markerIndex = raw.indexOf(marker);
     if (markerIndex >= 0) {
       const serverMessage = raw.slice(markerIndex + marker.length).trim();
-      if (serverMessage) return serverMessage;
+      if (serverMessage) {
+        try {
+          return formatValidationMessage(JSON.parse(serverMessage) as { message?: string; missingFields?: string[] });
+        } catch {
+          return serverMessage;
+        }
+      }
     }
+
+    try {
+      return formatValidationMessage(JSON.parse(raw) as { message?: string; missingFields?: string[] });
+    } catch {
+      // noop
+    }
+
     return raw || fallback;
   };
   const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries();
+  const { isRequired } = useFormRequirements('legal-entities', isOpen);
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [clientIds, setClientIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -750,6 +786,23 @@ export function LegalEntityModal({
     }
   };
 
+
+  const requiredFieldKey = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+  const isFilledValue = (value: string | boolean | null | undefined) => {
+    if (typeof value === 'boolean') return value;
+    return String(value ?? '').trim().length > 0;
+  };
+  const requiredInputClass = (name: string, value: string | boolean | null | undefined) => {
+    if (!isRequired(requiredFieldKey(name))) {
+      return 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500';
+    }
+
+    const filled = isFilledValue(value);
+    return `w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${filled
+      ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-200'
+      : 'border-red-400 focus:border-red-500 focus:ring-red-200'}`;
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (readOnly) {
@@ -1126,7 +1179,7 @@ export function LegalEntityModal({
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">
-                  {t('legalEntityShortName') || 'Краткое название'}*
+                  {t('legalEntityShortName') || 'Краткое название'}{isRequired('ShortName') ? '*' : ''}
                 </label>
                 <input
                   type="text"
@@ -1135,7 +1188,7 @@ export function LegalEntityModal({
                   onChange={handleInputChange}
                   required
                   disabled={readOnly}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={requiredInputClass('shortName', formState.shortName)}
                 />
               </div>
               <div>
@@ -1154,7 +1207,7 @@ export function LegalEntityModal({
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityInn') || 'ИНН'}
+                    {t('legalEntityInn') || 'ИНН'}{isRequired('Inn') ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -1162,12 +1215,12 @@ export function LegalEntityModal({
                     value={formState.inn}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className={requiredInputClass('inn', formState.inn)}
                   />
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityKpp') || 'КПП'}
+                    {t('legalEntityKpp') || 'КПП'}{isRequired('Kpp') ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -1175,12 +1228,12 @@ export function LegalEntityModal({
                     value={formState.kpp}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className={requiredInputClass('kpp', formState.kpp)}
                   />
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700">
-                    {t('legalEntityOgrn') || 'ОГРН'}
+                    {t('legalEntityOgrn') || 'ОГРН'}{isRequired('Ogrn') ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -1188,7 +1241,7 @@ export function LegalEntityModal({
                     value={formState.ogrn}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className={requiredInputClass('ogrn', formState.ogrn)}
                   />
                 </div>
               </div>
@@ -1330,8 +1383,8 @@ export function LegalEntityModal({
                     ['taxOfficePhone', 'Телефон налоговой'],
                   ].map(([name, label]) => (
                     <div key={name as string}>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                   <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -1355,8 +1408,8 @@ export function LegalEntityModal({
                     ['fss', 'ФСС'],
                   ].map(([name, label]) => (
                     <div key={name as string}>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                 </div>

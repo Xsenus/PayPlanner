@@ -664,6 +664,44 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("DealTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.FormFieldRequirement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Section")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Section", "FieldKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
+
+                    b.ToTable("FormFieldRequirements");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
                 {
                     b.Property<int>("Id")

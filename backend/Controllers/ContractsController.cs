@@ -8,6 +8,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -17,8 +18,13 @@ namespace PayPlanner.Api.Controllers;
 public class ContractsController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private readonly IFormRequirementsService _formRequirements;
 
-    public ContractsController(PaymentContext db) => _db = db;
+    public ContractsController(PaymentContext db, IFormRequirementsService formRequirements)
+    {
+        _db = db;
+        _formRequirements = formRequirements;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
@@ -44,6 +50,9 @@ public class ContractsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ContractDto>> Create([FromBody] UpsertContractRequest request, CancellationToken ct)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("contracts", request, ct);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
         var normalized = await ValidateAndNormalizePayload(request, ct);
         if (normalized.Error is not null) return normalized.Error;
@@ -75,6 +84,9 @@ public class ContractsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ContractDto>> Update(int id, [FromBody] UpsertContractRequest request, CancellationToken ct)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("contracts", request, ct);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
 
         var contract = await _db.Contracts

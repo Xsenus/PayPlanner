@@ -11,6 +11,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -20,8 +21,13 @@ namespace PayPlanner.Api.Controllers;
 public class ActsController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private readonly IFormRequirementsService _formRequirements;
 
-    public ActsController(PaymentContext db) => _db = db;
+    public ActsController(PaymentContext db, IFormRequirementsService formRequirements)
+    {
+        _db = db;
+        _formRequirements = formRequirements;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -186,6 +192,9 @@ public class ActsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ActDto>> Create([FromBody] UpsertActRequest request, CancellationToken ct)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -228,6 +237,9 @@ public class ActsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ActDto>> Update(int id, [FromBody] UpsertActRequest request, CancellationToken ct)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);

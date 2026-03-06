@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Controllers;
@@ -16,11 +17,13 @@ public class LegalEntitiesController : ControllerBase
 {
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichmentService;
+    private readonly IFormRequirementsService _formRequirements;
 
-    public LegalEntitiesController(PaymentContext db, ILegalEntityEnrichmentService enrichmentService)
+    public LegalEntitiesController(PaymentContext db, ILegalEntityEnrichmentService enrichmentService, IFormRequirementsService formRequirements)
     {
         _db = db;
         _enrichmentService = enrichmentService;
+        _formRequirements = formRequirements;
     }
 
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
@@ -384,6 +387,9 @@ public class LegalEntitiesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (string.IsNullOrWhiteSpace(request.ShortName))
         {
             return BadRequest("Необходимо указать краткое название");
@@ -645,6 +651,9 @@ public class LegalEntitiesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<LegalEntityDetailDto>> Update(int id, [FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         if (string.IsNullOrWhiteSpace(request.ShortName))
         {
             return BadRequest("Необходимо указать краткое название");

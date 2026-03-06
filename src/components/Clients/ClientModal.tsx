@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDialog } from '../../hooks/useDialog';
 import type { Client, ClientInput } from '../../types';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export function ClientModal({
   const { confirm } = useDialog();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { isRequired } = useFormRequirements('clients-modal', isOpen);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -56,12 +59,38 @@ export function ClientModal({
         notes: '',
       });
     }
+    setErrorMessage(null);
   }, [client]);
+
+  const fieldLabels: Record<string, string> = {
+    Name: 'Имя',
+    Email: 'Email',
+    Phone: 'Телефон',
+    Notes: 'Комментарий',
+  };
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const marker = ' - ';
+    const markerIndex = raw.indexOf(marker);
+    const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+    try {
+      const parsed = JSON.parse(payload) as { message?: string; missingFields?: string[] };
+      const base = parsed.message?.trim() || fallback;
+      const missing = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
+      if (missing.length === 0) return base;
+      const mapped = missing.map((f) => fieldLabels[f] ?? f).join(', ');
+      return `${base}: ${mapped}`;
+    } catch {
+      return raw || fallback;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setLoading(true);
+    setErrorMessage(null);
     try {
       const baseClient = client ?? ({} as Client);
       const payload: ClientInput = {
@@ -78,7 +107,7 @@ export function ClientModal({
       await onSubmit(payload);
       onClose();
     } catch (error) {
-      console.error('Failed to save client:', error);
+      setErrorMessage(extractErrorMessage(error, 'Не удалось сохранить клиента'));
     } finally {
       setLoading(false);
     }
@@ -140,48 +169,53 @@ export function ClientModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4" action="#">
+            {errorMessage && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {errorMessage}
+              </div>
+            )}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} {isRequired('Name') ? '*' : ''}</label>
               <input
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Name') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('email')} {isRequired('Email') ? '*' : ''}</label>
               <input
                 type="email"
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Email') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('phone')} {isRequired('Phone') ? '*' : ''}</label>
               <input
                 type="tel"
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Phone') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий {isRequired('Notes') ? '*' : ''}</label>
               <textarea
                 name="notes"
                 value={formData.notes}
                 onChange={handleChange}
                 rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Notes') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                 placeholder={t('additionalInfo')}
               />
             </div>

@@ -22,12 +22,14 @@ public class InvoicesController : ControllerBase
 {
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
+    private readonly IFormRequirementsService _formRequirements;
     private const string InvoiceItemsMarker = "[pp:invoice-items]";
 
-    public InvoicesController(PaymentContext db, IEmailService emailService)
+    public InvoicesController(PaymentContext db, IEmailService emailService, IFormRequirementsService formRequirements)
     {
         _db = db;
         _emailService = emailService;
+        _formRequirements = formRequirements;
     }
 
     [HttpGet]
@@ -189,6 +191,9 @@ public class InvoicesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("contract-invoices", request, ct);
+        if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -285,6 +290,9 @@ public class InvoicesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<InvoiceDto>> Update(int id, [FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("contract-invoices", request, ct);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);

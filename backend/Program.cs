@@ -100,6 +100,7 @@ builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<DatabaseBackupService>();
 builder.Services.AddScoped<StatsSummaryService>();
+builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 
