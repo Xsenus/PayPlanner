@@ -181,6 +181,6 @@ public class FormRequirementsController : ControllerBase
             chars.Add(c);
         }
 
-        return string.Join(' ', new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return string.Join(' ', new string(chars.ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 }
