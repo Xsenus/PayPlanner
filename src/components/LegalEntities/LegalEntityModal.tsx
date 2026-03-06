@@ -788,7 +788,20 @@ export function LegalEntityModal({
 
 
   const requiredFieldKey = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
-  const requiredInputClass = (name: string) => `w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${isRequired(requiredFieldKey(name)) ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}`;
+  const isFilledValue = (value: string | boolean | null | undefined) => {
+    if (typeof value === 'boolean') return value;
+    return String(value ?? '').trim().length > 0;
+  };
+  const requiredInputClass = (name: string, value: string | boolean | null | undefined) => {
+    if (!isRequired(requiredFieldKey(name))) {
+      return 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500';
+    }
+
+    const filled = isFilledValue(value);
+    return `w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${filled
+      ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-200'
+      : 'border-red-400 focus:border-red-500 focus:ring-red-200'}`;
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1175,7 +1188,7 @@ export function LegalEntityModal({
                   onChange={handleInputChange}
                   required
                   disabled={readOnly}
-                  className={requiredInputClass('shortName')}
+                  className={requiredInputClass('shortName', formState.shortName)}
                 />
               </div>
               <div>
@@ -1202,7 +1215,7 @@ export function LegalEntityModal({
                     value={formState.inn}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className={requiredInputClass('inn')}
+                    className={requiredInputClass('inn', formState.inn)}
                   />
                 </div>
                 <div>
@@ -1215,7 +1228,7 @@ export function LegalEntityModal({
                     value={formState.kpp}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className={requiredInputClass('kpp')}
+                    className={requiredInputClass('kpp', formState.kpp)}
                   />
                 </div>
                 <div>
@@ -1228,7 +1241,7 @@ export function LegalEntityModal({
                     value={formState.ogrn}
                     onChange={handleInputChange}
                     disabled={readOnly}
-                    className={requiredInputClass('ogrn')}
+                    className={requiredInputClass('ogrn', formState.ogrn)}
                   />
                 </div>
               </div>
@@ -1371,7 +1384,7 @@ export function LegalEntityModal({
                   ].map(([name, label]) => (
                     <div key={name as string}>
                       <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string)} />
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                   <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -1396,7 +1409,7 @@ export function LegalEntityModal({
                   ].map(([name, label]) => (
                     <div key={name as string}>
                       <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string)} />
+                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                 </div>
