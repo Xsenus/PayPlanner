@@ -9,6 +9,7 @@ import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useDialog } from '../../hooks/useDialog';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
