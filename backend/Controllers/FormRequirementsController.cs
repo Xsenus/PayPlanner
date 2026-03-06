@@ -16,14 +16,14 @@ public class FormRequirementsController : ControllerBase
 {
     private readonly PaymentContext _db;
 
-    private sealed record FieldDef(string Key, string Label);
+    private sealed record FieldDef(string Key, string Label, string Category = "Основные");
     private sealed record SectionDef(string Key, string Title, Type ModelType, IReadOnlyList<FieldDef> Fields);
 
     private static readonly SectionDef[] Sections =
     {
         new(
             "clients",
-            "Клиенты",
+            "Клиенты (модалка создания)",
             typeof(Client),
             new List<FieldDef>
             {
@@ -38,26 +38,69 @@ public class FormRequirementsController : ControllerBase
             typeof(LegalEntityRequest),
             new List<FieldDef>
             {
-                new("ShortName", "Краткое название"),
-                new("FullName", "Полное название"),
-                new("Inn", "ИНН"),
-                new("Kpp", "КПП"),
-                new("Ogrn", "ОГРН"),
-                new("Director", "Руководитель"),
-                new("Email", "Email"),
-                new("Phone", "Телефон"),
-                new("Address", "Адрес"),
-                new("Oktmo", "ОКТМО"),
-                new("Okato", "ОКАТО"),
-                new("Okpo", "ОКПО"),
-                new("Okved", "ОКВЭД"),
-                new("TaxOfficeCode", "Код налоговой"),
-                new("TaxRegion", "Регион налоговой"),
-                new("IfnsName", "Наименование ИФНС"),
-                new("TreasuryInn", "ИНН получателя"),
-                new("TreasuryKpp", "КПП получателя"),
-                new("TreasuryBankBik", "БИК банка"),
-                new("TreasuryAccountNumber", "Счет получателя"),
+                new("ShortName", "Краткое название", "Основные"),
+                new("FullName", "Полное название", "Основные"),
+                new("Inn", "ИНН", "Основные"),
+                new("Kpp", "КПП", "Основные"),
+                new("Ogrn", "ОГРН", "Основные"),
+                new("Director", "Руководитель", "Основные"),
+                new("ResponsibleUserId", "Ответственный", "Основные"),
+                new("Email", "Email", "Основные"),
+                new("Phone", "Телефон", "Основные"),
+                new("Address", "Адрес", "Основные"),
+
+                new("Country", "Страна", "Реквизиты: Основные"),
+                new("BaseCurrency", "Базовая валюта", "Реквизиты: Основные"),
+                new("ServiceLanguage", "Язык сервиса", "Реквизиты: Основные"),
+                new("OrganizationForm", "Форма организации", "Реквизиты: Основные"),
+                new("Timezone", "Часовой пояс", "Реквизиты: Основные"),
+
+                new("TaxSystem", "Система налогообложения", "Реквизиты: Налогообложение"),
+                new("TaxSystemMode", "Режим налогообложения", "Реквизиты: Налогообложение"),
+                new("IncomeTaxRate", "Ставка (доход)", "Реквизиты: Налогообложение"),
+                new("IncomeExpenseTaxRate", "Ставка (доход-расход)", "Реквизиты: Налогообложение"),
+                new("CharterCapital", "Уставный капитал", "Реквизиты: Налогообложение"),
+                new("TaxRegistrationDate", "Дата постановки на учет", "Реквизиты: Налогообложение"),
+                new("TaxOfficeCode", "Код налоговой", "Реквизиты: Налогообложение"),
+                new("TaxRegion", "Регион налоговой", "Реквизиты: Налогообложение"),
+                new("IfnsName", "Наименование ИФНС", "Реквизиты: Налогообложение"),
+                new("TaxOfficePhone", "Телефон налоговой", "Реквизиты: Налогообложение"),
+                new("VatWithoutVat", "Без НДС", "Реквизиты: Налогообложение"),
+
+                new("Okved", "ОКВЭД", "Реквизиты: Коды и фонды"),
+                new("Okpo", "ОКПО", "Реквизиты: Коды и фонды"),
+                new("Okato", "ОКАТО", "Реквизиты: Коды и фонды"),
+                new("Oktmo", "ОКТМО", "Реквизиты: Коды и фонды"),
+                new("Okogu", "ОКОГУ", "Реквизиты: Коды и фонды"),
+                new("Okfs", "ОКФС", "Реквизиты: Коды и фонды"),
+                new("Okopf", "ОКОПФ", "Реквизиты: Коды и фонды"),
+                new("Pfr", "ПФР", "Реквизиты: Коды и фонды"),
+                new("Fss", "ФСС", "Реквизиты: Коды и фонды"),
+
+                new("TreasuryInn", "ИНН получателя (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryKpp", "КПП получателя (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryRecipientName", "Получатель (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryBankBik", "БИК банка (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryBankName", "Банк (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryAccountNumber", "Счет получателя (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryCorrAccountNumber", "Кор. счет (ЕНС)", "Реквизиты: ЕНС"),
+                new("TreasuryKbk", "КБК (ЕНС)", "Реквизиты: ЕНС"),
+
+                new("RequisitesEnglishJson", "Реквизиты на английском", "Реквизиты: На английском"),
+                new("Addresses", "Адреса", "Реквизиты: Адреса"),
+                new("ContactPhonesJson", "Телефоны", "Реквизиты: Контакты"),
+                new("ContactEmailsJson", "Emails", "Реквизиты: Контакты"),
+
+                new("LogoDataUrl", "Логотип", "Файлы/подписи"),
+                new("SealDataUrl", "Печать", "Файлы/подписи"),
+                new("DirectorSignatureDataUrl", "Подпись руководителя", "Файлы/подписи"),
+                new("DocumentDirectorJson", "Руководитель (документы)", "Файлы/подписи"),
+                new("ChiefAccountantJson", "Главный бухгалтер (документы)", "Файлы/подписи"),
+
+                new("BankAccountsJson", "Банковские счета", "Прочее"),
+                new("CashRegistersJson", "Кассы", "Прочее"),
+                new("CardsJson", "Карты", "Прочее"),
+                new("Notes", "Примечание", "Прочее"),
             }),
         new(
             "payments",
@@ -156,7 +199,7 @@ public class FormRequirementsController : ControllerBase
 
             var fields = section.Fields
                 .Where(f => props.ContainsKey(f.Key))
-                .Select(f => new FormRequirementFieldMetadataDto { Key = f.Key, Label = f.Label })
+                .Select(f => new FormRequirementFieldMetadataDto { Key = f.Key, Label = f.Label, Category = f.Category })
                 .ToList();
 
             return new FormRequirementSectionMetadataDto

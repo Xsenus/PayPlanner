@@ -347,24 +347,34 @@ export function AppSettings() {
                       .map((section) => (
                         <div key={section.key} className="rounded-xl border border-gray-200 p-4">
                           <h4 className="text-sm font-semibold text-gray-900 mb-3">{section.title}</h4>
-                          <div className="grid gap-2 md:grid-cols-2">
-                            {section.fields.map((field) => {
-                              const id = `${section.key}:${field.key}`;
-                              const checked = requiredFieldKeys.has(id);
-                              return (
-                                <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    disabled={requirementsLoading}
-                                    onChange={(event) => void toggleRequiredField(section.key, field.key, event.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  <span>{field.label}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
+                          {Object.entries(section.fields.reduce<Record<string, typeof section.fields>>((acc, field) => {
+                            const category = field.category || 'Основные';
+                            if (!acc[category]) acc[category] = [];
+                            acc[category].push(field);
+                            return acc;
+                          }, {})).map(([category, fields]) => (
+                            <div key={category} className="mb-4 last:mb-0">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
+                              <div className="grid gap-2 md:grid-cols-2">
+                                {fields.map((field) => {
+                                  const id = `${section.key}:${field.key}`;
+                                  const checked = requiredFieldKeys.has(id);
+                                  return (
+                                    <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={requirementsLoading}
+                                        onChange={(event) => void toggleRequiredField(section.key, field.key, event.target.checked)}
+                                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                      />
+                                      <span>{field.label}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       ))}
                   </div>

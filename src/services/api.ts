@@ -77,6 +77,7 @@ export interface FormFieldRequirementDto {
 export interface FormRequirementFieldMetadataDto {
   key: string;
   label: string;
+  category?: string;
 }
 
 export interface FormRequirementSectionMetadataDto {
