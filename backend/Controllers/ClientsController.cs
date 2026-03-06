@@ -220,7 +220,7 @@ public class ClientsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Client model)
     {
-        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", model);
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
         var e = await _db.Clients.FindAsync(id);
@@ -483,18 +483,176 @@ public class ClientsController : ControllerBase
         var e = await _db.Clients.FindAsync(id);
         if (e is null) return NotFound();
 
-        var payments = await _db.Payments.Where(p => p.ClientId == id).ToListAsync();
-        foreach (var p in payments) { p.ClientId = null; p.ClientCaseId = null; }
-        await _db.SaveChangesAsync();
+        var usage = await GetClientUsageSummary(id);
+        if (usage.Count > 0)
+        {
+            return Conflict(new
+            {
+                message = "Клиент используется в связанных данных и не может быть удалён.",
+                usage,
+            });
+        }
 
         _db.Clients.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    private async Task<List<string>> GetClientUsageSummary(int clientId)
+    {
+        var usage = new List<string>();
+
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ClientId == clientId))
+            usage.Add("платежи");
+
+        if (await _db.Invoices.AsNoTracking().AnyAsync(i => i.ClientId == clientId))
+            usage.Add("счета");
+
+        if (await _db.Acts.AsNoTracking().AnyAsync(a => a.ClientId == clientId))
+            usage.Add("акты");
+
+        if (await _db.ClientCases.AsNoTracking().AnyAsync(c => c.ClientId == clientId))
+            usage.Add("дела клиента");
+
+        if (await _db.ClientContracts.AsNoTracking().AnyAsync(cc => cc.ClientId == clientId))
+            usage.Add("договоры");
+
+        if (await _db.PowersOfAttorney.AsNoTracking().AnyAsync(p => p.ClientId == clientId))
+            usage.Add("доверенности");
+
+        return usage;
+    }
+
+    private static ClientRequirementsModel BuildClientRequirementsModel(Client model)
+    {
+        var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
+        ClientRequirementsProfile? profile = null;
+        if (!string.IsNullOrWhiteSpace(profilePayload))
+        {
+            try
+            {
+                profile = JsonSerializer.Deserialize<ClientRequirementsProfile>(profilePayload);
+            }
+            catch
+            {
+                profile = null;
+            }
+        }
+
+        return new ClientRequirementsModel
+        {
+            Name = model.Name,
+            Email = model.Email,
+            Phone = model.Phone,
+            Company = model.Company,
+            Address = model.Address,
+            Notes = model.Notes,
+            IsActive = model.IsActive,
+            LegalEntityId = model.LegalEntityId,
+            ClientStatusId = model.ClientStatusId,
+
+            LastName = profile?.LastName,
+            FirstName = profile?.FirstName,
+            MiddleName = profile?.MiddleName,
+            Gender = profile?.Gender,
+            BirthDate = profile?.BirthDate,
+            Inn = profile?.Inn,
+            Snils = profile?.Snils,
+
+            Phones = profile?.Phones ?? new List<string>(),
+            Emails = profile?.Emails ?? new List<string>(),
+            Addresses = profile?.Addresses ?? new List<string>(),
+            AddressEntries = profile?.AddressEntries ?? new List<object>(),
+            Passports = profile?.Passports ?? new List<string>(),
+            PassportEntries = profile?.PassportEntries ?? new List<object>(),
+            BirthCertificates = profile?.BirthCertificates ?? new List<string>(),
+            BirthCertificateEntries = profile?.BirthCertificateEntries ?? new List<object>(),
+            MilitaryIds = profile?.MilitaryIds ?? new List<string>(),
+            MilitaryIdEntries = profile?.MilitaryIdEntries ?? new List<object>(),
+            Education = profile?.Education ?? new List<object>(),
+            Professions = profile?.Professions ?? new List<object>(),
+            Workplaces = profile?.Workplaces ?? new List<object>(),
+            Relatives = profile?.Relatives ?? new List<object>(),
+
+            PowersOfAttorney = model.PowersOfAttorney?.Select(x => x.Id).ToList() ?? new List<int>(),
+            Comment = profile?.Comment,
+            LegacyNotes = profile?.LegacyNotes,
+        };
+    }
 }
 
 public sealed record ClientCleanAddressRequest(string Address);
 public sealed record ClientSuggestAddressRequest(string Query, int Limit = 7);
+
+
+public sealed class ClientRequirementsModel
+{
+    public string? Name { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Company { get; init; }
+    public string? Address { get; init; }
+    public string? Notes { get; init; }
+    public bool IsActive { get; init; }
+    public int? LegalEntityId { get; init; }
+    public int? ClientStatusId { get; init; }
+
+    public string? LastName { get; init; }
+    public string? FirstName { get; init; }
+    public string? MiddleName { get; init; }
+    public string? Gender { get; init; }
+    public string? BirthDate { get; init; }
+    public string? Inn { get; init; }
+    public string? Snils { get; init; }
+
+    public List<string> Phones { get; init; } = new();
+    public List<string> Emails { get; init; } = new();
+    public List<string> Addresses { get; init; } = new();
+    public List<object> AddressEntries { get; init; } = new();
+    public List<string> Passports { get; init; } = new();
+    public List<object> PassportEntries { get; init; } = new();
+    public List<string> BirthCertificates { get; init; } = new();
+    public List<object> BirthCertificateEntries { get; init; } = new();
+    public List<string> MilitaryIds { get; init; } = new();
+    public List<object> MilitaryIdEntries { get; init; } = new();
+    public List<object> Education { get; init; } = new();
+    public List<object> Professions { get; init; } = new();
+    public List<object> Workplaces { get; init; } = new();
+    public List<object> Relatives { get; init; } = new();
+    public List<int> PowersOfAttorney { get; init; } = new();
+
+    public string? Comment { get; init; }
+    public string? LegacyNotes { get; init; }
+}
+
+public sealed class ClientRequirementsProfile
+{
+    public string? LastName { get; init; }
+    public string? FirstName { get; init; }
+    public string? MiddleName { get; init; }
+    public string? Gender { get; init; }
+    public string? BirthDate { get; init; }
+    public string? Inn { get; init; }
+    public string? Snils { get; init; }
+
+    public List<string>? Phones { get; init; }
+    public List<string>? Emails { get; init; }
+    public List<string>? Addresses { get; init; }
+    public List<object>? AddressEntries { get; init; }
+    public List<string>? Passports { get; init; }
+    public List<object>? PassportEntries { get; init; }
+    public List<string>? BirthCertificates { get; init; }
+    public List<object>? BirthCertificateEntries { get; init; }
+    public List<string>? MilitaryIds { get; init; }
+    public List<object>? MilitaryIdEntries { get; init; }
+    public List<object>? Education { get; init; }
+    public List<object>? Professions { get; init; }
+    public List<object>? Workplaces { get; init; }
+    public List<object>? Relatives { get; init; }
+
+    public string? Comment { get; init; }
+    public string? LegacyNotes { get; init; }
+}
 
 public sealed class ClientAddressProfile
 {

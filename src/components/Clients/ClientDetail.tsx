@@ -32,6 +32,7 @@ import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { apiService } from '../../services/api';
 import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
@@ -762,6 +763,26 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
   const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
+  const { isRequired } = useFormRequirements('clients', activeSection === 'profile');
+
+  const requiredInputClass = (requiredKey: string, value: unknown) => {
+    if (!isRequired(requiredKey)) return 'border-gray-300 focus:ring-emerald-500 focus:border-emerald-500';
+
+    const filled = Array.isArray(value)
+      ? value.some((item) => (typeof item === 'string' ? item.trim().length > 0 : Boolean(item)))
+      : typeof value === 'string'
+        ? value.trim().length > 0
+        : value !== null && value !== undefined && value !== '';
+
+    return filled
+      ? 'border-emerald-400 focus:ring-emerald-200 focus:border-emerald-500'
+      : 'border-red-400 focus:ring-red-200 focus:border-red-500';
+  };
+
+  const requiredMark = (requiredKey: string) => (isRequired(requiredKey) ? ' *' : '');
+
+  const isRequiredListMissing = (requiredKey: string, values: unknown[]) =>
+    isRequired(requiredKey) && !values.some((item) => (typeof item === 'string' ? item.trim().length > 0 : Boolean(item)));
 
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
@@ -1098,6 +1119,43 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       const message = err instanceof Error ? err.message : 'Не удалось обновить клиента';
       await alert({ title: 'Ошибка', description: message, variant: 'error' });
       throw err instanceof Error ? err : new Error(message);
+    }
+  };
+
+  const handleDeleteClientCard = async () => {
+    if (!clientPermissions.canDelete) {
+      showPermissionWarning('Недостаточно прав для удаления клиента.');
+      return;
+    }
+
+    const ok = await confirm({
+      title: 'Подтверждение удаления',
+      description: 'Удалить клиента? Действие необратимо.',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!ok) return;
+
+    try {
+      await apiService.deleteClient(clientId);
+      onBack();
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : 'Не удалось удалить клиента';
+      const marker = ' - ';
+      const markerIndex = raw.indexOf(marker);
+      const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+      try {
+        const parsed = JSON.parse(payload) as { message?: string; usage?: string[] };
+        const message = parsed.message?.trim() || 'Не удалось удалить клиента';
+        const usage = Array.isArray(parsed.usage) && parsed.usage.length > 0
+          ? ` Используется в: ${parsed.usage.join(', ')}.`
+          : '';
+        await alert({ title: 'Удаление невозможно', description: `${message}${usage}`.trim(), variant: 'error' });
+      } catch {
+        await alert({ title: 'Удаление невозможно', description: raw, variant: 'error' });
+      }
     }
   };
 
@@ -2330,8 +2388,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </p>
               </div>
               <div className="w-full max-w-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('clientStatus') || 'Статус клиента'}</label>
-                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>
+                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ClientStatusId', clientFormState.clientStatusId)}`}>
                   <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
                   {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
                 </select>
@@ -2370,12 +2428,12 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <>
                   <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Фамилия *</label>
-                      <input type="text" name="lastName" value={clientFormState.lastName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{'Фамилия' + requiredMark('LastName')}</label>
+                      <input type="text" name="lastName" value={clientFormState.lastName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('LastName', clientFormState.lastName)}`} />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Имя *</label>
-                      <input type="text" name="firstName" value={clientFormState.firstName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{'Имя' + requiredMark('FirstName')}</label>
+                      <input type="text" name="firstName" value={clientFormState.firstName} onChange={handleClientFormChange} required disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('FirstName', clientFormState.firstName)}`} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Отчество</label>
@@ -2393,12 +2451,12 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
                   <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">ИНН</label>
-                      <input type="text" name="inn" value={clientFormState.inn} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{'ИНН' + requiredMark('Inn')}</label>
+                      <input type="text" name="inn" value={clientFormState.inn} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('Inn', clientFormState.inn)}`} />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">СНИЛС</label>
-                      <input type="text" name="snils" value={clientFormState.snils} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" />
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{'СНИЛС' + requiredMark('Snils')}</label>
+                      <input type="text" name="snils" value={clientFormState.snils} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('Snils', clientFormState.snils)}`} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Дата рождения</label>
@@ -2416,24 +2474,34 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <div className="md:col-span-2">
                     <div className="mb-3 flex flex-wrap gap-2">
                       {[
-                        { id: 'main', label: 'Контакты' },
-                        { id: 'passports', label: 'Паспорта' },
-                        { id: 'addresses', label: 'Адреса' },
-                        { id: 'education', label: 'Образование (ОКСО)' },
-                        { id: 'professions', label: 'Профессии (ОКПДТР)' },
-                        { id: 'workplaces', label: 'Работа и должности' },
-                        { id: 'relatives', label: 'Родственники' },
-                        { id: 'birthCertificates', label: 'Свидетельства о рождении' },
-                        { id: 'militaryIds', label: 'Военные билеты' },
-                        { id: 'poa', label: 'Доверенности' },
+                        { id: 'main', label: 'Контакты', requiredKey: 'Phones', values: [...clientFormState.phones, ...clientFormState.emails] },
+                        { id: 'passports', label: 'Паспорта', requiredKey: 'Passports', values: clientFormState.passportEntries },
+                        { id: 'addresses', label: 'Адреса', requiredKey: 'Addresses', values: clientFormState.addressEntries },
+                        { id: 'education', label: 'Образование (ОКСО)', requiredKey: 'Education', values: clientFormState.education },
+                        { id: 'professions', label: 'Профессии (ОКПДТР)', requiredKey: 'Professions', values: clientFormState.professions },
+                        { id: 'workplaces', label: 'Работа и должности', requiredKey: 'Workplaces', values: clientFormState.workplaces },
+                        { id: 'relatives', label: 'Родственники', requiredKey: 'Relatives', values: clientFormState.relatives },
+                        { id: 'birthCertificates', label: 'Свидетельства о рождении', requiredKey: 'BirthCertificates', values: clientFormState.birthCertificateEntries },
+                        { id: 'militaryIds', label: 'Военные билеты', requiredKey: 'MilitaryIds', values: clientFormState.militaryIdEntries },
+                        { id: 'poa', label: 'Доверенности', requiredKey: 'PowersOfAttorney', values: powersOfAttorney },
                       ].map((tab) => (
                         <button
                           key={tab.id}
                           type="button"
                           onClick={() => setActiveProfileGroup(tab.id as typeof activeProfileGroup)}
-                          className={`rounded-lg border px-3 py-1.5 text-sm ${activeProfileGroup === tab.id ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-700'}`}
+                          className={`rounded-lg border px-3 py-1.5 text-sm ${(() => {
+                            const isActive = activeProfileGroup === tab.id;
+                            const missing = tab.requiredKey ? isRequiredListMissing(tab.requiredKey, tab.values ?? []) : false;
+                            const requiredAndFilled = Boolean(tab.requiredKey) && isRequired(tab.requiredKey) && !missing;
+                            if (isActive && missing) return 'border-red-500 bg-red-50 text-red-700';
+                            if (isActive && requiredAndFilled) return 'border-emerald-500 bg-emerald-50 text-emerald-700';
+                            if (isActive) return 'border-emerald-500 bg-emerald-50 text-emerald-700';
+                            if (missing) return 'border-red-300 text-red-700';
+                            if (requiredAndFilled) return 'border-emerald-300 text-emerald-700';
+                            return 'border-gray-300 text-gray-700';
+                          })()}`}
                         >
-                          {tab.label}
+                          {tab.label}{tab.requiredKey && isRequired(tab.requiredKey) ? ' *' : ''}
                         </button>
                       ))}
                     </div>
@@ -2704,8 +2772,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
               <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Комментарий к расширенной карточке</label>
-                  <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100" placeholder={t('additionalInfo')} />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{'Комментарий к расширенной карточке' + requiredMark('Comment')}</label>
+                  <textarea name="comment" value={clientFormState.comment} onChange={handleClientFormChange} rows={3} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('Comment', clientFormState.comment)}`} placeholder={t('additionalInfo')} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Исторические заметки (не удаляются)</label>
@@ -2733,6 +2801,14 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-60"
                 >
                   {clientFormSaving ? t('saving') ?? 'Сохранение...' : t('update') ?? 'Сохранить'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteClientCard}
+                  disabled={!clientPermissions.canDelete || clientFormSaving}
+                  className="inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-60"
+                >
+                  {t('delete') ?? 'Удалить'}
                 </button>
               </div>
             </form>

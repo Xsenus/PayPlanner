@@ -1,10 +1,7 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Models;
-using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
@@ -17,14 +14,13 @@ public class FormRequirementsController : ControllerBase
     private readonly PaymentContext _db;
 
     private sealed record FieldDef(string Key, string Label, string Category = "Основные");
-    private sealed record SectionDef(string Key, string Title, Type ModelType, IReadOnlyList<FieldDef> Fields);
+    private sealed record SectionDef(string Key, string Title, IReadOnlyList<FieldDef> Fields);
 
     private static readonly SectionDef[] Sections =
     {
         new(
             "clients-modal",
             "Клиенты (модалка создания)",
-            typeof(Client),
             new List<FieldDef>
             {
                 new("Name", "Имя"),
@@ -35,23 +31,50 @@ public class FormRequirementsController : ControllerBase
         new(
             "clients",
             "Клиенты (карточка редактирования)",
-            typeof(Client),
             new List<FieldDef>
             {
-                new("Name", "Имя"),
-                new("Email", "Email"),
-                new("Phone", "Телефон"),
-                new("Company", "Компания"),
-                new("Address", "Адрес"),
-                new("Notes", "Комментарий"),
-                new("IsActive", "Активный клиент"),
-                new("LegalEntityId", "Юридическое лицо"),
-                new("ClientStatusId", "Статус клиента"),
+                new("Name", "Имя", "Основные"),
+                new("Email", "Email", "Основные"),
+                new("Phone", "Телефон", "Основные"),
+                new("Company", "Компания", "Основные"),
+                new("Address", "Адрес", "Основные"),
+                new("Notes", "Комментарий", "Основные"),
+                new("IsActive", "Активный клиент", "Основные"),
+                new("LegalEntityId", "Юридическое лицо", "Основные"),
+                new("ClientStatusId", "Статус клиента", "Основные"),
+
+                new("LastName", "Фамилия", "Персональные данные"),
+                new("FirstName", "Имя", "Персональные данные"),
+                new("MiddleName", "Отчество", "Персональные данные"),
+                new("Gender", "Пол", "Персональные данные"),
+                new("BirthDate", "Дата рождения", "Персональные данные"),
+                new("Inn", "ИНН", "Персональные данные"),
+                new("Snils", "СНИЛС", "Персональные данные"),
+
+                new("Phones", "Телефоны", "Контакты (списки)"),
+                new("Emails", "Emails", "Контакты (списки)"),
+                new("Addresses", "Адреса", "Контакты (списки)"),
+                new("AddressEntries", "Нормализованные адреса", "Контакты (списки)"),
+
+                new("Passports", "Паспорта", "Документы (списки)"),
+                new("PassportEntries", "Паспортные данные", "Документы (списки)"),
+                new("BirthCertificates", "Свидетельства о рождении", "Документы (списки)"),
+                new("BirthCertificateEntries", "Свидетельства (детали)", "Документы (списки)"),
+                new("MilitaryIds", "Военные билеты", "Документы (списки)"),
+                new("MilitaryIdEntries", "Военные билеты (детали)", "Документы (списки)"),
+
+                new("Education", "Образование", "Профиль (списки)"),
+                new("Professions", "Профессии", "Профиль (списки)"),
+                new("Workplaces", "Работа и должности", "Профиль (списки)"),
+                new("Relatives", "Родственники", "Профиль (списки)"),
+                new("PowersOfAttorney", "Доверенности", "Профиль (списки)"),
+
+                new("Comment", "Комментарий к расширенной карточке", "Прочее"),
+                new("LegacyNotes", "Исторические заметки", "Прочее"),
             }),
         new(
             "legal-entities",
             "Юридические лица",
-            typeof(LegalEntityRequest),
             new List<FieldDef>
             {
                 new("ShortName", "Краткое название", "Основные"),
@@ -121,7 +144,6 @@ public class FormRequirementsController : ControllerBase
         new(
             "payments",
             "Платежи",
-            typeof(Payment),
             new List<FieldDef>
             {
                 new("Date", "Ожидаемая дата"),
@@ -136,7 +158,6 @@ public class FormRequirementsController : ControllerBase
         new(
             "contract-invoices",
             "Счета договора",
-            typeof(UpsertInvoiceRequest),
             new List<FieldDef>
             {
                 new("Number", "Номер счета"),
@@ -150,7 +171,6 @@ public class FormRequirementsController : ControllerBase
         new(
             "acts",
             "Акты",
-            typeof(UpsertActRequest),
             new List<FieldDef>
             {
                 new("Number", "Номер акта"),
@@ -164,7 +184,6 @@ public class FormRequirementsController : ControllerBase
         new(
             "contracts",
             "Договоры",
-            typeof(UpsertContractRequest),
             new List<FieldDef>
             {
                 new("Number", "Номер договора"),
@@ -208,22 +227,13 @@ public class FormRequirementsController : ControllerBase
     [HttpGet("sections")]
     public ActionResult<List<FormRequirementSectionMetadataDto>> GetSections()
     {
-        var data = Sections.Select(section =>
+        var data = Sections.Select(section => new FormRequirementSectionMetadataDto
         {
-            var props = section.ModelType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
-
-            var fields = section.Fields
-                .Where(f => props.ContainsKey(f.Key))
+            Key = section.Key,
+            Title = section.Title,
+            Fields = section.Fields
                 .Select(f => new FormRequirementFieldMetadataDto { Key = f.Key, Label = f.Label, Category = f.Category })
-                .ToList();
-
-            return new FormRequirementSectionMetadataDto
-            {
-                Key = section.Key,
-                Title = section.Title,
-                Fields = fields,
-            };
+                .ToList(),
         }).ToList();
 
         return Ok(data);

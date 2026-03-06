@@ -1,7 +1,7 @@
+using System.Text.Json;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services;
 
@@ -50,14 +50,45 @@ public class FormRequirementsService : IFormRequirementsService
     private static bool IsMissing(object? value, Type type)
     {
         if (value is null) return true;
-        if (value is string s) return string.IsNullOrWhiteSpace(s);
+        if (value is string s)
+        {
+            var trimmed = s.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed)) return true;
+            if (trimmed.StartsWith("[", StringComparison.Ordinal))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(trimmed);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        return !doc.RootElement.EnumerateArray().Any(e =>
+                            e.ValueKind switch
+                            {
+                                JsonValueKind.String => !string.IsNullOrWhiteSpace(e.GetString()),
+                                JsonValueKind.Null or JsonValueKind.Undefined => false,
+                                _ => true,
+                            });
+                    }
+                }
+                catch
+                {
+                    // не JSON-массив, обрабатываем как обычную строку
+                }
+            }
+            return false;
+        }
         if (value is DateTime dt) return dt == default;
         if (value is int i) return i <= 0;
         if (value is decimal d) return d <= 0;
         if (type != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(type))
         {
-            var enumerable = (System.Collections.IEnumerable)value;
-            return !enumerable.Cast<object>().Any();
+            var enumerable = ((System.Collections.IEnumerable)value).Cast<object?>();
+            return !enumerable.Any(item => item switch
+            {
+                null => false,
+                string str => !string.IsNullOrWhiteSpace(str),
+                _ => true,
+            });
         }
         return false;
     }
