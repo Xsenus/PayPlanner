@@ -22,7 +22,7 @@ public class FormRequirementsController : ControllerBase
     private static readonly SectionDef[] Sections =
     {
         new(
-            "clients",
+            "clients-modal",
             "Клиенты (модалка создания)",
             typeof(Client),
             new List<FieldDef>
@@ -31,6 +31,22 @@ public class FormRequirementsController : ControllerBase
                 new("Email", "Email"),
                 new("Phone", "Телефон"),
                 new("Notes", "Комментарий"),
+            }),
+        new(
+            "clients",
+            "Клиенты (карточка редактирования)",
+            typeof(Client),
+            new List<FieldDef>
+            {
+                new("Name", "Имя"),
+                new("Email", "Email"),
+                new("Phone", "Телефон"),
+                new("Company", "Компания"),
+                new("Address", "Адрес"),
+                new("Notes", "Комментарий"),
+                new("IsActive", "Активный клиент"),
+                new("LegalEntityId", "Юридическое лицо"),
+                new("ClientStatusId", "Статус клиента"),
             }),
         new(
             "legal-entities",

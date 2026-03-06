@@ -25,7 +25,8 @@ export function ClientModal({
   const { confirm } = useDialog();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const { isRequired } = useFormRequirements('clients', isOpen);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { isRequired } = useFormRequirements('clients-modal', isOpen);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -58,12 +59,38 @@ export function ClientModal({
         notes: '',
       });
     }
+    setErrorMessage(null);
   }, [client]);
+
+  const fieldLabels: Record<string, string> = {
+    Name: 'Имя',
+    Email: 'Email',
+    Phone: 'Телефон',
+    Notes: 'Комментарий',
+  };
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const marker = ' - ';
+    const markerIndex = raw.indexOf(marker);
+    const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+    try {
+      const parsed = JSON.parse(payload) as { message?: string; missingFields?: string[] };
+      const base = parsed.message?.trim() || fallback;
+      const missing = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
+      if (missing.length === 0) return base;
+      const mapped = missing.map((f) => fieldLabels[f] ?? f).join(', ');
+      return `${base}: ${mapped}`;
+    } catch {
+      return raw || fallback;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setLoading(true);
+    setErrorMessage(null);
     try {
       const baseClient = client ?? ({} as Client);
       const payload: ClientInput = {
@@ -80,7 +107,7 @@ export function ClientModal({
       await onSubmit(payload);
       onClose();
     } catch (error) {
-      console.error('Failed to save client:', error);
+      setErrorMessage(extractErrorMessage(error, 'Не удалось сохранить клиента'));
     } finally {
       setLoading(false);
     }
@@ -142,6 +169,11 @@ export function ClientModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4" action="#">
+            {errorMessage && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {errorMessage}
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t('name')} {isRequired('Name') ? '*' : ''}</label>
               <input

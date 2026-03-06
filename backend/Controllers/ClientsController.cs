@@ -172,7 +172,7 @@ public class ClientsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model)
     {
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients", model);
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients-modal", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
         if (model.LegalEntityId.HasValue)
