@@ -74,6 +74,17 @@ export interface FormFieldRequirementDto {
   updatedAt: string;
 }
 
+export interface FormRequirementFieldMetadataDto {
+  key: string;
+  label: string;
+}
+
+export interface FormRequirementSectionMetadataDto {
+  key: string;
+  title: string;
+  fields: FormRequirementFieldMetadataDto[];
+}
+
 export interface LegacyAddressMigrationDetail {
   ownerType?: 'legal' | 'client' | string;
   ownerId?: number;
@@ -309,6 +320,10 @@ export class ApiService {
   async getFormRequirements(section?: string) {
     const q = buildQuery({ section });
     return this.request<FormFieldRequirementDto[]>(`/form-requirements${q}`);
+  }
+
+  async getFormRequirementSections() {
+    return this.request<FormRequirementSectionMetadataDto[]>('/form-requirements/sections');
   }
 
   async upsertFormRequirement(payload: { section: string; fieldKey: string; isRequired: boolean }) {
