@@ -505,9 +505,6 @@ public class ClientsController : ControllerBase
         if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ClientId == clientId))
             usage.Add("платежи");
 
-        if (await _db.Invoices.AsNoTracking().AnyAsync(i => i.ClientId == clientId))
-            usage.Add("счета");
-
         if (await _db.Acts.AsNoTracking().AnyAsync(a => a.ClientId == clientId))
             usage.Add("акты");
 
