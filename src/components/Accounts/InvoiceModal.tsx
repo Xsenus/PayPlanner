@@ -218,6 +218,7 @@ export function InvoiceModal({
   const [contractOptions, setContractOptions] = useState<Contract[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
+  const [numberEditedManually, setNumberEditedManually] = useState(false);
 
   const parseMoney = useCallback((value: string): number => {
     const normalized = value.replace(',', '.').trim();
@@ -360,8 +361,31 @@ export function InvoiceModal({
       setActsError(null);
       setCreateActError(null);
       setLocalError(null);
+      setNumberEditedManually(false);
     }
   }, [open, invoice, defaultClientId, defaultType]);
+
+  useEffect(() => {
+    if (!open || mode !== 'create' || numberEditedManually) return;
+
+    let cancelled = false;
+
+    async function loadNextNumber() {
+      try {
+        const next = await apiService.getNextInvoiceNumber(fromInputToApiDate(form.date) ?? form.date);
+        if (!cancelled) {
+          setForm((prev) => ({ ...prev, number: next.nextNumber || prev.number }));
+        }
+      } catch {
+        // noop: оставляем номер как есть
+      }
+    }
+
+    void loadNextNumber();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, form.date, numberEditedManually]);
 
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
@@ -549,6 +573,9 @@ export function InvoiceModal({
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const value = event.target.value;
+    if (field === 'number') {
+      setNumberEditedManually(true);
+    }
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 

@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Text;
 using System.Net;
 using System.IO;
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +21,8 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class InvoicesController : ControllerBase
 {
+    private const string InvoiceNumberStartSettingKey = "invoices.numbering.startNumber";
+    private const string InvoiceNumberStrategySettingKey = "invoices.numbering.strategy";
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
@@ -217,6 +220,12 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
+        var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(number, request.Date.Date, null, ct);
+        if (duplicateNumberError is not null)
+        {
+            return duplicateNumberError;
+        }
+
         if (request.ServiceId.HasValue)
         {
             var serviceExists = await _db.Services.AsNoTracking().AnyAsync(s => s.Id == request.ServiceId.Value, ct);
@@ -323,6 +332,12 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
+        var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(number, request.Date.Date, id, ct);
+        if (duplicateNumberError is not null)
+        {
+            return duplicateNumberError;
+        }
+
         if (request.ServiceId.HasValue)
         {
             var serviceExists = await _db.Services.AsNoTracking().AnyAsync(s => s.Id == request.ServiceId.Value, ct);
@@ -398,6 +413,83 @@ public class InvoicesController : ControllerBase
         }
 
         return Ok(dto);
+    }
+
+    [HttpGet("numbering-settings")]
+    public async Task<ActionResult<object>> GetNumberingSettings(CancellationToken ct)
+    {
+        var userId = GetUserId(User);
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var settings = await _db.UserSettings
+            .AsNoTracking()
+            .Where(x => x.UserId == userId.Value && (x.Key == InvoiceNumberStartSettingKey || x.Key == InvoiceNumberStrategySettingKey))
+            .ToListAsync(ct);
+
+        return Ok(new
+        {
+            startNumber = ParseStartNumber(settings.FirstOrDefault(x => x.Key == InvoiceNumberStartSettingKey)?.Value),
+            allocationStrategy = ParseAllocationStrategy(settings.FirstOrDefault(x => x.Key == InvoiceNumberStrategySettingKey)?.Value),
+        });
+    }
+
+    [HttpPut("numbering-settings")]
+    public async Task<ActionResult<object>> UpsertNumberingSettings([FromBody] InvoiceNumberingSettingsRequest request, CancellationToken ct)
+    {
+        var userId = GetUserId(User);
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (request.StartNumber < 1)
+        {
+            return BadRequest("Стартовый номер должен быть больше 0.");
+        }
+
+        var allocationStrategy = ParseAllocationStrategy(request.AllocationStrategy);
+        var now = DateTime.UtcNow;
+
+        await UpsertUserSettingAsync(userId.Value, InvoiceNumberStartSettingKey, request.StartNumber.ToString(), now, ct);
+        await UpsertUserSettingAsync(userId.Value, InvoiceNumberStrategySettingKey, allocationStrategy, now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            startNumber = request.StartNumber,
+            allocationStrategy,
+        });
+    }
+
+    [HttpGet("next-number")]
+    public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime? date, CancellationToken ct)
+    {
+        var userId = GetUserId(User);
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var targetDate = (date ?? DateTime.UtcNow).Date;
+        var settings = await _db.UserSettings
+            .AsNoTracking()
+            .Where(x => x.UserId == userId.Value && (x.Key == InvoiceNumberStartSettingKey || x.Key == InvoiceNumberStrategySettingKey))
+            .ToListAsync(ct);
+
+        var startNumber = ParseStartNumber(settings.FirstOrDefault(x => x.Key == InvoiceNumberStartSettingKey)?.Value);
+        var allocationStrategy = ParseAllocationStrategy(settings.FirstOrDefault(x => x.Key == InvoiceNumberStrategySettingKey)?.Value);
+        var nextNumber = await GetNextInvoiceNumberAsync(targetDate, startNumber, allocationStrategy, ct);
+
+        return Ok(new
+        {
+            year = targetDate.Year,
+            nextNumber = nextNumber.ToString(),
+            startNumber,
+            allocationStrategy,
+        });
     }
 
     [HttpDelete("{id:int}")]
@@ -883,6 +975,108 @@ public class InvoicesController : ControllerBase
             ? new HashSet<int>()
             : responsibleIds.Where(x => x > 0).ToHashSet();
     }
+
+    private async Task<int> GetNextInvoiceNumberAsync(DateTime targetDate, int startNumber, string allocationStrategy, CancellationToken ct)
+    {
+        var yearStart = new DateTime(targetDate.Year, 1, 1);
+        var yearEnd = yearStart.AddYears(1);
+
+        var numbers = await _db.Payments
+            .AsNoTracking()
+            .Where(x =>
+                x.DocumentKind == DocumentKind.Invoice &&
+                (x.AccountDate ?? x.Date) >= yearStart &&
+                (x.AccountDate ?? x.Date) < yearEnd &&
+                x.Account != null &&
+                x.Account != "")
+            .Select(x => x.Account!)
+            .ToListAsync(ct);
+
+        var usedNumbers = numbers
+            .Select(value => int.TryParse(value.Trim(), out var parsed) ? parsed : (int?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Where(value => value >= startNumber)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+
+        if (allocationStrategy == "first-free")
+        {
+            var candidate = startNumber;
+            var usedSet = usedNumbers.ToHashSet();
+            while (usedSet.Contains(candidate))
+            {
+                candidate++;
+            }
+
+            return candidate;
+        }
+
+        var max = usedNumbers.Count > 0 ? usedNumbers.Max() : startNumber - 1;
+        return Math.Max(startNumber, max + 1);
+    }
+
+    private async Task<IActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)
+    {
+        var yearStart = new DateTime(accountDate.Year, 1, 1);
+        var yearEnd = yearStart.AddYears(1);
+        var normalized = number.Trim();
+
+        var duplicateExists = await _db.Payments
+            .AsNoTracking()
+            .Where(x =>
+                x.DocumentKind == DocumentKind.Invoice &&
+                (x.AccountDate ?? x.Date) >= yearStart &&
+                (x.AccountDate ?? x.Date) < yearEnd &&
+                x.Account != null)
+            .Where(x => excludeId == null || x.Id != excludeId.Value)
+            .AnyAsync(x => x.Account!.Trim().ToLower() == normalized.ToLower(), ct);
+
+        if (!duplicateExists)
+        {
+            return null;
+        }
+
+        return BadRequest($"Номер счета '{number}' уже занят в {accountDate.Year} году.");
+    }
+
+    private async Task UpsertUserSettingAsync(int userId, string key, string value, DateTime nowUtc, CancellationToken ct)
+    {
+        var setting = await _db.UserSettings
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.Key == key, ct);
+
+        if (setting is null)
+        {
+            _db.UserSettings.Add(new UserSetting
+            {
+                UserId = userId,
+                Key = key,
+                Value = value,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            });
+            return;
+        }
+
+        setting.Value = value;
+        setting.UpdatedAt = nowUtc;
+    }
+
+    private static int ParseStartNumber(string? value)
+    {
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : 1;
+    }
+
+    private static string ParseAllocationStrategy(string? value)
+    {
+        return string.Equals(value, "first-free", StringComparison.OrdinalIgnoreCase)
+            ? "first-free"
+            : "max-plus-one";
+    }
+
+    private static int? GetUserId(ClaimsPrincipal user)
+        => int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (int?)null;
 
     private static string NormalizeDocumentFormat(string? format)
     {

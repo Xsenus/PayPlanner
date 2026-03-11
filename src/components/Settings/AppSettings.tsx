@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
-import type { FormRequirementSectionMetadataDto, LegacyAddressMigrationResult } from '../../services/api';
+import type { FormRequirementSectionMetadataDto, InvoiceNumberingSettingsDto, LegacyAddressMigrationResult } from '../../services/api';
 
 type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
@@ -27,6 +27,9 @@ export function AppSettings() {
   const [selectedRequirementsSection, setSelectedRequirementsSection] = useState<string>('');
   const [requirementsLoading, setRequirementsLoading] = useState(false);
   const [requirementsMessage, setRequirementsMessage] = useState<string | null>(null);
+  const [invoiceNumbering, setInvoiceNumbering] = useState<InvoiceNumberingSettingsDto>({ startNumber: 1, allocationStrategy: 'max-plus-one' });
+  const [invoiceNumberingLoading, setInvoiceNumberingLoading] = useState(false);
+  const [invoiceNumberingMessage, setInvoiceNumberingMessage] = useState<string | null>(null);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
@@ -152,6 +155,33 @@ export function AppSettings() {
     }
   };
 
+  const loadInvoiceNumbering = async () => {
+    setInvoiceNumberingLoading(true);
+    setInvoiceNumberingMessage(null);
+    try {
+      const response = await apiService.getInvoiceNumberingSettings();
+      setInvoiceNumbering(response);
+    } catch (e) {
+      setInvoiceNumberingMessage(e instanceof Error ? e.message : 'Не удалось загрузить настройки нумерации счетов');
+    } finally {
+      setInvoiceNumberingLoading(false);
+    }
+  };
+
+  const saveInvoiceNumbering = async () => {
+    setInvoiceNumberingLoading(true);
+    setInvoiceNumberingMessage(null);
+    try {
+      const response = await apiService.updateInvoiceNumberingSettings(invoiceNumbering);
+      setInvoiceNumbering(response);
+      setInvoiceNumberingMessage('Настройки нумерации счетов сохранены');
+    } catch (e) {
+      setInvoiceNumberingMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройки нумерации счетов');
+    } finally {
+      setInvoiceNumberingLoading(false);
+    }
+  };
+
   const runMigration = async () => {
     setLoading(true);
     setError(null);
@@ -168,6 +198,9 @@ export function AppSettings() {
   useEffect(() => {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
+    }
+    if (activeSection === 'general') {
+      void loadInvoiceNumbering();
     }
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
@@ -270,8 +303,46 @@ export function AppSettings() {
             </div>
 
             {activeSection === 'general' && (
-              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 text-sm text-gray-600">
-                Здесь будут общие настройки приложения.
+              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+                <div>
+                  <h4 className="text-base font-semibold text-gray-900">Нумерация счетов</h4>
+                  <p className="text-sm text-gray-600 mt-1">Номер сбрасывается каждый год. Можно выбрать стартовый номер и стратегию подбора следующего номера.</p>
+                </div>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">Стартовый номер года</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={invoiceNumbering.startNumber}
+                    onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, startNumber: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
+                  <select
+                    value={invoiceNumbering.allocationStrategy}
+                    onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, allocationStrategy: e.target.value as InvoiceNumberingSettingsDto['allocationStrategy'] }))}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="max-plus-one">Максимальный номер + 1</option>
+                    <option value="first-free">Первый свободный номер от стартового</option>
+                  </select>
+                </label>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={saveInvoiceNumbering}
+                    disabled={invoiceNumberingLoading}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {invoiceNumberingLoading ? 'Сохранение…' : 'Сохранить'}
+                  </button>
+                  {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
+                </div>
               </div>
             )}
 
