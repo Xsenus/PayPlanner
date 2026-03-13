@@ -1314,7 +1314,7 @@ export function LegalEntityModal({
                     { key: 'organizationForm', label: 'Форма организации', dict: 'organization-forms', options: organizationForms },
                     { key: 'timezone', label: 'Часовой пояс', dict: 'timezones', options: timezones },
                   ].map((item) => {
-                    const value = (formState as Record<string, string | boolean>)[item.key] as string;
+                    const value = (formState as unknown as Record<string, string | boolean>)[item.key] as string;
                     const hasCurrent = !!value && item.options.some((opt) => opt.name === value);
                     return (
                       <div key={item.key}>
@@ -1384,7 +1384,7 @@ export function LegalEntityModal({
                   ].map(([name, label]) => (
                     <div key={name as string}>
                       <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
+                      <input type="text" name={name as string} value={(formState as unknown as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as unknown as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                   <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -1409,7 +1409,7 @@ export function LegalEntityModal({
                   ].map(([name, label]) => (
                     <div key={name as string}>
                       <label className="mb-2 block text-sm font-medium text-gray-700">{label}{isRequired(requiredFieldKey(name as string)) ? '*' : ''}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as Record<string, string | boolean>)[name as string])} />
+                      <input type="text" name={name as string} value={(formState as unknown as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className={requiredInputClass(name as string, (formState as unknown as Record<string, string | boolean>)[name as string])} />
                     </div>
                   ))}
                 </div>
@@ -1429,7 +1429,7 @@ export function LegalEntityModal({
                   ].map(([name, label]) => (
                     <div key={name as string}>
                       <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>
-                      <input type="text" name={name as string} value={(formState as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <input type="text" name={name as string} value={(formState as unknown as Record<string, string | boolean>)[name as string] as string} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   ))}
                 </div>

@@ -416,9 +416,6 @@ function AppContent() {
           ? (
               <Payments
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
-                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
-                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Income"
                 lockType
                 titleKey="paymentsIncomeTitle"
@@ -432,9 +429,6 @@ function AppContent() {
           ? (
               <Payments
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
-                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
-                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
                 defaultType="Expense"
                 lockType
                 titleKey="paymentsExpenseTitle"
@@ -483,9 +477,6 @@ function AppContent() {
                 contractId={selectedContractId}
                 onBack={() => setActiveTab('contracts')}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })}
-                onOpenInvoiceEditor={(id) => { try { localStorage.setItem('pp.openInvoiceId', String(id)); } catch { /** */ } setActiveTab('accounts'); }}
-                onOpenActEditor={(id) => { setSelectedActId(id); setActiveTab('actDetail'); }}
-                onOpenMoneyEditor={(id) => { try { localStorage.setItem('pp.openMoneyOperationId', String(id)); } catch { /** */ } setActiveTab('moneyTotal'); }}
               />
             )
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');

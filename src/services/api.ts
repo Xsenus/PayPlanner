@@ -67,6 +67,16 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface InvoiceNumberingSettingsDto {
+  startNumber: number;
+  allocationStrategy: 'max-plus-one' | 'first-free';
+}
+
+export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
+  year: number;
+  nextNumber: string;
+}
+
 export interface FormFieldRequirementDto {
   section: string;
   fieldKey: string;
@@ -367,6 +377,22 @@ export class ApiService {
   }) {
     const q = buildQuery(params ?? {});
     return this.request<InvoiceSummary>(`/invoices/summary${q}`);
+  }
+
+  async getInvoiceNumberingSettings() {
+    return this.request<InvoiceNumberingSettingsDto>('/invoices/numbering-settings');
+  }
+
+  async updateInvoiceNumberingSettings(payload: InvoiceNumberingSettingsDto) {
+    return this.request<InvoiceNumberingSettingsDto>('/invoices/numbering-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getNextInvoiceNumber(date?: string) {
+    const q = buildQuery({ date });
+    return this.request<NextInvoiceNumberDto>(`/invoices/next-number${q}`);
   }
 
   async createInvoice(payload: InvoiceInput) {

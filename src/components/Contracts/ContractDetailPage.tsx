@@ -192,7 +192,7 @@ export function ContractDetailPage({ contractId, onBack, onOpenClient, onOpenInv
             type="date"
             value={toDateInputValue(contract.date) ?? ''}
             disabled={!editMode}
-            onChange={(e) => setContract((prev) => (prev ? { ...prev, date: fromInputToApiDate(e.target.value) } : prev))}
+            onChange={(e) => setContract((prev) => (prev ? { ...prev, date: fromInputToApiDate(e.target.value) ?? prev.date } : prev))}
             className="mt-1 w-full rounded border px-2 py-1"
           />
         </label>
