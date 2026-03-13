@@ -1017,7 +1017,7 @@ public class InvoicesController : ControllerBase
         return Math.Max(startNumber, max + 1);
     }
 
-    private async Task<IActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)
+    private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)
     {
         var yearStart = new DateTime(accountDate.Year, 1, 1);
         var yearEnd = yearStart.AddYears(1);
