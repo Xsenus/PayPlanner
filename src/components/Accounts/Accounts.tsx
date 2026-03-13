@@ -168,9 +168,6 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const canEdit = permissions.accounts.canEdit;
   const canDelete = permissions.accounts.canDelete;
 
-  const today = useMemo(() => new Date(), []);
-  const startOfYear = useMemo(() => formatLocalYMD(new Date(today.getFullYear(), 0, 1)), [today]);
-  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
 
   const storagePrefix = useMemo(() => `pp.accounts.${user?.id ?? 'guest'}`, [user?.id]);
   const savedPeriod = useMemo(
@@ -183,8 +180,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   );
   const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 15), [storagePrefix]);
 
-  const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
-  const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
+  const [from, setFrom] = useState<string>(savedPeriod.from || '');
+  const [to, setTo] = useState<string>(savedPeriod.to || '');
   const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
   const [search, setSearch] = useState('');
@@ -503,8 +500,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   };
 
   const handleResetFilters = () => {
-    setFrom(startOfYear);
-    setTo(todayYMD);
+    setFrom('');
+    setTo('');
     setStatusFilter('all');
     setSearch('');
   };
