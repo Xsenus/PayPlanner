@@ -1,14 +1,20 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Ban,
   CalendarRange,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   FileCheck2,
+  GripVertical,
   Loader2,
   Pencil,
   Plus,
   RotateCcw,
   Search,
   Send,
+  Settings2,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -20,7 +26,7 @@ import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
-import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
+import { toDateInputValue } from '../../utils/dateUtils';
 import { ActModal } from './ActModal';
 
 const STATUS_ORDER: ActStatus[] = ['Terminated', 'Transferred', 'Signed'];
@@ -44,6 +50,39 @@ function formatDate(value?: string | null): string {
 
 type ActColumnKey = ActsSortKey | 'actions';
 
+const DEFAULT_VISIBLE_COLUMNS: ActColumnKey[] = [
+  'date',
+  'number',
+  'amount',
+  'invoiceNumber',
+  'client',
+  'counterpartyInn',
+  'status',
+  'responsible',
+  'actions',
+];
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+function safeRead<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as T;
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeWrite<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /** */
+  }
+}
+
 type SortState = {
   key: ActsSortKey;
   direction: 'asc' | 'desc';
@@ -66,21 +105,28 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   const { t } = useTranslation();
 
-  const today = useMemo(() => new Date(), []);
-  const startOfYear = useMemo(
-    () => formatLocalYMD(new Date(today.getFullYear(), 0, 1)),
-    [today],
+  const storagePrefix = useMemo(() => `pp.acts.${user?.id ?? 'guest'}`, [user?.id]);
+  const savedPeriod = useMemo(
+    () => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}),
+    [storagePrefix],
   );
-  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
+  const savedColumns = useMemo(
+    () => safeRead<ActColumnKey[]>(`${storagePrefix}.columns`, DEFAULT_VISIBLE_COLUMNS),
+    [storagePrefix],
+  );
+  const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 20), [storagePrefix]);
 
-  const [from, setFrom] = useState<string>(startOfYear);
-  const [to, setTo] = useState<string>(todayYMD);
+  const [from, setFrom] = useState<string>(savedPeriod.from || '');
+  const [to, setTo] = useState<string>(savedPeriod.to || '');
   const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [pageSize, setPageSize] = useState(Math.max(10, Math.min(savedPageSize, 100)));
+  const [visibleColumns, setVisibleColumns] = useState<ActColumnKey[]>(savedColumns);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [draggingColumnId, setDraggingColumnId] = useState<ActColumnKey | null>(null);
 
   const {
     acts,
@@ -167,14 +213,66 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     [summaryBuckets, t],
   );
 
+  const columns = useMemo(
+    () => [
+      { key: 'date' as ActColumnKey, label: t('actDate') ?? 'Дата', sortable: true },
+      { key: 'number' as ActColumnKey, label: t('actNumber') ?? '№', sortable: true },
+      { key: 'amount' as ActColumnKey, label: t('actAmount') ?? 'Сумма', sortable: true },
+      { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
+      { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
+      { key: 'counterpartyInn' as ActColumnKey, label: t('actInn') ?? 'ИНН', sortable: true },
+      { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
+      { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
+      { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
+    ],
+    [t],
+  );
+
+  const columnsForSettings = useMemo(
+    () => columns.filter((column) => (column.key === 'actions' ? canEdit || canDelete : true)),
+    [canDelete, canEdit, columns],
+  );
+
+  useEffect(() => {
+    setVisibleColumns((prev) => {
+      const allowed = prev.filter((key) => columnsForSettings.some((column) => column.key === key));
+      if (allowed.length === 0) {
+        return [columnsForSettings[0]?.key ?? 'date'];
+      }
+      return allowed;
+    });
+  }, [columnsForSettings]);
+
+  const visibleOrderedColumns = useMemo(
+    () => columnsForSettings.filter((column) => visibleColumns.includes(column.key)),
+    [columnsForSettings, visibleColumns],
+  );
+
+  const effectivePageSize = pagination.pageSize || pageSize;
   const totalPages = useMemo(() => {
-    if (!pagination.pageSize) return 1;
-    return Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize));
-  }, [pagination.pageSize, pagination.total]);
+    if (!effectivePageSize) return 1;
+    return Math.max(1, Math.ceil((pagination.total ?? 0) / effectivePageSize));
+  }, [effectivePageSize, pagination.total]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, from, to]);
+  }, [debouncedSearch, statusFilter, from, to, pageSize]);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.period`, { from, to });
+  }, [from, to, storagePrefix]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.columns`, visibleColumns);
+  }, [storagePrefix, visibleColumns]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.pageSize`, pageSize);
+  }, [pageSize, storagePrefix]);
 
   const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;
@@ -266,12 +364,149 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   };
 
   const handleResetFilters = () => {
-    setFrom(startOfYear);
-    setTo(todayYMD);
+    setFrom('');
+    setTo('');
     setStatusFilter('all');
     setSearch('');
     setSortState({ key: 'date', direction: 'desc' });
     setPage(1);
+  };
+
+  const toggleColumn = (key: ActColumnKey) => {
+    setVisibleColumns((prev) => {
+      if (prev.includes(key)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((columnKey) => columnKey !== key);
+      }
+      const next = [...prev, key];
+      next.sort((a, b) => {
+        const ia = columnsForSettings.findIndex((column) => column.key === a);
+        const ib = columnsForSettings.findIndex((column) => column.key === b);
+        return ia - ib;
+      });
+      return next;
+    });
+  };
+
+  const reorderColumns = (sourceId: ActColumnKey, targetId: ActColumnKey) => {
+    if (sourceId === targetId) return;
+    setVisibleColumns((prev) => {
+      const sourceIndex = prev.indexOf(sourceId);
+      const targetIndex = prev.indexOf(targetId);
+      if (sourceIndex === -1 || targetIndex === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const moveColumn = (columnId: ActColumnKey, direction: 'up' | 'down') => {
+    setVisibleColumns((prev) => {
+      const idx = prev.indexOf(columnId);
+      if (idx < 0) return prev;
+      const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapWith < 0 || swapWith >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+      return next;
+    });
+  };
+
+  const pageNumbers = useMemo(() => {
+    const pages = new Set<number>([1, totalPages, page - 1, page, page + 1]);
+    return Array.from(pages)
+      .filter((value) => value >= 1 && value <= totalPages)
+      .sort((a, b) => a - b);
+  }, [page, totalPages]);
+
+  const renderActCell = (act: Act, columnKey: ActColumnKey, key: string) => {
+    switch (columnKey) {
+      case 'date':
+        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{formatDate(act.date)}</td>;
+      case 'number':
+        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-900">{act.number}</td>;
+      case 'amount':
+        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{formatMoney(act.amount || 0)}</td>;
+      case 'invoiceNumber':
+        return (
+          <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
+            {act.invoiceNumber ? (
+              <button
+                type="button"
+                className="text-indigo-600 hover:underline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void openInvoiceFromAct(act);
+                }}
+              >
+                {act.invoiceNumber}
+              </button>
+            ) : '—'}
+          </td>
+        );
+      case 'client':
+        return (
+          <td key={key} className="px-4 py-3 text-sm text-slate-700">
+            <div className="flex flex-col">
+              <span className="font-medium text-slate-900">
+                {act.clientId && act.clientName ? (
+                  <button
+                    type="button"
+                    className="text-indigo-600 hover:underline"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenClient?.(act.clientId as number);
+                    }}
+                  >
+                    {act.clientName}
+                  </button>
+                ) : (act.clientName || t('actClientUnknown') || 'Без контрагента')}
+              </span>
+              {act.title && <span className="text-xs text-slate-500">{act.title}</span>}
+            </div>
+          </td>
+        );
+      case 'counterpartyInn':
+        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{act.counterpartyInn || '—'}</td>;
+      case 'status':
+        return (
+          <td key={key} className="px-4 py-3">
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusClasses[act.status]}`}>
+              {statusLabels[act.status]}
+            </span>
+          </td>
+        );
+      case 'responsible':
+        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{act.responsibleName || t('actResponsibleNotSelected') || '—'}</td>;
+      case 'actions':
+        return (
+          <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); onOpenAct?.(act.id); }}
+                  className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                  title={t('edit') ?? 'Редактировать'}>
+                  <Pencil className="h-4 w-4" />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); void handleDelete(act); }}
+                  className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
+                  title={t('delete') ?? 'Удалить'}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </td>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
@@ -300,7 +535,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
           )}
         </div>
 
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <div className="mb-6 grid gap-4 lg:grid-cols-3">
           {summaryLoading ? (
             STATUS_ORDER.map((_, index) => (
               <div
@@ -312,98 +547,164 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
               </div>
             ))
           ) : (
-            summaryCards.map((card) => {
+            summaryCards.map((card, index) => {
               const Icon = card.icon;
+              const filterLabel = index === 0
+                ? (t('actFiltersPeriod') ?? 'Период с')
+                : index === 1
+                  ? (t('actFiltersPeriodTo') ?? 'Период по')
+                  : (t('status') ?? 'Статус');
+
               return (
-                <div
-                  key={card.key}
-                  className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${card.accent}`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium uppercase tracking-wide text-slate-500">
-                      {card.title}
-                    </span>
-                    <Icon className="h-5 w-5" />
+                <div key={card.key} className="flex flex-col gap-3">
+                  <div className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${card.accent}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                        {card.title}
+                      </span>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="mt-3 text-2xl font-semibold">{formatMoney(card.bucket.amount)}</div>
+                    <div className="mt-2 text-sm text-slate-600">
+                      {t('actsSummaryCount') ?? 'Количество актов'}: {card.bucket.count}
+                    </div>
                   </div>
-                  <div className="mt-3 text-2xl font-semibold">
-                    {formatMoney(card.bucket.amount)}
-                  </div>
-                  <div className="mt-2 text-sm text-slate-600">
-                    {t('actsSummaryCount') ?? 'Количество актов'}: {card.bucket.count}
-                  </div>
+
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-center font-medium text-slate-700">{filterLabel}</span>
+                    {index < 2 ? (
+                      <div className="relative">
+                        <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <input
+                          type="date"
+                          value={index === 0 ? from : to}
+                          onChange={(event) => (index === 0 ? setFrom(event.target.value) : setTo(event.target.value))}
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        />
+                      </div>
+                    ) : (
+                      <select
+                        value={statusFilter}
+                        onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActStatus))}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+                        <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+                        {STATUS_ORDER.concat('Created' as ActStatus).map((status) => (
+                          <option key={status} value={status}>
+                            {statusLabels[status]}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </label>
                 </div>
               );
             })
           )}
         </div>
 
-        <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-end sm:justify-between">
-          <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actFiltersPeriod') ?? 'Период с'}</span>
-              <div className="relative">
-                <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(event) => setFrom(event.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                />
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actFiltersPeriodTo') ?? 'Период по'}</span>
-              <div className="relative">
-                <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                />
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('status') ?? 'Статус'}</span>
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActStatus))}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-                {STATUS_ORDER.concat('Created' as ActStatus).map((status) => (
-                  <option key={status} value={status}>
-                    {statusLabels[status]}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="relative w-full">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t('actSearchPlaceholder') ?? 'Номер акта, название или ИНН'}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            />
           </div>
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-1 sm:flex-row sm:items-end sm:justify-end">
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('actSearchPlaceholder') ?? 'Номер акта, название или ИНН'}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </div>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="relative">
               <button
                 type="button"
-                onClick={handleResetFilters}
+                onClick={() => setColumnsOpen((prev) => !prev)}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
-                <RotateCcw className="h-4 w-4" />
-                {t('actFiltersReset') ?? 'Сбросить'}
+                <Settings2 className="h-4 w-4" />
+                {t('visibleColumns') ?? 'Колонки'}
               </button>
-              <button
-                type="button"
-                onClick={() => void refresh()}
-                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-100">
-                {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
-                {t('actFiltersApply') ?? 'Обновить'}
-              </button>
+              {columnsOpen && (
+                <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {t('visibleColumns') ?? 'Отображаемые столбцы'}
+                  </p>
+                  <div className="space-y-2">
+                    {columnsForSettings.map((column) => {
+                      const columnId = column.key;
+                      const visibleIndex = visibleColumns.indexOf(columnId);
+                      const isVisible = visibleIndex >= 0;
+
+                      return (
+                        <div
+                          key={columnId}
+                          className={`flex items-center justify-between rounded-lg border px-2 py-1.5 ${draggingColumnId === columnId ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'}`}
+                          draggable={isVisible}
+                          onDragStart={(event) => {
+                            if (!isVisible) return;
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', columnId);
+                            setDraggingColumnId(columnId);
+                          }}
+                          onDragOver={(event) => {
+                            if (!isVisible) return;
+                            event.preventDefault();
+                          }}
+                          onDrop={(event) => {
+                            if (!isVisible) return;
+                            event.preventDefault();
+                            const sourceId = event.dataTransfer.getData('text/plain') as ActColumnKey;
+                            reorderColumns(sourceId, columnId);
+                            setDraggingColumnId(null);
+                          }}
+                          onDragEnd={() => setDraggingColumnId(null)}>
+                          <div className="flex items-center gap-2">
+                            <GripVertical className={`h-4 w-4 ${isVisible ? 'text-slate-400' : 'text-slate-300'}`} />
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={isVisible}
+                                onChange={() => toggleColumn(columnId)}
+                                disabled={visibleColumns.length === 1 && isVisible}
+                              />
+                              <span>{column.label}</span>
+                            </label>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => moveColumn(columnId, 'up')}
+                              disabled={!isVisible || visibleIndex === 0}
+                              className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveColumn(columnId, 'down')}
+                              disabled={!isVisible || visibleIndex === visibleColumns.length - 1}
+                              className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+              <RotateCcw className="h-4 w-4" />
+              {t('actFiltersReset') ?? 'Сбросить'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-100">
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
+              {t('actFiltersApply') ?? 'Обновить'}
+            </button>
           </div>
         </div>
 
@@ -417,53 +718,35 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
-                  {[
-                    { key: 'date' as ActColumnKey, label: t('actDate') ?? 'Дата', sortable: true },
-                    { key: 'number' as ActColumnKey, label: t('actNumber') ?? '№', sortable: true },
-                    { key: 'amount' as ActColumnKey, label: t('actAmount') ?? 'Сумма', sortable: true },
-                    { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
-                    { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
-                    { key: 'counterpartyInn' as ActColumnKey, label: t('actInn') ?? 'ИНН', sortable: true },
-                    { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
-                    { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
-                    { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
-                  ]
-                    .filter((column) =>
-                      column.key !== 'actions' || canEdit || canDelete ? true : false,
-                    )
-                    .map((column) => {
-                      const isSortable = column.sortable;
-                      const isActive = sortState.key === column.key;
-                      const direction = isActive ? sortState.direction : undefined;
-                      return (
-                        <th
-                          key={column.key}
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          {isSortable ? (
-                            <button
-                              type="button"
-                              onClick={() => changeSort(column.key as ActsSortKey)}
-                              className="inline-flex items-center gap-1 text-slate-700">
-                              <span>{column.label}</span>
-                              {isActive && (
-                                <span className="text-xs">
-                                  {direction === 'asc' ? '▲' : '▼'}
-                                </span>
-                              )}
-                            </button>
-                          ) : (
+                  {visibleOrderedColumns.map((column) => {
+                    const isSortable = column.sortable;
+                    const isActive = sortState.key === column.key;
+                    const direction = isActive ? sortState.direction : undefined;
+                    return (
+                      <th
+                        key={column.key}
+                        scope="col"
+                        className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        {isSortable ? (
+                          <button
+                            type="button"
+                            onClick={() => changeSort(column.key as ActsSortKey)}
+                            className="inline-flex items-center gap-1 text-slate-700">
                             <span>{column.label}</span>
-                          )}
-                        </th>
-                      );
-                    })}
+                            {isActive && <span className="text-xs">{direction === 'asc' ? '▲' : '▼'}</span>}
+                          </button>
+                        ) : (
+                          <span>{column.label}</span>
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {loading ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
+                    <td colSpan={visibleOrderedColumns.length || 1} className="px-4 py-12 text-center text-slate-500">
                       <div className="flex flex-col items-center gap-3">
                         <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
                         <span>{t('loading') ?? 'Загрузка...'}...</span>
@@ -472,11 +755,9 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                   </tr>
                 ) : acts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center">
+                    <td colSpan={visibleOrderedColumns.length || 1} className="px-4 py-12 text-center">
                       <div className="mx-auto max-w-md rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
-                        <h3 className="text-lg font-semibold text-slate-700">
-                          {t('actsEmpty') ?? 'Акты не найдены'}
-                        </h3>
+                        <h3 className="text-lg font-semibold text-slate-700">{t('actsEmpty') ?? 'Акты не найдены'}</h3>
                         <p className="mt-2 text-sm text-slate-500">
                           {t('actsEmptyHint') ?? 'Измените условия фильтра или добавьте новый акт.'}
                         </p>
@@ -497,87 +778,10 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                     <tr
                       key={act.id}
                       className={`hover:bg-slate-50/80 ${canEdit ? 'cursor-pointer' : ''}`}
-                      onClick={() => { if (canEdit) onOpenAct?.(act.id); }}
-                    >
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">
-                        {formatDate(act.date)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-900">
-                        {act.number}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">
-                        {formatMoney(act.amount || 0)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {act.invoiceNumber ? (
-                          <button
-                            type="button"
-                            className="text-indigo-600 hover:underline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void openInvoiceFromAct(act);
-                            }}
-                          >
-                            {act.invoiceNumber}
-                          </button>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-900">
-                            {act.clientId && act.clientName ? (
-                              <button
-                                type="button"
-                                className="text-indigo-600 hover:underline"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  onOpenClient?.(act.clientId as number);
-                                }}
-                              >
-                                {act.clientName}
-                              </button>
-                            ) : (act.clientName || t('actClientUnknown') || 'Без контрагента')}
-                          </span>
-                          {act.title && (
-                            <span className="text-xs text-slate-500">{act.title}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-                        {act.counterpartyInn || '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusClasses[act.status]}`}>
-                          {statusLabels[act.status]}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">
-                        {act.responsibleName || t('actResponsibleNotSelected') || '—'}
-                      </td>
-                      {(canEdit || canDelete) && (
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
-                          <div className="flex items-center gap-2">
-                            {canEdit && (
-                              <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); onOpenAct?.(act.id); }}
-                                className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
-                                title={t('edit') ?? 'Редактировать'}>
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); void handleDelete(act); }}
-                                className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
-                                title={t('delete') ?? 'Удалить'}>
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      )}
+                      onClick={() => {
+                        if (canEdit) onOpenAct?.(act.id);
+                      }}>
+                      {visibleOrderedColumns.map((column) => renderActCell(act, column.key, column.key))}
                     </tr>
                   ))
                 )}
@@ -585,27 +789,49 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
             </table>
           </div>
           {acts.length > 0 && (
-            <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-200 px-4 py-4 text-sm text-slate-600 sm:flex-row">
-              <div>
-                {t('recordsFound') ?? 'Найдено записей:'} {pagination.total}
+            <div className="flex flex-col justify-between gap-4 border-t border-slate-200 px-4 py-4 text-sm text-slate-600 lg:flex-row lg:items-center">
+              <div className="flex items-center gap-3">
+                <span>{t('recordsFound') ?? 'Найдено записей:'} {pagination.total}</span>
+                <label className="flex items-center gap-2">
+                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value))}
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-slate-700">
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => setPage((prev) => Math.max(1, prev - 1))}
                   disabled={page <= 1}
-                  className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
-                  ‹
+                  className="inline-flex items-center rounded-lg border border-slate-300 px-2 py-2 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span>
-                  {page} / {totalPages}
-                </span>
+                {pageNumbers.map((value, idx) => {
+                  const showDots = idx > 0 && value - pageNumbers[idx - 1] > 1;
+                  return (
+                    <div key={value} className="flex items-center">
+                      {showDots && <span className="px-1 text-slate-400">…</span>}
+                      <button
+                        type="button"
+                        onClick={() => setPage(value)}
+                        className={`rounded-lg border px-3 py-1.5 text-sm ${value === page ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
+                        {value}
+                      </button>
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
                   onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
                   disabled={page >= totalPages}
-                  className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
-                  ›
+                  className="inline-flex items-center rounded-lg border border-slate-300 px-2 py-2 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             </div>
