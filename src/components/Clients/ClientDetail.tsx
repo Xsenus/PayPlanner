@@ -1238,11 +1238,13 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       showPermissionWarning('Недостаточно прав для добавления договоров.');
       return;
     }
+    const normalizedClients = payload.clients.some((entry) => entry.clientId === clientId)
+      ? payload.clients
+      : [...payload.clients, { clientId }];
+
     const normalizedPayload: ContractInput = {
       ...payload,
-      clientIds: payload.clientIds.includes(clientId)
-        ? payload.clientIds
-        : [...payload.clientIds, clientId],
+      clients: normalizedClients,
     };
     setContractSubmitting(true);
     setContractModalError(null);

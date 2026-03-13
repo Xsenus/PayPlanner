@@ -786,6 +786,7 @@ export function InvoiceModal({
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
     Pending: { label: 'Создан', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'В работе', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
     Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
     Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
     Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
