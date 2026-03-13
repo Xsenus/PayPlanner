@@ -118,7 +118,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     const payload: ContractInput = {
       number: form.number.trim(),
       title: form.title.trim() || undefined,
-      date: fromInputToApiDate(form.date),
+      date: fromInputToApiDate(form.date) ?? form.date,
       startDate: form.startDate ? fromInputToApiDate(form.startDate) : undefined,
       amount: amountValue,
       description: form.description.trim() || undefined,

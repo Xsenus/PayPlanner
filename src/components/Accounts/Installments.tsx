@@ -17,7 +17,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import type { Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
+import type { ActResponsible, Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';

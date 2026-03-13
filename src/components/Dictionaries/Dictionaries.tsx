@@ -29,7 +29,8 @@ type VisibleKind =
   | 'timezones'
   | 'tax-systems'
   | 'tax-system-modes';
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem;
+type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;

@@ -197,6 +197,12 @@ export interface LegalEntityDadataDetails {
   emails?: string[];
 }
 
+export interface LegalEntityAddressInput {
+  type: string | number;
+  value: string;
+  isPrimary?: boolean;
+}
+
 export interface LegalEntityInput {
   shortName: string;
   fullName?: string | null;
@@ -253,6 +259,7 @@ export interface LegalEntityInput {
   contactPhonesJson?: string | null;
   contactEmailsJson?: string | null;
   notes?: string | null;
+  addresses?: LegalEntityAddressInput[];
   clientIds: number[];
 }
 
