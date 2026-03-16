@@ -13,7 +13,7 @@ import {
   Trash2,
   WalletCards,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -79,6 +79,16 @@ type TableColumn = {
   sortable?: boolean;
 };
 
+type ColumnWidthMap = Partial<Record<ColumnKey, number>>;
+
+type AccountsTableSettings = {
+  from: string;
+  to: string;
+  visibleColumns: ColumnKey[];
+  pageSize: number;
+  columnWidths: ColumnWidthMap;
+};
+
 type AccountRow = {
   accountNumber: string;
   invoice: Invoice | null;
@@ -99,6 +109,59 @@ function formatDate(value?: string | null): string {
 }
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['date', 'number', 'amount', 'counterparty', 'status', 'dueDate', 'act'];
+const TABLE_SETTINGS_DB_KEY = 'accounts_table_settings';
+const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> = {
+  date: 150,
+  number: 180,
+  amount: 150,
+  counterparty: 240,
+  status: 170,
+  dueDate: 150,
+  paidDate: 150,
+  act: 210,
+  responsible: 210,
+  type: 130,
+  description: 260,
+};
+
+function normalizeTableSettings(
+  parsed: Partial<AccountsTableSettings> | null | undefined,
+  fallbackFrom: string,
+  fallbackTo: string,
+): AccountsTableSettings {
+  const allowedColumnKeys: ColumnKey[] = [
+    'date',
+    'number',
+    'amount',
+    'counterparty',
+    'status',
+    'dueDate',
+    'paidDate',
+    'act',
+    'responsible',
+    'type',
+    'description',
+  ];
+
+  const visibleColumns = Array.isArray(parsed?.visibleColumns)
+    ? parsed.visibleColumns.filter((value): value is ColumnKey => allowedColumnKeys.includes(value as ColumnKey))
+    : [];
+
+  const safeColumnWidths = Object.entries(parsed?.columnWidths ?? {}).reduce<ColumnWidthMap>((acc, [key, value]) => {
+    if (!allowedColumnKeys.includes(key as ColumnKey)) return acc;
+    if (typeof value !== 'number' || Number.isNaN(value)) return acc;
+    acc[key as ColumnKey] = Math.max(96, value);
+    return acc;
+  }, {});
+
+  return {
+    from: parsed?.from || fallbackFrom,
+    to: parsed?.to || fallbackTo,
+    visibleColumns: visibleColumns.length ? visibleColumns : DEFAULT_VISIBLE_COLUMNS,
+    pageSize: typeof parsed?.pageSize === 'number' ? Math.max(5, Math.min(parsed.pageSize, 100)) : 15,
+    columnWidths: { ...DEFAULT_COLUMN_WIDTHS, ...safeColumnWidths },
+  };
+}
 
 function deriveAccountStatus(invoice: Invoice): AccountStatus {
   if (invoice.status === 'Completed') return 'paid';
@@ -182,6 +245,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     [storagePrefix],
   );
   const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 15), [storagePrefix]);
+  const savedColumnWidths = useMemo(
+    () => safeRead<ColumnWidthMap>(`${storagePrefix}.columnWidths`, DEFAULT_COLUMN_WIDTHS),
+    [storagePrefix],
+  );
 
   const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
   const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
@@ -193,7 +260,15 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(Math.max(5, Math.min(savedPageSize, 100)));
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(savedColumnWidths);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const resizingRef = useRef<{
+    columnKey: ColumnKey;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -279,6 +354,62 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   useEffect(() => {
     safeWrite(`${storagePrefix}.pageSize`, pageSize);
   }, [pageSize, storagePrefix]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.columnWidths`, columnWidths);
+  }, [columnWidths, storagePrefix]);
+
+  useEffect(() => {
+    let active = true;
+    const loadServerSettings = async () => {
+      try {
+        const response = await apiService.getUserSetting(TABLE_SETTINGS_DB_KEY);
+        if (!active || !response?.value) return;
+        const parsed = JSON.parse(response.value) as Partial<AccountsTableSettings>;
+        const normalized = normalizeTableSettings(parsed, startOfYear, todayYMD);
+        setFrom(normalized.from);
+        setTo(normalized.to);
+        setVisibleColumns(normalized.visibleColumns);
+        setPageSize(normalized.pageSize);
+        setColumnWidths(normalized.columnWidths);
+      } catch {
+        /** */
+      } finally {
+        if (active) setSettingsLoaded(true);
+      }
+    };
+
+    void loadServerSettings();
+
+    return () => {
+      active = false;
+    };
+  }, [startOfYear, todayYMD]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    const settings: AccountsTableSettings = {
+      from,
+      to,
+      visibleColumns,
+      pageSize,
+      columnWidths,
+    };
+
+    saveTimerRef.current = window.setTimeout(() => {
+      void apiService.upsertUserSetting(TABLE_SETTINGS_DB_KEY, JSON.stringify(settings));
+    }, 600);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, [columnWidths, from, pageSize, settingsLoaded, to, visibleColumns]);
 
   const effectivePageSize = pagination.pageSize || pageSize || 1;
 
@@ -687,6 +818,45 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setExpandedAccounts((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const getColumnWidth = (key: ColumnKey) => columnWidths[key] ?? DEFAULT_COLUMN_WIDTHS[key];
+
+  const handleResizeStart = (key: ColumnKey, event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const previousCursor = document.body.style.cursor;
+    const previousSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    resizingRef.current = {
+      columnKey: key,
+      startX: event.clientX,
+      startWidth: getColumnWidth(key),
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const delta = moveEvent.clientX - resizingRef.current.startX;
+      const nextWidth = Math.max(96, resizingRef.current.startWidth + delta);
+      setColumnWidths((prev) => ({
+        ...prev,
+        [resizingRef.current?.columnKey ?? key]: nextWidth,
+      }));
+    };
+
+    const handleMouseUp = () => {
+      resizingRef.current = null;
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousSelect;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
   const openPaymentEditModal = (payment: Payment) => {
     setEditingPayment(payment);
     setPaymentModalType(payment.type ?? 'Income');
@@ -896,26 +1066,26 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
             <div className="flex min-w-[320px] flex-1 flex-col gap-3 rounded-xl bg-slate-50/80 p-3">
               <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-gray-700">{t('invoiceFiltersPeriod') ?? 'Период с'}</span>
+                  <span className="text-center font-medium text-gray-700">{t('invoiceFiltersPeriod') ?? 'Период с'}</span>
                   <div className="relative">
                     <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <input
                       type="date"
                       value={from}
                       onChange={(event) => setFrom(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />
                   </div>
                 </label>
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-gray-700">{t('invoiceFiltersPeriodTo') ?? 'Период по'}</span>
+                  <span className="text-center font-medium text-gray-700">{t('invoiceFiltersPeriodTo') ?? 'Период по'}</span>
                   <div className="relative">
                     <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <input
                       type="date"
                       value={to}
                       onChange={(event) => setTo(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />
                   </div>
                 </label>
@@ -936,7 +1106,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               </div>
 
               <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                <div className="relative w-full md:max-w-xs">
+                <div className="relative w-full md:flex-1">
                   <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                   <input
                     type="search"
@@ -947,7 +1117,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                   />
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                <div className="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
                   <button
                     type="button"
                     onClick={handleResetFilters}
@@ -1015,7 +1185,15 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full table-fixed divide-y divide-gray-200">
+              <colgroup>
+                {columns
+                  .filter((column) => visibleColumns.includes(column.key))
+                  .map((column) => (
+                    <col key={column.key} style={{ width: getColumnWidth(column.key) }} />
+                  ))}
+                {(canEdit || canDelete) && <col style={{ width: 148 }} />}
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {columns
@@ -1027,7 +1205,12 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                       const sortKey = (column.key as InvoicesSortKey) ?? 'date';
 
                       return (
-                        <th key={column.key} scope="col" className="px-4 py-3 text-center align-middle">
+                        <th
+                          key={column.key}
+                          scope="col"
+                          style={{ width: getColumnWidth(column.key) }}
+                          className="relative px-4 py-3 text-center align-middle"
+                        >
                           {isSortable ? (
                             <button
                               type="button"
@@ -1043,6 +1226,13 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           ) : (
                             <span className="inline-flex items-center justify-center">{column.label}</span>
                           )}
+                          <div
+                            role="separator"
+                            aria-label={`Изменить ширину колонки ${column.label}`}
+                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                            onMouseDown={(event) => handleResizeStart(column.key, event)}
+                            onDragStart={(dragEvent) => dragEvent.preventDefault()}
+                          />
                         </th>
                       );
                     })}
