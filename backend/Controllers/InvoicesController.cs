@@ -220,10 +220,11 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
-        var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(number, request.Date.Date, null, ct);
-        if (duplicateNumberError is not null)
+        number = await ResolveInvoiceNumberForSaveAsync(number, request.Date.Date, null, request.AllowDuplicateNumberOnImport, ct);
+        if (string.IsNullOrEmpty(number))
         {
-            return duplicateNumberError;
+            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, request.Date.Date, null, ct);
+            return duplicateNumberError ?? BadRequest("Invoice number is required.");
         }
 
         if (request.ServiceId.HasValue)
@@ -235,11 +236,19 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        var invoice = new Invoice
+        {
+            Number = number,
+            Date = request.Date.Date,
+            CreatedAt = DateTime.UtcNow,
+        };
+
         var payment = new Payment
         {
             Account = number,
             DocumentKind = DocumentKind.Invoice,
             AccountDate = request.Date.Date,
+            Invoice = invoice,
             Date = (request.DueDate ?? request.Date).Date,
             Amount = request.Amount,
             Status = request.Status,
@@ -309,6 +318,7 @@ public class InvoicesController : ControllerBase
 
         var payment = await _db.Payments
             .Include(p => p.Responsibles)
+            .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
@@ -332,10 +342,11 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
-        var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(number, request.Date.Date, id, ct);
-        if (duplicateNumberError is not null)
+        number = await ResolveInvoiceNumberForSaveAsync(number, request.Date.Date, id, request.AllowDuplicateNumberOnImport, ct);
+        if (string.IsNullOrEmpty(number))
         {
-            return duplicateNumberError;
+            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, request.Date.Date, id, ct);
+            return duplicateNumberError ?? BadRequest("Invoice number is required.");
         }
 
         if (request.ServiceId.HasValue)
@@ -350,6 +361,16 @@ public class InvoicesController : ControllerBase
         payment.Account = number;
         payment.DocumentKind = DocumentKind.Invoice;
         payment.AccountDate = request.Date.Date;
+        payment.Invoice ??= new Invoice
+        {
+            Number = number,
+            Date = request.Date.Date,
+            CreatedAt = DateTime.UtcNow,
+        };
+        payment.Invoice.Number = number;
+        payment.Invoice.Date = request.Date.Date;
+        payment.Invoice.UpdatedAt = DateTime.UtcNow;
+        payment.InvoiceId = payment.Invoice.Id == 0 ? null : payment.Invoice.Id;
         payment.Date = (request.DueDate ?? request.Date).Date;
         payment.Amount = request.Amount;
         payment.Status = request.Status;
@@ -495,13 +516,33 @@ public class InvoicesController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
+        var payment = await _db.Payments
+            .Include(p => p.Invoice)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
         }
 
+        var invoiceId = payment.InvoiceId;
         _db.Payments.Remove(payment);
+
+        if (invoiceId.HasValue)
+        {
+            var hasOtherPayments = await _db.Payments
+                .AsNoTracking()
+                .AnyAsync(p => p.Id != id && p.InvoiceId == invoiceId.Value, ct);
+
+            if (!hasOtherPayments)
+            {
+                var invoice = await _db.Invoices.FindAsync(new object[] { invoiceId.Value }, ct);
+                if (invoice is not null)
+                {
+                    _db.Invoices.Remove(invoice);
+                }
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -513,6 +554,7 @@ public class InvoicesController : ControllerBase
         var payment = await _db.Payments
             .AsNoTracking()
             .Include(p => p.Client)
+            .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (payment is null)
@@ -525,7 +567,7 @@ public class InvoicesController : ControllerBase
         var documentHtml = BuildInvoiceHtml(payment, lineItems);
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
         var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
-        var fileName = $"invoice-{SanitizeFilePart(payment.Account)}.{ext}";
+        var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.{ext}";
 
         if (normalizedFormat == "pdf")
         {
@@ -546,6 +588,7 @@ public class InvoicesController : ControllerBase
         var payment = await _db.Payments
             .AsNoTracking()
             .Include(p => p.Client)
+            .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (payment is null)
@@ -571,9 +614,9 @@ public class InvoicesController : ControllerBase
         var lineItems = ExtractInvoiceItems(payment.SystemNotes);
         var documentHtml = BuildInvoiceHtml(payment, lineItems);
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
-        var fileName = $"invoice-{SanitizeFilePart(payment.Account)}.doc";
+        var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
         var subject = string.IsNullOrWhiteSpace(request.Subject)
-            ? $"Счёт №{payment.Account} от {payment.AccountDate?.Date:dd.MM.yyyy}"
+            ? $"Счёт №{payment.Invoice?.Number ?? payment.Account} от {(payment.Invoice?.Date ?? payment.AccountDate)?.Date:dd.MM.yyyy}"
             : request.Subject.Trim();
         var body = string.IsNullOrWhiteSpace(request.Message)
             ? "Во вложении счёт."
@@ -593,14 +636,15 @@ public class InvoicesController : ControllerBase
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
     {
         var payments = _db.Payments.AsNoTracking()
-            .Where(p => p.Account != null && p.Account != "" && p.DocumentKind == DocumentKind.Invoice);
+            .Where(p => p.DocumentKind == DocumentKind.Invoice &&
+                        ((p.InvoiceId != null && p.Invoice != null) || (p.Account != null && p.Account != "")));
 
         return payments.Select(payment => new InvoiceQueryItem
         {
             Payment = payment,
             Act = _db.Acts.AsNoTracking()
                 .Where(a => a.InvoiceId == payment.Id
-                    || (a.InvoiceId == null && a.InvoiceNumber != null && a.InvoiceNumber == payment.Account))
+                    || (a.InvoiceId == null && a.InvoiceNumber != null && a.InvoiceNumber == (payment.Invoice != null ? payment.Invoice.Number : payment.Account)))
                 .OrderByDescending(a => a.Date)
                 .ThenByDescending(a => a.Id)
                 .FirstOrDefault(),
@@ -625,13 +669,13 @@ public class InvoicesController : ControllerBase
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            query = query.Where(x => (x.Payment.AccountDate ?? x.Payment.Date) >= fromDate);
+            query = query.Where(x => (x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date)) >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            query = query.Where(x => (x.Payment.AccountDate ?? x.Payment.Date) <= toDate);
+            query = query.Where(x => (x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date)) <= toDate);
         }
 
         if (status.HasValue)
@@ -654,7 +698,7 @@ public class InvoicesController : ControllerBase
             var term = search.Trim();
             var like = $"%{term}%";
             query = query.Where(x =>
-                (x.Payment.Account != null && EF.Functions.Like(x.Payment.Account, like)) ||
+                ((x.Payment.Invoice != null && EF.Functions.Like(x.Payment.Invoice.Number, like)) || (x.Payment.Account != null && EF.Functions.Like(x.Payment.Account, like))) ||
                 (x.Payment.Description != null && EF.Functions.Like(x.Payment.Description, like)) ||
                 (x.Payment.Notes != null && EF.Functions.Like(x.Payment.Notes, like)) ||
                 (x.Payment.CounterpartyName != null && EF.Functions.Like(x.Payment.CounterpartyName, like)) ||
@@ -681,8 +725,8 @@ public class InvoicesController : ControllerBase
         return (sortBy?.ToLowerInvariant()) switch
         {
             "number" => desc
-                ? query.OrderByDescending(x => x.Payment.Account)
-                : query.OrderBy(x => x.Payment.Account),
+                ? query.OrderByDescending(x => x.Payment.Invoice != null ? x.Payment.Invoice.Number : x.Payment.Account)
+                : query.OrderBy(x => x.Payment.Invoice != null ? x.Payment.Invoice.Number : x.Payment.Account),
             "amount" => desc
                 ? query.OrderByDescending(x => x.Payment.Amount)
                 : query.OrderBy(x => x.Payment.Amount),
@@ -706,8 +750,8 @@ public class InvoicesController : ControllerBase
                 ? query.OrderByDescending(x => x.Payment.CreatedAt)
                 : query.OrderBy(x => x.Payment.CreatedAt),
             _ => desc
-                ? query.OrderByDescending(x => x.Payment.AccountDate ?? x.Payment.Date)
-                : query.OrderBy(x => x.Payment.AccountDate ?? x.Payment.Date),
+                ? query.OrderByDescending(x => x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date))
+                : query.OrderBy(x => x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date)),
         };
     }
 
@@ -765,8 +809,8 @@ public class InvoicesController : ControllerBase
     private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw
     {
         Id = x.Payment.Id,
-        Number = x.Payment.Account ?? string.Empty,
-        Date = x.Payment.AccountDate ?? x.Payment.Date,
+        Number = x.Payment.Invoice != null ? x.Payment.Invoice.Number : (x.Payment.Account ?? string.Empty),
+        Date = x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date),
         DueDate = x.Payment.Date,
         Amount = x.Payment.Amount,
         Type = x.Payment.Type,
@@ -981,15 +1025,10 @@ public class InvoicesController : ControllerBase
         var yearStart = new DateTime(targetDate.Year, 1, 1);
         var yearEnd = yearStart.AddYears(1);
 
-        var numbers = await _db.Payments
+        var numbers = await _db.Invoices
             .AsNoTracking()
-            .Where(x =>
-                x.DocumentKind == DocumentKind.Invoice &&
-                (x.AccountDate ?? x.Date) >= yearStart &&
-                (x.AccountDate ?? x.Date) < yearEnd &&
-                x.Account != null &&
-                x.Account != "")
-            .Select(x => x.Account!)
+            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+            .Select(x => x.Number)
             .ToListAsync(ct);
 
         var usedNumbers = numbers
@@ -1017,21 +1056,49 @@ public class InvoicesController : ControllerBase
         return Math.Max(startNumber, max + 1);
     }
 
+    private async Task<string?> ResolveInvoiceNumberForSaveAsync(string number, DateTime accountDate, int? excludeId, bool allowDuplicateOnImport, CancellationToken ct)
+    {
+        var duplicateError = await EnsureInvoiceNumberIsUniqueAsync(number, accountDate, excludeId, ct);
+        if (duplicateError is null)
+        {
+            return number;
+        }
+
+        if (!allowDuplicateOnImport)
+        {
+            return null;
+        }
+
+        var baseNumber = number;
+        for (var i = 1; i <= 9999; i++)
+        {
+            var suffix = $"-IMP{i}";
+            var maxBaseLength = Math.Max(1, 120 - suffix.Length);
+            var truncatedBase = baseNumber.Length > maxBaseLength
+                ? baseNumber[..maxBaseLength]
+                : baseNumber;
+            var candidate = $"{truncatedBase}{suffix}";
+            var candidateError = await EnsureInvoiceNumberIsUniqueAsync(candidate, accountDate, excludeId, ct);
+            if (candidateError is null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)
     {
         var yearStart = new DateTime(accountDate.Year, 1, 1);
         var yearEnd = yearStart.AddYears(1);
         var normalized = number.Trim();
 
-        var duplicateExists = await _db.Payments
+        var duplicateExists = await _db.Invoices
             .AsNoTracking()
-            .Where(x =>
-                x.DocumentKind == DocumentKind.Invoice &&
-                (x.AccountDate ?? x.Date) >= yearStart &&
-                (x.AccountDate ?? x.Date) < yearEnd &&
-                x.Account != null)
-            .Where(x => excludeId == null || x.Id != excludeId.Value)
-            .AnyAsync(x => x.Account!.Trim().ToLower() == normalized.ToLower(), ct);
+            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+            .Where(x => excludeId == null || !x.Payments.Any(p => p.Id == excludeId.Value))
+            .AnyAsync(x => x.Number.Trim().ToLower() == normalized.ToLower(), ct);
 
         if (!duplicateExists)
         {
@@ -1090,8 +1157,8 @@ public class InvoicesController : ControllerBase
 
     private static string BuildInvoiceHtml(Payment payment, IReadOnlyCollection<InvoiceLineItemDto> lineItems)
     {
-        var number = WebUtility.HtmlEncode(payment.Account ?? "—");
-        var date = (payment.AccountDate ?? payment.Date).ToString("dd.MM.yyyy");
+        var number = WebUtility.HtmlEncode(payment.Invoice?.Number ?? payment.Account ?? "—");
+        var date = (payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date).ToString("dd.MM.yyyy");
         var counterparty = WebUtility.HtmlEncode(payment.CounterpartyName ?? "—");
         var clientName = WebUtility.HtmlEncode(payment.Client?.Name ?? "—");
         var amount = payment.Amount.ToString("0.00");

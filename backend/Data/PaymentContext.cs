@@ -153,6 +153,18 @@ public class PaymentContext : DbContext
             entity.HasIndex(x => x.PaymentId).HasDatabaseName("IX_ContractPayments_PaymentId");
         });
 
+        // ------------------ Invoice ------------------
+        modelBuilder.Entity<Invoice>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => e.Number).HasDatabaseName("IX_Invoices_Number");
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_Invoices_Date");
+            entity.HasIndex(e => new { e.Number, e.Date }).HasDatabaseName("IX_Invoices_Number_Date");
+        });
+
         // ------------------ LegalEntity ------------------
         modelBuilder.Entity<LegalEntity>(entity =>
         {
@@ -260,6 +272,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ContractId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.Invoice)
+                  .WithMany(i => i.Payments)
+                  .HasForeignKey(e => e.InvoiceId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // Связь с делом клиента
             entity.HasOne(e => e.ClientCase)
                   .WithMany(cc => cc.Payments)
@@ -316,6 +333,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.PaymentStatusId).HasDatabaseName("IX_Payments_PaymentStatusId");
             entity.HasIndex(e => e.ContractId).HasDatabaseName("IX_Payments_ContractId");
             entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
+            entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
             entity.HasIndex(e => new { e.ClientId, e.Date }).HasDatabaseName("IX_Payments_ClientId_Date");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date }).HasDatabaseName("IX_Payments_ClientCaseId_Date");
             entity.HasIndex(e => new { e.IsPaid, e.Date }).HasDatabaseName("IX_Payments_IsPaid_Date");
@@ -837,6 +855,11 @@ public class PaymentContext : DbContext
     public DbSet<ContractInvoice> ContractInvoices { get; set; }
 
     public DbSet<ContractPayment> ContractPayments { get; set; }
+
+    /// <summary>
+    /// Счета.
+    /// </summary>
+    public DbSet<Invoice> Invoices { get; set; }
 
     /// <summary>
     /// Типы сделок.
