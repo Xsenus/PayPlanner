@@ -754,6 +754,42 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("IncomeTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_Invoices_Date");
+
+                    b.HasIndex("Number")
+                        .HasDatabaseName("IX_Invoices_Number");
+
+                    b.HasIndex("Number", "Date")
+                        .HasDatabaseName("IX_Invoices_Number_Date");
+
+                    b.ToTable("Invoices");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -1293,6 +1329,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsPaid")
                         .HasColumnType("INTEGER");
 
@@ -1365,6 +1404,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_Payments_InvoiceId");
 
                     b.HasIndex("LastPaymentDate")
                         .HasDatabaseName("IX_Payments_LastPaymentDate");
@@ -2312,6 +2354,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("IncomeTypeId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Invoice", "Invoice")
+                        .WithMany("Payments")
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.PaymentSource", "PaymentSource")
                         .WithMany("Payments")
                         .HasForeignKey("PaymentSourceId")
@@ -2336,6 +2383,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("DealType");
 
                     b.Navigation("IncomeType");
+
+                    b.Navigation("Invoice");
 
                     b.Navigation("PaymentSource");
 
@@ -2468,6 +2517,11 @@ namespace PayPlanner.Api.Migrations
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
+                {
+                    b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>
                 {
                     b.Navigation("Payments");
                 });
