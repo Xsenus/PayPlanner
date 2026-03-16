@@ -523,33 +523,47 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [payments]);
 
   const accountRows = useMemo(() => {
-    const rows: AccountRow[] = [];
+    const grouped = new Map<string, Invoice[]>();
 
     invoices.forEach((invoice) => {
       const normalized = accountKey(invoice.number) ?? '';
+      const dateKey = toDateInputValue(invoice.date) ?? invoice.date ?? '';
+      const groupKey = `${normalized}::${dateKey}::${invoice.type ?? 'Income'}`;
+      const existing = grouped.get(groupKey) ?? [];
+      grouped.set(groupKey, [...existing, invoice]);
+    });
+
+    const rows: AccountRow[] = [];
+
+    grouped.forEach((groupInvoices) => {
+      const representative = groupInvoices[0];
+      const normalized = accountKey(representative.number) ?? '';
       const paymentsForInvoice = normalized ? paymentsByAccount.get(normalized) ?? [] : [];
 
       const dueDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.plannedDate) return acc;
         if (!acc) return payment.plannedDate;
         return new Date(payment.plannedDate) > new Date(acc) ? payment.plannedDate : acc;
-      }, invoice.dueDate ?? null);
+      }, representative.dueDate ?? null);
 
       const paidDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.paidDate) return acc;
         if (!acc) return payment.paidDate;
         return new Date(payment.paidDate) > new Date(acc) ? payment.paidDate : acc;
-      }, invoice.paidDate ?? null);
+      }, representative.paidDate ?? null);
+
+      const summedFromPayments = paymentsForInvoice.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
+      const fallbackSum = groupInvoices.reduce((sum, invoice) => sum + (invoice.amount ?? 0), 0);
 
       rows.push({
-        accountNumber: invoice.number,
-        invoice,
+        accountNumber: representative.number,
+        invoice: representative,
         payments: paymentsForInvoice,
-        totalAmount: invoice.amount,
+        totalAmount: summedFromPayments > 0 ? summedFromPayments : fallbackSum,
         dueDate,
         paidDate,
-        status: deriveStatusFromPayments(paymentsForInvoice, invoice),
-        type: invoice.type ?? 'Income',
+        status: deriveStatusFromPayments(paymentsForInvoice, representative),
+        type: representative.type ?? 'Income',
       });
     });
 
@@ -1341,7 +1355,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
             <div className="flex flex-col gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-4">
                 <div>
-                  {t('recordsFound') ?? 'Найдено записей'}: {filteredAccounts.length}
+                  {t('recordsFound') ?? 'Найдено записей'}: {pagination.total}
                 </div>
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}:</span>
