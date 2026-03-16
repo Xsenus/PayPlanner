@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   FilePlus2,
+  GripVertical,
   Loader2,
   Pencil,
   Plus,
@@ -85,6 +86,7 @@ type AccountsTableSettings = {
   from: string;
   to: string;
   visibleColumns: ColumnKey[];
+  columnOrder: ColumnKey[];
   pageSize: number;
   columnWidths: ColumnWidthMap;
 };
@@ -109,6 +111,19 @@ function formatDate(value?: string | null): string {
 }
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['date', 'number', 'amount', 'counterparty', 'status', 'dueDate', 'act'];
+const ALL_COLUMN_KEYS: ColumnKey[] = [
+  'date',
+  'number',
+  'amount',
+  'counterparty',
+  'status',
+  'dueDate',
+  'paidDate',
+  'act',
+  'responsible',
+  'type',
+  'description',
+];
 const TABLE_SETTINGS_DB_KEY = 'accounts_table_settings';
 const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> = {
   date: 150,
@@ -129,26 +144,19 @@ function normalizeTableSettings(
   fallbackFrom: string,
   fallbackTo: string,
 ): AccountsTableSettings {
-  const allowedColumnKeys: ColumnKey[] = [
-    'date',
-    'number',
-    'amount',
-    'counterparty',
-    'status',
-    'dueDate',
-    'paidDate',
-    'act',
-    'responsible',
-    'type',
-    'description',
-  ];
-
   const visibleColumns = Array.isArray(parsed?.visibleColumns)
-    ? parsed.visibleColumns.filter((value): value is ColumnKey => allowedColumnKeys.includes(value as ColumnKey))
+    ? parsed.visibleColumns.filter((value): value is ColumnKey => ALL_COLUMN_KEYS.includes(value as ColumnKey))
     : [];
 
+  const rawOrder = Array.isArray(parsed?.columnOrder)
+    ? parsed.columnOrder.filter((value): value is ColumnKey => ALL_COLUMN_KEYS.includes(value as ColumnKey))
+    : [];
+  const columnOrder = rawOrder.length
+    ? [...rawOrder, ...ALL_COLUMN_KEYS.filter((value) => !rawOrder.includes(value))]
+    : ALL_COLUMN_KEYS;
+
   const safeColumnWidths = Object.entries(parsed?.columnWidths ?? {}).reduce<ColumnWidthMap>((acc, [key, value]) => {
-    if (!allowedColumnKeys.includes(key as ColumnKey)) return acc;
+    if (!ALL_COLUMN_KEYS.includes(key as ColumnKey)) return acc;
     if (typeof value !== 'number' || Number.isNaN(value)) return acc;
     acc[key as ColumnKey] = Math.max(96, value);
     return acc;
@@ -158,6 +166,7 @@ function normalizeTableSettings(
     from: parsed?.from || fallbackFrom,
     to: parsed?.to || fallbackTo,
     visibleColumns: visibleColumns.length ? visibleColumns : DEFAULT_VISIBLE_COLUMNS,
+    columnOrder,
     pageSize: typeof parsed?.pageSize === 'number' ? Math.max(5, Math.min(parsed.pageSize, 100)) : 15,
     columnWidths: { ...DEFAULT_COLUMN_WIDTHS, ...safeColumnWidths },
   };
@@ -244,6 +253,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     () => safeRead<ColumnKey[]>(`${storagePrefix}.columns`, DEFAULT_VISIBLE_COLUMNS),
     [storagePrefix],
   );
+  const savedColumnOrder = useMemo(
+    () => safeRead<ColumnKey[]>(`${storagePrefix}.columnOrder`, ALL_COLUMN_KEYS),
+    [storagePrefix],
+  );
   const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 15), [storagePrefix]);
   const savedColumnWidths = useMemo(
     () => safeRead<ColumnWidthMap>(`${storagePrefix}.columnWidths`, DEFAULT_COLUMN_WIDTHS),
@@ -260,9 +273,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(Math.max(5, Math.min(savedPageSize, 100)));
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(savedColumnOrder);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(savedColumnWidths);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [draggingColumn, setDraggingColumn] = useState<ColumnKey | null>(null);
   const resizingRef = useRef<{
     columnKey: ColumnKey;
     startX: number;
@@ -352,6 +367,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [storagePrefix, visibleColumns]);
 
   useEffect(() => {
+    safeWrite(`${storagePrefix}.columnOrder`, columnOrder);
+  }, [columnOrder, storagePrefix]);
+
+  useEffect(() => {
     safeWrite(`${storagePrefix}.pageSize`, pageSize);
   }, [pageSize, storagePrefix]);
 
@@ -370,6 +389,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
         setFrom(normalized.from);
         setTo(normalized.to);
         setVisibleColumns(normalized.visibleColumns);
+        setColumnOrder(normalized.columnOrder);
         setPageSize(normalized.pageSize);
         setColumnWidths(normalized.columnWidths);
       } catch {
@@ -396,6 +416,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       from,
       to,
       visibleColumns,
+      columnOrder,
       pageSize,
       columnWidths,
     };
@@ -409,7 +430,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [columnWidths, from, pageSize, settingsLoaded, to, visibleColumns]);
+  }, [columnOrder, columnWidths, from, pageSize, settingsLoaded, to, visibleColumns]);
 
   const effectivePageSize = pagination.pageSize || pageSize || 1;
 
@@ -804,6 +825,13 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     [t],
   );
 
+  const columnsByKey = useMemo(() => Object.fromEntries(columns.map((column) => [column.key, column])) as Record<ColumnKey, TableColumn>, [columns]);
+
+  const orderedVisibleColumns = useMemo(
+    () => columnOrder.filter((key) => visibleColumns.includes(key)).map((key) => columnsByKey[key]).filter(Boolean),
+    [columnOrder, columnsByKey, visibleColumns],
+  );
+
   const toggleColumn = (key: ColumnKey) => {
     setVisibleColumns((prev) => {
       if (prev.includes(key)) {
@@ -812,6 +840,38 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       }
       return [...prev, key];
     });
+  };
+
+  const reorderColumns = (source: ColumnKey, target: ColumnKey) => {
+    if (source === target) return;
+    setColumnOrder((prev) => {
+      const fromIndex = prev.indexOf(source);
+      const toIndex = prev.indexOf(target);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const next = [...prev];
+      next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, source);
+      return next;
+    });
+  };
+
+  const handleColumnDragStart = (key: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', key);
+    setDraggingColumn(key);
+  };
+
+  const handleColumnDrop = (target: ColumnKey, event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    const source = event.dataTransfer.getData('text/plain') as ColumnKey;
+    if (!source) return;
+    reorderColumns(source, target);
+    setDraggingColumn(null);
+  };
+
+  const handleColumnDragOver = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
   };
 
   const toggleExpanded = (key: string) => {
@@ -1187,8 +1247,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           <div className="overflow-x-auto">
             <table className="min-w-full table-fixed divide-y divide-gray-200">
               <colgroup>
-                {columns
-                  .filter((column) => visibleColumns.includes(column.key))
+                {orderedVisibleColumns
                   .map((column) => (
                     <col key={column.key} style={{ width: getColumnWidth(column.key) }} />
                   ))}
@@ -1196,8 +1255,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               </colgroup>
               <thead className="bg-gray-50">
                 <tr className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  {columns
-                    .filter((column) => visibleColumns.includes(column.key))
+                  {orderedVisibleColumns
                     .map((column) => {
                       const isSortable = column.sortable !== false && column.key !== 'status';
                       const isActive = sortState.key === column.key;
@@ -1209,8 +1267,19 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           key={column.key}
                           scope="col"
                           style={{ width: getColumnWidth(column.key) }}
-                          className="relative px-4 py-3 text-center align-middle"
+                          className={`relative px-4 py-3 text-center align-middle ${draggingColumn === column.key ? 'bg-blue-50' : ''}`}
+                          onDragOver={handleColumnDragOver}
+                          onDrop={(event) => handleColumnDrop(column.key, event)}
                         >
+                          <div
+                            className="absolute left-1 top-1/2 -translate-y-1/2 cursor-move text-gray-400"
+                            draggable
+                            onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                            onDragEnd={() => setDraggingColumn(null)}
+                            title="Перетащите для изменения порядка"
+                          >
+                            <GripVertical className="h-3.5 w-3.5" />
+                          </div>
                           {isSortable ? (
                             <button
                               type="button"
@@ -1218,13 +1287,13 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 handleSort(sortKey);
                                 setPage(1);
                               }}
-                              className="inline-flex items-center justify-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                              className="inline-flex items-center justify-center gap-1 pl-3 text-xs font-semibold uppercase tracking-wide text-gray-500"
                             >
                               {column.label}
                               <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
                             </button>
                           ) : (
-                            <span className="inline-flex items-center justify-center">{column.label}</span>
+                            <span className="inline-flex items-center justify-center pl-3">{column.label}</span>
                           )}
                           <div
                             role="separator"
@@ -1246,7 +1315,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={visibleColumns.length + 1} className="py-10 text-center text-gray-500">
+                    <td colSpan={orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         {t('loading') ?? 'Загрузка...'}
@@ -1255,7 +1324,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                   </tr>
                 ) : filteredAccounts.length === 0 ? (
                   <tr>
-                    <td colSpan={visibleColumns.length + 1} className="py-10 text-center text-gray-500">
+                    <td colSpan={orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
                       {t('invoiceNoData') ?? 'Счета не найдены'}
                     </td>
                   </tr>
@@ -1272,7 +1341,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                       invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
-                    const colSpan = visibleColumns.length + (canEdit || canDelete ? 1 : 0);
+                    const colSpan = orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0);
 
                     return (
                       <Fragment key={`${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`}>
@@ -1284,153 +1353,160 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                             }
                           }}
                         >
-                          {visibleColumns.includes('date') && (
-                            <td className="px-4 py-3 text-center align-middle font-medium text-gray-900">
-                              {formatDate(invoice?.date)}
-                            </td>
-                          )}
-                          {visibleColumns.includes('number') && (
-                            <td className="px-4 py-3 text-gray-900">
-                              <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); toggleExpanded(row.accountNumber); }}
-                                className="inline-flex items-center gap-2 font-semibold text-blue-700"
-                              >
-                                <ChevronDown
-                                  className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                                />
-                                {row.accountNumber}
-                              </button>
-                            </td>
-                          )}
-                          {visibleColumns.includes('amount') && (
-                            <td className="px-4 py-3">
-                              <span className="font-semibold text-gray-900">
-                                {formatCurrencySmart(row.totalAmount).full}
-                              </span>
-                            </td>
-                          )}
-                          {visibleColumns.includes('counterparty') && (
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {clientId && canOpenClientFromAccounts ? (
+                          {orderedVisibleColumns.map((column) => {
+                            switch (column.key) {
+                              case 'date':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle font-medium text-gray-900">
+                                    {formatDate(invoice?.date)}
+                                  </td>
+                                );
+                              case 'number':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-gray-900">
                                     <button
                                       type="button"
-                                      onClick={(event) => { event.stopPropagation(); onOpenClient?.(clientId); }}
-                                      className="font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
-                                      title="Открыть карточку клиента"
+                                      onClick={(event) => { event.stopPropagation(); toggleExpanded(row.accountNumber); }}
+                                      className="inline-flex items-center gap-2 font-semibold text-blue-700"
                                     >
-                                      {primaryName}
+                                      <ChevronDown
+                                        className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                      />
+                                      {row.accountNumber}
                                     </button>
-                                  ) : (
-                                    <span className="font-medium text-gray-900">{primaryName}</span>
-                                  )}
-                                  <ClientStatusBadge status={invoice?.clientStatus} />
-                                  <span
-                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
-                                  >
-                                    {typeLabel}
-                                  </span>
-                                </div>
-                                {invoice?.clientCompany && (
-                                  <div className="text-xs text-gray-500">{invoice.clientCompany}</div>
-                                )}
-                                {invoice?.counterpartyName && invoice.counterpartyName !== invoice.clientName && (
-                                  <div className="text-xs text-gray-500">
-                                    {t('invoiceCounterpartyLabel') ?? 'От поставщика'}: {invoice.counterpartyName}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          )}
-                          {visibleColumns.includes('status') && (
-                            <td className="px-4 py-3">
-                              <span
-                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[accountStatus]}`}
-                              >
-                                {statusLabels[accountStatus]}
-                              </span>
-                              {invoice?.paymentStatusName && (
-                                <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>
-                              )}
-                            </td>
-                          )}
-                          {visibleColumns.includes('dueDate') && (
-                            <td className="px-4 py-3 text-center align-middle">{formatDate(row.dueDate)}</td>
-                          )}
-                          {visibleColumns.includes('paidDate') && (
-                            <td className="px-4 py-3 text-center align-middle">{formatDate(row.paidDate)}</td>
-                          )}
-                          {visibleColumns.includes('act') && (
-                            <td className="px-4 py-3 text-center align-middle">
-                              <div className="flex flex-col items-center gap-2">
-                                {actsLoading && actsForInvoice.length === 0 && (
-                                  <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'}</div>
-                                )}
-                                {actsForInvoice.length > 0 ? (
-                                  <>
-                                    <div className="flex items-center justify-center gap-2">
-                                      {canCreate && (
-                                        <button
-                                          type="button"
-                                          onClick={() => openActCreateModal(row)}
-                                          className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
-                                          aria-label={t('addAct') ?? 'Добавить акт'}
+                                  </td>
+                                );
+                              case 'amount':
+                                return (
+                                  <td key={column.key} className="px-4 py-3">
+                                    <span className="font-semibold text-gray-900">{formatCurrencySmart(row.totalAmount).full}</span>
+                                  </td>
+                                );
+                              case 'counterparty':
+                                return (
+                                  <td key={column.key} className="px-4 py-3">
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {clientId && canOpenClientFromAccounts ? (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => { event.stopPropagation(); onOpenClient?.(clientId); }}
+                                            className="font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
+                                            title="Открыть карточку клиента"
+                                          >
+                                            {primaryName}
+                                          </button>
+                                        ) : (
+                                          <span className="font-medium text-gray-900">{primaryName}</span>
+                                        )}
+                                        <ClientStatusBadge status={invoice?.clientStatus} />
+                                        <span
+                                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
                                         >
-                                          <FilePlus2 className="h-4 w-4" />
-                                        </button>
+                                          {typeLabel}
+                                        </span>
+                                      </div>
+                                      {invoice?.clientCompany && <div className="text-xs text-gray-500">{invoice.clientCompany}</div>}
+                                      {invoice?.counterpartyName && invoice.counterpartyName !== invoice.clientName && (
+                                        <div className="text-xs text-gray-500">
+                                          {t('invoiceCounterpartyLabel') ?? 'От поставщика'}: {invoice.counterpartyName}
+                                        </div>
                                       )}
                                     </div>
-                                    <div className="flex flex-col items-center gap-2">
-                                      {actsForInvoice.map((act) => (
-                                        <button
-                                          key={act.id}
-                                          type="button"
-                                          onClick={() => openActEditModal(act, row)}
-                                          className="group inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                                        >
-                                          <span>{act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}</span>
-                                          <span className="text-[11px] font-medium text-gray-500">{formatDate(act.date)}</span>
-                                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                            {actStatusLabels[act.status]}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </>
-                                ) : (
-                                  canCreate && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openActCreateModal(row)}
-                                      className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
-                                      aria-label={t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
+                                  </td>
+                                );
+                              case 'status':
+                                return (
+                                  <td key={column.key} className="px-4 py-3">
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[accountStatus]}`}
                                     >
-                                      <FilePlus2 className="h-5 w-5" />
-                                    </button>
-                                  )
-                                )}
-                              </div>
-                            </td>
-                          )}
-                          {visibleColumns.includes('responsible') && (
-                            <td className="px-4 py-3 text-center align-middle">
-                              {invoice?.responsibles?.length ? invoice.responsibles.map((item) => item.fullName).join(', ') : invoice?.responsibleName ? invoice.responsibleName : '—'}
-                            </td>
-                          )}
-                          {visibleColumns.includes('type') && (
-                            <td className="px-4 py-3 text-center align-middle">
-                              <span
-                                className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
-                              >
-                                {typeLabel}
-                              </span>
-                            </td>
-                          )}
-                          {visibleColumns.includes('description') && (
-                            <td className="px-4 py-3 text-gray-600">{invoice?.description || '—'}</td>
-                          )}
+                                      {statusLabels[accountStatus]}
+                                    </span>
+                                    {invoice?.paymentStatusName && <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>}
+                                  </td>
+                                );
+                              case 'dueDate':
+                                return <td key={column.key} className="px-4 py-3 text-center align-middle">{formatDate(row.dueDate)}</td>;
+                              case 'paidDate':
+                                return <td key={column.key} className="px-4 py-3 text-center align-middle">{formatDate(row.paidDate)}</td>;
+                              case 'act':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                    <div className="flex flex-col items-center gap-2">
+                                      {actsLoading && actsForInvoice.length === 0 && (
+                                        <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'}</div>
+                                      )}
+                                      {actsForInvoice.length > 0 ? (
+                                        <>
+                                          <div className="flex items-center justify-center gap-2">
+                                            {canCreate && (
+                                              <button
+                                                type="button"
+                                                onClick={() => openActCreateModal(row)}
+                                                className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
+                                                aria-label={t('addAct') ?? 'Добавить акт'}
+                                              >
+                                                <FilePlus2 className="h-4 w-4" />
+                                              </button>
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col items-center gap-2">
+                                            {actsForInvoice.map((act) => (
+                                              <button
+                                                key={act.id}
+                                                type="button"
+                                                onClick={() => openActEditModal(act, row)}
+                                                className="group inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                                              >
+                                                <span>{act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}</span>
+                                                <span className="text-[11px] font-medium text-gray-500">{formatDate(act.date)}</span>
+                                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{actStatusLabels[act.status]}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </>
+                                      ) : (
+                                        canCreate && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openActCreateModal(row)}
+                                            className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
+                                            aria-label={t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
+                                          >
+                                            <FilePlus2 className="h-5 w-5" />
+                                          </button>
+                                        )
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              case 'responsible':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                    {invoice?.responsibles?.length
+                                      ? invoice.responsibles.map((item) => item.fullName).join(', ')
+                                      : invoice?.responsibleName
+                                        ? invoice.responsibleName
+                                        : '—'}
+                                  </td>
+                                );
+                              case 'type':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                    <span
+                                      className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
+                                    >
+                                      {typeLabel}
+                                    </span>
+                                  </td>
+                                );
+                              case 'description':
+                                return <td key={column.key} className="px-4 py-3 text-gray-600">{invoice?.description || '—'}</td>;
+                              default:
+                                return null;
+                            }
+                          })}
                           {(canEdit || canDelete) && (
                             <td className="px-4 py-3">
                               <div className="flex items-center justify-end gap-2">
