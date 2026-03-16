@@ -309,7 +309,6 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     refreshing,
     error,
     summary,
-    pagination,
     refresh: refreshInvoices,
     createInvoice,
     updateInvoice,
@@ -329,8 +328,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     type: typeFilter === 'All' ? undefined : typeFilter,
     sortBy: sortState.key,
     sortDir: sortState.direction,
-    page,
-    pageSize,
+    page: 1,
+    pageSize: 2000,
   });
 
   const {
@@ -373,7 +372,6 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   useEffect(() => {
     safeWrite(`${storagePrefix}.pageSize`, pageSize);
   }, [pageSize, storagePrefix]);
-
   useEffect(() => {
     safeWrite(`${storagePrefix}.columnWidths`, columnWidths);
   }, [columnWidths, storagePrefix]);
@@ -432,12 +430,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     };
   }, [columnOrder, columnWidths, from, pageSize, settingsLoaded, to, visibleColumns]);
 
-  const effectivePageSize = pagination.pageSize || pageSize || 1;
-
-  const totalPages = useMemo(() => {
-    if (!effectivePageSize) return 1;
-    return Math.max(1, Math.ceil((pagination.total ?? 0) / effectivePageSize));
-  }, [pagination.total, effectivePageSize]);
+  const effectivePageSize = pageSize || 1;
 
   const statusLabels: Record<AccountStatus, string> = {
     created: 'Создан',
@@ -675,33 +668,47 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [payments]);
 
   const accountRows = useMemo(() => {
-    const rows: AccountRow[] = [];
+    const grouped = new Map<string, Invoice[]>();
 
     invoices.forEach((invoice) => {
       const normalized = accountKey(invoice.number) ?? '';
+      const dateKey = toDateInputValue(invoice.date) ?? invoice.date ?? '';
+      const groupKey = `${normalized}::${dateKey}::${invoice.type ?? 'Income'}`;
+      const existing = grouped.get(groupKey) ?? [];
+      grouped.set(groupKey, [...existing, invoice]);
+    });
+
+    const rows: AccountRow[] = [];
+
+    grouped.forEach((groupInvoices) => {
+      const representative = groupInvoices[0];
+      const normalized = accountKey(representative.number) ?? '';
       const paymentsForInvoice = normalized ? paymentsByAccount.get(normalized) ?? [] : [];
 
       const dueDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.plannedDate) return acc;
         if (!acc) return payment.plannedDate;
         return new Date(payment.plannedDate) > new Date(acc) ? payment.plannedDate : acc;
-      }, invoice.dueDate ?? null);
+      }, representative.dueDate ?? null);
 
       const paidDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.paidDate) return acc;
         if (!acc) return payment.paidDate;
         return new Date(payment.paidDate) > new Date(acc) ? payment.paidDate : acc;
-      }, invoice.paidDate ?? null);
+      }, representative.paidDate ?? null);
+
+      const summedFromPayments = paymentsForInvoice.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
+      const fallbackSum = groupInvoices.reduce((sum, invoice) => sum + (invoice.amount ?? 0), 0);
 
       rows.push({
-        accountNumber: invoice.number,
-        invoice,
+        accountNumber: representative.number,
+        invoice: representative,
         payments: paymentsForInvoice,
-        totalAmount: invoice.amount,
+        totalAmount: summedFromPayments > 0 ? summedFromPayments : fallbackSum,
         dueDate,
         paidDate,
-        status: deriveStatusFromPayments(paymentsForInvoice, invoice),
-        type: invoice.type ?? 'Income',
+        status: deriveStatusFromPayments(paymentsForInvoice, representative),
+        type: representative.type ?? 'Income',
       });
     });
 
@@ -808,6 +815,18 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
   const filteredAccounts = useMemo(() => accountRows, [accountRows]);
 
+  const mergedTotal = filteredAccounts.length;
+
+  const totalPages = useMemo(() => {
+    if (!effectivePageSize) return 1;
+    return Math.max(1, Math.ceil(mergedTotal / effectivePageSize));
+  }, [mergedTotal, effectivePageSize]);
+
+  const pagedAccounts = useMemo(() => {
+    const start = (page - 1) * effectivePageSize;
+    return filteredAccounts.slice(start, start + effectivePageSize);
+  }, [filteredAccounts, page, effectivePageSize]);
+
   const columns: TableColumn[] = useMemo(
     () => [
       { key: 'date', label: t('invoiceDate') ?? t('actDate') ?? 'Дата', sortable: true },
@@ -824,13 +843,18 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     ],
     [t],
   );
-
   const columnsByKey = useMemo(() => Object.fromEntries(columns.map((column) => [column.key, column])) as Record<ColumnKey, TableColumn>, [columns]);
 
   const orderedVisibleColumns = useMemo(
     () => columnOrder.filter((key) => visibleColumns.includes(key)).map((key) => columnsByKey[key]).filter(Boolean),
     [columnOrder, columnsByKey, visibleColumns],
   );
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const toggleColumn = (key: ColumnKey) => {
     setVisibleColumns((prev) => {
@@ -1322,14 +1346,14 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                       </div>
                     </td>
                   </tr>
-                ) : filteredAccounts.length === 0 ? (
+                ) : pagedAccounts.length === 0 ? (
                   <tr>
                     <td colSpan={orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
                       {t('invoiceNoData') ?? 'Счета не найдены'}
                     </td>
                   </tr>
                 ) : (
-                  filteredAccounts.map((row) => {
+                  pagedAccounts.map((row) => {
                     const invoice = row.invoice;
                     const accountStatus = row.status;
                     const type = row.type;
@@ -1603,11 +1627,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
             <div className="border-t border-gray-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{String(error)}</div>
           )}
 
-          {!isLoading && filteredAccounts.length > 0 && (
+          {!isLoading && mergedTotal > 0 && (
             <div className="flex flex-col gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-4">
                 <div>
-                  {t('recordsFound') ?? 'Найдено записей'}: {filteredAccounts.length}
+                  {t('recordsFound') ?? 'Найдено записей'}: {mergedTotal}
                 </div>
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}:</span>

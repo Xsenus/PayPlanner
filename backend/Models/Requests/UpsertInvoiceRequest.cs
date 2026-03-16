@@ -51,6 +51,12 @@ public class UpsertInvoiceRequest
 
     public int? PaymentStatusEntityId { get; set; }
 
+    /// <summary>
+    /// Режим импорта: при конфликте номера счёта автоматически подбирается уникальный номер (суффикс),
+    /// чтобы загрузка не прерывалась из-за исторических дублей.
+    /// </summary>
+    public bool AllowDuplicateNumberOnImport { get; set; }
+
     public List<int>? ResponsibleIds { get; set; }
 
     public List<InvoiceLineItemRequest>? LineItems { get; set; }

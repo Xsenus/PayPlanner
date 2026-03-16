@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
-import type { FormRequirementSectionMetadataDto, InvoiceNumberingSettingsDto, LegacyAddressMigrationResult } from '../../services/api';
+import type { FormRequirementSectionMetadataDto, InvoiceLegacyMigrationSummaryDto, InvoiceNumberingSettingsDto, LegacyAddressMigrationResult } from '../../services/api';
 
 type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
@@ -30,6 +30,9 @@ export function AppSettings() {
   const [invoiceNumbering, setInvoiceNumbering] = useState<InvoiceNumberingSettingsDto>({ startNumber: 1, allocationStrategy: 'max-plus-one' });
   const [invoiceNumberingLoading, setInvoiceNumberingLoading] = useState(false);
   const [invoiceNumberingMessage, setInvoiceNumberingMessage] = useState<string | null>(null);
+  const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
+  const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
+  const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
@@ -195,6 +198,19 @@ export function AppSettings() {
     }
   };
 
+  const runInvoiceMigration = async () => {
+    setInvoiceMigrationLoading(true);
+    setInvoiceMigrationError(null);
+    try {
+      const response = await apiService.migrateLegacyInvoiceLinks();
+      setInvoiceMigrationResult(response);
+    } catch (e) {
+      setInvoiceMigrationError(e instanceof Error ? e.message : 'Не удалось выполнить перенос счетов');
+    } finally {
+      setInvoiceMigrationLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
@@ -298,7 +314,7 @@ export function AppSettings() {
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
-                    : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
+                    : 'Перенос старых адресов и legacy-счетов в новые сущности с детальной сводкой.'}
               </p>
             </div>
 
@@ -343,6 +359,48 @@ export function AppSettings() {
                   </button>
                   {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
                 </div>
+              </div>
+            )}
+
+            {activeSection === 'import-addresses' && (
+              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+                <div>
+                  <h4 className="text-base font-semibold text-gray-900">Ручной перенос счетов в новую сущность</h4>
+                  <p className="text-sm text-gray-600 mt-1">Запускает перенос legacy-счетов из платежей в отдельную сущность счетов и связывает платежи со счетами. Безопасно для повторного запуска. Если номер/год совпадают, несколько платежей привязываются к одному счету.</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={runInvoiceMigration}
+                    disabled={invoiceMigrationLoading}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {invoiceMigrationLoading ? 'Переносим…' : 'Перенести счета'}
+                  </button>
+                </div>
+
+                {invoiceMigrationError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{invoiceMigrationError}</div>
+                )}
+
+                {invoiceMigrationResult && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <p className="font-medium mb-2">Сводка переноса счетов</p>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                      <li>Проверено платежей: <b>{invoiceMigrationResult.scannedPayments}</b></li>
+                      <li>Платежей-счетов: <b>{invoiceMigrationResult.invoicePayments}</b></li>
+                      <li>Переведено в тип «Счёт»: <b>{invoiceMigrationResult.convertedToInvoiceKind}</b></li>
+                      <li>Уже были связаны: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
+                      <li>Пропущено без номера: <b>{invoiceMigrationResult.missingNumberSkipped}</b></li>
+                      <li>Связано с существующими счетами: <b>{invoiceMigrationResult.linkedToExistingInvoice}</b></li>
+                      <li>Создано новых счетов: <b>{invoiceMigrationResult.createdInvoices}</b></li>
+                      <li>Всего связанных платежей: <b>{invoiceMigrationResult.linkedPayments}</b></li>
+                      <li>Уникальных ключей в legacy: <b>{invoiceMigrationResult.distinctLegacyInvoiceKeys}</b></li>
+                      <li>Ключей-дублей уже в Invoices: <b>{invoiceMigrationResult.existingDuplicateInvoiceKeys}</b></li>
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

@@ -19,6 +19,16 @@ namespace PayPlanner.Api.Models
         public DateTime? AccountDate { get; set; }
 
         /// <summary>
+        /// Внешний ключ на счёт.
+        /// </summary>
+        public int? InvoiceId { get; set; }
+
+        /// <summary>
+        /// Навигация на счёт.
+        /// </summary>
+        public Invoice? Invoice { get; set; }
+
+        /// <summary>
         /// Сумма платежа (в валюте учёта).
         /// </summary>
         public decimal Amount { get; set; }

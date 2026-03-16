@@ -127,6 +127,19 @@ export interface LegacyAddressMigrationResult {
   details: LegacyAddressMigrationDetail[];
 }
 
+export interface InvoiceLegacyMigrationSummaryDto {
+  scannedPayments: number;
+  invoicePayments: number;
+  convertedToInvoiceKind: number;
+  alreadyLinked: number;
+  missingNumberSkipped: number;
+  linkedToExistingInvoice: number;
+  createdInvoices: number;
+  linkedPayments: number;
+  distinctLegacyInvoiceKeys: number;
+  existingDuplicateInvoiceKeys: number;
+}
+
 export interface SimpleDictionaryDuplicateItem {
   id: number;
   name: string;
@@ -393,6 +406,12 @@ export class ApiService {
   async getNextInvoiceNumber(date?: string) {
     const q = buildQuery({ date });
     return this.request<NextInvoiceNumberDto>(`/invoices/next-number${q}`);
+  }
+
+  async migrateLegacyInvoiceLinks() {
+    return this.request<InvoiceLegacyMigrationSummaryDto>('/invoices/migrate-legacy-links', {
+      method: 'POST',
+    });
   }
 
   async createInvoice(payload: InvoiceInput) {
