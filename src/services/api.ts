@@ -130,6 +130,7 @@ export interface LegacyAddressMigrationResult {
 export interface InvoiceLegacyMigrationSummaryDto {
   scannedPayments: number;
   invoicePayments: number;
+  convertedToInvoiceKind: number;
   alreadyLinked: number;
   missingNumberSkipped: number;
   linkedToExistingInvoice: number;

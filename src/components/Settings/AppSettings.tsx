@@ -366,7 +366,7 @@ export function AppSettings() {
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
                   <h4 className="text-base font-semibold text-gray-900">Ручной перенос счетов в новую сущность</h4>
-                  <p className="text-sm text-gray-600 mt-1">Запускает перенос legacy-счетов из платежей в отдельную сущность счетов и связывает платежи со счетами. Безопасно для повторного запуска.</p>
+                  <p className="text-sm text-gray-600 mt-1">Запускает перенос legacy-счетов из платежей в отдельную сущность счетов и связывает платежи со счетами. Безопасно для повторного запуска. Если номер/год совпадают, несколько платежей привязываются к одному счету.</p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -390,6 +390,7 @@ export function AppSettings() {
                     <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                       <li>Проверено платежей: <b>{invoiceMigrationResult.scannedPayments}</b></li>
                       <li>Платежей-счетов: <b>{invoiceMigrationResult.invoicePayments}</b></li>
+                      <li>Переведено в тип «Счёт»: <b>{invoiceMigrationResult.convertedToInvoiceKind}</b></li>
                       <li>Уже были связаны: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
                       <li>Пропущено без номера: <b>{invoiceMigrationResult.missingNumberSkipped}</b></li>
                       <li>Связано с существующими счетами: <b>{invoiceMigrationResult.linkedToExistingInvoice}</b></li>

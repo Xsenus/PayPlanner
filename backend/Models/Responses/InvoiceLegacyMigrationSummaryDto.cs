@@ -4,6 +4,7 @@ public class InvoiceLegacyMigrationSummaryDto
 {
     public int ScannedPayments { get; set; }
     public int InvoicePayments { get; set; }
+    public int ConvertedToInvoiceKind { get; set; }
     public int AlreadyLinked { get; set; }
     public int MissingNumberSkipped { get; set; }
     public int LinkedToExistingInvoice { get; set; }

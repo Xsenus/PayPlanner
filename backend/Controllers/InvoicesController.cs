@@ -551,6 +551,12 @@ public class InvoicesController : ControllerBase
 
         foreach (var payment in payments)
         {
+            if (payment.DocumentKind != DocumentKind.Invoice)
+            {
+                payment.DocumentKind = DocumentKind.Invoice;
+                summary.ConvertedToInvoiceKind++;
+            }
+
             if (payment.InvoiceId.HasValue)
             {
                 summary.AlreadyLinked++;
@@ -717,8 +723,8 @@ public class InvoicesController : ControllerBase
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
     {
         var payments = _db.Payments.AsNoTracking()
-            .Where(p => p.DocumentKind == DocumentKind.Invoice &&
-                        ((p.InvoiceId != null && p.Invoice != null) || (p.Account != null && p.Account != "")));
+            .Where(p => (p.InvoiceId != null && p.Invoice != null)
+                        || (p.DocumentKind == DocumentKind.Invoice && p.Account != null && p.Account != ""));
 
         return payments.Select(payment => new InvoiceQueryItem
         {
