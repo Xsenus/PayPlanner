@@ -519,13 +519,13 @@ public class InvoicesController : ControllerBase
     {
         var payments = await _db.Payments
             .Include(p => p.Invoice)
-            .Where(p => p.DocumentKind == DocumentKind.Invoice)
+            .Where(p => p.Account != null && p.Account != "")
             .ToListAsync(ct);
 
         var summary = new InvoiceLegacyMigrationSummaryDto
         {
             ScannedPayments = payments.Count,
-            InvoicePayments = payments.Count,
+            InvoicePayments = payments.Count(p => p.DocumentKind == DocumentKind.Invoice),
         };
 
         var legacyKeys = payments

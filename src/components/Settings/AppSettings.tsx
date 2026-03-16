@@ -314,7 +314,7 @@ export function AppSettings() {
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
-                    : 'Перенос старых адресов из legacy-поля Address в модель адресов для юр. и физ. лиц.'}
+                    : 'Перенос старых адресов и legacy-счетов в новые сущности с детальной сводкой.'}
               </p>
             </div>
 
@@ -362,7 +362,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'general' && (
+            {activeSection === 'import-addresses' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
                   <h4 className="text-base font-semibold text-gray-900">Ручной перенос счетов в новую сущность</h4>
