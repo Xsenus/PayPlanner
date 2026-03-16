@@ -513,6 +513,87 @@ public class InvoicesController : ControllerBase
         });
     }
 
+
+    [HttpPost("migrate-legacy-links")]
+    public async Task<ActionResult<InvoiceLegacyMigrationSummaryDto>> MigrateLegacyInvoiceLinks(CancellationToken ct)
+    {
+        var payments = await _db.Payments
+            .Include(p => p.Invoice)
+            .Where(p => p.DocumentKind == DocumentKind.Invoice)
+            .ToListAsync(ct);
+
+        var summary = new InvoiceLegacyMigrationSummaryDto
+        {
+            ScannedPayments = payments.Count,
+            InvoicePayments = payments.Count,
+        };
+
+        var legacyKeys = payments
+            .Where(p => !string.IsNullOrWhiteSpace(p.Account))
+            .Select(p => BuildInvoiceMigrationKey(p.Account!, (p.AccountDate ?? p.Date).Date.Year))
+            .Distinct()
+            .ToList();
+        summary.DistinctLegacyInvoiceKeys = legacyKeys.Count;
+
+        var invoices = await _db.Invoices.ToListAsync(ct);
+        var duplicateInvoiceKeys = invoices
+            .GroupBy(i => BuildInvoiceMigrationKey(i.Number, i.Date.Year))
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet();
+        summary.ExistingDuplicateInvoiceKeys = duplicateInvoiceKeys.Count;
+
+        var invoiceMap = invoices
+            .GroupBy(i => BuildInvoiceMigrationKey(i.Number, i.Date.Year))
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(x => x.Date).ThenBy(x => x.Id).First());
+
+        foreach (var payment in payments)
+        {
+            if (payment.InvoiceId.HasValue)
+            {
+                summary.AlreadyLinked++;
+                continue;
+            }
+
+            var number = Normalize(payment.Account);
+            if (string.IsNullOrEmpty(number))
+            {
+                summary.MissingNumberSkipped++;
+                continue;
+            }
+
+            var invoiceDate = (payment.AccountDate ?? payment.Date).Date;
+            var key = BuildInvoiceMigrationKey(number, invoiceDate.Year);
+
+            if (!invoiceMap.TryGetValue(key, out var invoice))
+            {
+                invoice = new Invoice
+                {
+                    Number = number,
+                    Date = invoiceDate,
+                    CreatedAt = DateTime.UtcNow,
+                };
+                _db.Invoices.Add(invoice);
+                invoiceMap[key] = invoice;
+                summary.CreatedInvoices++;
+            }
+            else
+            {
+                summary.LinkedToExistingInvoice++;
+            }
+
+            payment.Account = number;
+            payment.AccountDate = invoiceDate;
+            payment.Invoice = invoice;
+            summary.LinkedPayments++;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(summary);
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
@@ -791,6 +872,9 @@ public class InvoicesController : ControllerBase
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string BuildInvoiceMigrationKey(string number, int year)
+        => $"{number.Trim().ToLowerInvariant()}::{year}";
 
     private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int clientId, CancellationToken ct)
     {
