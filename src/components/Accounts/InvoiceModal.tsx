@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActStatus,
   ActResponsible,
   Client,
+  ClientCase,
   Contract,
   Invoice,
   InvoiceInput,
@@ -14,16 +15,18 @@ import type {
 } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
+import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
+import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { CaseModal } from '../Clients/CaseModal';
 
 type FormState = {
   number: string;
@@ -34,10 +37,10 @@ type FormState = {
   status: PaymentStatus;
   clientId: string;
   contractId: string;
+  clientCaseReference: string;
   description: string;
   actReference: string;
   paidDate: string;
-  counterpartyName: string;
   responsibleIds: string[];
 };
 
@@ -56,8 +59,6 @@ type DraftActForm = {
   amount: string;
   comment: string;
 };
-
-type ClientPickerMode = 'client' | 'counterparty';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -143,11 +144,13 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
 }
 
 type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'status'>;
+type ClientCaseOption = Pick<ClientCase, 'id' | 'clientId' | 'title' | 'status' | 'createdAt'>;
 
 interface InvoiceModalProps {
   open: boolean;
   mode: 'create' | 'edit';
   invoice: Invoice | null;
+  resumeDraft?: InvoiceEditorDraftState | null;
   onClose: () => void;
   onBack?: () => void;
   onOpenClient?: (clientId: number) => void;
@@ -183,10 +186,10 @@ function normalizeInvoiceToForm(
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
       contractId: '',
+      clientCaseReference: '',
       description: '',
       actReference: '',
       paidDate: '',
-      counterpartyName: '',
       responsibleIds: defaultResponsibleId ? [String(defaultResponsibleId)] : [],
     };
   }
@@ -200,12 +203,82 @@ function normalizeInvoiceToForm(
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
     contractId: invoice.contractId ? String(invoice.contractId) : '',
+    clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
-    counterpartyName: invoice.counterpartyName ?? '',
     responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)).slice(0, 1),
   };
+}
+
+function normalizeInvoiceClientCaseIds(invoice: Invoice | null): number[] {
+  const rawIds = invoice?.clientCaseIds?.length
+    ? invoice.clientCaseIds
+    : invoice?.clientCaseId
+      ? [invoice.clientCaseId]
+      : [];
+
+  return Array.from(new Set(rawIds.filter((value): value is number => typeof value === 'number' && value > 0)));
+}
+
+function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[] {
+  if (invoice?.clientCases?.length) {
+    return invoice.clientCases.map((item) => ({
+      id: item.id,
+      clientId: item.clientId,
+      title: item.title,
+      status: item.status,
+      createdAt: item.createdAt,
+    }));
+  }
+
+  if (invoice?.clientCaseId) {
+    return [
+      {
+        id: invoice.clientCaseId,
+        clientId: invoice.clientId ?? 0,
+        title: invoice.clientCaseTitle ?? '',
+        status: '',
+        createdAt: invoice.createdAt,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
+  if (invoice?.acts?.length) {
+    return invoice.acts.map((item) => ({
+      id: item.id,
+      number: item.number,
+      title: item.title ?? undefined,
+      date: item.date,
+      amount: item.amount,
+      invoiceNumber: invoice.number,
+      clientId: item.clientId ?? undefined,
+      clientName: item.clientName ?? undefined,
+      status: item.status,
+    }));
+  }
+
+  if (invoice?.actId) {
+    return [
+      {
+        id: invoice.actId,
+        number: invoice.actNumber ?? invoice.number,
+        title: invoice.actTitle ?? undefined,
+        date: invoice.date,
+        amount: invoice.amount,
+        invoiceNumber: invoice.actNumber ?? invoice.number,
+        clientId: invoice.clientId ?? undefined,
+        clientName: invoice.clientName ?? undefined,
+        status: (invoice.actStatus ?? 'Created') as ActStatus,
+      },
+    ];
+  }
+
+  return [];
 }
 
 function actLabel(act: ActOption | null): string {
@@ -214,6 +287,31 @@ function actLabel(act: ActOption | null): string {
   if (act.number) parts.push(`№${act.number}`);
   if (act.title) parts.push(act.title);
   return parts.join(' · ');
+}
+
+function clientCaseLabel(clientCase: ClientCaseOption | null): string {
+  if (!clientCase) return '';
+  return clientCase.title?.trim() || `Дело #${clientCase.id}`;
+}
+
+function clientCaseStatusLabel(statusRaw?: string | null): string {
+  const status = (statusRaw ?? '').trim();
+  const normalized = status.toLowerCase();
+
+  if (!normalized) return 'Без статуса';
+  if (normalized.includes('open')) return 'Открыто';
+  if (normalized.includes('onhold') || normalized.includes('hold')) return 'Приостановлено';
+  if (normalized.includes('closed')) return 'Закрыто';
+  if (normalized.includes('в работе') || normalized.includes('актив')) return 'Открыто';
+  if (normalized.includes('ожид')) return 'Приостановлено';
+  if (normalized.includes('закры')) return 'Закрыто';
+
+  return status;
+}
+
+function contractLabel(contract: Contract | null): string {
+  if (!contract) return 'Без договора';
+  return contract.title?.trim() ? `${contract.number} — ${contract.title}` : contract.number;
 }
 
 function formatDate(value?: string | null): string {
@@ -229,6 +327,7 @@ export function InvoiceModal({
   open,
   mode,
   invoice,
+  resumeDraft,
   onClose,
   onBack,
   onOpenClient,
@@ -261,10 +360,13 @@ export function InvoiceModal({
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
-  const [clientPickerMode, setClientPickerMode] = useState<ClientPickerMode>('client');
   const [clientPickerSearch, setClientPickerSearch] = useState('');
-  const [counterpartyClientId, setCounterpartyClientId] = useState<number | null>(null);
-  const [selectedAct, setSelectedAct] = useState<ActOption | null>(null);
+  const [selectedActs, setSelectedActs] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
+  const [actOptions, setActOptions] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
+  const [clientCaseOptions, setClientCaseOptions] = useState<ClientCaseOption[]>(() => normalizeInvoiceClientCases(invoice));
+  const [selectedClientCaseIds, setSelectedClientCaseIds] = useState<number[]>(() => normalizeInvoiceClientCaseIds(invoice));
+  const [caseDropdownOpen, setCaseDropdownOpen] = useState(false);
+  const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [createActOpen, setCreateActOpen] = useState(false);
   const [pageViewMode, setPageViewMode] = useState<boolean>(presentation === 'page' && mode === 'edit');
   const [creatingAct, setCreatingAct] = useState(false);
@@ -279,10 +381,15 @@ export function InvoiceModal({
   const [contractOptions, setContractOptions] = useState<Contract[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
+  const [clientCasesLoading, setClientCasesLoading] = useState(false);
+  const [clientCasesError, setClientCasesError] = useState<string | null>(null);
+  const [actsLoading, setActsLoading] = useState(false);
+  const [actsError, setActsError] = useState<string | null>(null);
   const [numberEditedManually, setNumberEditedManually] = useState(false);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
+  const lastAutoContractClientIdRef = useRef<string>('');
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
@@ -318,28 +425,7 @@ export function InvoiceModal({
     });
   };
 
-  const initialAct = useMemo<ActOption | null>(() => {
-    if (!invoice?.actId) return null;
-    return {
-      id: invoice.actId,
-      number: invoice.actNumber ?? invoice.number,
-      title: invoice.actTitle ?? undefined,
-      date: invoice.date,
-      amount: invoice.amount,
-      invoiceNumber: invoice.actNumber ?? invoice.number,
-      clientId: invoice.clientId ?? undefined,
-      clientName: invoice.clientName ?? undefined,
-      status: (invoice.actStatus ?? 'Created') as ActStatus,
-    };
-  }, [invoice]);
-
-  const [actSearch, setActSearch] = useState<string>(() => actLabel(initialAct));
-  const [actSuggestions, setActSuggestions] = useState<ActOption[]>([]);
-  const [actsLoading, setActsLoading] = useState(false);
-  const [actsError, setActsError] = useState<string | null>(null);
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
-
-  const debouncedActSearch = useDebouncedValue(actSearch.trim(), 300);
 
   useEffect(() => {
     if (presentation === 'page' && mode === 'edit') {
@@ -353,15 +439,37 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
   );
-
-  const selectedCounterpartyClient = useMemo(() => {
-    if (counterpartyClientId) {
-      return clients.find((client) => client.id === counterpartyClientId) ?? null;
-    }
-    const value = form.counterpartyName.trim().toLowerCase();
-    if (!value) return null;
-    return clients.find((client) => client.name.trim().toLowerCase() === value) ?? null;
-  }, [clients, counterpartyClientId, form.counterpartyName]);
+  const selectedContract = useMemo(
+    () => contractOptions.find((contract) => String(contract.id) === form.contractId) ?? null,
+    [contractOptions, form.contractId],
+  );
+  const selectedClientCasesSummary = useMemo(() => {
+    if (!selectedClientCaseIds.length) return '';
+    return selectedClientCaseIds
+      .map((id) => {
+        const match = clientCaseOptions.find((item) => item.id === id) ?? null;
+        return clientCaseLabel(match ?? { id, clientId: selectedClient?.id ?? 0, title: '', status: '', createdAt: '' });
+      })
+      .join(', ');
+  }, [clientCaseOptions, selectedClient?.id, selectedClientCaseIds]);
+  const selectedActsSummary = useMemo(
+    () => selectedActs.map((item) => actLabel(item)).filter(Boolean).join(', '),
+    [selectedActs],
+  );
+  const selectedClientCases = useMemo(
+    () => selectedClientCaseIds
+      .map((id) => clientCaseOptions.find((item) => item.id === id) ?? null)
+      .filter((item): item is ClientCaseOption => item !== null),
+    [clientCaseOptions, selectedClientCaseIds],
+  );
+  const availableClientCases = useMemo(
+    () => clientCaseOptions.filter((item) => !selectedClientCaseIds.includes(item.id)),
+    [clientCaseOptions, selectedClientCaseIds],
+  );
+  const availableActOptions = useMemo(
+    () => actOptions.filter((item) => !selectedActs.some((selected) => selected.id === item.id)),
+    [actOptions, selectedActs],
+  );
 
   const filteredClients = useMemo(() => {
     const query = clientPickerSearch.trim().toLowerCase();
@@ -376,6 +484,7 @@ export function InvoiceModal({
   }, [clientPickerSearch, clients]);
 
   const isIncome = form.type === 'Income';
+  const isPageMode = presentation === 'page';
 
   useEffect(() => {
     let cancelled = false;
@@ -397,7 +506,13 @@ export function InvoiceModal({
       setContractsLoading(true);
       setContractsError(null);
       try {
-        const response = await apiService.getContracts({ clientId, page: 1, pageSize: 200, sortBy: 'date', sortDir: 'desc' });
+        const response = await apiService.getContracts({
+          clientId,
+          page: 1,
+          pageSize: 200,
+          sortBy: 'createdAt',
+          sortDir: 'desc',
+        });
         if (!cancelled) {
           setContractOptions(response.items ?? []);
         }
@@ -418,35 +533,99 @@ export function InvoiceModal({
   }, [open, form.clientId]);
 
   useEffect(() => {
+    if (!open || mode !== 'create' || !form.clientId || form.contractId || contractOptions.length === 0) {
+      return;
+    }
+
+    if (lastAutoContractClientIdRef.current === form.clientId) {
+      return;
+    }
+
+    const latestContract = contractOptions[0];
+    if (!latestContract) {
+      return;
+    }
+
+    setForm((prev) => (
+      prev.clientId === form.clientId && !prev.contractId
+        ? { ...prev, contractId: String(latestContract.id) }
+        : prev
+    ));
+    lastAutoContractClientIdRef.current = form.clientId;
+  }, [contractOptions, form.clientId, form.contractId, mode, open]);
+
+  useEffect(() => {
     if (!form.contractId) return;
     if (contractOptions.some((contract) => String(contract.id) === form.contractId)) return;
     setForm((prev) => ({ ...prev, contractId: '' }));
   }, [contractOptions, form.contractId]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadClientCasesByClient() {
+      if (!open || !form.clientId) {
+        setClientCaseOptions([]);
+        setClientCasesError(null);
+        return;
+      }
+
+      const clientId = Number.parseInt(form.clientId, 10);
+      if (!Number.isFinite(clientId) || clientId <= 0) {
+        setClientCaseOptions([]);
+        setClientCasesError(null);
+        return;
+      }
+
+      setClientCasesLoading(true);
+      setClientCasesError(null);
+      try {
+        const response = await apiService.getCases({ clientId });
+        if (!cancelled) {
+          const nextOptions = [...(response ?? [])].sort(
+            (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+          );
+          setClientCaseOptions(nextOptions);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setClientCaseOptions([]);
+          setClientCasesError(error instanceof Error ? error.message : 'Не удалось загрузить дела');
+        }
+      } finally {
+        if (!cancelled) setClientCasesLoading(false);
+      }
+    }
+
+    void loadClientCasesByClient();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.clientId]);
+
+  useEffect(() => {
     if (open) {
-      setForm(normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType));
-      setLineItems(normalizeLineItems(invoice?.lineItems, invoice?.amount));
-      const nextInitial = invoice?.actId ? {
-        id: invoice.actId,
-        number: invoice.actNumber ?? invoice.number,
-        title: invoice.actTitle ?? undefined,
-        date: invoice.date,
-        amount: invoice.amount,
-        invoiceNumber: invoice.actNumber ?? invoice.number,
-        clientId: invoice.clientId ?? undefined,
-        clientName: invoice.clientName ?? undefined,
-        status: (invoice.actStatus ?? 'Created') as ActStatus,
-      } : null;
-      setCounterpartyClientId(null);
-      setSelectedAct(nextInitial);
-      setActSearch(actLabel(nextInitial));
+      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType);
+      setForm(nextForm);
+      setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
+      setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
+      setActOptions(normalizeInvoiceActs(invoice));
+      setClientCaseOptions(normalizeInvoiceClientCases(invoice));
+      setSelectedClientCaseIds(resumeDraft?.selectedClientCaseIds ?? normalizeInvoiceClientCaseIds(invoice));
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+      setActDropdownOpen(false);
       setActsError(null);
+      setClientCasesError(null);
       setCreateActError(null);
       setLocalError(null);
-      setNumberEditedManually(false);
+      setNumberEditedManually(Boolean(resumeDraft?.form.number));
+      if (presentation === 'page') {
+        setPageViewMode(resumeDraft?.pageViewMode ?? true);
+      }
+      lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
-  }, [open, invoice, defaultClientId, defaultResponsibleId, defaultType]);
+  }, [open, invoice, resumeDraft, defaultClientId, defaultResponsibleId, defaultType, presentation]);
 
   useEffect(() => {
     if (!open || mode !== 'create') return;
@@ -581,71 +760,72 @@ export function InvoiceModal({
     });
   };
 
-  const fetchActs = useCallback(async () => {
-    if (form.type !== 'Income') {
-      setActSuggestions([]);
-      return;
-    }
-    if (debouncedActSearch.length < 2) {
-      setActSuggestions([]);
-      return;
-    }
-    setActsLoading(true);
-    try {
-      const response = await apiService.getActs({
-        search: debouncedActSearch,
-        page: 1,
-        pageSize: 5,
-        sortBy: 'date',
-        sortDir: 'desc',
-        clientId: form.clientId ? Number(form.clientId) : undefined,
-      });
-      const items = response.items ?? [];
-      const options: ActOption[] = items.map((act) => ({
-        id: act.id,
-        number: act.number,
-        title: act.title ?? undefined,
-        date: act.date,
-        amount: act.amount,
-        invoiceNumber: act.invoiceNumber ?? undefined,
-        clientId: act.clientId ?? undefined,
-        clientName: act.clientName ?? undefined,
-        status: act.status,
-      }));
-      setActSuggestions(options);
-      setActsError(null);
-    } catch (err) {
-      setActsError(err instanceof Error ? err.message : 'Не удалось загрузить акты');
-      setActSuggestions([]);
-    } finally {
-      setActsLoading(false);
-    }
-  }, [debouncedActSearch, form.clientId, form.type]);
-
   useEffect(() => {
-    if (!open) return;
-    void fetchActs();
-  }, [fetchActs, open]);
+    let cancelled = false;
+
+    async function loadActsByClient() {
+      if (!open || !form.clientId) {
+        setActOptions([]);
+        setActsError(null);
+        return;
+      }
+
+      setActsLoading(true);
+      try {
+        const response = await apiService.getActs({
+          page: 1,
+          pageSize: 200,
+          sortBy: 'date',
+          sortDir: 'desc',
+          clientId: Number(form.clientId),
+        });
+        if (cancelled) return;
+
+        const items = response.items ?? [];
+        setActOptions(items.map((act) => ({
+          id: act.id,
+          number: act.number,
+          title: act.title ?? undefined,
+          date: act.date,
+          amount: act.amount,
+          invoiceNumber: act.invoiceNumber ?? undefined,
+          clientId: act.clientId ?? undefined,
+          clientName: act.clientName ?? undefined,
+          status: act.status,
+        })));
+        setActsError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setActsError(err instanceof Error ? err.message : 'Не удалось загрузить акты');
+        setActOptions([]);
+      } finally {
+        if (!cancelled) {
+          setActsLoading(false);
+        }
+      }
+    }
+
+    void loadActsByClient();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.clientId, open]);
 
   const handleActSelect = (act: ActOption) => {
-    setSelectedAct(act);
-    setActSearch(actLabel(act));
-    setActSuggestions([]);
-    setActDropdownOpen(false);
-    setForm((prev) => ({
-      ...prev,
-      type: 'Income',
-      number: act.invoiceNumber ?? act.number ?? prev.number,
-      date: toDateInputValue(act.date) || prev.date,
-      dueDate: prev.dueDate || toDateInputValue(act.date),
-      amount: act.amount ? String(act.amount) : prev.amount,
-      clientId: act.clientId ? String(act.clientId) : prev.clientId,
-    }));
+    setSelectedActs((prev) => (prev.some((item) => item.id === act.id) ? prev : [...prev, act]));
   };
 
-  const clearSelectedAct = () => {
-    setSelectedAct(null);
-    setActSearch('');
+  const removeSelectedAct = (actId: number) => {
+    setSelectedActs((prev) => prev.filter((item) => item.id !== actId));
+  };
+
+  const toggleAct = (act: ActOption) => {
+    if (selectedActs.some((item) => item.id === act.id)) {
+      removeSelectedAct(act.id);
+      return;
+    }
+
+    handleActSelect(act);
   };
 
   const handleTypeSelect = (nextType: PaymentKind) => {
@@ -654,28 +834,72 @@ export function InvoiceModal({
       ...prev,
       type: nextType,
     }));
-
-    if (nextType === 'Expense') {
-      setSelectedAct(null);
-      setActSearch('');
-      setActSuggestions([]);
-    }
   };
 
-  const openClientPicker = (mode: ClientPickerMode) => {
-    setClientPickerMode(mode);
+  const openClientPicker = () => {
     setClientPickerSearch('');
     setClientPickerOpen(true);
   };
 
   const handleClientPick = (client: Client) => {
-    if (clientPickerMode === 'client') {
-      setForm((prev) => ({ ...prev, clientId: String(client.id) }));
-    } else {
-      setCounterpartyClientId(client.id);
-      setForm((prev) => ({ ...prev, counterpartyName: client.name }));
+    const nextClientId = String(client.id);
+    const clientChanged = form.clientId !== nextClientId;
+    if (clientChanged) {
+      lastAutoContractClientIdRef.current = '';
+      setSelectedActs([]);
+      setActOptions([]);
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setActDropdownOpen(false);
     }
+    setForm((prev) => ({
+      ...prev,
+      clientId: nextClientId,
+      contractId: clientChanged ? '' : prev.contractId,
+    }));
     setClientPickerOpen(false);
+  };
+
+  const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
+    setSelectedClientCaseIds((prev) => (prev.includes(clientCase.id) ? prev : [...prev, clientCase.id]));
+  };
+
+  const removeSelectedClientCase = (clientCaseId: number) => {
+    setSelectedClientCaseIds((prev) => prev.filter((id) => id !== clientCaseId));
+  };
+
+  const toggleClientCase = (clientCaseId: number) => {
+    if (selectedClientCaseIds.includes(clientCaseId)) {
+      removeSelectedClientCase(clientCaseId);
+      return;
+    }
+
+    const clientCase = clientCaseOptions.find((item) => item.id === clientCaseId);
+    if (clientCase) {
+      handleClientCaseSelect(clientCase);
+    }
+  };
+
+  const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
+    if (!form.clientId) {
+      throw new Error('Сначала выберите поставщика услуг');
+    }
+
+    const created = await apiService.createCase({
+      clientId: Number(form.clientId),
+      title: patch.title?.trim() ?? '',
+      description: patch.description?.trim(),
+      status: patch.status ?? 'Open',
+    });
+
+    setClientCaseOptions((prev) => {
+      const next = [created, ...prev.filter((item) => item.id !== created.id)];
+      return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    });
+    setSelectedClientCaseIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
+    setCaseDropdownOpen(false);
+    setCreateCaseOpen(false);
   };
 
   const handleCreateAct = async () => {
@@ -700,6 +924,7 @@ export function InvoiceModal({
         amount: actAmount,
         invoiceNumber: form.number.trim() || undefined,
         clientId: form.clientId ? Number(form.clientId) : undefined,
+        contractId: form.contractId ? Number(form.contractId) : undefined,
         status: 'Created',
         comment: draftAct.comment.trim() || undefined,
       });
@@ -716,8 +941,9 @@ export function InvoiceModal({
         status: created.status,
       };
 
-      setSelectedAct(option);
-      setActSearch(actLabel(option));
+      setActOptions((prev) => [option, ...prev.filter((item) => item.id !== option.id)]);
+      setSelectedActs((prev) => (prev.some((item) => item.id === option.id) ? prev : [...prev, option]));
+      setActDropdownOpen(false);
       setCreateActOpen(false);
       setDraftAct({
         number: '',
@@ -746,7 +972,8 @@ export function InvoiceModal({
 
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
     const safeAmount = parseMoneyInput(form.amount);
-    const counterparty = form.counterpartyName.trim();
+    const clientCaseIds = selectedClientCaseIds.filter((id) => Number.isFinite(id) && id > 0);
+    const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
 
     return {
       number: form.number.trim() || String(invoice?.number ?? ''),
@@ -757,10 +984,13 @@ export function InvoiceModal({
       status: statusOverride ?? form.status,
       clientId: Number(form.clientId),
       contractId: form.contractId ? Number(form.contractId) : undefined,
+      clientCaseId: clientCaseIds[0] ?? null,
+      clientCaseIds,
+      clientCaseReference: form.clientCaseReference.trim() ? form.clientCaseReference.trim() : undefined,
       description: form.description.trim() ? form.description.trim() : undefined,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
-      actId: selectedAct ? selectedAct.id : null,
-      counterpartyName: counterparty ? counterparty : undefined,
+      actId: actIds[0] ?? null,
+      actIds,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       responsibleIds: form.responsibleIds.slice(0, 1).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
@@ -772,7 +1002,23 @@ export function InvoiceModal({
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
     };
-  }, [form, invoice?.number, lineItems, selectedAct]);
+  }, [form, invoice?.number, lineItems, selectedActs, selectedClientCaseIds]);
+
+  const buildInvoiceEditorDraft = useCallback((): InvoiceEditorDraftState => ({
+    invoiceId: invoice?.id ?? null,
+    mode,
+    presentation: isPageMode ? 'page' : 'modal',
+    pageViewMode,
+    form,
+    lineItems,
+    selectedActs,
+    selectedClientCaseIds,
+  }), [form, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds]);
+
+  const handleOpenClientCard = (clientId: number) => {
+    storeInvoiceEditorDraft(buildInvoiceEditorDraft());
+    onOpenClient?.(clientId);
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -959,9 +1205,314 @@ export function InvoiceModal({
     Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
   };
   const currentStatusMeta = statusMeta[form.status] ?? statusMeta.Pending;
-  if (!open) return null;
+  const createCaseStub = useMemo<ClientCase>(() => ({
+    id: 0,
+    clientId: form.clientId ? Number(form.clientId) : 0,
+    title: '',
+    description: '',
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  }), [form.clientId]);
+  const documentsSection = (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+      <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
+        </span>
+      </header>
+      <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div className="space-y-3 text-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="font-medium text-slate-700">{t('cases') ?? 'Дела'}</span>
+              <p className="mt-1 text-xs text-slate-500">
+                Выберите дело поставщика услуг из списка или создайте новое.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                title="Выбрать дело"
+                aria-label="Выбрать дело"
+                onClick={() => {
+                  setCaseDropdownOpen((prev) => !prev);
+                  setActDropdownOpen(false);
+                }}
+                disabled={!form.clientId}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title="Создать дело"
+                aria-label="Создать дело"
+                onClick={() => setCreateCaseOpen(true)}
+                disabled={!form.clientId}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
 
-  const isPageMode = presentation === 'page';
+          <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            {!form.clientId ? (
+              <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
+                Сначала выберите поставщика услуг.
+              </div>
+            ) : selectedClientCaseIds.length === 0 ? (
+              <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
+                Дела еще не добавлены в счет.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedClientCaseIds.map((id) => {
+                  const selectedCase = clientCaseOptions.find((item) => item.id === id) ?? null;
+                  return (
+                    <div
+                      key={id}
+                      className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-white px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900">
+                          {clientCaseLabel(selectedCase ?? { id, clientId: selectedClient?.id ?? 0, title: '', status: '', createdAt: '' })}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">{clientCaseStatusLabel(selectedCase?.status)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedClientCase(id)}
+                        className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
+                        aria-label={t('clear') ?? 'Очистить'}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {caseDropdownOpen && (
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите дело</span>
+                <button
+                  type="button"
+                  onClick={() => setCaseDropdownOpen(false)}
+                  className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                  aria-label={t('clear') ?? 'Очистить'}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="max-h-56 overflow-auto p-2">
+                {clientCasesLoading ? (
+                  <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                  </div>
+                ) : clientCasesError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{clientCasesError}</div>
+                ) : clientCaseOptions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+                    У поставщика услуг пока нет дел.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clientCaseOptions.map((clientCase) => {
+                      const checked = selectedClientCaseIds.includes(clientCase.id);
+                      return (
+                        <button
+                          key={clientCase.id}
+                          type="button"
+                          onClick={() => toggleClientCase(clientCase.id)}
+                          className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                            checked ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border ${
+                            checked ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300 bg-white text-transparent'
+                          }`}>
+                            <Check className="h-3.5 w-3.5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-slate-900">{clientCaseLabel(clientCase)}</span>
+                            <span className="mt-1 block text-xs text-slate-500">{clientCaseStatusLabel(clientCase.status)}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">Комментарий по делу</span>
+            <textarea
+              value={form.clientCaseReference}
+              onChange={handleChange('clientCaseReference')}
+              rows={2}
+              placeholder="Например: дело ожидает подтверждения документов"
+              className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          </label>
+        </div>
+
+        <div className="space-y-3 text-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="font-medium text-slate-700">{t('acts') ?? 'Акты'}</span>
+              <p className="mt-1 text-xs text-slate-500">
+                Выберите акт поставщика услуг из списка или создайте новый.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                title="Выбрать акт"
+                aria-label="Выбрать акт"
+                onClick={() => {
+                  setActDropdownOpen((prev) => !prev);
+                  setCaseDropdownOpen(false);
+                }}
+                disabled={!form.clientId}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title="Создать акт"
+                aria-label="Создать акт"
+                onClick={() => {
+                  setDraftAct((prev) => ({
+                    ...prev,
+                    date: form.date || prev.date,
+                    amount: form.amount || prev.amount,
+                  }));
+                  setCreateActError(null);
+                  setCreateActOpen(true);
+                }}
+                disabled={!form.clientId}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            {!form.clientId ? (
+              <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
+                Сначала выберите поставщика услуг.
+              </div>
+            ) : selectedActs.length === 0 ? (
+              <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
+                Акты еще не добавлены в счет.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedActs.map((act) => (
+                  <div
+                    key={act.id}
+                    className="flex items-start justify-between gap-3 rounded-xl border border-emerald-200 bg-white px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900">{actLabel(act)}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeSelectedAct(act.id)}
+                      className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
+                      aria-label={t('clear') ?? 'Очистить'}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {actDropdownOpen && (
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите акт</span>
+                <button
+                  type="button"
+                  onClick={() => setActDropdownOpen(false)}
+                  className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                  aria-label={t('clear') ?? 'Очистить'}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="max-h-56 overflow-auto p-2">
+                {actsLoading ? (
+                  <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                  </div>
+                ) : actsError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{actsError}</div>
+                ) : actOptions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+                    У поставщика услуг пока нет актов.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {actOptions.map((act) => {
+                      const checked = selectedActs.some((item) => item.id === act.id);
+                      return (
+                        <button
+                          key={act.id}
+                          type="button"
+                          onClick={() => toggleAct(act)}
+                          className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                            checked ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border ${
+                            checked ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-transparent'
+                          }`}>
+                            <Check className="h-3.5 w-3.5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-slate-900">{actLabel(act)}</span>
+                            <span className="mt-1 block text-xs text-slate-500">
+                              {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
+            <textarea
+              value={form.actReference}
+              onChange={handleChange('actReference')}
+              rows={2}
+              placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
+              className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          </label>
+        </div>
+      </div>
+    </section>
+  );
+  if (!open) return null;
 
   const content = (
     <div className={`relative w-full max-w-none overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
@@ -1047,13 +1598,13 @@ export function InvoiceModal({
 
               <div className="border border-slate-800 p-3 text-sm text-slate-900">
                 <div className="grid grid-cols-2 border border-slate-800">
-                  <div className="border-r border-slate-800 p-2">{form.counterpartyName || 'Поставщик'}</div>
+                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || (t('invoiceClient') ?? 'Поставщик услуг')}</div>
                   <div className="p-2">БИК / Счёт</div>
                 </div>
-                <h3 className="my-4 text-center text-2xl font-bold">Счет № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
+                <h3 className="my-4 text-center text-2xl font-bold">Счёт № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
                 <div className="space-y-1 border-t border-slate-800 pt-3 text-xs sm:text-sm">
-                  <p><span className="font-semibold">Поставщик:</span> {form.counterpartyName || '—'}</p>
-                  <p><span className="font-semibold">Покупатель:</span> {selectedClient?.name || '—'}</p>
+                  <p><span className="font-semibold">{t('invoiceClient') ?? 'Поставщик услуг'}:</span> {selectedClient?.name || '—'}</p>
+                  <p><span className="font-semibold">Договор:</span> {contractLabel(selectedContract)}</p>
                   <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
                 </div>
 
@@ -1103,31 +1654,17 @@ export function InvoiceModal({
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
-                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Ссылка на счет для клиента</div>
+                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Ссылка на счет</div>
                 <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
                 <p>
-                  <span className="text-slate-500">От кого:</span>{' '}
-                  {selectedCounterpartyClient && onOpenClient ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenClient(selectedCounterpartyClient.id)}
-                      className="text-blue-600 underline hover:text-blue-700"
-                    >
-                      {selectedCounterpartyClient.name}
-                    </button>
-                  ) : (
-                    form.counterpartyName || '—'
-                  )}
-                </p>
-                <p>
-                  <span className="text-slate-500">Кому:</span>{' '}
+                  <span className="text-slate-500">{t('invoiceClient') ?? 'Поставщик услуг'}:</span>{' '}
                   {selectedClient && onOpenClient ? (
                     <button
                       type="button"
-                      onClick={() => onOpenClient(selectedClient.id)}
+                      onClick={() => handleOpenClientCard(selectedClient.id)}
                       className="text-blue-600 underline hover:text-blue-700"
                     >
                       {selectedClient.name}
@@ -1136,7 +1673,11 @@ export function InvoiceModal({
                     selectedClient?.name || '—'
                   )}
                 </p>
-                <p><span className="text-slate-500">Акт:</span> {selectedAct ? actLabel(selectedAct) : (form.actReference || '—')}</p>
+                <p><span className="text-slate-500">Договор:</span> {contractLabel(selectedContract)}</p>
+                <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
+                <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
+                <p><span className="text-slate-500">{t('acts') ?? 'Акты'}:</span> {selectedActsSummary || '—'}</p>
+                <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}:</span> {form.actReference || '—'}</p>
                 <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
                 <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
                 <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
@@ -1275,6 +1816,8 @@ export function InvoiceModal({
                           </div>
                         </section>
 
+              {documentsSection}
+
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                           <header className="mb-3 flex items-center justify-between">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
@@ -1315,24 +1858,24 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoicePartiesTitle') ?? 'Контрагент и источник'}
+                              {t('invoicePartiesTitle') ?? 'Поставщик услуг и договор'}
                             </span>
               
                           </header>
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Контрагент'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Поставщик услуг'}</span>
                               <div className="flex gap-2">
                                 <input
                                   type="text"
                                   value={selectedClient?.name ?? ''}
                                   readOnly
                                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50"
-                                  placeholder={t('invoiceClientPlaceholder') ?? 'Выберите клиента'}
+                                  placeholder={t('invoiceClientPlaceholder') ?? 'Выберите поставщика услуг'}
                                 />
                                 <button
                                   type="button"
-                                  onClick={() => openClientPicker('client')}
+                                  onClick={openClientPicker}
                                   className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
                                 >
                                   <UserRoundSearch className="h-4 w-4" />
@@ -1362,10 +1905,10 @@ export function InvoiceModal({
                               {selectedClient && onOpenClient && (
                                 <button
                                   type="button"
-                                  onClick={() => onOpenClient(selectedClient.id)}
+                                  onClick={() => handleOpenClientCard(selectedClient.id)}
                                   className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
                                 >
-                                  Открыть карточку клиента
+                                  Открыть карточку поставщика услуг
                                 </button>
                               )}
                             </label>
@@ -1389,66 +1932,6 @@ export function InvoiceModal({
                               {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
                             </label>
 
-                            <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceCounterparty') ?? 'От кого счёт'}</span>
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={form.counterpartyName}
-                                  onChange={(event) => {
-                                    setCounterpartyClientId(null);
-                                    setForm((prev) => ({ ...prev, counterpartyName: event.target.value }));
-                                  }}
-                                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                  placeholder={t('invoiceCounterpartyPlaceholder') ?? 'Например: ООО «Городской водоканал»'}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => openClientPicker('counterparty')}
-                                  className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
-                                >
-                                  <UserRoundSearch className="h-4 w-4" />
-                                </button>
-                              </div>
-                              {selectedCounterpartyClient && onOpenClient && (
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenClient(selectedCounterpartyClient.id)}
-                                  className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
-                                >
-                                  Открыть карточку контрагента
-                                </button>
-                              )}
-                            </label>
-
-                          </div>
-                        </section>
-
-              <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
-                          <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceResponsible') ?? 'Ответственный'}
-                            </span>
-                          </header>
-                          <div className="mt-4">
-                            <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceResponsible') ?? 'Ответственный'}</span>
-                              <select
-                                value={form.responsibleIds[0] ?? ''}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-                                  setForm((prev) => ({ ...prev, responsibleIds: nextValue ? [nextValue] : [] }));
-                                }}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                              >
-                                <option value="">Не выбрано</option>
-                                {responsibles.map((responsible) => (
-                                  <option key={responsible.id} value={String(responsible.id)}>
-                                    {responsible.fullName}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                           </div>
                         </section>
 
@@ -1493,110 +1976,6 @@ export function InvoiceModal({
                           </div>
                         </section>
 
-              <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
-                          <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
-                            </span>
-                          </header>
-                          <div className="mt-4 space-y-4">
-                            {isIncome && (
-                              <div className="flex flex-col gap-2 text-sm">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium text-slate-700">{t('invoiceAct') ?? 'Акт'}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setDraftAct((prev) => ({
-                                        ...prev,
-                                        date: form.date || prev.date,
-                                        amount: form.amount || prev.amount,
-                                      }));
-                                      setCreateActError(null);
-                                      setCreateActOpen(true);
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                                  >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    {t('actCreate') ?? 'Создать акт'}
-                                  </button>
-                                </div>
-                                {selectedAct && (
-                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                                    {t('invoiceSelectedAct') ?? 'Выбран акт'}: {actLabel(selectedAct)}
-                                  </div>
-                                )}
-                                <div className="relative">
-                                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                                  <input
-                                    type="text"
-                                    value={actSearch}
-                                    onChange={(event) => {
-                                      setActSearch(event.target.value);
-                                      setActDropdownOpen(true);
-                                    }}
-                                    onFocus={() => setActDropdownOpen(true)}
-                                    onBlur={() => setTimeout(() => setActDropdownOpen(false), 150)}
-                                    placeholder={t('invoiceActSearchPlaceholder') ?? 'Поиск акта по номеру или названию'}
-                                    className="w-full rounded-lg border border-slate-300 px-9 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                  />
-                                  {actSearch && (
-                                    <button
-                                      type="button"
-                                      onClick={clearSelectedAct}
-                                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                                      aria-label={t('clear') ?? 'Очистить'}
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                  {actDropdownOpen && (actsLoading || actSuggestions.length > 0 || actsError) && (
-                                    <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                                      {actsLoading ? (
-                                        <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
-                                          <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
-                                        </div>
-                                      ) : actsError ? (
-                                        <div className="px-3 py-2 text-sm text-rose-600">{actsError}</div>
-                                      ) : actSuggestions.length === 0 ? (
-                                        <div className="px-3 py-2 text-sm text-slate-500">
-                                          {t('nothingFound') ?? 'Ничего не найдено'}
-                                        </div>
-                                      ) : (
-                                        actSuggestions.map((act) => (
-                                          <button
-                                            key={act.id}
-                                            type="button"
-                                            onClick={() => handleActSelect(act)}
-                                            className="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
-                                          >
-                                            <div className="font-medium text-slate-900">{actLabel(act)}</div>
-                                            <div className="mt-1 text-xs text-slate-500">
-                                              <span>{formatDate(act.date)}</span>
-                                              <span className="mx-2">·</span>
-                                              <span>{formatCurrencySmart(act.amount ?? 0).full}</span>
-                                            </div>
-                                          </button>
-                                        ))
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
-                              <textarea
-                                value={form.actReference}
-                                onChange={handleChange('actReference')}
-                                rows={2}
-                                placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                              />
-                            </label>
-                          </div>
-                        </section>
             </div>
           </div>
 
@@ -1633,9 +2012,7 @@ export function InvoiceModal({
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-base font-semibold text-slate-900">
-                {clientPickerMode === 'client'
-                  ? (t('invoicePickClientTitle') ?? 'Выбор контрагента')
-                  : (t('invoicePickCounterpartyTitle') ?? 'Выбор отправителя счёта')}
+                {t('invoicePickClientTitle') ?? 'Выбор поставщика услуг'}
               </h3>
               <button type="button" onClick={() => setClientPickerOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
@@ -1664,6 +2041,13 @@ export function InvoiceModal({
           </div>
         </div>
       )}
+
+      <CaseModal
+        isOpen={createCaseOpen}
+        onClose={() => setCreateCaseOpen(false)}
+        caseData={createCaseStub}
+        onSave={handleCreateClientCase}
+      />
 
       {createActOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">

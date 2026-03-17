@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
-import type { FormRequirementSectionMetadataDto, InvoiceLegacyMigrationSummaryDto, InvoiceNumberingSettingsDto, LegacyAddressMigrationResult } from '../../services/api';
+import type {
+  FormRequirementSectionMetadataDto,
+  InvoiceCounterpartyCleanupResultDto,
+  InvoiceLegacyMigrationSummaryDto,
+  InvoiceNumberingSettingsDto,
+  LegacyAddressMigrationResult,
+} from '../../services/api';
 
 type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
@@ -30,6 +36,9 @@ export function AppSettings() {
   const [invoiceNumbering, setInvoiceNumbering] = useState<InvoiceNumberingSettingsDto>({ startNumber: 1, allocationStrategy: 'max-plus-one' });
   const [invoiceNumberingLoading, setInvoiceNumberingLoading] = useState(false);
   const [invoiceNumberingMessage, setInvoiceNumberingMessage] = useState<string | null>(null);
+  const [invoiceCounterpartyCleanupLoading, setInvoiceCounterpartyCleanupLoading] = useState(false);
+  const [invoiceCounterpartyCleanupMessage, setInvoiceCounterpartyCleanupMessage] = useState<string | null>(null);
+  const [invoiceCounterpartyCleanupResult, setInvoiceCounterpartyCleanupResult] = useState<InvoiceCounterpartyCleanupResultDto | null>(null);
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
@@ -182,6 +191,21 @@ export function AppSettings() {
       setInvoiceNumberingMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройки нумерации счетов');
     } finally {
       setInvoiceNumberingLoading(false);
+    }
+  };
+
+  const runInvoiceCounterpartyCleanup = async () => {
+    setInvoiceCounterpartyCleanupLoading(true);
+    setInvoiceCounterpartyCleanupMessage(null);
+    try {
+      const response = await apiService.cleanupInvoiceCounterpartyNames();
+      setInvoiceCounterpartyCleanupResult(response);
+      setInvoiceCounterpartyCleanupMessage('Очистка поля "От кого счёт" выполнена');
+    } catch (e) {
+      setInvoiceCounterpartyCleanupResult(null);
+      setInvoiceCounterpartyCleanupMessage(e instanceof Error ? e.message : 'Не удалось очистить поле "От кого счёт"');
+    } finally {
+      setInvoiceCounterpartyCleanupLoading(false);
     }
   };
 
@@ -358,6 +382,32 @@ export function AppSettings() {
                     {invoiceNumberingLoading ? 'Сохранение…' : 'Сохранить'}
                   </button>
                   {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
+                </div>
+
+                <div className="border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-900">Очистка устаревшего поля счета</h4>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Удаляет сохраненные значения поля "От кого счёт" и снимает старое требование заполнения.
+                  </p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={runInvoiceCounterpartyCleanup}
+                      disabled={invoiceCounterpartyCleanupLoading}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {invoiceCounterpartyCleanupLoading ? 'Очищаем…' : 'Очистить поле'}
+                    </button>
+                    {invoiceCounterpartyCleanupMessage && (
+                      <span className="text-sm text-gray-600">{invoiceCounterpartyCleanupMessage}</span>
+                    )}
+                  </div>
+                  {invoiceCounterpartyCleanupResult && (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p>Очищено счетов: {invoiceCounterpartyCleanupResult.cleared}</p>
+                      <p>Удалено legacy-требований: {invoiceCounterpartyCleanupResult.removedRequirements}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

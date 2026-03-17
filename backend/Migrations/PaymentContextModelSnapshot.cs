@@ -796,6 +796,22 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Invoices");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PaymentId", "ClientCaseId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
+
+                    b.ToTable("InvoiceClientCases", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceItemNameDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -1394,6 +1410,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<int?>("ClientCaseId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClientCaseReference")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
 
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
@@ -2266,7 +2286,7 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.Payment", "Invoice")
-                        .WithMany()
+                        .WithMany("Acts")
                         .HasForeignKey("InvoiceId")
                         .OnDelete(DeleteBehavior.SetNull);
 
@@ -2417,6 +2437,25 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Contract");
+
+                    b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("InvoiceClientCases")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany("InvoiceClientCases")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
 
                     b.Navigation("Payment");
                 });
@@ -2596,6 +2635,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("InvoiceClientCases");
+
                     b.Navigation("Payments");
                 });
 
@@ -2639,6 +2680,10 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
                 {
+                    b.Navigation("Acts");
+
+                    b.Navigation("InvoiceClientCases");
+
                     b.Navigation("Responsibles");
                 });
 

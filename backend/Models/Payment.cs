@@ -29,6 +29,11 @@ namespace PayPlanner.Api.Models
         public Invoice? Invoice { get; set; }
 
         /// <summary>
+        /// Акты, явно привязанные к счёту.
+        /// </summary>
+        public ICollection<Act> Acts { get; set; } = new List<Act>();
+
+        /// <summary>
         /// Сумма платежа (в валюте учёта).
         /// </summary>
         public decimal Amount { get; set; }
@@ -42,6 +47,11 @@ namespace PayPlanner.Api.Models
         /// Навигация на дело клиента.
         /// </summary>
         public ClientCase? ClientCase { get; set; }
+
+        /// <summary>
+        /// Явные связи счёта с несколькими делами клиента.
+        /// </summary>
+        public ICollection<InvoiceClientCase> InvoiceClientCases { get; set; } = new List<InvoiceClientCase>();
 
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
@@ -137,6 +147,8 @@ namespace PayPlanner.Api.Models
         /// Произвольные заметки по платежу.
         /// </summary>
         public string Notes { get; set; } = string.Empty;
+
+        public string? ClientCaseReference { get; set; }
 
         /// <summary>
         /// Системные заметки, автоматически формируемые приложением (история переносов и т. п.).

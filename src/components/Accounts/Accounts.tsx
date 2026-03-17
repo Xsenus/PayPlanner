@@ -39,6 +39,11 @@ import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import {
+  clearInvoiceEditorDraft,
+  peekInvoiceEditorDraft,
+  type InvoiceEditorDraftState,
+} from '../../utils/invoiceEditorBridge';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
@@ -110,6 +115,20 @@ function formatDate(value?: string | null): string {
   if (!normalized) return value;
   const [y, m, d] = normalized.split('-');
   return `${d}.${m}.${y}`;
+}
+
+function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
+  if (!invoice) return [];
+  if (invoice.clientCases?.length) {
+    return invoice.clientCases.map((item) => item.title?.trim() || `Дело #${item.id}`);
+  }
+  if (invoice.clientCaseTitle?.trim()) {
+    return [invoice.clientCaseTitle];
+  }
+  if (invoice.clientCaseId) {
+    return [`Дело #${invoice.clientCaseId}`];
+  }
+  return [];
 }
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['date', 'number', 'amount', 'counterparty', 'status', 'dueDate', 'act'];
@@ -230,6 +249,61 @@ function safeWrite<T>(key: string, value: T) {
   } catch {
     /** */
   }
+}
+
+function parseDraftMoney(value: string): number {
+  const normalized = value.replace(/\s+/g, '').replace(',', '.');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildInvoiceFromDraft(draft: InvoiceEditorDraftState): Invoice | null {
+  if (!draft.invoiceId) return null;
+
+  const clientId = draft.form.clientId ? Number(draft.form.clientId) : null;
+  const contractId = draft.form.contractId ? Number(draft.form.contractId) : null;
+  const responsibleIds = draft.form.responsibleIds
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return {
+    id: draft.invoiceId,
+    number: draft.form.number,
+    date: draft.form.date,
+    dueDate: draft.form.dueDate || null,
+    amount: parseDraftMoney(draft.form.amount),
+    type: draft.form.type,
+    status: draft.form.status,
+    isPaid: draft.form.status === 'Completed',
+    paidDate: draft.form.paidDate || null,
+    clientId,
+    contractId,
+    clientCaseId: draft.selectedClientCaseIds[0] ?? null,
+    clientCaseIds: draft.selectedClientCaseIds,
+    clientCaseReference: draft.form.clientCaseReference || null,
+    description: draft.form.description || null,
+    actReference: draft.form.actReference || null,
+    actId: draft.selectedActs[0]?.id ?? null,
+    actIds: draft.selectedActs.map((item) => item.id),
+    acts: draft.selectedActs.map((item) => ({
+      id: item.id,
+      number: item.number,
+      title: item.title ?? null,
+      date: item.date,
+      amount: item.amount,
+      status: item.status,
+      clientId: item.clientId ?? null,
+      clientName: item.clientName ?? null,
+    })),
+    lineItems: draft.lineItems.map((item) => ({
+      name: item.name,
+      quantity: parseDraftMoney(item.quantity),
+      unit: item.unit,
+      price: parseDraftMoney(item.price),
+    })),
+    responsibleIds,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export function Accounts({ defaultType, lockType = false, onOpenClient }: AccountsProps) {
@@ -505,6 +579,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [pageEditingInvoice, setPageEditingInvoice] = useState<Invoice | null>(null);
+  const [resumeInvoiceDraft, setResumeInvoiceDraft] = useState<InvoiceEditorDraftState | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -567,19 +642,53 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
   }, [actModalOpen, ensureActLookups]);
 
-  const openCreateModal = () => {
+  const openCreateModal = useCallback((draft: InvoiceEditorDraftState | null = null) => {
+    clearInvoiceEditorDraft();
     setSelectedInvoice(null);
+    setResumeInvoiceDraft(draft);
     setModalError(null);
     setModalOpen(true);
-  };
+  }, []);
 
-  const openEditPage = (invoice: Invoice) => {
+  const openEditPage = useCallback((invoice: Invoice, draft: InvoiceEditorDraftState | null = null) => {
+    clearInvoiceEditorDraft();
     setPageEditingInvoice(invoice);
+    setResumeInvoiceDraft(draft);
     setModalError(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (modalOpen || pageEditingInvoice) return;
+
+    const draft = peekInvoiceEditorDraft();
+    if (!draft) return;
+
+    if (draft.mode === 'create') {
+      openCreateModal(draft);
+      return;
+    }
+
+    if (!draft.invoiceId) {
+      clearInvoiceEditorDraft();
+      return;
+    }
+
+    if (loading || refreshing) {
+      return;
+    }
+
+    const target = invoices.find((item) => item.id === draft.invoiceId) ?? buildInvoiceFromDraft(draft);
+    if (!target) {
+      clearInvoiceEditorDraft();
+      return;
+    }
+
+    openEditPage(target, draft);
+  }, [invoices, loading, modalOpen, openCreateModal, openEditPage, pageEditingInvoice, refreshing]);
 
   useEffect(() => {
     if (!canEdit || invoices.length === 0) return;
+    if (peekInvoiceEditorDraft()) return;
     let raw: string | null = null;
     try {
       raw = localStorage.getItem('pp.openInvoiceId');
@@ -599,26 +708,21 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [canEdit, invoices]);
 
   const closeModal = () => {
+    clearInvoiceEditorDraft();
     setModalOpen(false);
     setSelectedInvoice(null);
+    setResumeInvoiceDraft(null);
     setModalError(null);
   };
 
   const closeEditPage = () => {
+    clearInvoiceEditorDraft();
     setPageEditingInvoice(null);
+    setResumeInvoiceDraft(null);
     setModalError(null);
   };
 
   const openClientFromEditor = (clientId: number) => {
-    if (!pageEditingInvoice) {
-      onOpenClient?.(clientId);
-      return;
-    }
-    try {
-      localStorage.setItem('pp.openInvoiceId', String(pageEditingInvoice.id));
-    } catch {
-      /** */
-    }
     onOpenClient?.(clientId);
   };
 
@@ -837,7 +941,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       { key: 'date', label: t('invoiceDate') ?? t('actDate') ?? 'Дата', sortable: true },
       { key: 'number', label: t('invoiceNumber') ?? 'Номер счёта', sortable: true },
       { key: 'amount', label: t('invoiceAmount') ?? t('amount') ?? 'Сумма', sortable: true },
-      { key: 'counterparty', label: t('invoiceClient') ?? 'Контрагент', sortable: true },
+      { key: 'counterparty', label: t('invoiceClient') ?? 'Поставщик услуг', sortable: true },
       { key: 'status', label: t('invoiceStatus') ?? t('status') ?? 'Статус', sortable: false },
       { key: 'dueDate', label: t('invoiceDueDate') ?? 'Оплатить до', sortable: true },
       { key: 'paidDate', label: t('paidDate') ?? 'Дата оплаты', sortable: false },
@@ -1057,6 +1161,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           mode="edit"
           presentation="page"
           invoice={pageEditingInvoice}
+          resumeDraft={resumeInvoiceDraft}
           onClose={closeEditPage}
           onBack={closeEditPage}
           onOpenClient={openClientFromEditor}
@@ -1367,8 +1472,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                     const typeLabel = typeLabels[type];
                     const invoiceKey = accountKey(row.accountNumber) ?? row.accountNumber;
                     const actsForInvoice = invoiceKey ? actsByInvoice[invoiceKey] ?? [] : [];
-                    const primaryName =
-                      invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
+                    const primaryName = invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
+                    const caseLines = getInvoiceCaseSummary(invoice);
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
                     const colSpan = orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0);
@@ -1437,9 +1542,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                         </span>
                                       </div>
                                       {invoice?.clientCompany && <div className="text-xs text-gray-500">{invoice.clientCompany}</div>}
-                                      {invoice?.counterpartyName && invoice.counterpartyName !== invoice.clientName && (
+                                      {caseLines.length > 0 && (
                                         <div className="text-xs text-gray-500">
-                                          {t('invoiceCounterpartyLabel') ?? 'От поставщика'}: {invoice.counterpartyName}
+                                          {(t('cases') ?? 'Дела')}: {caseLines.join(', ')}
                                         </div>
                                       )}
                                     </div>
@@ -1683,8 +1788,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           open={modalOpen}
           mode="create"
           invoice={selectedInvoice}
+          resumeDraft={resumeInvoiceDraft}
           onClose={closeModal}
-          onOpenClient={onOpenClient}
+          onOpenClient={openClientFromEditor}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}

@@ -146,6 +146,11 @@ export interface InvoiceLegacyMigrationSummaryDto {
   existingDuplicateInvoiceKeys: number;
 }
 
+export interface InvoiceCounterpartyCleanupResultDto {
+  cleared: number;
+  removedRequirements: number;
+}
+
 export interface SimpleDictionaryDuplicateItem {
   id: number;
   name: string;
@@ -416,6 +421,12 @@ export class ApiService {
 
   async migrateLegacyInvoiceLinks() {
     return this.request<InvoiceLegacyMigrationSummaryDto>('/invoices/migrate-legacy-links', {
+      method: 'POST',
+    });
+  }
+
+  async cleanupInvoiceCounterpartyNames() {
+    return this.request<InvoiceCounterpartyCleanupResultDto>('/invoices/cleanup-counterparty-names', {
       method: 'POST',
     });
   }

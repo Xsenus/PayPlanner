@@ -3410,15 +3410,37 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           <tr key={invoice.id} className="hover:bg-gray-50/80">
                             <td className="px-4 py-3 font-medium text-gray-900">{toRuDate(invoice.date)}</td>
                             <td className="px-4 py-3">
+                              {(() => {
+                                const caseLabels = invoice.clientCases?.length
+                                  ? invoice.clientCases.map((item) => item.title?.trim() || `Дело #${item.id}`)
+                                  : invoice.clientCaseTitle
+                                    ? [invoice.clientCaseTitle]
+                                    : invoice.clientCaseId
+                                      ? [`Дело #${invoice.clientCaseId}`]
+                                      : [];
+                                const actLabels = invoice.acts?.length
+                                  ? invoice.acts.map((item) => {
+                                      const parts: string[] = [];
+                                      if (item.number) parts.push(`№${item.number}`);
+                                      if (item.title) parts.push(item.title);
+                                      return parts.join(' · ') || `Акт #${item.id}`;
+                                    })
+                                  : invoice.actNumber
+                                    ? [`${t('invoiceAct') ?? 'Акт'} №${invoice.actNumber}${invoice.actTitle ? ` · ${invoice.actTitle}` : ''}`]
+                                    : [];
+
+                                return (
+                                  <>
                               <div className="font-medium text-gray-900">№{invoice.number}</div>
-                              {invoice.clientCaseTitle ? (
-                                <div className="text-xs text-gray-500">{invoice.clientCaseTitle}</div>
-                              ) : null}
-                              {invoice.actNumber ? (
-                                <div className="text-xs text-gray-500">
-                                  {(t('invoiceAct') ?? 'Акт')} №{invoice.actNumber}
-                                </div>
-                              ) : null}
+                              {caseLabels.map((label) => (
+                                <div key={label} className="text-xs text-gray-500">{label}</div>
+                              ))}
+                              {actLabels.map((label) => (
+                                <div key={label} className="text-xs text-gray-500">{label}</div>
+                              ))}
+                                  </>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3 font-semibold text-gray-900">
                               {formatCurrencySmart(invoice.amount).full}

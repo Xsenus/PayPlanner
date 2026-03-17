@@ -354,6 +354,14 @@ export interface ClientCase {
   createdAt: string;
 }
 
+export interface InvoiceClientCaseLink {
+  id: number;
+  clientId: number;
+  title: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface DealType {
   id: number;
   name: string;
@@ -600,6 +608,20 @@ export interface InvoiceResponsible {
   fullName: string;
 }
 
+export interface InvoiceActLink {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  amount: number;
+  status: ActStatus;
+  clientId?: number | null;
+  clientName?: string | null;
+  responsibleId?: number | null;
+  responsibleName?: string | null;
+  comment?: string | null;
+}
+
 export interface Invoice {
   id: number;
   number: string;
@@ -619,12 +641,17 @@ export interface Invoice {
   clientStatus?: ClientStatus | null;
   clientCaseId?: number | null;
   clientCaseTitle?: string | null;
+  clientCaseIds?: number[];
+  clientCases?: InvoiceClientCaseLink[];
+  clientCaseReference?: string | null;
   description?: string | null;
   actReference?: string | null;
   actId?: number | null;
   actNumber?: string | null;
   actTitle?: string | null;
   actStatus?: ActStatus | null;
+  actIds?: number[];
+  acts?: InvoiceActLink[];
   responsibleId?: number | null;
   responsibleName?: string | null;
   responsibles?: InvoiceResponsible[];
@@ -655,9 +682,12 @@ export interface InvoiceInput {
   clientId: number;
   contractId?: number | null;
   clientCaseId?: number | null;
+  clientCaseIds?: number[];
+  clientCaseReference?: string | null;
   description?: string | null;
   actReference?: string | null;
   actId?: number | null;
+  actIds?: number[];
   counterpartyName?: string | null;
   serviceId?: number | null;
   paymentSourceId?: number | null;

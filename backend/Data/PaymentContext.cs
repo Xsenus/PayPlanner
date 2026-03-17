@@ -59,7 +59,7 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(e => e.Invoice)
-                  .WithMany()
+                  .WithMany(p => p.Acts)
                   .HasForeignKey(e => e.InvoiceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
@@ -151,6 +151,21 @@ public class PaymentContext : DbContext
                 .HasForeignKey(x => x.PaymentId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(x => x.PaymentId).HasDatabaseName("IX_ContractPayments_PaymentId");
+        });
+
+        modelBuilder.Entity<InvoiceClientCase>(entity =>
+        {
+            entity.HasKey(x => new { x.PaymentId, x.ClientCaseId });
+            entity.ToTable("InvoiceClientCases");
+            entity.HasOne(x => x.Payment)
+                .WithMany(x => x.InvoiceClientCases)
+                .HasForeignKey(x => x.PaymentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ClientCase)
+                .WithMany(x => x.InvoiceClientCases)
+                .HasForeignKey(x => x.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ClientCaseId).HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
         });
 
         // ------------------ Invoice ------------------
@@ -250,6 +265,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.DocumentKind).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
+            entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);
@@ -316,6 +332,11 @@ public class PaymentContext : DbContext
             entity.HasMany(e => e.Responsibles)
                   .WithOne(pr => pr.Payment)
                   .HasForeignKey(pr => pr.PaymentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.InvoiceClientCases)
+                  .WithOne(x => x.Payment)
+                  .HasForeignKey(x => x.PaymentId)
                   .OnDelete(DeleteBehavior.Cascade);
 
             // ---- Индексы Account
@@ -868,6 +889,8 @@ public class PaymentContext : DbContext
     public DbSet<ContractInvoice> ContractInvoices { get; set; }
 
     public DbSet<ContractPayment> ContractPayments { get; set; }
+
+    public DbSet<InvoiceClientCase> InvoiceClientCases { get; set; }
 
     /// <summary>
     /// Счета.

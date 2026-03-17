@@ -21,12 +21,17 @@ public class InvoiceDto
     public ClientStatusDto? ClientStatus { get; set; }
     public int? ClientCaseId { get; set; }
     public string? ClientCaseTitle { get; set; }
+    public List<int> ClientCaseIds { get; set; } = new();
+    public List<InvoiceClientCaseDto> ClientCases { get; set; } = new();
+    public string? ClientCaseReference { get; set; }
     public string? Description { get; set; }
     public string? ActReference { get; set; }
     public int? ActId { get; set; }
     public string? ActNumber { get; set; }
     public string? ActTitle { get; set; }
     public ActStatus? ActStatus { get; set; }
+    public List<int> ActIds { get; set; } = new();
+    public List<InvoiceActDto> Acts { get; set; } = new();
     public string? ResponsibleName { get; set; }
     public List<InvoiceResponsibleDto> Responsibles { get; set; } = new();
     public int? ResponsibleId { get; set; }
@@ -38,6 +43,30 @@ public class InvoiceDto
     public DateTime CreatedAt { get; set; }
     public DocumentKind DocumentKind { get; set; }
     public List<InvoiceLineItemDto> LineItems { get; set; } = new();
+}
+
+public class InvoiceClientCaseDto
+{
+    public int Id { get; set; }
+    public int ClientId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public ClientCaseStatus Status { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class InvoiceActDto
+{
+    public int Id { get; set; }
+    public string Number { get; set; } = string.Empty;
+    public string? Title { get; set; }
+    public DateTime Date { get; set; }
+    public decimal Amount { get; set; }
+    public ActStatus Status { get; set; }
+    public int? ClientId { get; set; }
+    public string? ClientName { get; set; }
+    public int? ResponsibleId { get; set; }
+    public string? ResponsibleName { get; set; }
+    public string? Comment { get; set; }
 }
 
 public class InvoiceLineItemDto

@@ -32,11 +32,20 @@ public class UpsertInvoiceRequest
 
     public int? ClientCaseId { get; set; }
 
+    public List<int>? ClientCaseIds { get; set; }
+
+    [MaxLength(300)]
+    public string? ClientCaseReference { get; set; }
+
     [MaxLength(500)]
     public string? Description { get; set; }
 
     [MaxLength(300)]
     public string? ActReference { get; set; }
+
+    public int? ActId { get; set; }
+
+    public List<int>? ActIds { get; set; }
 
     [MaxLength(200)]
     public string? CounterpartyName { get; set; }

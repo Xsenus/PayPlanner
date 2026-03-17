@@ -72,16 +72,7 @@ public class InvoicesController : ControllerBase
             .ToListAsync(ct);
 
         var items = rawItems.Select(MapFromRaw).ToList();
-        var responsiblesMap = await LoadResponsiblesMapAsync(items.Select(i => i.Id), ct);
-        foreach (var item in items)
-        {
-            item.Responsibles = responsiblesMap.GetValueOrDefault(item.Id, new List<InvoiceResponsibleDto>());
-            if (item.Responsibles.Count > 0)
-            {
-                item.ResponsibleId = item.Responsibles[0].Id;
-                item.ResponsibleName = item.Responsibles[0].FullName;
-            }
-        }
+        await EnrichInvoiceDtosAsync(items, ct);
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -247,6 +238,18 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(request.ClientId, request, ct);
+        if (clientCaseValidation.Error is not null)
+        {
+            return clientCaseValidation.Error;
+        }
+
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request, null, ct);
+        if (actValidation.Error is not null)
+        {
+            return actValidation.Error;
+        }
+
         var invoice = new Invoice
         {
             Number = number,
@@ -265,16 +268,17 @@ public class InvoicesController : ControllerBase
             Status = request.Status,
             Type = request.Type,
             Description = Normalize(request.Description) ?? string.Empty,
+            ClientCaseReference = Normalize(request.ClientCaseReference),
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
             ContractId = request.ContractId,
-            ClientCaseId = request.ClientCaseId,
+            ClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0 ? clientCaseValidation.ClientCaseIds[0] : null,
             PaymentSourceId = request.PaymentSourceId,
             ServiceId = request.ServiceId,
             IncomeTypeId = request.IncomeTypeId,
             DealTypeId = request.DealTypeId,
             PaymentStatusId = request.PaymentStatusEntityId,
-            CounterpartyName = Normalize(request.CounterpartyName),
+            CounterpartyName = null,
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -299,19 +303,11 @@ public class InvoicesController : ControllerBase
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
-        var raw = await BuildInvoiceQuery()
-            .Where(x => x.Payment.Id == payment.Id)
-            .Select(ProjectionRaw)
-            .FirstAsync(ct);
+        await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
+        await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct);
+        await _db.SaveChangesAsync(ct);
 
-        var dto = MapFromRaw(raw);
-        var responsiblesMap = await LoadResponsiblesMapAsync(new[] { payment.Id }, ct);
-        dto.Responsibles = responsiblesMap.GetValueOrDefault(payment.Id, new List<InvoiceResponsibleDto>());
-        if (dto.Responsibles.Count > 0)
-        {
-            dto.ResponsibleId = dto.Responsibles[0].Id;
-            dto.ResponsibleName = dto.Responsibles[0].FullName;
-        }
+        var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -330,6 +326,7 @@ public class InvoicesController : ControllerBase
         var payment = await _db.Payments
             .Include(p => p.Responsibles)
             .Include(p => p.Invoice)
+            .Include(p => p.InvoiceClientCases)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
@@ -369,6 +366,20 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(request.ClientId, request, ct);
+        if (clientCaseValidation.Error is not null)
+        {
+            return clientCaseValidation.Error;
+        }
+
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request, id, ct);
+        if (actValidation.Error is not null)
+        {
+            return actValidation.Error;
+        }
+
+        var previousInvoiceNumber = payment.Account;
+
         payment.Account = number;
         payment.DocumentKind = DocumentKind.Invoice;
         payment.AccountDate = request.Date.Date;
@@ -387,16 +398,17 @@ public class InvoicesController : ControllerBase
         payment.Status = request.Status;
         payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
+        payment.ClientCaseReference = Normalize(request.ClientCaseReference);
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
         payment.ContractId = request.ContractId;
-        payment.ClientCaseId = request.ClientCaseId;
+        payment.ClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0 ? clientCaseValidation.ClientCaseIds[0] : null;
         payment.PaymentSourceId = request.PaymentSourceId;
         payment.ServiceId = request.ServiceId;
         payment.IncomeTypeId = request.IncomeTypeId;
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
-        payment.CounterpartyName = Normalize(request.CounterpartyName);
+        payment.CounterpartyName = null;
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
         var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(request.ClientId, request.ResponsibleIds, ct);
@@ -428,21 +440,11 @@ public class InvoicesController : ControllerBase
 
         ApplyPaidFlags(payment, request.PaidDate);
 
+        await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
+        await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
         await _db.SaveChangesAsync(ct);
 
-        var raw = await BuildInvoiceQuery()
-            .Where(x => x.Payment.Id == payment.Id)
-            .Select(ProjectionRaw)
-            .FirstAsync(ct);
-
-        var dto = MapFromRaw(raw);
-        var responsiblesMap = await LoadResponsiblesMapAsync(new[] { payment.Id }, ct);
-        dto.Responsibles = responsiblesMap.GetValueOrDefault(payment.Id, new List<InvoiceResponsibleDto>());
-        if (dto.Responsibles.Count > 0)
-        {
-            dto.ResponsibleId = dto.Responsibles[0].Id;
-            dto.ResponsibleName = dto.Responsibles[0].FullName;
-        }
+        var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
 
         return Ok(dto);
     }
@@ -609,6 +611,41 @@ public class InvoicesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         return Ok(summary);
+    }
+
+    [HttpPost("cleanup-counterparty-names")]
+    public async Task<ActionResult<object>> CleanupCounterpartyNames(CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Forbid();
+        }
+
+        var invoicePayments = await _db.Payments
+            .Where(p => p.DocumentKind == DocumentKind.Invoice && p.CounterpartyName != null && p.CounterpartyName != "")
+            .ToListAsync(ct);
+
+        foreach (var payment in invoicePayments)
+        {
+            payment.CounterpartyName = null;
+        }
+
+        var retiredRequirements = await _db.FormFieldRequirements
+            .Where(x => x.Section == "contract-invoices" && x.FieldKey == "CounterpartyName")
+            .ToListAsync(ct);
+
+        if (retiredRequirements.Count > 0)
+        {
+            _db.FormFieldRequirements.RemoveRange(retiredRequirements);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            cleared = invoicePayments.Count,
+            removedRequirements = retiredRequirements.Count,
+        });
     }
 
     [HttpDelete("{id:int}")]
@@ -803,6 +840,14 @@ public class InvoicesController : ControllerBase
                 (x.Payment.Client != null && x.Payment.Client.Name != null && EF.Functions.Like(x.Payment.Client.Name, like)) ||
                 (x.Payment.Client != null && x.Payment.Client.Company != null && EF.Functions.Like(x.Payment.Client.Company, like)) ||
                 (x.Payment.ClientCase != null && x.Payment.ClientCase.Title != null && EF.Functions.Like(x.Payment.ClientCase.Title, like)) ||
+                x.Payment.InvoiceClientCases.Any(link => link.ClientCase != null && EF.Functions.Like(link.ClientCase.Title, like)) ||
+                x.Payment.Acts.Any(act =>
+                    EF.Functions.Like(act.Number, like) ||
+                    (act.Title != null && EF.Functions.Like(act.Title, like)) ||
+                    (act.InvoiceNumber != null && EF.Functions.Like(act.InvoiceNumber, like)) ||
+                    (act.CounterpartyInn != null && EF.Functions.Like(act.CounterpartyInn, like)) ||
+                    (act.Comment != null && EF.Functions.Like(act.Comment, like)) ||
+                    (act.Client != null && act.Client.Name != null && EF.Functions.Like(act.Client.Name, like))) ||
                 (x.Act != null && x.Act.Number != null && EF.Functions.Like(x.Act.Number, like)) ||
                 (x.Act != null && x.Act.Title != null && EF.Functions.Like(x.Act.Title, like)) ||
                 (x.Act != null && x.Act.InvoiceNumber != null && EF.Functions.Like(x.Act.InvoiceNumber, like)) ||
@@ -893,6 +938,31 @@ public class InvoicesController : ControllerBase
     private static string BuildInvoiceMigrationKey(string number, int year)
         => $"{number.Trim().ToLowerInvariant()}::{year}";
 
+    private static List<int> NormalizeIds(IEnumerable<int?> ids)
+        => ids.Where(x => x.HasValue && x.Value > 0).Select(x => x!.Value).Distinct().ToList();
+
+    private static List<int> NormalizeInvoiceClientCaseIds(UpsertInvoiceRequest request)
+    {
+        var ids = request.ClientCaseIds?.Select(x => (int?)x).ToList() ?? new List<int?>();
+        if (request.ClientCaseId.HasValue)
+        {
+            ids.Add(request.ClientCaseId.Value);
+        }
+
+        return NormalizeIds(ids);
+    }
+
+    private static List<int> NormalizeInvoiceActIds(UpsertInvoiceRequest request)
+    {
+        var ids = request.ActIds?.Select(x => (int?)x).ToList() ?? new List<int?>();
+        if (request.ActId.HasValue)
+        {
+            ids.Add(request.ActId.Value);
+        }
+
+        return NormalizeIds(ids);
+    }
+
     private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int clientId, CancellationToken ct)
     {
         if (!contractId.HasValue) return null;
@@ -905,6 +975,87 @@ public class InvoicesController : ControllerBase
         if (!linkExists) return BadRequest("Client is not linked to selected contract.");
 
         return null;
+    }
+
+    private async Task<(ActionResult? Error, List<int> ClientCaseIds)> ValidateInvoiceClientCasesAsync(int clientId, UpsertInvoiceRequest request, CancellationToken ct)
+    {
+        var clientCaseIds = NormalizeInvoiceClientCaseIds(request);
+        if (clientCaseIds.Count == 0)
+        {
+            return (null, clientCaseIds);
+        }
+
+        var cases = await _db.ClientCases
+            .AsNoTracking()
+            .Where(x => clientCaseIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.ClientId })
+            .ToListAsync(ct);
+
+        if (cases.Count != clientCaseIds.Count)
+        {
+            var existingIds = cases.Select(x => x.Id).ToHashSet();
+            var missingIds = clientCaseIds.Where(id => !existingIds.Contains(id));
+            return (BadRequest($"Unknown clientCaseIds: {string.Join(", ", missingIds)}"), new List<int>());
+        }
+
+        var foreignClientCaseIds = cases
+            .Where(x => x.ClientId != clientId)
+            .Select(x => x.Id)
+            .OrderBy(x => x)
+            .ToList();
+
+        if (foreignClientCaseIds.Count > 0)
+        {
+            return (BadRequest($"Client cases are not linked to selected client: {string.Join(", ", foreignClientCaseIds)}"), new List<int>());
+        }
+
+        return (null, clientCaseIds);
+    }
+
+    private async Task<(ActionResult? Error, List<int> ActIds)> ValidateInvoiceActsAsync(int clientId, UpsertInvoiceRequest request, int? invoiceId, CancellationToken ct)
+    {
+        var actIds = NormalizeInvoiceActIds(request);
+        if (actIds.Count == 0)
+        {
+            return (null, actIds);
+        }
+
+        var acts = await _db.Acts
+            .AsNoTracking()
+            .Where(x => actIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.ClientId, x.InvoiceId })
+            .ToListAsync(ct);
+
+        if (acts.Count != actIds.Count)
+        {
+            var existingIds = acts.Select(x => x.Id).ToHashSet();
+            var missingIds = actIds.Where(id => !existingIds.Contains(id));
+            return (BadRequest($"Unknown actIds: {string.Join(", ", missingIds)}"), new List<int>());
+        }
+
+        var foreignClientActIds = acts
+            .Where(x => x.ClientId != clientId)
+            .Select(x => x.Id)
+            .OrderBy(x => x)
+            .ToList();
+
+        if (foreignClientActIds.Count > 0)
+        {
+            return (BadRequest($"Acts are not linked to selected client: {string.Join(", ", foreignClientActIds)}"), new List<int>());
+        }
+
+        var linkedToOtherInvoices = acts
+            .Where(x => x.InvoiceId.HasValue && x.InvoiceId.Value != invoiceId)
+            .Select(x => x.Id)
+            .OrderBy(x => x)
+            .ToList();
+
+        if (linkedToOtherInvoices.Count > 0)
+        {
+            return (BadRequest($"Acts are already linked to another invoice: {string.Join(", ", linkedToOtherInvoices)}"), new List<int>());
+        }
+
+        return (null, actIds);
     }
 
     private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw
@@ -936,6 +1087,7 @@ public class InvoicesController : ControllerBase
             : null,
         ClientCaseId = x.Payment.ClientCaseId,
         ClientCaseTitle = x.Payment.ClientCase != null ? x.Payment.ClientCase.Title : null,
+        ClientCaseReference = x.Payment.ClientCaseReference,
         Description = x.Payment.Description,
         ActReference = x.Payment.Notes,
         ActId = x.Act != null ? x.Act.Id : (int?)null,
@@ -979,6 +1131,7 @@ public class InvoicesController : ControllerBase
             ClientStatus = raw.ClientStatus,
             ClientCaseId = raw.ClientCaseId,
             ClientCaseTitle = raw.ClientCaseTitle,
+            ClientCaseReference = raw.ClientCaseReference,
             Description = raw.Description,
             ActReference = raw.ActReference,
             ActId = raw.ActId,
@@ -996,6 +1149,61 @@ public class InvoicesController : ControllerBase
             DocumentKind = raw.DocumentKind,
             LineItems = ExtractInvoiceItems(raw.SystemNotes),
         };
+    }
+
+    private async Task<InvoiceDto> LoadInvoiceDtoAsync(int paymentId, CancellationToken ct)
+    {
+        var raw = await BuildInvoiceQuery()
+            .Where(x => x.Payment.Id == paymentId)
+            .Select(ProjectionRaw)
+            .FirstAsync(ct);
+
+        var dto = MapFromRaw(raw);
+        await EnrichInvoiceDtosAsync(new List<InvoiceDto> { dto }, ct);
+        return dto;
+    }
+
+    private async Task EnrichInvoiceDtosAsync(List<InvoiceDto> items, CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var ids = items.Select(i => i.Id).Distinct().ToList();
+        var responsiblesMap = await LoadResponsiblesMapAsync(ids, ct);
+        var actsMap = await LoadActsMapAsync(ids, ct);
+        var clientCasesMap = await LoadClientCasesMapAsync(ids, ct);
+
+        foreach (var item in items)
+        {
+            item.Responsibles = responsiblesMap.GetValueOrDefault(item.Id, new List<InvoiceResponsibleDto>());
+            if (item.Responsibles.Count > 0)
+            {
+                item.ResponsibleId = item.Responsibles[0].Id;
+                item.ResponsibleName = item.Responsibles[0].FullName;
+            }
+
+            item.Acts = actsMap.GetValueOrDefault(item.Id, new List<InvoiceActDto>());
+            item.ActIds = item.Acts.Select(x => x.Id).ToList();
+            if (item.Acts.Count > 0 && !item.ActId.HasValue)
+            {
+                var primaryAct = item.Acts[0];
+                item.ActId = primaryAct.Id;
+                item.ActNumber = primaryAct.Number;
+                item.ActTitle = primaryAct.Title;
+                item.ActStatus = primaryAct.Status;
+            }
+
+            item.ClientCases = clientCasesMap.GetValueOrDefault(item.Id, new List<InvoiceClientCaseDto>());
+            item.ClientCaseIds = item.ClientCases.Select(x => x.Id).ToList();
+            if (item.ClientCases.Count > 0 && !item.ClientCaseId.HasValue)
+            {
+                var primaryCase = item.ClientCases[0];
+                item.ClientCaseId = primaryCase.Id;
+                item.ClientCaseTitle = primaryCase.Title;
+            }
+        }
     }
 
     private static List<InvoiceLineItemDto> ExtractInvoiceItems(string? systemNotes)
@@ -1098,6 +1306,261 @@ public class InvoicesController : ControllerBase
                     Id = x.UserId,
                     FullName = x.FullName,
                 }).ToList());
+    }
+
+    private async Task<Dictionary<int, List<InvoiceActDto>>> LoadActsMapAsync(IEnumerable<int> paymentIds, CancellationToken ct)
+    {
+        var ids = paymentIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, List<InvoiceActDto>>();
+        }
+
+        var invoiceMeta = await _db.Payments
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new
+            {
+                x.Id,
+                Number = x.Invoice != null ? x.Invoice.Number : x.Account,
+            })
+            .ToListAsync(ct);
+
+        var invoiceIdsByNumber = invoiceMeta
+            .Where(x => !string.IsNullOrWhiteSpace(x.Number))
+            .GroupBy(x => x.Number!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.Id).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var invoiceNumbers = invoiceIdsByNumber.Keys.ToList();
+
+        var rows = await _db.Acts
+            .AsNoTracking()
+            .Where(a => (a.InvoiceId.HasValue && ids.Contains(a.InvoiceId.Value))
+                || (!a.InvoiceId.HasValue && a.InvoiceNumber != null && invoiceNumbers.Contains(a.InvoiceNumber)))
+            .OrderByDescending(a => a.Date)
+            .ThenByDescending(a => a.Id)
+            .Select(a => new
+            {
+                a.Id,
+                a.InvoiceId,
+                a.InvoiceNumber,
+                Act = new InvoiceActDto
+                {
+                    Id = a.Id,
+                    Number = a.Number,
+                    Title = a.Title,
+                    Date = a.Date,
+                    Amount = a.Amount,
+                    Status = a.Status,
+                    ClientId = a.ClientId,
+                    ClientName = a.Client != null ? a.Client.Name : null,
+                    ResponsibleId = a.ResponsibleId,
+                    ResponsibleName = a.Responsible != null
+                        ? (string.IsNullOrWhiteSpace(a.Responsible.FullName) ? a.Responsible.Email : a.Responsible.FullName)
+                        : null,
+                    Comment = a.Comment,
+                },
+            })
+            .ToListAsync(ct);
+
+        var result = new Dictionary<int, List<InvoiceActDto>>();
+        foreach (var row in rows)
+        {
+            var targetIds = new List<int>();
+            if (row.InvoiceId.HasValue && ids.Contains(row.InvoiceId.Value))
+            {
+                targetIds.Add(row.InvoiceId.Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(row.InvoiceNumber)
+                && invoiceIdsByNumber.TryGetValue(row.InvoiceNumber.Trim(), out var matchedInvoiceIds))
+            {
+                targetIds.AddRange(matchedInvoiceIds);
+            }
+
+            foreach (var targetId in targetIds.Distinct())
+            {
+                if (!result.TryGetValue(targetId, out var bucket))
+                {
+                    bucket = new List<InvoiceActDto>();
+                    result[targetId] = bucket;
+                }
+
+                if (bucket.Any(x => x.Id == row.Act.Id))
+                {
+                    continue;
+                }
+
+                bucket.Add(row.Act);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<Dictionary<int, List<InvoiceClientCaseDto>>> LoadClientCasesMapAsync(IEnumerable<int> paymentIds, CancellationToken ct)
+    {
+        var ids = paymentIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, List<InvoiceClientCaseDto>>();
+        }
+
+        var paymentMeta = await _db.Payments
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new
+            {
+                x.Id,
+                x.ClientCaseId,
+            })
+            .ToListAsync(ct);
+
+        var legacyCaseIds = paymentMeta
+            .Where(x => x.ClientCaseId.HasValue)
+            .Select(x => x.ClientCaseId!.Value)
+            .Distinct()
+            .ToList();
+
+        var legacyCases = legacyCaseIds.Count == 0
+            ? new Dictionary<int, InvoiceClientCaseDto>()
+            : await _db.ClientCases
+                .AsNoTracking()
+                .Where(x => legacyCaseIds.Contains(x.Id))
+                .Select(x => new InvoiceClientCaseDto
+                {
+                    Id = x.Id,
+                    ClientId = x.ClientId,
+                    Title = x.Title,
+                    Status = x.Status,
+                    CreatedAt = x.CreatedAt,
+                })
+                .ToDictionaryAsync(x => x.Id, ct);
+
+        var result = new Dictionary<int, List<InvoiceClientCaseDto>>();
+
+        foreach (var payment in paymentMeta)
+        {
+            if (!payment.ClientCaseId.HasValue || !legacyCases.TryGetValue(payment.ClientCaseId.Value, out var clientCase))
+            {
+                continue;
+            }
+
+            result[payment.Id] = new List<InvoiceClientCaseDto> { clientCase };
+        }
+
+        var linkedRows = await _db.InvoiceClientCases
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.PaymentId))
+            .OrderByDescending(x => x.ClientCase.CreatedAt)
+            .ThenByDescending(x => x.ClientCaseId)
+            .Select(x => new
+            {
+                x.PaymentId,
+                ClientCase = new InvoiceClientCaseDto
+                {
+                    Id = x.ClientCase.Id,
+                    ClientId = x.ClientCase.ClientId,
+                    Title = x.ClientCase.Title,
+                    Status = x.ClientCase.Status,
+                    CreatedAt = x.ClientCase.CreatedAt,
+                },
+            })
+            .ToListAsync(ct);
+
+        foreach (var row in linkedRows)
+        {
+            if (!result.TryGetValue(row.PaymentId, out var bucket))
+            {
+                bucket = new List<InvoiceClientCaseDto>();
+                result[row.PaymentId] = bucket;
+            }
+
+            if (bucket.Any(x => x.Id == row.ClientCase.Id))
+            {
+                continue;
+            }
+
+            bucket.Add(row.ClientCase);
+        }
+
+        return result;
+    }
+
+    private async Task SyncInvoiceClientCasesAsync(Payment payment, IReadOnlyCollection<int> clientCaseIds, CancellationToken ct)
+    {
+        var collection = _db.Entry(payment).Collection(x => x.InvoiceClientCases);
+        if (!collection.IsLoaded)
+        {
+            await collection.LoadAsync(ct);
+        }
+
+        var targetIds = clientCaseIds.Where(x => x > 0).Distinct().ToHashSet();
+        var toRemove = payment.InvoiceClientCases.Where(x => !targetIds.Contains(x.ClientCaseId)).ToList();
+        foreach (var link in toRemove)
+        {
+            payment.InvoiceClientCases.Remove(link);
+        }
+
+        var existingIds = payment.InvoiceClientCases.Select(x => x.ClientCaseId).ToHashSet();
+        foreach (var clientCaseId in targetIds)
+        {
+            if (existingIds.Contains(clientCaseId))
+            {
+                continue;
+            }
+
+            payment.InvoiceClientCases.Add(new InvoiceClientCase
+            {
+                PaymentId = payment.Id,
+                ClientCaseId = clientCaseId,
+            });
+        }
+
+        payment.ClientCaseId = targetIds.Count > 0 ? targetIds.First() : null;
+    }
+
+    private async Task SyncInvoiceActsAsync(Payment payment, IReadOnlyCollection<int> actIds, string invoiceNumber, CancellationToken ct, string? previousInvoiceNumber = null)
+    {
+        var normalizedCurrentNumber = Normalize(invoiceNumber);
+        var invoiceNumbers = new[] { normalizedCurrentNumber, Normalize(previousInvoiceNumber) }
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var targetIds = actIds.Where(x => x > 0).Distinct().ToHashSet();
+        var currentActs = await _db.Acts
+            .Where(a => a.InvoiceId == payment.Id
+                || (a.InvoiceId == null && a.InvoiceNumber != null && invoiceNumbers.Contains(a.InvoiceNumber)))
+            .ToListAsync(ct);
+
+        foreach (var act in currentActs.Where(a => !targetIds.Contains(a.Id)))
+        {
+            act.InvoiceId = null;
+            if (!string.IsNullOrWhiteSpace(act.InvoiceNumber) && invoiceNumbers.Contains(act.InvoiceNumber))
+            {
+                act.InvoiceNumber = null;
+            }
+            act.UpdatedAt = DateTime.UtcNow;
+        }
+
+        if (targetIds.Count == 0)
+        {
+            return;
+        }
+
+        var selectedActs = await _db.Acts
+            .Where(a => targetIds.Contains(a.Id))
+            .ToListAsync(ct);
+
+        foreach (var act in selectedActs)
+        {
+            act.InvoiceId = payment.Id;
+            act.InvoiceNumber = normalizedCurrentNumber;
+            act.UpdatedAt = DateTime.UtcNow;
+        }
     }
 
     private async Task<bool> EnsureResponsibleIdsExistAsync(HashSet<int> responsibleIds, CancellationToken ct)
@@ -1297,7 +1760,6 @@ public class InvoicesController : ControllerBase
     {
         var number = WebUtility.HtmlEncode(payment.Invoice?.Number ?? payment.Account ?? "—");
         var date = (payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date).ToString("dd.MM.yyyy");
-        var counterparty = WebUtility.HtmlEncode(payment.CounterpartyName ?? "—");
         var clientName = WebUtility.HtmlEncode(payment.Client?.Name ?? "—");
         var amount = payment.Amount.ToString("0.00");
 
@@ -1332,7 +1794,6 @@ public class InvoicesController : ControllerBase
         html.AppendLine("</head>");
         html.AppendLine("<body>");
         html.AppendLine($"  <h1>Счёт № {number} от {date}</h1>");
-        html.AppendLine($"  <p><b>От кого:</b> {counterparty}</p>");
         html.AppendLine($"  <p><b>Кому:</b> {clientName}</p>");
         html.AppendLine("  <table>");
         html.AppendLine("    <thead>");
@@ -1379,6 +1840,7 @@ public class InvoicesController : ControllerBase
         public ClientStatusDto? ClientStatus { get; init; }
         public int? ClientCaseId { get; init; }
         public string? ClientCaseTitle { get; init; }
+        public string? ClientCaseReference { get; init; }
         public string? Description { get; init; }
         public string? ActReference { get; init; }
         public int? ActId { get; init; }

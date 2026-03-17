@@ -167,7 +167,6 @@ public class FormRequirementsController : ControllerBase
                 new("Amount", "Сумма"),
                 new("Description", "Основание"),
                 new("ActReference", "Ссылка на акт"),
-                new("CounterpartyName", "Контрагент"),
             }),
         new(
             "acts",

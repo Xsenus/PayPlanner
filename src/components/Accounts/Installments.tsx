@@ -50,6 +50,38 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+function getInvoiceCaseSummary(invoice: Invoice): string[] {
+  if (invoice.clientCases?.length) {
+    return invoice.clientCases.map((item) => item.title?.trim() || `Дело #${item.id}`);
+  }
+
+  if (invoice.clientCaseTitle?.trim()) {
+    return [invoice.clientCaseTitle];
+  }
+
+  if (invoice.clientCaseId) {
+    return [`Дело #${invoice.clientCaseId}`];
+  }
+
+  return [];
+}
+
+function getInvoiceActSummary(invoice: Invoice): string[] {
+  if (invoice.acts?.length) {
+    return invoice.acts.map((item) => {
+      const parts: string[] = [];
+      if (item.number) parts.push(`№${item.number}`);
+      if (item.title) parts.push(item.title);
+      return parts.join(' · ') || `Акт #${item.id}`;
+    });
+  }
+
+  const legacy: string[] = [];
+  if (invoice.actNumber) legacy.push(`№${invoice.actNumber}`);
+  if (invoice.actTitle) legacy.push(invoice.actTitle);
+  return legacy.length > 0 ? [legacy.join(' · ')] : [];
+}
+
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Processing', 'Cancelled'];
 
 function safeRead<T>(key: string, fallback: T): T {
@@ -524,7 +556,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                   {[
                     { key: 'date' as InvoicesSortKey, label: t('invoiceDate') ?? t('actDate') ?? 'Дата' },
                     { key: 'number' as InvoicesSortKey, label: t('invoiceNumber') ?? 'Номер счёта' },
-                    { key: 'client' as InvoicesSortKey, label: t('invoiceClient') ?? 'Контрагент' },
+                    { key: 'client' as InvoicesSortKey, label: t('invoiceClient') ?? 'Поставщик услуг' },
                     { key: 'amount' as InvoicesSortKey, label: t('invoiceAmount') ?? t('amount') ?? 'Сумма' },
                     { key: 'status' as InvoicesSortKey, label: t('invoiceStatus') ?? t('status') ?? 'Статус' },
                     { key: 'responsible' as InvoicesSortKey, label: t('invoiceResponsible') ?? 'Ответственный' },
@@ -579,35 +611,17 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                   filteredInvoices.map((invoice) => {
                     const status = invoice.status ?? 'Pending';
                     const type = (invoice.type ?? 'Income') as PaymentKind;
-                    const actPieces: string[] = [];
-                    if (invoice.actNumber) actPieces.push(`№${invoice.actNumber}`);
-                    if (invoice.actTitle) actPieces.push(invoice.actTitle);
-                    const actLine = actPieces.join(' · ');
+                    const caseLines = getInvoiceCaseSummary(invoice);
+                    const actLines = getInvoiceActSummary(invoice);
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
-                    const primaryName =
-                      type === 'Expense'
-                        ? invoice.counterpartyName ?? invoice.clientName ?? '—'
-                        : invoice.clientName ?? invoice.counterpartyName ?? '—';
+                    const primaryName = invoice.clientName ?? invoice.counterpartyName ?? '—';
                     const extraLines: string[] = [];
-                    if (type === 'Expense') {
-                      if (invoice.clientName) {
-                        extraLines.push(
-                          `${t('invoiceLinkedClientLabel') ?? 'Связан с клиентом'}: ${invoice.clientName}`,
-                        );
-                      }
-                      if (invoice.clientCompany) {
-                        extraLines.push(invoice.clientCompany);
-                      }
-                    } else {
-                      if (invoice.clientCompany) {
-                        extraLines.push(invoice.clientCompany);
-                      }
-                      if (invoice.counterpartyName) {
-                        extraLines.push(
-                          `${t('invoiceCounterpartyLabel') ?? 'От поставщика'}: ${invoice.counterpartyName}`,
-                        );
-                      }
+                    if (invoice.clientCompany) {
+                      extraLines.push(invoice.clientCompany);
+                    }
+                    if (caseLines.length > 0) {
+                      extraLines.push(`${t('cases') ?? 'Дела'}: ${caseLines.join(', ')}`);
                     }
 
                     return (
@@ -652,8 +666,14 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                         </td>
                         <td className="px-4 py-3">{formatDate(invoice.dueDate)}</td>
                         <td className="px-4 py-3">
-                          {actLine ? (
-                            <div className="font-medium text-gray-900">{actLine}</div>
+                          {actLines.length > 0 ? (
+                            <div className="space-y-1">
+                              {actLines.map((line) => (
+                                <div key={line} className="font-medium text-gray-900">
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
                           ) : (
                             <div className="text-gray-500">—</div>
                           )}
