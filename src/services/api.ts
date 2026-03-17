@@ -139,11 +139,19 @@ export interface InvoiceLegacyMigrationSummaryDto {
   convertedToInvoiceKind: number;
   alreadyLinked: number;
   missingNumberSkipped: number;
+  missingClientSkipped: number;
   linkedToExistingInvoice: number;
   createdInvoices: number;
   linkedPayments: number;
+  relinkedPayments: number;
   distinctLegacyInvoiceKeys: number;
+  distinctLegacyGroups: number;
+  groupsWithCase: number;
+  groupsWithoutCase: number;
   existingDuplicateInvoiceKeys: number;
+  sharedInvoiceEntities: number;
+  splitSharedInvoiceGroups: number;
+  representativePaymentsUpdated: number;
 }
 
 export interface InvoiceCounterpartyCleanupResultDto {
@@ -374,6 +382,7 @@ export class ApiService {
     to?: string;
     status?: PaymentStatus;
     clientId?: number;
+    caseId?: number;
     responsibleId?: number;
     search?: string;
     type?: 'Income' | 'Expense';
@@ -395,6 +404,7 @@ export class ApiService {
     to?: string;
     status?: PaymentStatus;
     clientId?: number;
+    caseId?: number;
     responsibleId?: number;
     search?: string;
     type?: 'Income' | 'Expense';

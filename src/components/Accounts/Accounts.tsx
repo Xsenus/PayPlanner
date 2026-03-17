@@ -109,6 +109,16 @@ type AccountRow = {
   type: PaymentKind;
 };
 
+type PaymentModalInvoiceContext = {
+  invoiceEntityId: number;
+  invoiceRecordId?: number | null;
+  number: string;
+  date: string;
+  clientId?: number | null;
+  clientCaseId?: number | null;
+  type?: PaymentKind;
+};
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
   const normalized = toDateInputValue(value);
@@ -230,6 +240,38 @@ function accountKey(value?: string | null): string | null {
   if (stripped) return stripped;
 
   return normalized;
+}
+
+function invoiceEntityId(value?: Invoice | null): number | null {
+  return typeof value?.invoiceEntityId === 'number' && value.invoiceEntityId > 0
+    ? value.invoiceEntityId
+    : null;
+}
+
+function invoiceLegacyKey(number?: string | null, date?: string | null): string | null {
+  const normalizedNumber = accountKey(number);
+  if (!normalizedNumber) return null;
+
+  const normalizedDate = toDateInputValue(date ?? null);
+  const year = normalizedDate?.slice(0, 4) ?? 'na';
+  return `${normalizedNumber}::${year}`;
+}
+
+function paymentLegacyKey(payment: Payment): string | null {
+  return invoiceLegacyKey(payment.account, payment.accountDate ?? payment.date);
+}
+
+function mergePaymentsUnique(...groups: Payment[][]): Payment[] {
+  const map = new Map<number, Payment>();
+  groups.flat().forEach((payment) => {
+    map.set(payment.id, payment);
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const left = toDateInputValue(a.plannedDate) || toDateInputValue(a.date) || '';
+    const right = toDateInputValue(b.plannedDate) || toDateInputValue(b.date) || '';
+    return left.localeCompare(right) || a.id - b.id;
+  });
 }
 
 function safeRead<T>(key: string, fallback: T): T {
@@ -365,6 +407,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
+  const [paymentModalInvoiceContext, setPaymentModalInvoiceContext] = useState<PaymentModalInvoiceContext | null>(null);
   const [actsByInvoice, setActsByInvoice] = useState<Record<string, Act[]>>({});
   const [actsLoading, setActsLoading] = useState(false);
   const [actsError, setActsError] = useState<string | null>(null);
@@ -765,10 +808,23 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
 
-  const paymentsByAccount = useMemo(() => {
+  const paymentsByInvoiceEntityId = useMemo(() => {
+    const map = new Map<number, Payment[]>();
+    payments.forEach((payment) => {
+      if (payment.documentKind === 'Invoice') return;
+      if (typeof payment.invoiceId !== 'number' || payment.invoiceId <= 0) return;
+      const existing = map.get(payment.invoiceId) ?? [];
+      map.set(payment.invoiceId, [...existing, payment]);
+    });
+    return map;
+  }, [payments]);
+
+  const legacyPaymentsByInvoiceKey = useMemo(() => {
     const map = new Map<string, Payment[]>();
     payments.forEach((payment) => {
-      const key = accountKey(payment.account);
+      if (payment.documentKind === 'Invoice') return;
+      if (payment.invoiceId) return;
+      const key = paymentLegacyKey(payment);
       if (!key) return;
       const existing = map.get(key) ?? [];
       map.set(key, [...existing, payment]);
@@ -776,23 +832,41 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     return map;
   }, [payments]);
 
+  const paymentsById = useMemo(() => {
+    return new Map(payments.map((payment) => [payment.id, payment]));
+  }, [payments]);
+
   const accountRows = useMemo(() => {
     const grouped = new Map<string, Invoice[]>();
 
     invoices.forEach((invoice) => {
-      const normalized = accountKey(invoice.number) ?? '';
-      const dateKey = toDateInputValue(invoice.date) ?? invoice.date ?? '';
-      const groupKey = `${normalized}::${dateKey}::${invoice.type ?? 'Income'}`;
+      const canonicalId = invoiceEntityId(invoice);
+      const legacyKey = invoiceLegacyKey(invoice.number, invoice.date);
+      const groupKey = canonicalId ? `entity:${canonicalId}` : `legacy:${legacyKey ?? invoice.id}`;
       const existing = grouped.get(groupKey) ?? [];
       grouped.set(groupKey, [...existing, invoice]);
     });
 
-    const rows: AccountRow[] = [];
-
-    grouped.forEach((groupInvoices) => {
-      const representative = groupInvoices[0];
-      const normalized = accountKey(representative.number) ?? '';
-      const paymentsForInvoice = normalized ? paymentsByAccount.get(normalized) ?? [] : [];
+    return Array.from(grouped.values()).map<AccountRow>((groupInvoices) => {
+      const representative =
+        groupInvoices.find((item) => item.documentKind === 'Invoice') ?? groupInvoices[0];
+      const canonicalId =
+        invoiceEntityId(representative) ??
+        groupInvoices.map((item) => invoiceEntityId(item)).find((value): value is number => Boolean(value)) ??
+        null;
+      const legacyKey = invoiceLegacyKey(representative.number, representative.date);
+      const canonicalPayments = canonicalId ? paymentsByInvoiceEntityId.get(canonicalId) ?? [] : [];
+      const legacyPayments = legacyKey ? legacyPaymentsByInvoiceKey.get(legacyKey) ?? [] : [];
+      const invoiceRowIds = new Set(groupInvoices.map((item) => item.id));
+      const paymentsFromInvoiceRows = groupInvoices
+        .filter((item) => item.id !== representative.id)
+        .map((item) => paymentsById.get(item.id))
+        .filter((payment): payment is Payment => Boolean(payment));
+      const paymentsForInvoice = mergePaymentsUnique(
+        paymentsFromInvoiceRows,
+        canonicalPayments.filter((payment) => !invoiceRowIds.has(payment.id)),
+        legacyPayments.filter((payment) => !invoiceRowIds.has(payment.id)),
+      );
 
       const dueDate = paymentsForInvoice.reduce<string | null>((acc, payment) => {
         if (!payment.plannedDate) return acc;
@@ -809,7 +883,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       const summedFromPayments = paymentsForInvoice.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
       const fallbackSum = groupInvoices.reduce((sum, invoice) => sum + (invoice.amount ?? 0), 0);
 
-      rows.push({
+      return {
         accountNumber: representative.number,
         invoice: representative,
         payments: paymentsForInvoice,
@@ -818,11 +892,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
         paidDate,
         status: deriveStatusFromPayments(paymentsForInvoice, representative),
         type: representative.type ?? 'Income',
-      });
+      };
     });
-
-    return rows;
-  }, [invoices, paymentsByAccount]);
+  }, [invoices, legacyPaymentsByInvoiceKey, paymentsById, paymentsByInvoiceEntityId]);
 
   const loadActsForInvoices = useCallback(async () => {
     const invoiceNumbers = Array.from(
@@ -1050,8 +1122,40 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  const openPaymentEditModal = (payment: Payment) => {
+  const buildPaymentModalInvoiceContext = useCallback(
+    (invoice: Invoice | null | undefined): PaymentModalInvoiceContext | null => {
+      const canonicalId = invoiceEntityId(invoice);
+      if (!invoice || !canonicalId) return null;
+
+      return {
+        invoiceEntityId: canonicalId,
+        invoiceRecordId: invoice.id,
+        number: invoice.number,
+        date: invoice.date,
+        clientId: invoice.clientId ?? null,
+        clientCaseId: invoice.clientCaseId ?? null,
+        type: invoice.type ?? 'Income',
+      };
+    },
+    [],
+  );
+
+  const openPaymentCreateModal = (invoice: Invoice | null | undefined) => {
+    const context = buildPaymentModalInvoiceContext(invoice);
+    if (!context) {
+      toast.error('Сначала сохраните счет, затем можно добавлять связанные платежи.', 'Платежи счета');
+      return;
+    }
+
+    setEditingPayment(null);
+    setPaymentModalInvoiceContext(context);
+    setPaymentModalType(context.type ?? 'Income');
+    setPaymentModalOpen(true);
+  };
+
+  const openPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
     setEditingPayment(payment);
+    setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
     setPaymentModalType(payment.type ?? 'Income');
     setPaymentModalOpen(true);
   };
@@ -1059,6 +1163,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const handleClosePaymentModal = () => {
     setPaymentModalOpen(false);
     setEditingPayment(null);
+    setPaymentModalInvoiceContext(null);
   };
 
   const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
@@ -1072,6 +1177,21 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
     await Promise.all([refreshPayments(), refreshInvoices()]);
     handleClosePaymentModal();
+  };
+
+  const handleDeletePayment = async (payment: Payment) => {
+    if (!canDelete) return;
+    const approved = await confirm({
+      title: 'Удаление платежа',
+      description: 'Удалить связанный платеж?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    await deletePayment(payment.id);
+    await Promise.all([refreshPayments(), refreshInvoices()]);
   };
 
   const openActCreateModal = (row: AccountRow) => {
@@ -1153,14 +1273,53 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
   };
 
-  if (pageEditingInvoice) {
+  const currentPageInvoice = pageEditingInvoice
+    ? invoices.find((item) => item.id === pageEditingInvoice.id) ?? pageEditingInvoice
+    : null;
+  const currentPageAccountRow = currentPageInvoice
+    ? accountRows.find((row) => {
+        const rowCanonicalId = invoiceEntityId(row.invoice);
+        const currentCanonicalId = invoiceEntityId(currentPageInvoice);
+        if (rowCanonicalId && currentCanonicalId) {
+          return rowCanonicalId === currentCanonicalId;
+        }
+        return row.invoice?.id === currentPageInvoice.id;
+      }) ?? null
+    : null;
+
+  const paymentModalElement = (
+    <PaymentModal
+      isOpen={paymentModalOpen}
+      onClose={handleClosePaymentModal}
+      onSubmit={handleSubmitPayment}
+      payment={editingPayment ?? undefined}
+      type={paymentModalType}
+      linkedInvoice={paymentModalInvoiceContext}
+      onDelete={
+        canDelete
+          ? async (id) => {
+              await deletePayment(id);
+              await Promise.all([refreshPayments(), refreshInvoices()]);
+              handleClosePaymentModal();
+            }
+          : undefined
+      }
+      onCreateRemainder={async (payload) => {
+        const created = await createPayment(payload);
+        await Promise.all([refreshPayments(), refreshInvoices()]);
+        return created;
+      }}
+    />
+  );
+
+  if (currentPageInvoice) {
     return (
       <div className="min-h-screen bg-gray-50">
         <InvoiceModal
           open
           mode="edit"
           presentation="page"
-          invoice={pageEditingInvoice}
+          invoice={currentPageInvoice}
           resumeDraft={resumeInvoiceDraft}
           onClose={closeEditPage}
           onBack={closeEditPage}
@@ -1176,7 +1335,13 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
+          relatedPayments={currentPageAccountRow?.payments ?? []}
+          paymentsLoading={paymentsLoading || paymentsRefreshing}
+          onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
+          onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
         />
+        {paymentModalElement}
       </div>
     );
   }
@@ -1671,12 +1836,24 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                             </td>
                           )}
                         </tr>
-                        {isExpanded && row.payments.length > 0 && (
+                        {isExpanded && (row.payments.length > 0 || canEdit) && (
                           <tr>
                             <td colSpan={colSpan} className="bg-gray-50 px-4 py-3">
                               <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-                                <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold uppercase text-gray-500">
-                                  {t('paymentOperations') ?? 'Операции по счёту'}
+                                <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2">
+                                  <div className="text-xs font-semibold uppercase text-gray-500">
+                                    {t('paymentOperations') ?? 'Операции по счёту'}
+                                  </div>
+                                  {canEdit && invoice && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openPaymentCreateModal(invoice)}
+                                      className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      {t('addPayment') ?? 'Добавить платеж'}
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="overflow-x-auto">
                                   <table className="min-w-full divide-y divide-gray-100 text-sm">
@@ -1686,7 +1863,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                         <th className="px-4 py-2">{t('amount') ?? 'Сумма'}</th>
                                         <th className="px-4 py-2">{t('status') ?? 'Статус'}</th>
                                         <th className="px-4 py-2">{t('description') ?? 'Описание'}</th>
-                                        {canEdit && (
+                                        {(canEdit || canDelete) && (
                                           <th className="px-4 py-2 text-right">{t('actions') ?? 'Действия'}</th>
                                         )}
                                       </tr>
@@ -1704,17 +1881,32 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                             </span>
                                           </td>
                                           <td className="px-4 py-2 text-gray-600">{payment.description || '—'}</td>
-                                          {canEdit && (
-                                            <td className="px-4 py-2 text-right">
-                                              <button
-                                                type="button"
-                                                onClick={() => openPaymentEditModal(payment)}
-                                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
-                                                title={t('edit') ?? 'Редактировать'}
-                                                aria-label={t('edit') ?? 'Редактировать'}
-                                              >
-                                                <Pencil className="h-4 w-4" />
-                                              </button>
+                                          {(canEdit || canDelete) && (
+                                            <td className="px-4 py-2">
+                                              <div className="flex items-center justify-end gap-2">
+                                                {canEdit && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openPaymentEditModal(payment, invoice)}
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
+                                                    title={t('edit') ?? 'Редактировать'}
+                                                    aria-label={t('edit') ?? 'Редактировать'}
+                                                  >
+                                                    <Pencil className="h-4 w-4" />
+                                                  </button>
+                                                )}
+                                                {canDelete && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void handleDeletePayment(payment)}
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 transition hover:bg-red-50"
+                                                    title={t('delete') ?? 'Удалить'}
+                                                    aria-label={t('delete') ?? 'Удалить'}
+                                                  >
+                                                    <Trash2 className="h-4 w-4" />
+                                                  </button>
+                                                )}
+                                              </div>
                                             </td>
                                           )}
                                         </tr>
@@ -1821,23 +2013,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           initialValues={actInitialValues ?? undefined}
         />
 
-        <PaymentModal
-          isOpen={paymentModalOpen}
-          onClose={handleClosePaymentModal}
-          onSubmit={handleSubmitPayment}
-          payment={editingPayment ?? undefined}
-          type={paymentModalType}
-          onDelete={
-            canDelete
-              ? async (id) => {
-                  await deletePayment(id);
-                  await Promise.all([refreshPayments(), refreshInvoices()]);
-                  handleClosePaymentModal();
-                }
-              : undefined
-          }
-          onCreateRemainder={createPayment}
-        />
+        {paymentModalElement}
       </div>
     </div>
   );

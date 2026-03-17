@@ -8,7 +8,13 @@ import type {
   LegacyAddressMigrationResult,
 } from '../../services/api';
 
-type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
+type SettingsSection =
+  | 'general'
+  | 'integrations'
+  | 'db-invoices'
+  | 'db-addresses'
+  | 'dictionary-merge'
+  | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 
 export function AppSettings() {
@@ -48,7 +54,8 @@ export function AppSettings() {
     if (activeSection === 'integrations') return 'Ключи интеграций';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
     if (activeSection === 'form-requirements') return 'Обязательные поля форм';
-    return 'Импорт · Перенос адресов';
+    if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
+    return 'Работа с базой · Адреса';
   }, [activeSection]);
 
   const loadFormRequirements = async () => {
@@ -295,17 +302,28 @@ export function AppSettings() {
               </button>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
-                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Импорт</div>
+                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Работа с базой</div>
                 <button
                   type="button"
-                  onClick={() => setActiveSection('import-addresses')}
+                  onClick={() => setActiveSection('db-invoices')}
                   className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'import-addresses'
+                    activeSection === 'db-invoices'
                       ? 'bg-blue-50 text-blue-700 border border-blue-200'
                       : 'text-gray-700 hover:bg-white border border-transparent'
                   }`}
                 >
-                  ↳ Перенос адресов
+                  ↳ Счета
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('db-addresses')}
+                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    activeSection === 'db-addresses'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-white border border-transparent'
+                  }`}
+                >
+                  ↳ Адреса
                 </button>
               </div>
 
@@ -338,7 +356,9 @@ export function AppSettings() {
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
-                    : 'Перенос старых адресов и legacy-счетов в новые сущности с детальной сводкой.'}
+                    : activeSection === 'db-invoices'
+                      ? 'Операции по формированию канонических счетов и перепривязке платежей к актуальным сущностям счета.'
+                      : 'Операции по переносу и выравниванию адресов. Позже здесь можно будет добавить другие сервисные процедуры.'}
               </p>
             </div>
 
@@ -412,11 +432,15 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'import-addresses' && (
+            {activeSection === 'db-invoices' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
-                  <h4 className="text-base font-semibold text-gray-900">Ручной перенос счетов в новую сущность</h4>
-                  <p className="text-sm text-gray-600 mt-1">Запускает перенос legacy-счетов из платежей в отдельную сущность счетов и связывает платежи со счетами. Безопасно для повторного запуска. Если номер/год совпадают, несколько платежей привязываются к одному счету.</p>
+                  <h4 className="text-base font-semibold text-gray-900">Формирование канонических счетов из операций</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Операция анализирует платежи, у которых заполнен legacy-счет, и формирует канонические счета с привязкой по клиенту, номеру счета, году и делу.
+                    Платежи с одинаковым счетом и одним делом объединяются в один счет; одинаковый номер счета, но разные дела, разделяются на разные счета.
+                    После этого платежи перепривязываются к актуальному счету через `invoiceId`.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -426,7 +450,7 @@ export function AppSettings() {
                     disabled={invoiceMigrationLoading}
                     className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {invoiceMigrationLoading ? 'Переносим…' : 'Перенести счета'}
+                    {invoiceMigrationLoading ? 'Обрабатываем…' : 'Обновить счета и связи'}
                   </button>
                 </div>
 
@@ -436,18 +460,25 @@ export function AppSettings() {
 
                 {invoiceMigrationResult && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                    <p className="font-medium mb-2">Сводка переноса счетов</p>
+                    <p className="font-medium mb-2">Сводка обновления счетов</p>
                     <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                       <li>Проверено платежей: <b>{invoiceMigrationResult.scannedPayments}</b></li>
-                      <li>Платежей-счетов: <b>{invoiceMigrationResult.invoicePayments}</b></li>
-                      <li>Переведено в тип «Счёт»: <b>{invoiceMigrationResult.convertedToInvoiceKind}</b></li>
-                      <li>Уже были связаны: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
+                      <li>Из них legacy invoice-строк: <b>{invoiceMigrationResult.invoicePayments}</b></li>
+                      <li>Уже были связаны правильно: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
                       <li>Пропущено без номера: <b>{invoiceMigrationResult.missingNumberSkipped}</b></li>
+                      <li>Пропущено без клиента: <b>{invoiceMigrationResult.missingClientSkipped}</b></li>
+                      <li>Групп к обработке: <b>{invoiceMigrationResult.distinctLegacyGroups}</b></li>
+                      <li>Групп с делом: <b>{invoiceMigrationResult.groupsWithCase}</b></li>
+                      <li>Групп без дела: <b>{invoiceMigrationResult.groupsWithoutCase}</b></li>
                       <li>Связано с существующими счетами: <b>{invoiceMigrationResult.linkedToExistingInvoice}</b></li>
                       <li>Создано новых счетов: <b>{invoiceMigrationResult.createdInvoices}</b></li>
-                      <li>Всего связанных платежей: <b>{invoiceMigrationResult.linkedPayments}</b></li>
-                      <li>Уникальных ключей в legacy: <b>{invoiceMigrationResult.distinctLegacyInvoiceKeys}</b></li>
-                      <li>Ключей-дублей уже в Invoices: <b>{invoiceMigrationResult.existingDuplicateInvoiceKeys}</b></li>
+                      <li>Новых привязок платежей: <b>{invoiceMigrationResult.linkedPayments}</b></li>
+                      <li>Перепривязано к новым счетам: <b>{invoiceMigrationResult.relinkedPayments}</b></li>
+                      <li>Обновлено карточек счета/дела: <b>{invoiceMigrationResult.representativePaymentsUpdated}</b></li>
+                      <li>Legacy-групп по ключу: <b>{invoiceMigrationResult.distinctLegacyInvoiceKeys}</b></li>
+                      <li>Дубликатов ключей в счетах: <b>{invoiceMigrationResult.existingDuplicateInvoiceKeys}</b></li>
+                      <li>Общих счетов на несколько ключей: <b>{invoiceMigrationResult.sharedInvoiceEntities}</b></li>
+                      <li>Групп, которые пришлось разделить: <b>{invoiceMigrationResult.splitSharedInvoiceGroups}</b></li>
                     </ul>
                   </div>
                 )}
@@ -562,7 +593,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'import-addresses' && (
+            {activeSection === 'db-addresses' && (
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                   <label className="flex items-start gap-3 text-sm text-gray-700">

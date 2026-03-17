@@ -10,6 +10,7 @@ import type {
   Invoice,
   InvoiceInput,
   InvoiceLineItem,
+  Payment,
   PaymentKind,
   PaymentStatus,
 } from '../../types';
@@ -166,6 +167,11 @@ interface InvoiceModalProps {
   defaultType?: PaymentKind;
   lockType?: boolean;
   presentation?: 'modal' | 'page';
+  relatedPayments?: Payment[];
+  paymentsLoading?: boolean;
+  onAddRelatedPayment?: () => void;
+  onEditRelatedPayment?: (payment: Payment) => void;
+  onDeleteRelatedPayment?: (payment: Payment) => Promise<void> | void;
 }
 
 function normalizeInvoiceToForm(
@@ -343,6 +349,11 @@ export function InvoiceModal({
   defaultType,
   lockType = false,
   presentation = 'modal',
+  relatedPayments = [],
+  paymentsLoading = false,
+  onAddRelatedPayment,
+  onEditRelatedPayment,
+  onDeleteRelatedPayment,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
@@ -1205,6 +1216,22 @@ export function InvoiceModal({
     Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
   };
   const currentStatusMeta = statusMeta[form.status] ?? statusMeta.Pending;
+  const relatedPaymentStatusMeta: Record<PaymentStatus, string> = {
+    Pending: 'bg-slate-100 text-slate-700',
+    Processing: 'bg-blue-100 text-blue-700',
+    Completed: 'bg-emerald-100 text-emerald-700',
+    Cancelled: 'bg-rose-100 text-rose-700',
+    Overdue: 'bg-amber-100 text-amber-700',
+  };
+  const relatedPaymentStatusLabel: Record<PaymentStatus, string> = {
+    Pending: t('pending') ?? 'Ожидается',
+    Processing: t('processingStatus') ?? 'В обработке',
+    Completed: t('completedStatus') ?? 'Оплачен',
+    Cancelled: t('cancelledStatus') ?? 'Отменён',
+    Overdue: t('overdue') ?? 'Просрочен',
+  };
+  const canManageRelatedPayments = mode === 'edit' && !!invoice?.invoiceEntityId;
+  const canShowRelatedPaymentActions = mode === 'edit' && !!onAddRelatedPayment;
   const createCaseStub = useMemo<ClientCase>(() => ({
     id: 0,
     clientId: form.clientId ? Number(form.clientId) : 0,
@@ -1852,6 +1879,104 @@ export function InvoiceModal({
                           </datalist>
                           <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                <header className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Платежи по счёту
+                    </span>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Здесь отображаются связанные календарные платежи и оплаты по текущему счёту.
+                    </p>
+                  </div>
+                  {canShowRelatedPaymentActions && (
+                    <button
+                      type="button"
+                      onClick={onAddRelatedPayment}
+                      className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Добавить платеж
+                    </button>
+                  )}
+                </header>
+
+                {!canManageRelatedPayments ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    Сначала сохраните счёт, после этого здесь можно будет создавать и редактировать связанные платежи.
+                  </div>
+                ) : paymentsLoading ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t('loading') ?? 'Загрузка...'}
+                  </div>
+                ) : relatedPayments.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    Связанные платежи пока не добавлены.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {relatedPayments.map((payment) => (
+                      <div
+                        key={payment.id}
+                        className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-900">
+                              {formatCurrencySmart(payment.amount ?? 0).full}
+                            </span>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                relatedPaymentStatusMeta[payment.status] ?? relatedPaymentStatusMeta.Pending
+                              }`}
+                            >
+                              {relatedPaymentStatusLabel[payment.status] ?? relatedPaymentStatusLabel.Pending}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-sm text-slate-600">
+                            {payment.description?.trim() || 'Без описания'}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span>План: {formatDate(payment.plannedDate || payment.date) || '—'}</span>
+                            <span>Факт: {formatDate(payment.paidDate || payment.lastPaymentDate) || '—'}</span>
+                            {payment.account && <span>Счёт: {payment.account}</span>}
+                          </div>
+                        </div>
+                        {(onEditRelatedPayment || onDeleteRelatedPayment) && (
+                          <div className="flex items-center gap-2 self-end sm:self-start">
+                            {onEditRelatedPayment && (
+                              <button
+                                type="button"
+                                onClick={() => onEditRelatedPayment(payment)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
+                                title={t('edit') ?? 'Редактировать'}
+                                aria-label={t('edit') ?? 'Редактировать'}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            )}
+                            {onDeleteRelatedPayment && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void onDeleteRelatedPayment(payment);
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-red-600 transition hover:bg-red-50"
+                                title={t('delete') ?? 'Удалить'}
+                                aria-label={t('delete') ?? 'Удалить'}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
 
             <div className="space-y-6">
@@ -2099,7 +2224,7 @@ export function InvoiceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
+    <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/60 px-4 py-8">
       {content}
     </div>
   );

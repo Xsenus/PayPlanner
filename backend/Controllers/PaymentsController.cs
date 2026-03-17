@@ -60,7 +60,7 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model)
+    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
     {
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
@@ -75,7 +75,7 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         if (model.DocumentKind == default)
         {
-            model.DocumentKind = string.IsNullOrWhiteSpace(model.Account) ? DocumentKind.Accrual : DocumentKind.Invoice;
+            model.DocumentKind = DocumentKind.Payment;
         }
         model.SystemNotes = model.SystemNotes ?? string.Empty;
         model.RescheduleCount = Math.Max(0, model.RescheduleCount);
@@ -84,6 +84,7 @@ public class PaymentsController : ControllerBase
             model.LastPaymentDate = model.PaidDate.Value.Date;
         }
 
+        await SyncInvoiceLinkAsync(model, ct);
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
 
@@ -93,7 +94,7 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model)
+    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
@@ -140,16 +141,16 @@ public class PaymentsController : ControllerBase
         e.IncomeTypeId = model.IncomeTypeId;
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
+        e.InvoiceId = model.InvoiceId;
         e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
-        e.DocumentKind = model.DocumentKind == default
-            ? (string.IsNullOrWhiteSpace(e.Account) ? DocumentKind.Accrual : DocumentKind.Invoice)
-            : model.DocumentKind;
+        e.DocumentKind = model.DocumentKind == default ? DocumentKind.Payment : model.DocumentKind;
         e.AccountDate = model.AccountDate;
         e.PaidDate = model.PaidDate;
         e.PaidAmount = model.PaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
+        await SyncInvoiceLinkAsync(e, ct);
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -212,6 +213,120 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+
+    [HttpPost("repair-invoice-links")]
+    public async Task<IActionResult> RepairInvoiceLinks(CancellationToken ct)
+    {
+        var payments = await _db.Payments
+            .Where(p => (p.Account != null && p.Account != "") || p.InvoiceId != null)
+            .OrderBy(p => p.Id)
+            .ToListAsync(ct);
+
+        var originalInvoiceIds = payments.ToDictionary(p => p.Id, p => p.InvoiceId);
+        var originalKinds = payments.ToDictionary(p => p.Id, p => p.DocumentKind);
+        var repairedLinks = 0;
+        var clearedLinks = 0;
+        var correctedKinds = 0;
+
+        foreach (var payment in payments)
+        {
+            await SyncInvoiceLinkAsync(payment, ct);
+        }
+
+        var invoiceDocumentKeeperIds = payments
+            .Where(p => p.DocumentKind == DocumentKind.Invoice && p.InvoiceId.HasValue)
+            .GroupBy(p => p.InvoiceId!.Value)
+            .Select(group => group.OrderBy(p => p.CreatedAt).ThenBy(p => p.Id).First().Id)
+            .ToHashSet();
+
+        foreach (var payment in payments)
+        {
+            if (payment.DocumentKind == DocumentKind.Invoice
+                && payment.InvoiceId.HasValue
+                && !invoiceDocumentKeeperIds.Contains(payment.Id))
+            {
+                payment.DocumentKind = DocumentKind.Payment;
+            }
+
+            if (payment.InvoiceId != originalInvoiceIds[payment.Id])
+            {
+                if (payment.InvoiceId.HasValue)
+                {
+                    repairedLinks++;
+                }
+                else
+                {
+                    clearedLinks++;
+                }
+            }
+
+            if (payment.DocumentKind != originalKinds[payment.Id])
+            {
+                correctedKinds++;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            scanned = payments.Count,
+            repairedLinks,
+            clearedLinks,
+            correctedKinds,
+        });
+    }
+
+    private async Task SyncInvoiceLinkAsync(Payment payment, CancellationToken ct)
+    {
+        var invoice = await ResolveInvoiceAsync(payment, ct);
+        if (invoice is null)
+        {
+            payment.InvoiceId = null;
+
+            var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
+            payment.Account = normalizedAccount;
+            payment.AccountDate = normalizedAccount is null
+                ? null
+                : (payment.AccountDate ?? payment.Date).Date;
+            return;
+        }
+
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date.Date;
+    }
+
+    private async Task<Invoice?> ResolveInvoiceAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.InvoiceId.HasValue && payment.InvoiceId.Value > 0)
+        {
+            var linked = await _db.Invoices.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == payment.InvoiceId.Value, ct);
+            if (linked is not null)
+            {
+                return linked;
+            }
+        }
+
+        var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
+        if (normalizedAccount is null)
+        {
+            return null;
+        }
+
+        var invoiceYear = (payment.AccountDate ?? payment.Date).Date.Year;
+        var lookup = normalizedAccount.ToLowerInvariant();
+
+        return await _db.Invoices.AsNoTracking()
+            .Where(x => x.Number.ToLower() == lookup && x.Date.Year == invoiceYear)
+            .OrderByDescending(x => x.Date)
+            .ThenByDescending(x => x.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private static string? NormalizeInvoiceNumber(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string MergeSystemNotes(string original, string? incoming)
     {

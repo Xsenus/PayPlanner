@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -23,9 +24,13 @@ public class AccountsController : ControllerBase
         [FromQuery] int take = 50,
         CancellationToken ct = default)
     {
-        var query = _db.Payments.AsNoTracking().Where(p => p.Account != null && p.Account != "");
+        var query = _db.Payments.AsNoTracking()
+            .Where(p => p.DocumentKind == DocumentKind.Invoice && p.Account != null && p.Account != "");
         if (clientId.HasValue) query = query.Where(p => p.ClientId == clientId.Value);
-        if (caseId.HasValue) query = query.Where(p => p.ClientCaseId == caseId.Value);
+        if (caseId.HasValue)
+        {
+            query = query.Where(p => p.ClientCaseId == caseId.Value || p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+        }
         if (!string.IsNullOrWhiteSpace(q))
         {
             var term = q.Trim().ToLower();

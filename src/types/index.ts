@@ -584,6 +584,7 @@ export interface Payment {
   incomeType?: IncomeType | null;
   paymentSource?: PaymentSource | null;
   paymentStatusEntity?: PaymentStatusEntity;
+  invoiceId?: number | null;
   account?: string | null;
   accountDate?: string | null;
 }
@@ -624,6 +625,7 @@ export interface InvoiceActLink {
 
 export interface Invoice {
   id: number;
+  invoiceEntityId?: number | null;
   number: string;
   date: string;
   dueDate?: string | null;

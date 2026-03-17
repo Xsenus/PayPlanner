@@ -1,18 +1,31 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Trash2, Info, History } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Payment, PaymentStatus, ClientCase, PaymentPayload } from '../../types';
+import type { Payment, PaymentStatus, ClientCase, PaymentPayload, Invoice, InvoiceInput, ActResponsible } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useDialog } from '../../hooks/useDialog';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import { useToast } from '../../hooks/useToast';
+import { InvoiceModal } from '../Accounts/InvoiceModal';
+import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
+type LinkedInvoiceContext = {
+  invoiceEntityId: number;
+  invoiceRecordId?: number | null;
+  number: string;
+  date: string;
+  clientId?: number | null;
+  clientCaseId?: number | null;
+  type?: PaymentKind;
+};
 
 function parseDecimal(value: string): number {
   if (!value) return 0;
@@ -26,6 +39,7 @@ interface PaymentModalProps {
   defaultClientCaseId?: number;
   casesPrefetch?: ClientCase[];
   type?: PaymentKind;
+  linkedInvoice?: LinkedInvoiceContext | null;
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<unknown>;
@@ -45,6 +59,7 @@ export function PaymentModal({
   defaultClientCaseId,
   casesPrefetch,
   type,
+  linkedInvoice,
 }: PaymentModalProps) {
   const accountInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -56,10 +71,11 @@ export function PaymentModal({
     setTimeout(() => el.removeAttribute('readonly'), 80);
   }
 
-  const { clients } = useClients();
+  const { clients, loading: clientsLoading } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
+  const toast = useToast();
   const { isRequired } = useFormRequirements('payments', isOpen);
 
   const [loading, setLoading] = useState(false);
@@ -83,6 +99,7 @@ export function PaymentModal({
     incomeTypeId: '',
     paymentSourceId: '',
     paymentStatusId: '',
+    invoiceId: '',
     type: (type ?? 'Income') as PaymentKind,
     account: '',
     accountDate: '',
@@ -111,12 +128,94 @@ export function PaymentModal({
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [invoicePickerLoading, setInvoicePickerLoading] = useState(false);
+  const [invoicePickerError, setInvoicePickerError] = useState<string | null>(null);
+  const [invoiceOptions, setInvoiceOptions] = useState<Invoice[]>([]);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceCreateOpen, setInvoiceCreateOpen] = useState(false);
+  const [invoiceCreateSubmitting, setInvoiceCreateSubmitting] = useState(false);
+  const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
+  const [invoiceCreateResponsibles, setInvoiceCreateResponsibles] = useState<ActResponsible[]>([]);
+  const [invoiceCreateLookupsLoading, setInvoiceCreateLookupsLoading] = useState(false);
+  const [invoiceCreateLookupsError, setInvoiceCreateLookupsError] = useState<string | null>(null);
   const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
   const [showProcessHelp, setShowProcessHelp] = useState(false);
+  const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
+  const hasSelectedInvoice = hasLockedInvoice || Boolean(formData.invoiceId);
+  const selectedInvoiceSummary = useMemo(() => {
+    if (!formData.invoiceId) return null;
+
+    const selectedId = parseInt(formData.invoiceId, 10);
+    const matched = invoiceOptions.find((item) => item.invoiceEntityId === selectedId) ?? null;
+    if (matched) {
+      return {
+        id: selectedId,
+        title: `Счет № ${matched.number}`,
+        meta: `${toRuDate(matched.date) || matched.date || '—'}${matched.clientCaseTitle ? ` · ${matched.clientCaseTitle}` : ''}`,
+      };
+    }
+
+    return {
+      id: selectedId,
+      title: formData.account?.trim() ? `Счет № ${formData.account.trim()}` : `Счет #${selectedId}`,
+      meta: formData.accountDate ? toRuDate(formData.accountDate) || formData.accountDate : 'Связь со счетом установлена',
+    };
+  }, [formData.account, formData.accountDate, formData.invoiceId, invoiceOptions]);
+  const invoiceCreateDraft = useMemo<InvoiceEditorDraftState | null>(() => {
+    if (!invoiceCreateOpen) return null;
+
+    const clientId = formData.clientId || (defaultClientId ? String(defaultClientId) : '');
+    const clientCaseId = formData.clientCaseId ? Number(formData.clientCaseId) : null;
+    const invoiceDate = formData.accountDate || formData.date || todayYMD();
+    const dueDate = formData.date || invoiceDate;
+    const amount = formData.amount.trim();
+    const description = formData.description.trim();
+    const lineItemName = description || 'Платеж';
+
+    return {
+      invoiceId: null,
+      mode: 'create',
+      presentation: 'modal',
+      pageViewMode: false,
+      form: {
+        number: formData.account.trim(),
+        date: invoiceDate,
+        dueDate,
+        amount,
+        type: formData.type,
+        status: formData.status,
+        clientId,
+        contractId: '',
+        clientCaseReference: '',
+        description,
+        actReference: '',
+        paidDate: formData.paidDate || '',
+        responsibleIds: [],
+      },
+      lineItems: [
+        {
+          id: `${Date.now()}-linked-invoice`,
+          name: lineItemName,
+          quantity: '1',
+          unit: 'усл. ед.',
+          price: amount,
+        },
+      ],
+      selectedActs: [],
+      selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
+    };
+  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen]);
 
   /* -------------------- Подсказки по счёту -------------------- */
   useEffect(() => {
+    if (!isOpen || hasSelectedInvoice) {
+      setAccountOpts([]);
+      setAccountLoading(false);
+      return;
+    }
+
     let stop = false;
     const timer = setTimeout(async () => {
       try {
@@ -174,7 +273,99 @@ export function PaymentModal({
       stop = true;
       clearTimeout(timer);
     };
-  }, [formData.account, formData.clientId, formData.clientCaseId]);
+  }, [formData.account, formData.clientId, formData.clientCaseId, hasSelectedInvoice, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
+      setInvoicePickerLoading(false);
+      setInvoicePickerError(null);
+      return;
+    }
+
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    if (!clientId) {
+      setInvoiceOptions([]);
+      setInvoicePickerLoading(false);
+      setInvoicePickerError('Сначала выберите клиента.');
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setInvoicePickerLoading(true);
+        setInvoicePickerError(null);
+        const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
+        const response = await apiService.getInvoices({
+          clientId,
+          caseId,
+          type: formData.type,
+          search: invoiceSearch.trim() || formData.account.trim() || undefined,
+          page: 1,
+          pageSize: 20,
+        });
+
+        if (cancelled) return;
+
+        const canonicalItems = (response.items ?? []).filter(
+          (item) => typeof item.invoiceEntityId === 'number' && item.invoiceEntityId > 0,
+        );
+        setInvoiceOptions(canonicalItems);
+      } catch (e) {
+        if (!cancelled) {
+          setInvoiceOptions([]);
+          setInvoicePickerError(e instanceof Error ? e.message : 'Не удалось загрузить счета клиента.');
+        }
+      } finally {
+        if (!cancelled) {
+          setInvoicePickerLoading(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    formData.account,
+    formData.clientCaseId,
+    formData.clientId,
+    formData.type,
+    hasLockedInvoice,
+    invoicePickerOpen,
+    invoiceSearch,
+    isOpen,
+  ]);
+
+  useEffect(() => {
+    if (!invoiceCreateOpen) return;
+    if (invoiceCreateResponsibles.length > 0 || invoiceCreateLookupsLoading) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        setInvoiceCreateLookupsLoading(true);
+        setInvoiceCreateLookupsError(null);
+        const responsibles = await apiService.getActResponsibles();
+        if (!cancelled) {
+          setInvoiceCreateResponsibles(responsibles ?? []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setInvoiceCreateLookupsError(e instanceof Error ? e.message : 'Не удалось загрузить ответственных.');
+        }
+      } finally {
+        if (!cancelled) {
+          setInvoiceCreateLookupsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceCreateLookupsLoading, invoiceCreateOpen, invoiceCreateResponsibles.length]);
 
   const prevOpenRef = useRef(false);
   const paymentRef = useRef<Payment | null>(null);
@@ -210,19 +401,24 @@ export function PaymentModal({
           paidDate: toDateInputValue(p.paidDate) || '',
           lastPaymentDate: toDateInputValue(p.lastPaymentDate) || '',
           notes: p.notes || '',
-          clientId: (p.clientId ?? defaultClientId)?.toString() || '',
-          clientCaseId: (p.clientCaseId ?? defaultClientCaseId)?.toString() || '',
+          clientId: (linkedInvoice?.clientId ?? p.clientId ?? defaultClientId)?.toString() || '',
+          clientCaseId:
+            (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
           incomeTypeId: p.incomeTypeId?.toString() || '',
           paymentSourceId: p.paymentSourceId?.toString() || '',
           paymentStatusId: p.paymentStatusId?.toString() || '',
-          type: (p.type as PaymentKind) ?? type ?? 'Income',
-          account: p.account ?? '',
-          accountDate: toDateInputValue(p.accountDate) || '',
+          invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
+          type: (p.type as PaymentKind) ?? linkedInvoice?.type ?? type ?? 'Income',
+          account: linkedInvoice?.number ?? p.account ?? '',
+          accountDate: toDateInputValue(linkedInvoice?.date) || toDateInputValue(p.accountDate) || '',
           systemNotes: p.systemNotes ?? '',
           rescheduleCount: p.rescheduleCount ?? 0,
         });
         setSyncDateWithPayment(Boolean(p.hasPartialPayment && p.lastPaymentDate));
+        setInvoicePickerOpen(false);
+        setInvoiceSearch('');
+        setInvoicePickerError(null);
       } else {
         setFormData({
           date: todayYMD(),
@@ -235,19 +431,23 @@ export function PaymentModal({
           paidDate: '',
           lastPaymentDate: '',
           notes: '',
-          clientId: defaultClientId?.toString() || '',
-          clientCaseId: defaultClientCaseId?.toString() || '',
+          clientId: (linkedInvoice?.clientId ?? defaultClientId)?.toString() || '',
+          clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
           paymentSourceId: '',
           paymentStatusId: '',
-          type: (type ?? 'Income') as PaymentKind,
-          account: '',
-          accountDate: '',
+          invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
+          type: (linkedInvoice?.type ?? type ?? 'Income') as PaymentKind,
+          account: linkedInvoice?.number ?? '',
+          accountDate: toDateInputValue(linkedInvoice?.date) || '',
           systemNotes: '',
           rescheduleCount: 0,
         });
         setSyncDateWithPayment(false);
+        setInvoicePickerOpen(false);
+        setInvoiceSearch('');
+        setInvoicePickerError(null);
       }
 
       const fallbackDate =
@@ -257,7 +457,7 @@ export function PaymentModal({
 
       prevOpenRef.current = true;
     }
-  }, [isOpen, defaultClientId, defaultClientCaseId, type]);
+  }, [defaultClientCaseId, defaultClientId, isOpen, linkedInvoice, type]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -593,6 +793,7 @@ export function PaymentModal({
         paymentStatusId: formData.paymentStatusId
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
+        invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
         account: formData.account?.trim() || undefined,
         accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
       };
@@ -637,6 +838,90 @@ export function PaymentModal({
     }
   };
 
+  const applyInvoiceSelection = (invoice: Invoice) => {
+    const canonicalId = invoice.invoiceEntityId;
+    if (!canonicalId || canonicalId <= 0) {
+      toast.error(
+        'У выбранного счета еще нет канонической связи. Сначала обновите счета в настройках.',
+        'Связанный счет',
+      );
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      invoiceId: String(canonicalId),
+      account: invoice.number,
+      accountDate: toDateInputValue(invoice.date) || prev.accountDate,
+      type: invoice.type ?? prev.type,
+      clientId: invoice.clientId ? String(invoice.clientId) : prev.clientId,
+      clientCaseId: invoice.clientCaseId ? String(invoice.clientCaseId) : prev.clientCaseId,
+    }));
+    setInvoicePickerOpen(false);
+    setInvoiceSearch('');
+  };
+
+  const clearInvoiceSelection = async () => {
+    if (hasLockedInvoice) return;
+
+    const approved = await confirm({
+      title: 'Убрать связь со счетом',
+      description: 'Удалить привязку текущего платежа к выбранному счету?',
+      confirmLabel: 'Убрать связь',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      invoiceId: '',
+    }));
+  };
+
+  const handleCreateInvoiceFromPayment = async () => {
+    if (hasLockedInvoice) return;
+
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    if (!clientId) {
+      toast.error('Сначала выберите клиента, затем можно создать счет из платежа.', 'Создание счета');
+      return;
+    }
+
+    setInvoiceCreateError(null);
+    setInvoicePickerOpen(false);
+    setInvoiceCreateOpen(true);
+  };
+
+  const handleSubmitCreatedInvoice = async (payload: InvoiceInput) => {
+    try {
+      setInvoiceCreateSubmitting(true);
+      setInvoiceCreateError(null);
+
+      const created = await apiService.createInvoice(payload);
+      const normalizedCreated: Invoice = created.invoiceEntityId
+        ? created
+        : {
+            ...created,
+            invoiceEntityId: created.id,
+          };
+
+      setInvoiceOptions((prev) => {
+        const next = prev.filter((item) => item.invoiceEntityId !== normalizedCreated.invoiceEntityId);
+        return [normalizedCreated, ...next];
+      });
+
+      applyInvoiceSelection(normalizedCreated);
+      setInvoiceCreateOpen(false);
+      toast.success('Счет создан и привязан к платежу.', 'Создание счета');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось создать счет.';
+      setInvoiceCreateError(message);
+    } finally {
+      setInvoiceCreateSubmitting(false);
+    }
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
   ) => {
@@ -659,7 +944,12 @@ export function PaymentModal({
     }
 
     if (name === 'clientId') {
-      setFormData((prev) => ({ ...prev, clientId: value, clientCaseId: '' }));
+      setFormData((prev) => ({
+        ...prev,
+        clientId: value,
+        clientCaseId: '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+      }));
       return;
     }
 
@@ -668,6 +958,16 @@ export function PaymentModal({
         ...prev,
         type: value as PaymentKind,
         incomeTypeId: '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+      }));
+      return;
+    }
+
+    if (name === 'clientCaseId') {
+      setFormData((prev) => ({
+        ...prev,
+        clientCaseId: value,
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
       }));
       return;
     }
@@ -701,8 +1001,8 @@ export function PaymentModal({
   const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
   const selSourceId = formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+  const modal = (
+    <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-xl max-w-6xl w-full max-h-[92vh] shadow-2xl flex flex-col">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/95 px-6 py-4 backdrop-blur">
           <div>
@@ -863,6 +1163,7 @@ export function PaymentModal({
                       name="type"
                       value={formData.type}
                       onChange={handleChange}
+                      disabled={hasLockedInvoice}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                       <option value="Income">{t('income') ?? 'Доход'}</option>
                       <option value="Expense">{t('expense') ?? 'Расход'}</option>
@@ -1072,6 +1373,12 @@ export function PaymentModal({
                   <span>{t('client')}</span>
                 </div>
                 <div className="space-y-4">
+                  {hasLockedInvoice && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                      Платеж привязан к счету № {linkedInvoice?.number || '—'} от{' '}
+                      {toRuDate(linkedInvoice?.date) || linkedInvoice?.date || '—'}.
+                    </div>
+                  )}
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <label className="block text-sm font-medium text-gray-700">{t('client')} {isRequired('ClientId') ? '*' : ''}</label>
@@ -1083,6 +1390,7 @@ export function PaymentModal({
                       name="clientId"
                       value={formData.clientId}
                       onChange={handleChange}
+                      disabled={hasLockedInvoice}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                       <option value="">{t('selectClient')}</option>
                       {clients.map((client) => (
@@ -1161,8 +1469,13 @@ export function PaymentModal({
                   <div className="grid gap-3 sm:grid-cols-[2fr,1fr] sm:items-end">
                     <div className="relative">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('account') ?? 'Счёт'}
+                        {hasSelectedInvoice ? 'Номер счета (только просмотр)' : (t('account') ?? 'Счёт')}
                       </label>
+                      {hasSelectedInvoice && (
+                        <p className="mb-2 text-xs text-gray-500">
+                          Номер берется из связанного счета и сохраняется по канонической ссылке.
+                        </p>
+                      )}
 
                       <input
                         ref={accountInputRef}
@@ -1170,21 +1483,32 @@ export function PaymentModal({
                         value={formData.account}
                         onChange={handleChange}
                         onFocus={() => {
+                          if (hasSelectedInvoice) return;
                           suppressBrowserAutocomplete();
                           setAccountOpen(true);
                         }}
-                        onClick={suppressBrowserAutocomplete}
-                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                        onClick={() => {
+                          if (hasSelectedInvoice) return;
+                          suppressBrowserAutocomplete();
+                        }}
+                        onBlur={() => {
+                          if (hasSelectedInvoice) return;
+                          setTimeout(() => setAccountOpen(false), 150);
+                        }}
                         placeholder="Например: Счет № 12345"
                         maxLength={120}
+                        readOnly={hasSelectedInvoice}
                         autoComplete="new-password"
                         autoCorrect="off"
                         autoCapitalize="none"
                         spellCheck={false}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                          hasSelectedInvoice ? 'bg-gray-50 text-gray-600' : ''
+                        }`}
                       />
 
-                      {accountOpen &&
+                      {!hasSelectedInvoice &&
+                        accountOpen &&
                         (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
                           <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
                             {accountLoading && (
@@ -1263,6 +1587,119 @@ export function PaymentModal({
                             })}
                           </div>
                         )}
+
+                      {false && !hasLockedInvoice && (
+                        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-medium text-gray-800">Связанный счет</div>
+                              <div className="text-xs text-gray-500">
+                                Выберите существующий счет клиента или создайте новый счет из текущего платежа.
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setInvoicePickerOpen((prev) => !prev)}
+                                disabled={!formData.clientId}
+                                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {invoicePickerOpen ? 'Скрыть список' : 'Выбрать счет'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleCreateInvoiceFromPayment()}
+                                disabled={invoiceCreateSubmitting || !formData.clientId}
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {invoiceCreateSubmitting ? 'Открываем…' : 'Создать счет'}
+                              </button>
+                              {selectedInvoiceSummary && (
+                                <button
+                                  type="button"
+                                  onClick={clearInvoiceSelection}
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
+                                >
+                                  Убрать связь
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {selectedInvoiceSummary ? (
+                            <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                              <div className="text-sm font-semibold text-gray-900">{selectedInvoiceSummary.title}</div>
+                              <div className="mt-1 text-xs text-gray-500">{selectedInvoiceSummary.meta}</div>
+                            </div>
+                          ) : (
+                            <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-sm text-gray-500">
+                              Связанный счет пока не выбран.
+                            </div>
+                          )}
+
+                          {invoicePickerOpen && (
+                            <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3">
+                              <input
+                                type="text"
+                                value={invoiceSearch}
+                                onChange={(event) => setInvoiceSearch(event.target.value)}
+                                placeholder="Поиск счета по номеру, описанию или делу"
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                              />
+
+                              {invoicePickerLoading && (
+                                <div className="text-sm text-gray-500">Загрузка счетов…</div>
+                              )}
+
+                              {invoicePickerError && (
+                                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                  {invoicePickerError}
+                                </div>
+                              )}
+
+                              {!invoicePickerLoading && !invoicePickerError && invoiceOptions.length === 0 && (
+                                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                                  Подходящие счета не найдены. Можно создать новый счет из этого платежа.
+                                </div>
+                              )}
+
+                              {!invoicePickerLoading && invoiceOptions.length > 0 && (
+                                <div className="max-h-56 space-y-2 overflow-y-auto">
+                                  {invoiceOptions.map((invoiceOption) => {
+                                    const canonicalId = invoiceOption.invoiceEntityId;
+                                    const selected = canonicalId && String(canonicalId) === formData.invoiceId;
+                                    const caseLabel = invoiceOption.clientCases?.length
+                                      ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
+                                      : invoiceOption.clientCaseTitle;
+
+                                    return (
+                                      <button
+                                        key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
+                                        type="button"
+                                        onClick={() => applyInvoiceSelection(invoiceOption)}
+                                        className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                                          selected
+                                            ? 'border-emerald-300 bg-emerald-50'
+                                            : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                                        }`}
+                                      >
+                                        <div className="text-sm font-semibold text-gray-900">
+                                          Счет № {invoiceOption.number}
+                                        </div>
+                                        <div className="mt-1 text-xs text-gray-500">
+                                          {toRuDate(invoiceOption.date) || invoiceOption.date}
+                                          {caseLabel ? ` · ${caseLabel}` : ''}
+                                          {invoiceOption.description ? ` · ${invoiceOption.description}` : ''}
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -1274,8 +1711,124 @@ export function PaymentModal({
                         name="accountDate"
                         value={formData.accountDate}
                         onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        disabled={hasSelectedInvoice}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
                       />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Связанный счет</div>
+                            <div className="text-xs text-gray-500">
+                              Выберите существующий счет клиента или создайте новый счет из текущего платежа.
+                            </div>
+                          </div>
+                          {!hasLockedInvoice && (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setInvoicePickerOpen((prev) => !prev)}
+                                disabled={!formData.clientId}
+                                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {invoicePickerOpen ? 'Скрыть список' : 'Выбрать счет'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleCreateInvoiceFromPayment()}
+                                disabled={invoiceCreateSubmitting || !formData.clientId}
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {invoiceCreateSubmitting ? 'Открываем…' : 'Создать счет'}
+                              </button>
+                              {selectedInvoiceSummary && (
+                                <button
+                                  type="button"
+                                  onClick={clearInvoiceSelection}
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
+                                >
+                                  Убрать связь
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {selectedInvoiceSummary ? (
+                          <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                            <div className="text-sm font-semibold text-gray-900">{selectedInvoiceSummary.title}</div>
+                            <div className="mt-1 text-xs text-gray-500">{selectedInvoiceSummary.meta}</div>
+                          </div>
+                        ) : (
+                          <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-sm text-gray-500">
+                            Связанный счет пока не выбран.
+                          </div>
+                        )}
+
+                        {!hasLockedInvoice && invoicePickerOpen && (
+                          <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3">
+                            <input
+                              type="text"
+                              value={invoiceSearch}
+                              onChange={(event) => setInvoiceSearch(event.target.value)}
+                              placeholder="Поиск счета по номеру, описанию или делу"
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                            />
+
+                            {invoicePickerLoading && (
+                              <div className="text-sm text-gray-500">Загрузка счетов…</div>
+                            )}
+
+                            {invoicePickerError && (
+                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                {invoicePickerError}
+                              </div>
+                            )}
+
+                            {!invoicePickerLoading && !invoicePickerError && invoiceOptions.length === 0 && (
+                              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                                Подходящие счета не найдены. Можно создать новый счет из этого платежа.
+                              </div>
+                            )}
+
+                            {!invoicePickerLoading && invoiceOptions.length > 0 && (
+                              <div className="max-h-56 space-y-2 overflow-y-auto">
+                                {invoiceOptions.map((invoiceOption) => {
+                                  const canonicalId = invoiceOption.invoiceEntityId;
+                                  const selected = canonicalId && String(canonicalId) === formData.invoiceId;
+                                  const caseLabel = invoiceOption.clientCases?.length
+                                    ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
+                                    : invoiceOption.clientCaseTitle;
+
+                                  return (
+                                    <button
+                                      key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
+                                      type="button"
+                                      onClick={() => applyInvoiceSelection(invoiceOption)}
+                                      className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                                        selected
+                                          ? 'border-emerald-300 bg-emerald-50'
+                                          : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                                      }`}
+                                    >
+                                      <div className="text-sm font-semibold text-gray-900">
+                                        Счет № {invoiceOption.number}
+                                      </div>
+                                      <div className="mt-1 text-xs text-gray-500">
+                                        {toRuDate(invoiceOption.date) || invoiceOption.date}
+                                        {caseLabel ? ` · ${caseLabel}` : ''}
+                                        {invoiceOption.description ? ` · ${invoiceOption.description}` : ''}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1481,5 +2034,43 @@ export function PaymentModal({
         </div>
       </div>
     </div>
+  );
+
+  const createInvoiceModal = (
+    <InvoiceModal
+      open={invoiceCreateOpen}
+      mode="create"
+      invoice={null}
+      resumeDraft={invoiceCreateDraft}
+      onClose={() => {
+        setInvoiceCreateOpen(false);
+        setInvoiceCreateError(null);
+      }}
+      onSubmit={handleSubmitCreatedInvoice}
+      submitting={invoiceCreateSubmitting}
+      errorMessage={invoiceCreateError}
+      clients={clients}
+      responsibles={invoiceCreateResponsibles}
+      lookupsLoading={clientsLoading || invoiceCreateLookupsLoading}
+      lookupsError={invoiceCreateLookupsError}
+      defaultClientId={formData.clientId ? Number(formData.clientId) : defaultClientId}
+      defaultType={formData.type}
+    />
+  );
+
+  if (typeof document === 'undefined') {
+    return (
+      <>
+        {modal}
+        {createInvoiceModal}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {createPortal(modal, document.body)}
+      {createInvoiceModal}
+    </>
   );
 }

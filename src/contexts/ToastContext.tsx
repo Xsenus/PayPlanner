@@ -124,7 +124,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div className="pointer-events-none fixed right-4 top-4 z-[140] flex w-[min(100vw-2rem,24rem)] flex-col gap-3" aria-live="polite" aria-atomic="true">
+            <div className="pointer-events-none fixed right-4 top-4 z-[2000] flex w-[min(100vw-2rem,24rem)] flex-col gap-3" aria-live="polite" aria-atomic="true">
               {toasts.map((toast) => {
                 const styles = toastStyles(toast.variant);
                 const Icon = styles.icon;

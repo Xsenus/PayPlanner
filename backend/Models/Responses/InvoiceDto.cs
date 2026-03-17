@@ -5,6 +5,7 @@ namespace PayPlanner.Api.Models.Responses;
 public class InvoiceDto
 {
     public int Id { get; set; }
+    public int? InvoiceEntityId { get; set; }
     public string Number { get; set; } = string.Empty;
     public DateTime Date { get; set; }
     public DateTime? DueDate { get; set; }

@@ -41,6 +41,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
         [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         [FromQuery] PaymentType? type,
@@ -59,7 +60,7 @@ public class InvoicesController : ControllerBase
         }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, effectiveResponsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type);
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -83,6 +84,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
         [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         [FromQuery] PaymentType? type,
@@ -95,7 +97,7 @@ public class InvoicesController : ControllerBase
         }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, effectiveResponsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type);
 
         var today = DateTime.UtcNow.Date;
 
@@ -532,7 +534,9 @@ public class InvoicesController : ControllerBase
     {
         var payments = await _db.Payments
             .Include(p => p.Invoice)
+            .Include(p => p.InvoiceClientCases)
             .Where(p => p.Account != null && p.Account != "")
+            .OrderBy(p => p.Id)
             .ToListAsync(ct);
 
         var summary = new InvoiceLegacyMigrationSummaryDto
@@ -541,72 +545,180 @@ public class InvoicesController : ControllerBase
             InvoicePayments = payments.Count(p => p.DocumentKind == DocumentKind.Invoice),
         };
 
-        var legacyKeys = payments
-            .Where(p => !string.IsNullOrWhiteSpace(p.Account))
-            .Select(p => BuildInvoiceMigrationKey(p.Account!, (p.AccountDate ?? p.Date).Date.Year))
-            .Distinct()
-            .ToList();
-        summary.DistinctLegacyInvoiceKeys = legacyKeys.Count;
-
-        var invoices = await _db.Invoices.ToListAsync(ct);
-        var duplicateInvoiceKeys = invoices
-            .GroupBy(i => BuildInvoiceMigrationKey(i.Number, i.Date.Year))
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .ToHashSet();
-        summary.ExistingDuplicateInvoiceKeys = duplicateInvoiceKeys.Count;
-
-        var invoiceMap = invoices
-            .GroupBy(i => BuildInvoiceMigrationKey(i.Number, i.Date.Year))
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(x => x.Date).ThenBy(x => x.Id).First());
-
+        var bindings = new List<InvoiceMigrationBinding>();
         foreach (var payment in payments)
         {
-            if (payment.DocumentKind != DocumentKind.Invoice)
+            var binding = TryBuildInvoiceMigrationBinding(payment, preferCanonicalInvoice: false);
+            if (binding is null)
             {
-                payment.DocumentKind = DocumentKind.Invoice;
-                summary.ConvertedToInvoiceKind++;
-            }
-
-            if (payment.InvoiceId.HasValue)
-            {
-                summary.AlreadyLinked++;
-                continue;
-            }
-
-            var number = Normalize(payment.Account);
-            if (string.IsNullOrEmpty(number))
-            {
-                summary.MissingNumberSkipped++;
-                continue;
-            }
-
-            var invoiceDate = (payment.AccountDate ?? payment.Date).Date;
-            var key = BuildInvoiceMigrationKey(number, invoiceDate.Year);
-
-            if (!invoiceMap.TryGetValue(key, out var invoice))
-            {
-                invoice = new Invoice
+                if (payment.ClientId is null || payment.ClientId.Value <= 0)
                 {
-                    Number = number,
-                    Date = invoiceDate,
+                    summary.MissingClientSkipped++;
+                }
+
+                if (string.IsNullOrWhiteSpace(Normalize(payment.Account)))
+                {
+                    summary.MissingNumberSkipped++;
+                }
+
+                continue;
+            }
+
+            bindings.Add(binding);
+        }
+
+        summary.DistinctLegacyInvoiceKeys = bindings
+            .Select(x => x.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        summary.DistinctLegacyGroups = summary.DistinctLegacyInvoiceKeys;
+        summary.GroupsWithCase = bindings
+            .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .Count(g => g.First().ClientCaseId.HasValue);
+        summary.GroupsWithoutCase = summary.DistinctLegacyGroups - summary.GroupsWithCase;
+
+        var invoicesById = await _db.Invoices.ToDictionaryAsync(x => x.Id, ct);
+        var candidateInvoiceIdsByKey = new Dictionary<string, Dictionary<int, int>>(StringComparer.OrdinalIgnoreCase);
+        var keyCountsByInvoiceId = new Dictionary<int, Dictionary<string, int>>();
+
+        foreach (var payment in payments.Where(x => x.InvoiceId.HasValue && x.Invoice != null))
+        {
+            var binding = TryBuildInvoiceMigrationBinding(payment, preferCanonicalInvoice: true);
+            if (binding is null || !payment.InvoiceId.HasValue)
+            {
+                continue;
+            }
+
+            IncrementNestedCount(candidateInvoiceIdsByKey, binding.Key, payment.InvoiceId.Value);
+            IncrementNestedCount(keyCountsByInvoiceId, payment.InvoiceId.Value, binding.Key);
+        }
+
+        summary.ExistingDuplicateInvoiceKeys = candidateInvoiceIdsByKey.Count(x => x.Value.Count > 1);
+        summary.SharedInvoiceEntities = keyCountsByInvoiceId.Count(x => x.Value.Count > 1);
+
+        var preservedKeyByInvoiceId = keyCountsByInvoiceId.ToDictionary(
+            x => x.Key,
+            x => x.Value
+                .OrderByDescending(item => item.Value)
+                .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .First()
+                .Key);
+
+        var invoiceByKey = new Dictionary<string, Invoice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in candidateInvoiceIdsByKey)
+        {
+            var reusableInvoiceId = entry.Value
+                .Where(candidate => invoicesById.ContainsKey(candidate.Key))
+                .Where(candidate =>
+                {
+                    if (!keyCountsByInvoiceId.TryGetValue(candidate.Key, out var mappedKeys) || mappedKeys.Count <= 1)
+                    {
+                        return true;
+                    }
+
+                    return preservedKeyByInvoiceId.TryGetValue(candidate.Key, out var preservedKey)
+                        && string.Equals(preservedKey, entry.Key, StringComparison.OrdinalIgnoreCase);
+                })
+                .OrderByDescending(candidate => candidate.Value)
+                .ThenBy(candidate => candidate.Key)
+                .Select(candidate => candidate.Key)
+                .FirstOrDefault();
+
+            if (reusableInvoiceId > 0 && invoicesById.TryGetValue(reusableInvoiceId, out var invoice))
+            {
+                invoiceByKey[entry.Key] = invoice;
+            }
+        }
+
+        var groupedBindings = bindings
+            .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var group in groupedBindings)
+        {
+            var orderedBindings = group
+                .OrderBy(x => x.InvoiceDate)
+                .ThenBy(x => x.Payment.Id)
+                .ToList();
+            var first = orderedBindings[0];
+            var hadLegacyCandidates = candidateInvoiceIdsByKey.ContainsKey(group.Key);
+            var reusedExistingInvoice = invoiceByKey.TryGetValue(group.Key, out var targetInvoice);
+
+            if (!reusedExistingInvoice)
+            {
+                targetInvoice = new Invoice
+                {
+                    Number = first.Number,
+                    Date = first.InvoiceDate,
                     CreatedAt = DateTime.UtcNow,
                 };
-                _db.Invoices.Add(invoice);
-                invoiceMap[key] = invoice;
+                _db.Invoices.Add(targetInvoice);
+                invoiceByKey[group.Key] = targetInvoice;
                 summary.CreatedInvoices++;
+
+                if (hadLegacyCandidates)
+                {
+                    summary.SplitSharedInvoiceGroups++;
+                }
             }
             else
             {
                 summary.LinkedToExistingInvoice++;
             }
 
-            payment.Account = number;
-            payment.AccountDate = invoiceDate;
-            payment.Invoice = invoice;
-            summary.LinkedPayments++;
+            var resolvedInvoice = targetInvoice!;
+            var normalizedAccountDate = resolvedInvoice.Date.Date == default
+                ? first.InvoiceDate.Date
+                : resolvedInvoice.Date.Date;
+            var normalizedAccountNumber = Normalize(resolvedInvoice.Number) ?? first.Number;
+
+            foreach (var binding in orderedBindings)
+            {
+                var payment = binding.Payment;
+                var alreadyLinkedToTarget = reusedExistingInvoice
+                    && resolvedInvoice.Id > 0
+                    && payment.InvoiceId == resolvedInvoice.Id;
+
+                if (alreadyLinkedToTarget)
+                {
+                    summary.AlreadyLinked++;
+                }
+                else if (payment.InvoiceId.HasValue && payment.InvoiceId.Value > 0)
+                {
+                    summary.RelinkedPayments++;
+                }
+                else
+                {
+                    summary.LinkedPayments++;
+                }
+
+                payment.Invoice = resolvedInvoice;
+                payment.InvoiceId = resolvedInvoice.Id > 0 ? resolvedInvoice.Id : null;
+                payment.Account = normalizedAccountNumber;
+                payment.AccountDate = normalizedAccountDate;
+                payment.ClientId = binding.ClientId;
+                payment.ClientCaseId = binding.ClientCaseId;
+            }
+
+            var caseCarrierPayments = orderedBindings
+                .Select(x => x.Payment)
+                .Where(x => x.DocumentKind == DocumentKind.Invoice)
+                .DistinctBy(x => x.Id)
+                .ToList();
+
+            if (caseCarrierPayments.Count == 0)
+            {
+                caseCarrierPayments.Add(orderedBindings[0].Payment);
+            }
+
+            foreach (var carrier in caseCarrierPayments)
+            {
+                if (SyncInvoiceMigrationCaseLinks(carrier, first.ClientId, first.ClientCaseId))
+                {
+                    summary.RepresentativePaymentsUpdated++;
+                }
+            }
         }
 
         await _db.SaveChangesAsync(ct);
@@ -792,6 +904,7 @@ public class InvoicesController : ControllerBase
         DateTime? to,
         PaymentStatus? status,
         int? clientId,
+        int? caseId,
         int? responsibleId,
         string? search,
         PaymentType? type)
@@ -821,6 +934,13 @@ public class InvoicesController : ControllerBase
         if (clientId.HasValue)
         {
             query = query.Where(x => x.Payment.ClientId == clientId.Value);
+        }
+
+        if (caseId.HasValue)
+        {
+            query = query.Where(x =>
+                x.Payment.ClientCaseId == caseId.Value
+                || x.Payment.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
         }
 
         if (responsibleId.HasValue)
@@ -935,8 +1055,112 @@ public class InvoicesController : ControllerBase
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static string BuildInvoiceMigrationKey(string number, int year)
-        => $"{number.Trim().ToLowerInvariant()}::{year}";
+    private static string BuildInvoiceMigrationKey(string number, int year, int clientId, int? clientCaseId, PaymentType type)
+        => $"{number.Trim().ToLowerInvariant()}::{year}::client:{clientId}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
+
+    private static InvoiceMigrationBinding? TryBuildInvoiceMigrationBinding(Payment payment, bool preferCanonicalInvoice)
+    {
+        var clientId = payment.ClientId;
+        if (!clientId.HasValue || clientId.Value <= 0)
+        {
+            return null;
+        }
+
+        var rawNumber = preferCanonicalInvoice && payment.Invoice != null
+            ? payment.Invoice.Number
+            : payment.Account;
+        var number = Normalize(rawNumber);
+        if (string.IsNullOrWhiteSpace(number))
+        {
+            return null;
+        }
+
+        var rawDate = preferCanonicalInvoice && payment.Invoice != null
+            ? payment.Invoice.Date
+            : (payment.AccountDate ?? payment.Date);
+        var invoiceDate = rawDate.Date;
+        var clientCaseId = payment.ClientCaseId is > 0 ? payment.ClientCaseId : null;
+
+        return new InvoiceMigrationBinding(
+            payment,
+            BuildInvoiceMigrationKey(number, invoiceDate.Year, clientId.Value, clientCaseId, payment.Type),
+            number,
+            invoiceDate,
+            clientId.Value,
+            clientCaseId,
+            payment.Type);
+    }
+
+    private static void IncrementNestedCount<TKeyOuter, TKeyInner>(
+        IDictionary<TKeyOuter, Dictionary<TKeyInner, int>> target,
+        TKeyOuter outerKey,
+        TKeyInner innerKey)
+        where TKeyOuter : notnull
+        where TKeyInner : notnull
+    {
+        if (!target.TryGetValue(outerKey, out var bucket))
+        {
+            bucket = new Dictionary<TKeyInner, int>();
+            target[outerKey] = bucket;
+        }
+
+        bucket[innerKey] = bucket.TryGetValue(innerKey, out var count) ? count + 1 : 1;
+    }
+
+    private static bool SyncInvoiceMigrationCaseLinks(Payment payment, int clientId, int? clientCaseId)
+    {
+        var changed = false;
+
+        if (payment.ClientId != clientId)
+        {
+            payment.ClientId = clientId;
+            changed = true;
+        }
+
+        if (payment.ClientCaseId != clientCaseId)
+        {
+            payment.ClientCaseId = clientCaseId;
+            changed = true;
+        }
+
+        if (clientCaseId.HasValue)
+        {
+            var toRemove = payment.InvoiceClientCases
+                .Where(link => link.ClientCaseId != clientCaseId.Value)
+                .ToList();
+            foreach (var link in toRemove)
+            {
+                payment.InvoiceClientCases.Remove(link);
+                changed = true;
+            }
+
+            if (!payment.InvoiceClientCases.Any(link => link.ClientCaseId == clientCaseId.Value))
+            {
+                payment.InvoiceClientCases.Add(new InvoiceClientCase
+                {
+                    PaymentId = payment.Id,
+                    ClientCaseId = clientCaseId.Value,
+                });
+                changed = true;
+            }
+        }
+        else if (payment.InvoiceClientCases.Count > 0)
+        {
+            payment.InvoiceClientCases.Clear();
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private sealed record InvoiceMigrationBinding(
+        Payment Payment,
+        string Key,
+        string Number,
+        DateTime InvoiceDate,
+        int ClientId,
+        int? ClientCaseId,
+        PaymentType Type);
 
     private static List<int> NormalizeIds(IEnumerable<int?> ids)
         => ids.Where(x => x.HasValue && x.Value > 0).Select(x => x!.Value).Distinct().ToList();
@@ -1061,6 +1285,7 @@ public class InvoicesController : ControllerBase
     private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw
     {
         Id = x.Payment.Id,
+        InvoiceEntityId = x.Payment.InvoiceId,
         Number = x.Payment.Invoice != null ? x.Payment.Invoice.Number : (x.Payment.Account ?? string.Empty),
         Date = x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date),
         DueDate = x.Payment.Date,
@@ -1115,6 +1340,7 @@ public class InvoicesController : ControllerBase
         return new InvoiceDto
         {
             Id = raw.Id,
+            InvoiceEntityId = raw.InvoiceEntityId,
             Number = raw.Number,
             Date = raw.Date,
             DueDate = raw.DueDate,
@@ -1824,6 +2050,7 @@ public class InvoicesController : ControllerBase
     private sealed class InvoiceProjectionRaw
     {
         public int Id { get; init; }
+        public int? InvoiceEntityId { get; init; }
         public string Number { get; init; } = string.Empty;
         public DateTime Date { get; init; }
         public DateTime? DueDate { get; init; }
