@@ -126,6 +126,13 @@ namespace PayPlanner.Api.Extensions
             return q;
         }
 
+        public static IQueryable<Client> ApplyClientVisibility(this IQueryable<Client> q, bool isAdmin, int? responsibleUserId)
+        {
+            if (isAdmin) return q;
+            if (!responsibleUserId.HasValue) return q.Where(_ => false);
+            return q.Where(c => c.ResponsibleUserId == responsibleUserId.Value);
+        }
+
         public static IQueryable<Client> ApplyClientSort(this IQueryable<Client> q, string? sortBy, string? sortDir)
         {
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);

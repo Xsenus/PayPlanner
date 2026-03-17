@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
@@ -15,6 +16,7 @@ namespace PayPlanner.Api.Controllers;
 public class ClientsController : ControllerBase
 {
     private const string CLIENT_PROFILE_NOTES_PREFIX = "__PP_CLIENT_PROFILE_V2__:";
+    private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichment;
@@ -27,34 +29,102 @@ public class ClientsController : ControllerBase
         _formRequirements = formRequirements;
     }
 
+    private IQueryable<Client> BuildVisibleClientsQuery(int? currentUserId)
+        => _db.Clients.ApplyClientVisibility(User.IsInRole("admin"), currentUserId);
+
+    private static string? FormatResponsibleUserName(User? user)
+    {
+        if (user is null) return null;
+        return string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName;
+    }
+
+    private static void PopulateResponsibleUserNames(IEnumerable<Client> clients)
+    {
+        foreach (var client in clients)
+        {
+            client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+        }
+    }
+
+    private static T? DeserializeClientProfile<T>(string? raw) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(raw, ClientProfileJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
+    {
+        if (!responsibleUserId.HasValue) return true;
+        return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == responsibleUserId.Value && u.IsActive, ct);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _db.Clients
+    {
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var clients = await BuildVisibleClientsQuery(currentUserId)
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
+            .Include(c => c.ResponsibleUser)
             .AsNoTracking()
             .OrderBy(c => c.Name)
-            .ToListAsync(ct));
+            .ToListAsync(ct);
+
+        PopulateResponsibleUserNames(clients);
+        return Ok(clients);
+    }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var client = await _db.Clients
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var client = await BuildVisibleClientsQuery(currentUserId)
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
+            .Include(c => c.ResponsibleUser)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is not null)
+        {
+            client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+        }
         return client is null ? NotFound() : Ok(client);
     }
 
     [HttpGet("{id:int}/stats")]
     public async Task<IActionResult> GetStats(int id, [FromQuery] int? caseId, CancellationToken ct)
     {
-        var client = await _db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var client = await BuildVisibleClientsQuery(currentUserId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
         var q = _db.Payments.Where(p => p.ClientId == id)
@@ -170,10 +240,16 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Client model)
+    public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients-modal", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
+
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
 
         if (model.LegalEntityId.HasValue)
         {
@@ -193,6 +269,14 @@ public class ClientsController : ControllerBase
             }
         }
 
+        var responsibleUserId = User.IsInRole("admin")
+            ? (model.ResponsibleUserId ?? currentUserId.Value)
+            : currentUserId.Value;
+        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
+        {
+            return BadRequest($"Ответственный #{responsibleUserId} не найден");
+        }
+
         var entity = new Client
         {
             Name = model.Name,
@@ -203,22 +287,22 @@ public class ClientsController : ControllerBase
             Notes = model.Notes,
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
+            ResponsibleUserId = responsibleUserId,
             ClientStatusId = model.ClientStatusId,
         };
 
         _db.Clients.Add(entity);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
         await SyncClientAddressesAsync(entity, profilePayload);
         await SyncClientPassportAsync(entity, profilePayload);
-        await _db.SaveChangesAsync();
-        await _db.Entry(entity).Reference(c => c.LegalEntity).LoadAsync();
-        await _db.Entry(entity).Reference(c => c.ClientStatus).LoadAsync();
+        await _db.SaveChangesAsync(ct);
+        await LoadClientResponseDataAsync(entity, ct);
         return Created($"/api/clients/{entity.Id}", entity);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Client model)
+    public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("clients", BuildClientRequirementsModel(model));
         missingUpdate = missingUpdate
@@ -227,7 +311,14 @@ public class ClientsController : ControllerBase
             .ToList();
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
-        var e = await _db.Clients.FindAsync(id);
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var e = await BuildVisibleClientsQuery(currentUserId)
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
         if (model.LegalEntityId.HasValue)
         {
@@ -246,6 +337,14 @@ public class ClientsController : ControllerBase
                 return BadRequest($"Статус клиента #{model.ClientStatusId.Value} не найден");
             }
         }
+        var responsibleUserId = User.IsInRole("admin")
+            ? model.ResponsibleUserId
+            : e.ResponsibleUserId;
+        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
+        {
+            return BadRequest($"Ответственный #{responsibleUserId} не найден");
+        }
+
         e.Name = model.Name;
         e.Email = model.Email;
         e.Phone = model.Phone;
@@ -257,15 +356,24 @@ public class ClientsController : ControllerBase
         await SyncClientPassportAsync(e, profilePayload);
         e.IsActive = model.IsActive;
         e.LegalEntityId = model.LegalEntityId;
+        e.ResponsibleUserId = responsibleUserId;
         e.ClientStatusId = model.ClientStatusId;
-        await _db.SaveChangesAsync();
-        await _db.Entry(e).Reference(c => c.LegalEntity).LoadAsync();
-        await _db.Entry(e).Reference(c => c.ClientStatus).LoadAsync();
+        await _db.SaveChangesAsync(ct);
+        await LoadClientResponseDataAsync(e, ct);
         return Ok(e);
     }
 
 
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task LoadClientResponseDataAsync(Client client, CancellationToken ct)
+    {
+        await _db.Entry(client).Reference(c => c.LegalEntity).LoadAsync(ct);
+        await _db.Entry(client).Reference(c => c.ClientStatus).LoadAsync(ct);
+        await _db.Entry(client).Reference(c => c.ResponsibleUser).LoadAsync(ct);
+        await _db.Entry(client).Collection(c => c.Addresses).LoadAsync(ct);
+        client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+    }
 
     private static string? ExtractProfilePayloadFromNotes(string? notes)
     {
@@ -277,19 +385,7 @@ public class ClientsController : ControllerBase
 
     private async Task SyncClientAddressesAsync(Client client, string? profilePayload)
     {
-        var raw = profilePayload?.Trim();
-        if (string.IsNullOrWhiteSpace(raw)) return;
-
-        ClientAddressProfile? profile;
-        try
-        {
-            profile = JsonSerializer.Deserialize<ClientAddressProfile>(raw);
-        }
-        catch
-        {
-            return;
-        }
-
+        var profile = DeserializeClientProfile<ClientAddressProfile>(profilePayload?.Trim());
         if (profile is null) return;
 
         var existing = await _db.AddressRecords.Where(x => x.ClientId == client.Id).ToListAsync();
@@ -354,19 +450,7 @@ public class ClientsController : ControllerBase
 
     private async Task SyncClientPassportAsync(Client client, string? profilePayload)
     {
-        var raw = profilePayload?.Trim();
-        if (string.IsNullOrWhiteSpace(raw)) return;
-
-        ClientAddressProfile? profile;
-        try
-        {
-            profile = JsonSerializer.Deserialize<ClientAddressProfile>(raw);
-        }
-        catch
-        {
-            return;
-        }
-
+        var profile = DeserializeClientProfile<ClientAddressProfile>(profilePayload?.Trim());
         if (profile is null) return;
 
         var existing = await _db.ClientPassports.Where(x => x.ClientId == client.Id).ToListAsync();
@@ -482,9 +566,16 @@ public class ClientsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var e = await _db.Clients.FindAsync(id);
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var e = await BuildVisibleClientsQuery(currentUserId)
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
         var usage = await GetClientUsageSummary(id);
@@ -527,18 +618,7 @@ public class ClientsController : ControllerBase
     private static ClientRequirementsModel BuildClientRequirementsModel(Client model)
     {
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
-        ClientRequirementsProfile? profile = null;
-        if (!string.IsNullOrWhiteSpace(profilePayload))
-        {
-            try
-            {
-                profile = JsonSerializer.Deserialize<ClientRequirementsProfile>(profilePayload);
-            }
-            catch
-            {
-                profile = null;
-            }
-        }
+        var profile = DeserializeClientProfile<ClientRequirementsProfile>(profilePayload);
 
         return new ClientRequirementsModel
         {
@@ -550,6 +630,7 @@ public class ClientsController : ControllerBase
             Notes = model.Notes,
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
+            ResponsibleUserId = model.ResponsibleUserId,
             ClientStatusId = model.ClientStatusId,
 
             LastName = profile?.LastName,
@@ -596,6 +677,7 @@ public sealed class ClientRequirementsModel
     public string? Notes { get; init; }
     public bool IsActive { get; init; }
     public int? LegalEntityId { get; init; }
+    public int? ResponsibleUserId { get; init; }
     public int? ClientStatusId { get; init; }
 
     public string? LastName { get; init; }

@@ -282,6 +282,7 @@ export function InvoiceModal({
   const [numberEditedManually, setNumberEditedManually] = useState(false);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
+  const lastAutoResponsibleIdRef = useRef<string>('');
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
@@ -446,6 +447,37 @@ export function InvoiceModal({
       setNumberEditedManually(false);
     }
   }, [open, invoice, defaultClientId, defaultResponsibleId, defaultType]);
+
+  useEffect(() => {
+    if (!open || mode !== 'create') return;
+
+    const nextAutoResponsibleId = selectedClient?.responsibleUserId
+      ? String(selectedClient.responsibleUserId)
+      : defaultResponsibleId
+        ? String(defaultResponsibleId)
+        : '';
+
+    setForm((prev) => {
+      const currentResponsibleId = prev.responsibleIds[0] ?? '';
+      const shouldReplace =
+        !currentResponsibleId || currentResponsibleId === lastAutoResponsibleIdRef.current;
+
+      if (!shouldReplace) {
+        lastAutoResponsibleIdRef.current = nextAutoResponsibleId;
+        return prev;
+      }
+
+      lastAutoResponsibleIdRef.current = nextAutoResponsibleId;
+      if (currentResponsibleId === nextAutoResponsibleId) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        responsibleIds: nextAutoResponsibleId ? [nextAutoResponsibleId] : [],
+      };
+    });
+  }, [defaultResponsibleId, mode, open, selectedClient?.id, selectedClient?.responsibleUserId]);
 
   useEffect(() => {
     if (!errorMessage) {
@@ -1312,9 +1344,16 @@ export function InvoiceModal({
                               {lookupsError && (
                                 <span className="text-xs text-rose-600">{lookupsError}</span>
                               )}
-                              {selectedClient?.clientStatus && (
+                              {(selectedClient?.clientStatus || selectedClient?.responsibleUserName) && (
                                 <div className="mt-2 space-y-1 rounded-xl border border-slate-100 bg-slate-50 p-2">
-                                  <ClientStatusBadge status={selectedClient.clientStatus} />
+                                  {selectedClient.clientStatus && (
+                                    <ClientStatusBadge status={selectedClient.clientStatus} />
+                                  )}
+                                  {selectedClient.responsibleUserName && (
+                                    <p className="text-xs text-slate-600">
+                                      Ответственный: {selectedClient.responsibleUserName}
+                                    </p>
+                                  )}
                                   {selectedClient.clientStatus.description && (
                                     <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                                   )}

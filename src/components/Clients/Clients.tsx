@@ -171,6 +171,7 @@ function highlightPhone(phone: string, q: string): ReactNode {
 type ColumnId =
   | 'id'
   | 'name'
+  | 'responsible'
   | 'status'
   | 'company'
   | 'email'
@@ -199,6 +200,7 @@ type ColumnDefinition = {
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { id: 'id', label: 'ID', defaultWidth: 80, defaultVisible: false },
   { id: 'name', label: 'Клиент', defaultWidth: 220, defaultVisible: true, filterable: true },
+  { id: 'responsible', label: 'Ответственный', defaultWidth: 180, defaultVisible: true },
   { id: 'status', label: 'Статус', defaultWidth: 160, defaultVisible: true, filterable: true },
   { id: 'company', label: 'Компания', defaultWidth: 180, defaultVisible: true, filterable: true },
   { id: 'email', label: 'Email', defaultWidth: 200, defaultVisible: true, filterable: true },
@@ -355,6 +357,7 @@ export function Clients() {
       ({
         id: 'id',
         name: 'name',
+        responsible: 'responsibleUserName',
         status: 'clientStatus',
         company: 'company',
         email: 'email',
@@ -816,6 +819,22 @@ export function Clients() {
     return (
       <ClientDetail
         clientId={selectedClientId}
+        onClientUpdated={(updatedClient) => {
+          setClients((prev) =>
+            prev.map((client) =>
+              client.id === updatedClient.id
+                ? {
+                    ...client,
+                    ...updatedClient,
+                    legalEntity: updatedClient.legalEntity ?? client.legalEntity ?? null,
+                    clientStatus: updatedClient.clientStatus ?? client.clientStatus ?? null,
+                    cases: Array.isArray(updatedClient.cases) ? updatedClient.cases : client.cases,
+                    contracts: Array.isArray(updatedClient.contracts) ? updatedClient.contracts : client.contracts,
+                  }
+                : client,
+            ),
+          );
+        }}
         onBack={() => setSelectedClientId(null)}
         initialCaseId={initialCaseId}
       />
@@ -864,6 +883,12 @@ export function Clients() {
               </button>
             </div>
           </div>
+        );
+      case 'responsible':
+        return client.responsibleUserName ? (
+          <span className="text-sm text-gray-700 block truncate">{client.responsibleUserName}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
         );
       case 'status':
         return <ClientStatusBadge status={client.clientStatus} />;
@@ -1417,6 +1442,11 @@ export function Clients() {
                           >
                             {highlight(client.name ?? '', query)}
                           </button>
+                          {client.responsibleUserName && (
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                              Ответственный: {client.responsibleUserName}
+                            </span>
+                          )}
                           <ClientStatusBadge status={client.clientStatus} />
                         </div>
                         {client.company && (

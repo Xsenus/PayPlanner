@@ -285,6 +285,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientStatusId")
@@ -304,6 +307,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Name")
                         .HasDatabaseName("IX_Clients_Name");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_Clients_ResponsibleUserId");
 
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_Clients_IsActive_Name");
@@ -2305,9 +2311,16 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("ClientStatus");
 
                     b.Navigation("LegalEntity");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>

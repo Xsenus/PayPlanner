@@ -515,6 +515,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ClientStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ResponsibleUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ResponsibleUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
@@ -523,6 +528,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Clients_IsActive_Name");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Clients_LegalEntityId");
             entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_Clients_ClientStatusId");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_Clients_ResponsibleUserId");
         });
 
         // ------------------ ClientCase ------------------

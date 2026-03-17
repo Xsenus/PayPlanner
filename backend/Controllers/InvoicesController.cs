@@ -280,7 +280,7 @@ public class InvoicesController : ControllerBase
 
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
-        var responsibleIds = NormalizeResponsibleIds(request.ResponsibleIds);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(request.ClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -399,7 +399,7 @@ public class InvoicesController : ControllerBase
         payment.CounterpartyName = Normalize(request.CounterpartyName);
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
-        var responsibleIds = NormalizeResponsibleIds(request.ResponsibleIds);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(request.ClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -1112,6 +1112,33 @@ public class InvoicesController : ControllerBase
             .CountAsync(u => responsibleIds.Contains(u.Id), ct);
 
         return existingCount == responsibleIds.Count;
+    }
+
+    private async Task<HashSet<int>> ResolveInvoiceResponsibleIdsAsync(int clientId, List<int>? responsibleIds, CancellationToken ct)
+    {
+        var normalized = NormalizeResponsibleIds(responsibleIds);
+        if (normalized.Count > 0)
+        {
+            return normalized;
+        }
+
+        var clientResponsibleUserId = await _db.Clients
+            .AsNoTracking()
+            .Where(c => c.Id == clientId)
+            .Select(c => c.ResponsibleUserId)
+            .FirstOrDefaultAsync(ct);
+        if (clientResponsibleUserId.HasValue && clientResponsibleUserId.Value > 0)
+        {
+            return new HashSet<int> { clientResponsibleUserId.Value };
+        }
+
+        var currentUserId = GetUserId(User);
+        if (currentUserId.HasValue && currentUserId.Value > 0)
+        {
+            return new HashSet<int> { currentUserId.Value };
+        }
+
+        return normalized;
     }
 
     private static HashSet<int> NormalizeResponsibleIds(List<int>? responsibleIds)

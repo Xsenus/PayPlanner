@@ -80,6 +80,7 @@ import {
 interface ClientDetailProps {
   clientId: number;
   onBack: () => void;
+  onClientUpdated?: (client: Client) => void;
   initialCaseId?: number | 'all';
 }
 
@@ -682,12 +683,13 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     legacyNotes: profile.legacyNotes.trim(),
   });
 
-export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
+export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId }: ClientDetailProps) {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { confirm, alert } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
+  const userIsAdmin = isAdmin();
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
@@ -757,6 +759,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     comment: '',
     legacyNotes: '',
     legalEntityId: '',
+    responsibleUserId: '',
     isActive: true,
     clientStatusId: '',
   });
@@ -799,6 +802,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const fieldLabels: Record<string, string> = {
     Emails: 'Email',
     Relatives: 'Родственники',
+    ResponsibleUserId: 'Ответственный',
     ClientStatusId: 'Статус клиента',
     LastName: 'Фамилия',
     FirstName: 'Имя',
@@ -809,21 +813,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const formatApiValidationError = (error: unknown, fallback: string) => {
-    const raw = error instanceof Error ? error.message : String(error);
-    const marker = ' - ';
-    const markerIndex = raw.indexOf(marker);
-    const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
-
-    try {
-      const parsed = JSON.parse(payload) as { message?: string; missingFields?: string[] };
-      const base = parsed.message?.trim() || fallback;
-      const missing = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
-      if (missing.length === 0) return base;
-      const mapped = missing.map((field) => fieldLabels[field] ?? field).join(', ');
-      return `${base}: ${mapped}`;
-    } catch {
-      return raw || fallback;
-    }
+    return extractDisplayErrorMessage(error, fallback, fieldLabels);
   };
 
   const { cases: serverCases } = useClientCases(clientId);
@@ -1159,9 +1149,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       const updated = await apiService.updateClient(clientId, payload);
       setClientData(updated);
       setClientName(updated.name ?? `Client #${clientId}`);
+      onClientUpdated?.(updated);
+      return updated;
     } catch (err) {
       const message = formatApiValidationError(err, 'Не удалось обновить клиента');
-      await alert({ title: 'Ошибка', description: message, variant: 'error' });
+      toast.error(message, 'Ошибка сохранения');
       throw err instanceof Error ? err : new Error(message);
     }
   };
@@ -1399,6 +1391,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       comment: profile.comment,
       legacyNotes: profile.legacyNotes,
       legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
+      responsibleUserId: clientData.responsibleUserId ? String(clientData.responsibleUserId) : '',
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
@@ -1478,6 +1471,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           notes: '',
           createdAt: '1970-01-01T00:00:00.000Z',
           isActive: true,
+          responsibleUserId: clientData?.responsibleUserId ?? null,
+          responsibleUserName: clientData?.responsibleUserName ?? null,
         } satisfies Client,
       ];
     }
@@ -1535,12 +1530,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           notes: '',
           createdAt: '1970-01-01T00:00:00.000Z',
           isActive: true,
+          responsibleUserId: clientData?.responsibleUserId ?? null,
+          responsibleUserName: clientData?.responsibleUserName ?? null,
         } satisfies Client,
       ];
     }
 
     return invoiceClients;
-  }, [invoiceClients, clientId, clientName]);
+  }, [clientData?.responsibleUserId, clientData?.responsibleUserName, invoiceClients, clientId, clientName]);
 
   const contractDefaultClients = useMemo<ContractClient[]>(() => {
     const normalizedName =
@@ -1647,6 +1644,26 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     );
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
+  const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
+
+  const clientResponsibleOptions = useMemo(() => {
+    const options = [...actResponsibles];
+    const currentResponsibleId = clientFormState.responsibleUserId
+      ? Number(clientFormState.responsibleUserId)
+      : null;
+    if (
+      currentResponsibleId
+      && !options.some((responsible) => responsible.id === currentResponsibleId)
+      && clientData?.responsibleUserName
+    ) {
+      options.push({ id: currentResponsibleId, fullName: clientData.responsibleUserName });
+    }
+
+    return options.sort((a, b) =>
+      a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }),
+    );
+  }, [actResponsibles, clientData?.responsibleUserName, clientFormState.responsibleUserId]);
+
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
     if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
@@ -1671,6 +1688,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       void ensureActLookups();
     }
   }, [actModalOpen, ensureActLookups]);
+
+  useEffect(() => {
+    if (invoiceModalOpen || canManageClientResponsible) {
+      void ensureActLookups();
+    }
+  }, [canManageClientResponsible, ensureActLookups, invoiceModalOpen]);
 
   const openAddPayment = () => {
     if (!clientPermissions.canCreate) {
@@ -1902,6 +1925,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     const { name, value } = event.target;
     if (name === 'legalEntityId') {
       setClientFormState((prev) => ({ ...prev, legalEntityId: value }));
+      return;
+    }
+    if (name === 'responsibleUserId') {
+      setClientFormState((prev) => ({ ...prev, responsibleUserId: value }));
       return;
     }
     if (name === 'clientStatusId') {
@@ -2276,25 +2303,36 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         ? registrationAddress
         : profile.actualAddress.trim();
       if (profile.kind === 'legal' && !clientFormState.legalEntityId) {
-        await alert({ title: 'Проверка данных', description: 'Для карточки юридического лица выберите юридическое лицо из списка.', variant: 'error' });
+        toast.error(
+          'Для карточки юридического лица выберите юридическое лицо из списка.',
+          'Проверка данных',
+        );
         return;
       }
-      await handleUpdateClient({
-        name: buildClientDisplayName(profile, selectedLegalEntity?.shortName ?? selectedLegalEntity?.fullName ?? undefined),
-        email: normalizedEmails[0] ?? '',
-        phone: normalizedPhones[0] ?? '',
-        company: profile.kind === 'legal' ? selectedLegalEntity?.shortName ?? 'Юридическое лицо' : '',
-        address: registrationAddress || actualAddress || normalizedAddresses[0] || '',
-        notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,
-        isActive: clientFormState.isActive,
-        legalEntityId:
-          profile.kind === 'legal' && clientFormState.legalEntityId
-            ? Number(clientFormState.legalEntityId)
+      try {
+        await handleUpdateClient({
+          name: buildClientDisplayName(profile, selectedLegalEntity?.shortName ?? selectedLegalEntity?.fullName ?? undefined),
+          email: normalizedEmails[0] ?? '',
+          phone: normalizedPhones[0] ?? '',
+          company: profile.kind === 'legal' ? selectedLegalEntity?.shortName ?? 'Юридическое лицо' : '',
+          address: registrationAddress || actualAddress || normalizedAddresses[0] || '',
+          notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,
+          isActive: clientFormState.isActive,
+          legalEntityId:
+            profile.kind === 'legal' && clientFormState.legalEntityId
+              ? Number(clientFormState.legalEntityId)
+              : null,
+          responsibleUserId: clientFormState.responsibleUserId
+            ? Number(clientFormState.responsibleUserId)
             : null,
-        clientStatusId: clientFormState.clientStatusId
-          ? Number(clientFormState.clientStatusId)
-          : null,
-      });
+          clientStatusId: clientFormState.clientStatusId
+            ? Number(clientFormState.clientStatusId)
+            : null,
+        });
+        toast.success('Изменения карточки клиента сохранены.', 'Клиент обновлен');
+      } catch {
+        return;
+      }
     } finally {
       setClientFormSaving(false);
     }
@@ -2337,6 +2375,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
             className="flex-1 min-w-0 text-2xl font-bold text-gray-900 flex flex-wrap items-center gap-3"
             title={clientName}>
             <span className="truncate">{clientName}</span>
+            {clientData?.responsibleUserName && (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                Ответственный: {clientData.responsibleUserName}
+              </span>
+            )}
             <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -2435,13 +2478,39 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
               </div>
-              <div className="w-full max-w-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>
-                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ClientStatusId', clientFormState.clientStatusId)}`}>
-                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                  {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
-                </select>
-                {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
+              <div className="w-full max-w-2xl grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {'Ответственный' + requiredMark('ResponsibleUserId')}
+                  </label>
+                  <select
+                    name="responsibleUserId"
+                    value={clientFormState.responsibleUserId}
+                    onChange={handleClientFormChange}
+                    disabled={!canManageClientResponsible}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ResponsibleUserId', clientFormState.responsibleUserId)}`}
+                  >
+                    <option value="">Не указан</option>
+                    {clientResponsibleOptions.map((responsible) => (
+                      <option key={responsible.id} value={responsible.id}>
+                        {responsible.fullName}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {canManageClientResponsible
+                      ? 'По умолчанию подставляется пользователь, который создал клиента.'
+                      : 'Назначается автоматически при создании клиента. Изменение доступно администратору.'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>
+                  <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ClientStatusId', clientFormState.clientStatusId)}`}>
+                    <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                    {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
+                  </select>
+                  {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
+                </div>
               </div>
             </div>
             {!clientPermissions.canEdit && (
@@ -3986,7 +4055,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}
-          defaultResponsibleId={user?.id}
+          defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
         />
 
         <ActModal

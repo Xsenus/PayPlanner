@@ -275,6 +275,8 @@ export interface Client {
   isActive: boolean;
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
+  responsibleUserId?: number | null;
+  responsibleUserName?: string | null;
   clientStatusId?: number | null;
   clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
@@ -291,6 +293,7 @@ export interface ClientInput {
   notes: string;
   isActive: boolean;
   legalEntityId?: number | null;
+  responsibleUserId?: number | null;
   clientStatusId?: number | null;
 }
 
