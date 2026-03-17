@@ -52,9 +52,14 @@ public class InvoicesController : ControllerBase
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
+        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        {
+            return Unauthorized();
+        }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, effectiveResponsibleId, search, type);
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -92,8 +97,14 @@ public class InvoicesController : ControllerBase
         [FromQuery] PaymentType? type,
         CancellationToken ct = default)
     {
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
+        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        {
+            return Unauthorized();
+        }
+
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, responsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, effectiveResponsibleId, search, type);
 
         var today = DateTime.UtcNow.Date;
 
@@ -777,7 +788,7 @@ public class InvoicesController : ControllerBase
 
         if (responsibleId.HasValue)
         {
-            query = query.Where(x => x.Act != null && x.Act.ResponsibleId == responsibleId.Value);
+            query = query.Where(x => x.Payment.Responsibles.Any(r => r.UserId == responsibleId.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -1230,6 +1241,16 @@ public class InvoicesController : ControllerBase
         return string.Equals(value, "first-free", StringComparison.OrdinalIgnoreCase)
             ? "first-free"
             : "max-plus-one";
+    }
+
+    private int? ResolveVisibleResponsibleId(int? requestedResponsibleId)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return requestedResponsibleId;
+        }
+
+        return GetUserId(User);
     }
 
     private static int? GetUserId(ClaimsPrincipal user)

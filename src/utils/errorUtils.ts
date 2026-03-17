@@ -1,0 +1,60 @@
+type ValidationErrorPayload = {
+  message?: string;
+  missingFields?: string[];
+};
+
+function stripHttpEnvelope(raw: string): string {
+  const marker = ' - ';
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex >= 0) {
+    const payload = raw.slice(markerIndex + marker.length).trim();
+    if (payload) return payload;
+  }
+
+  const atIndex = raw.indexOf(' at ');
+  if (atIndex > 0 && /^HTTP\s+\d+/i.test(raw)) {
+    return raw.slice(0, atIndex).trim();
+  }
+
+  return raw.trim();
+}
+
+function tryParseValidationPayload(raw: string): ValidationErrorPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as ValidationErrorPayload;
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch {
+    /** */
+  }
+
+  return null;
+}
+
+export function extractDisplayErrorMessage(
+  error: unknown,
+  fallback: string,
+  fieldLabels?: Record<string, string>,
+): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const stripped = stripHttpEnvelope(raw);
+  const parsed = tryParseValidationPayload(stripped) ?? tryParseValidationPayload(raw);
+
+  if (parsed) {
+    const base = parsed.message?.trim() || fallback;
+    const missingFields = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
+    if (!missingFields.length) {
+      return base;
+    }
+
+    const mapped = missingFields.map((field) => fieldLabels?.[field] ?? field).join(', ');
+    return mapped ? `${base}: ${mapped}` : base;
+  }
+
+  if (!stripped || /^HTTP\s+\d+/i.test(stripped)) {
+    return fallback;
+  }
+
+  return stripped;
+}

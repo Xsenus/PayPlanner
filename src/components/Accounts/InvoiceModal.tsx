@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActStatus,
@@ -22,6 +22,8 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
 import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type FormState = {
   number: string;
@@ -58,10 +60,64 @@ type DraftActForm = {
 type ClientPickerMode = 'client' | 'counterparty';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
-  const source = typeof value === 'string' ? value.replace(',', '.').trim() : value;
-  const parsed = typeof source === 'number' ? source : Number.parseFloat(source || '0');
+  const parsed = parseMoneyInput(value);
   if (!Number.isFinite(parsed)) return '0.00';
-  return parsed.toFixed(2);
+  const [integer, decimal] = parsed.toFixed(2).split('.');
+  return `${groupThousands(integer)}.${decimal}`;
+}
+
+function normalizeMoneyInput(value: string | number | null | undefined): string {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '';
+  }
+
+  const raw = String(value ?? '')
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.]/g, '');
+
+  if (!raw) return '';
+
+  const dotIndex = raw.indexOf('.');
+  if (dotIndex < 0) return raw;
+
+  return `${raw.slice(0, dotIndex + 1)}${raw.slice(dotIndex + 1).replace(/\./g, '')}`;
+}
+
+function groupThousands(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function parseMoneyInput(value: string | number | null | undefined): number {
+  const normalized = normalizeMoneyInput(value);
+  if (!normalized || normalized === '.') return 0;
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoneyInputValue(value: string | number | null | undefined): string {
+  const normalized = normalizeMoneyInput(value);
+  if (!normalized) return '';
+
+  const hasDecimal = normalized.includes('.');
+  const hasTrailingDot = normalized.endsWith('.');
+  const [integerPartRaw, decimalPart = ''] = normalized.split('.', 2);
+  const integerPart = groupThousands((integerPartRaw || '0').replace(/^0+(?=\d)/, '') || '0');
+
+  if (hasTrailingDot) {
+    return `${integerPart}.`;
+  }
+
+  if (hasDecimal) {
+    return `${integerPart}.${decimalPart}`;
+  }
+
+  return integerPart;
+}
+
+function formatMoneyDisplayValue(value: string | number | null | undefined): string {
+  return formatMoneyValue(value);
 }
 
 function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
@@ -103,6 +159,7 @@ interface InvoiceModalProps {
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
+  defaultResponsibleId?: number;
   defaultType?: PaymentKind;
   lockType?: boolean;
   presentation?: 'modal' | 'page';
@@ -111,6 +168,7 @@ interface InvoiceModalProps {
 function normalizeInvoiceToForm(
   invoice: Invoice | null,
   defaultClientId?: number,
+  defaultResponsibleId?: number,
   defaultType?: PaymentKind,
 ): FormState {
   const today = formatLocalYMD(new Date());
@@ -129,7 +187,7 @@ function normalizeInvoiceToForm(
       actReference: '',
       paidDate: '',
       counterpartyName: '',
-      responsibleIds: [],
+      responsibleIds: defaultResponsibleId ? [String(defaultResponsibleId)] : [],
     };
   }
 
@@ -182,12 +240,14 @@ export function InvoiceModal({
   lookupsLoading,
   lookupsError,
   defaultClientId,
+  defaultResponsibleId,
   defaultType,
   lockType = false,
   presentation = 'modal',
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { confirm, alert } = useDialog();
+  const toast = useToast();
   const { setActiveTab } = useTabNavigation();
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
   const typeBadgeClasses: Record<PaymentKind, string> = {
@@ -196,7 +256,7 @@ export function InvoiceModal({
   };
   const isTypeLocked = lockType && mode === 'create';
   const [form, setForm] = useState<FormState>(() =>
-    normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
+    normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -220,20 +280,15 @@ export function InvoiceModal({
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
   const [numberEditedManually, setNumberEditedManually] = useState(false);
-
-  const parseMoney = useCallback((value: string): number => {
-    const normalized = value.replace(',', '.').trim();
-    if (!normalized) return 0;
-    const parsed = Number.parseFloat(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }, []);
+  const lastErrorToastRef = useRef<string | null>(null);
+  const lastLocalErrorToastRef = useRef<string | null>(null);
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
-      const total = items.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
-      return total.toFixed(2);
+      const total = items.reduce((sum, item) => sum + parseMoneyInput(item.quantity) * parseMoneyInput(item.price), 0);
+      return formatMoneyDisplayValue(total);
     },
-    [parseMoney],
+    [],
   );
 
   const { invoiceUnits, invoiceItemNames } = useDictionaries();
@@ -241,12 +296,12 @@ export function InvoiceModal({
   const lineItemNameOptions = useMemo(() => invoiceItemNames.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceItemNames]);
 
   const handleLineItemPriceChange = (id: string, rawValue: string) => {
-    const normalized = rawValue.replace(/[^\d.,]/g, '').replace(',', '.');
-    updateLineItem(id, { price: formatMoneyValue(normalized) });
+    updateLineItem(id, { price: formatMoneyInputValue(rawValue) });
   };
 
   const handleLineItemPriceBlur = (id: string, rawValue: string) => {
-    updateLineItem(id, { price: formatMoneyValue(rawValue) });
+    const formatted = formatMoneyInputValue(rawValue);
+    updateLineItem(id, { price: formatted || formatMoneyDisplayValue(0) });
   };
 
   const applyLineItemTemplate = (id: string, name: string) => {
@@ -257,7 +312,7 @@ export function InvoiceModal({
     updateLineItem(id, {
       unit: template.unit?.trim() || undefined,
       price: template.defaultPrice !== undefined && template.defaultPrice !== null
-        ? formatMoneyValue(template.defaultPrice)
+        ? formatMoneyDisplayValue(template.defaultPrice)
         : undefined,
     });
   };
@@ -369,7 +424,7 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeInvoiceToForm(invoice, defaultClientId, defaultType));
+      setForm(normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType));
       setLineItems(normalizeLineItems(invoice?.lineItems, invoice?.amount));
       const nextInitial = invoice?.actId ? {
         id: invoice.actId,
@@ -390,7 +445,38 @@ export function InvoiceModal({
       setLocalError(null);
       setNumberEditedManually(false);
     }
-  }, [open, invoice, defaultClientId, defaultType]);
+  }, [open, invoice, defaultClientId, defaultResponsibleId, defaultType]);
+
+  useEffect(() => {
+    if (!errorMessage) {
+      lastErrorToastRef.current = null;
+      return;
+    }
+
+    if (lastErrorToastRef.current === errorMessage) {
+      return;
+    }
+
+    toast.error(
+      errorMessage,
+      mode === 'edit' ? 'Не удалось обновить счет' : 'Не удалось создать счет',
+    );
+    lastErrorToastRef.current = errorMessage;
+  }, [errorMessage, mode, toast]);
+
+  useEffect(() => {
+    if (!localError) {
+      lastLocalErrorToastRef.current = null;
+      return;
+    }
+
+    if (lastLocalErrorToastRef.current === localError) {
+      return;
+    }
+
+    toast.error(localError, 'Проверьте данные счета');
+    lastLocalErrorToastRef.current = localError;
+  }, [localError, toast]);
 
   useEffect(() => {
     if (!open || mode !== 'create' || numberEditedManually) return;
@@ -440,7 +526,7 @@ export function InvoiceModal({
         name: '',
         quantity: '1',
         unit: unitOptions[0] || 'шт',
-        price: '0.00',
+        price: formatMoneyDisplayValue(0),
       },
     ]);
   };
@@ -566,7 +652,7 @@ export function InvoiceModal({
       return;
     }
 
-    const actAmount = Number.parseFloat((draftAct.amount || form.amount).replace(',', '.'));
+    const actAmount = parseMoneyInput(draftAct.amount || form.amount);
     if (!Number.isFinite(actAmount) || actAmount < 0) {
       setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
       return;
@@ -627,8 +713,7 @@ export function InvoiceModal({
 
 
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
-    const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
-    const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+    const safeAmount = parseMoneyInput(form.amount);
     const counterparty = form.counterpartyName.trim();
 
     return {
@@ -649,9 +734,9 @@ export function InvoiceModal({
       lineItems: lineItems
         .map((item) => ({
           name: item.name.trim(),
-          quantity: Number.parseFloat(item.quantity.replace(',', '.')),
+          quantity: parseMoneyInput(item.quantity),
           unit: item.unit.trim() || 'шт',
-          price: Number.parseFloat(item.price.replace(',', '.')),
+          price: parseMoneyInput(item.price),
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
     };
@@ -675,7 +760,7 @@ export function InvoiceModal({
       return;
     }
 
-    const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
+    const parsedAmount = parseMoneyInput(form.amount);
     if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
       setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
       return;
@@ -687,15 +772,20 @@ export function InvoiceModal({
     try {
       await onSubmit(payload);
     } catch (err) {
-      if (err instanceof Error && !errorMessage) {
-        setLocalError(err.message);
+      if (!errorMessage) {
+        setLocalError(
+          extractDisplayErrorMessage(
+            err,
+            mode === 'edit' ? 'Не удалось сохранить счет' : 'Не удалось создать счет',
+          ),
+        );
       }
     }
   };
 
   const handleOpenInstallmentCalculator = () => {
     if (form.type !== 'Income') return;
-    const parsedAmount = Number.parseFloat(form.amount.replace(',', '.'));
+    const parsedAmount = parseMoneyInput(form.amount);
     const hasValidAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
     const clientIdNumber = form.clientId ? Number.parseInt(form.clientId, 10) : undefined;
 
@@ -825,8 +915,8 @@ export function InvoiceModal({
     }
   };
 
-  const amountValue = Number.parseFloat(form.amount.replace(',', '.')) || 0;
-  const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoney(item.quantity) * parseMoney(item.price), 0);
+  const amountValue = parseMoneyInput(form.amount);
+  const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoneyInput(item.quantity) * parseMoneyInput(item.price), 0);
   const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
@@ -948,8 +1038,8 @@ export function InvoiceModal({
                   </thead>
                   <tbody>
                     {lineItems.map((item, index) => {
-                      const qty = parseMoney(item.quantity);
-                      const price = parseMoney(item.price);
+                      const qty = parseMoneyInput(item.quantity);
+                      const price = parseMoneyInput(item.price);
                       const rowTotal = qty * price;
                       return (
                         <tr key={item.id}>
@@ -957,8 +1047,8 @@ export function InvoiceModal({
                           <td className="border border-slate-800 px-2 py-1">{item.name || '—'}</td>
                           <td className="border border-slate-800 px-2 py-1 text-right">{qty.toFixed(2)}</td>
                           <td className="border border-slate-800 px-2 py-1 text-right">{item.unit || 'шт'}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{price.toFixed(2)}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{rowTotal.toFixed(2)}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(price)}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(rowTotal)}</td>
                         </tr>
                       );
                     })}
@@ -966,8 +1056,8 @@ export function InvoiceModal({
                 </table>
 
                 <div className="mt-3 text-right text-sm">
-                  <p><span className="font-semibold">Итого:</span> {lineItemsTotal.toFixed(2)}</p>
-                  <p><span className="font-semibold">Всего к оплате:</span> {amountValue.toFixed(2)}</p>
+                  <p><span className="font-semibold">Итого:</span> {formatMoneyDisplayValue(lineItemsTotal)}</p>
+                  <p><span className="font-semibold">Всего к оплате:</span> {formatMoneyDisplayValue(amountValue)}</p>
                 </div>
               </div>
             </section>
@@ -1117,9 +1207,9 @@ export function InvoiceModal({
                                 <input
                                   type="text"
                                   inputMode="decimal"
-                                  value={formatMoneyValue(form.amount)}
+                                  value={formatMoneyDisplayValue(form.amount)}
                                   readOnly
-                                  className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-right text-sm tabular-nums text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   placeholder="0.00"
                                 />
                               </label>
@@ -1170,7 +1260,7 @@ export function InvoiceModal({
                                 <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Наименование" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                                 <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
                                 <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums" />
                                 <button type="button" onClick={() => { void removeLineItem(item.id); }} className="w-10 rounded-lg border border-slate-200 px-1 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
                               </div>
                             ))}
@@ -1185,7 +1275,7 @@ export function InvoiceModal({
                               <option key={name} value={name} />
                             ))}
                           </datalist>
-                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyValue(form.amount)}</div>
+                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>
             </div>
 
@@ -1470,12 +1560,6 @@ export function InvoiceModal({
                         </section>
             </div>
           </div>
-
-{(localError || errorMessage) && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {localError ?? errorMessage}
-            </div>
-          )}
 
           {!(isPageMode && mode === 'edit') && (
             <div className="flex items-center justify-end gap-3 pt-2">

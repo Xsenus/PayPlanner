@@ -744,6 +744,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
+          defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
         />

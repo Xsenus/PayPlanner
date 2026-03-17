@@ -20,6 +20,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useToast } from '../../hooks/useToast';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { usePayments } from '../../hooks/usePayments';
 import type {
@@ -36,6 +37,7 @@ import type {
 } from '../../types';
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
@@ -233,6 +235,7 @@ function safeWrite<T>(key: string, value: T) {
 export function Accounts({ defaultType, lockType = false, onOpenClient }: AccountsProps) {
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
+  const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
 
@@ -625,13 +628,15 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     try {
       if (pageEditingInvoice) {
         await updateInvoice(pageEditingInvoice.id, payload);
+        toast.success('Изменения по счету сохранены.', 'Счет обновлен');
         closeEditPage();
       } else {
         await createInvoice(payload);
+        toast.success('Счет успешно создан.', 'Счет сохранен');
         closeModal();
       }
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : 'Не удалось сохранить счёт');
+      setModalError(extractDisplayErrorMessage(err, 'Не удалось сохранить счет'));
     } finally {
       setSubmitting(false);
     }
@@ -1063,6 +1068,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
+          defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
         />
@@ -1687,6 +1693,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
           defaultClientId={undefined}
+          defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
         />

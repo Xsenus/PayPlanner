@@ -36,7 +36,9 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
   Act,
@@ -684,6 +686,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const { t } = useTranslation();
   const { user } = useAuth();
   const { confirm, alert } = useDialog();
+  const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
@@ -1091,12 +1094,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     try {
       if (isEdit && selectedInvoice) {
         await updateClientInvoice(selectedInvoice.id, payload);
+        toast.success('Изменения по счету сохранены.', 'Счет обновлен');
       } else {
         await createClientInvoice(payload);
+        toast.success('Счет успешно создан.', 'Счет сохранен');
       }
       closeInvoiceModal();
     } catch (err) {
-      setInvoiceModalError(err instanceof Error ? err.message : 'Не удалось сохранить счёт');
+      setInvoiceModalError(extractDisplayErrorMessage(err, 'Не удалось сохранить счет'));
     } finally {
       setInvoiceSubmitting(false);
     }
@@ -3981,6 +3986,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}
+          defaultResponsibleId={user?.id}
         />
 
         <ActModal
