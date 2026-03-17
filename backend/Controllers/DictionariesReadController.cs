@@ -136,6 +136,26 @@ public class DictionariesReadController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("invoice-units")]
+    public async Task<IActionResult> InvoiceUnits(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.InvoiceUnits.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("invoice-item-names")]
+    public async Task<IActionResult> InvoiceItemNames(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.InvoiceItemNames.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
     [HttpGet("client-statuses")]
     public async Task<IActionResult> ClientStatuses(CancellationToken ct)
     {

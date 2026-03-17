@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Pencil, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Copy, Download, Link2, Loader2, Plus, Printer, Search, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActStatus,
@@ -22,7 +22,6 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { storeInstallmentDraft } from '../../utils/installmentBridge';
 import { useDialog } from '../../hooks/useDialog';
-import DictionariesModal from '../Dictionaries/DictionariesModal';
 
 type FormState = {
   number: string;
@@ -37,7 +36,6 @@ type FormState = {
   actReference: string;
   paidDate: string;
   counterpartyName: string;
-  serviceId: string;
   responsibleIds: string[];
 };
 
@@ -59,6 +57,13 @@ type DraftActForm = {
 
 type ClientPickerMode = 'client' | 'counterparty';
 
+function formatMoneyValue(value: string | number | null | undefined): string {
+  const source = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const parsed = typeof source === 'number' ? source : Number.parseFloat(source || '0');
+  if (!Number.isFinite(parsed)) return '0.00';
+  return parsed.toFixed(2);
+}
+
 function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
   if (source && source.length > 0) {
     return source.map((item, index) => ({
@@ -66,7 +71,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       name: item.name ?? '',
       quantity: String(item.quantity ?? 0),
       unit: item.unit ?? 'шт',
-      price: String(item.price ?? 0),
+      price: formatMoneyValue(item.price),
     }));
   }
 
@@ -76,7 +81,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       name: '',
       quantity: '1',
       unit: 'шт',
-      price: fallbackAmount !== undefined && fallbackAmount !== null ? String(fallbackAmount) : '',
+      price: formatMoneyValue(fallbackAmount ?? 0),
     },
   ];
 }
@@ -124,7 +129,6 @@ function normalizeInvoiceToForm(
       actReference: '',
       paidDate: '',
       counterpartyName: '',
-      serviceId: '',
       responsibleIds: [],
     };
   }
@@ -142,7 +146,6 @@ function normalizeInvoiceToForm(
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
     counterpartyName: invoice.counterpartyName ?? '',
-    serviceId: invoice.serviceId ? String(invoice.serviceId) : '',
     responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)).slice(0, 1),
   };
 }
@@ -192,7 +195,6 @@ export function InvoiceModal({
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
   const isTypeLocked = lockType && mode === 'create';
-  const { services } = useDictionaries();
   const [form, setForm] = useState<FormState>(() =>
     normalizeInvoiceToForm(invoice, defaultClientId, defaultType),
   );
@@ -214,7 +216,6 @@ export function InvoiceModal({
     amount: '',
     comment: '',
   });
-  const [serviceDictOpen, setServiceDictOpen] = useState(false);
   const [contractOptions, setContractOptions] = useState<Contract[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
@@ -234,6 +235,32 @@ export function InvoiceModal({
     },
     [parseMoney],
   );
+
+  const { invoiceUnits, invoiceItemNames } = useDictionaries();
+  const unitOptions = useMemo(() => invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceUnits]);
+  const lineItemNameOptions = useMemo(() => invoiceItemNames.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceItemNames]);
+
+  const handleLineItemPriceChange = (id: string, rawValue: string) => {
+    const normalized = rawValue.replace(/[^\d.,]/g, '').replace(',', '.');
+    updateLineItem(id, { price: formatMoneyValue(normalized) });
+  };
+
+  const handleLineItemPriceBlur = (id: string, rawValue: string) => {
+    updateLineItem(id, { price: formatMoneyValue(rawValue) });
+  };
+
+  const applyLineItemTemplate = (id: string, name: string) => {
+    const normalized = name.trim().toLowerCase();
+    if (!normalized) return;
+    const template = invoiceItemNames.find((item) => item.name.trim().toLowerCase() === normalized);
+    if (!template) return;
+    updateLineItem(id, {
+      unit: template.unit?.trim() || undefined,
+      price: template.defaultPrice !== undefined && template.defaultPrice !== null
+        ? formatMoneyValue(template.defaultPrice)
+        : undefined,
+    });
+  };
 
   const initialAct = useMemo<ActOption | null>(() => {
     if (!invoice?.actId) return null;
@@ -387,6 +414,16 @@ export function InvoiceModal({
     };
   }, [open, mode, form.date, numberEditedManually]);
 
+  useEffect(() => {
+    const total = calculateLineItemsTotal(lineItems);
+    setForm((prev) => (prev.amount === total ? prev : { ...prev, amount: total }));
+  }, [lineItems, calculateLineItemsTotal]);
+
+  useEffect(() => {
+    if (!unitOptions.length) return;
+    setLineItems((prev) => prev.map((item) => (item.unit.trim() ? item : { ...item, unit: unitOptions[0] })));
+  }, [unitOptions]);
+
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
       const next = prev.map((item) => (item.id === id ? { ...item, ...patch } : item));
@@ -402,13 +439,22 @@ export function InvoiceModal({
         id: `${Date.now()}-${prev.length}`,
         name: '',
         quantity: '1',
-        unit: 'шт',
-        price: '',
+        unit: unitOptions[0] || 'шт',
+        price: '0.00',
       },
     ]);
   };
 
-  const removeLineItem = (id: string) => {
+  const removeLineItem = async (id: string) => {
+    const accepted = await confirm({
+      title: 'Удалить позицию',
+      description: 'Точно ли хотите удалить позицию?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
     setLineItems((prev) => {
       if (prev.length <= 1) return prev;
       const next = prev.filter((item) => item.id !== id);
@@ -598,7 +644,6 @@ export function InvoiceModal({
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       actId: selectedAct ? selectedAct.id : null,
       counterpartyName: counterparty ? counterparty : undefined,
-      serviceId: form.serviceId ? Number(form.serviceId) : undefined,
       paidDate: form.paidDate ? fromInputToApiDate(form.paidDate) ?? form.paidDate : undefined,
       responsibleIds: form.responsibleIds.slice(0, 1).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
@@ -1045,7 +1090,7 @@ export function InvoiceModal({
                               )}
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                                 <input
@@ -1056,35 +1101,6 @@ export function InvoiceModal({
                                   required
                                 />
                               </label>
-
-                              <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
-                                  Услуги
-                                  <button
-                                    type="button"
-                                    onClick={() => setServiceDictOpen(true)}
-                                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                    Справочник
-                                  </button>
-                                </span>
-                                <select
-                                  value={form.serviceId}
-                                  onChange={handleChange('serviceId')}
-                                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                >
-                                  <option value="">Не выбрано</option>
-                                  {services.map((service) => (
-                                    <option key={service.id} value={service.id}>
-                                      {service.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
                                   {t('invoiceAmount') ?? 'Сумма'}
@@ -1101,9 +1117,9 @@ export function InvoiceModal({
                                 <input
                                   type="text"
                                   inputMode="decimal"
-                                  value={form.amount}
-                                  onChange={handleChange('amount')}
-                                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  value={formatMoneyValue(form.amount)}
+                                  readOnly
+                                  className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   placeholder="0.00"
                                 />
                               </label>
@@ -1150,16 +1166,26 @@ export function InvoiceModal({
                           </header>
                           <div className="space-y-2">
                             {lineItems.map((item) => (
-                              <div key={item.id} className="grid grid-cols-12 gap-2">
-                                <input type="text" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} placeholder="Наименование" className="col-span-5 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.price} onChange={(event) => updateLineItem(item.id, { price: event.target.value })} placeholder="Цена" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <button type="button" onClick={() => removeLineItem(item.id)} className="col-span-1 rounded-lg border border-slate-200 px-2 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
+                              <div key={item.id} className="flex items-center gap-2">
+                                <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Наименование" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
+                                <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <button type="button" onClick={() => { void removeLineItem(item.id); }} className="w-10 rounded-lg border border-slate-200 px-1 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
                               </div>
                             ))}
                           </div>
-                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatCurrencySmart(parseMoney(form.amount)).full}</div>
+                          <datalist id="invoice-line-item-units">
+                            {unitOptions.map((unit) => (
+                              <option key={unit} value={unit} />
+                            ))}
+                          </datalist>
+                          <datalist id="invoice-line-item-names">
+                            {lineItemNameOptions.map((name) => (
+                              <option key={name} value={name} />
+                            ))}
+                          </datalist>
+                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyValue(form.amount)}</div>
                         </section>
             </div>
 
@@ -1515,18 +1541,6 @@ export function InvoiceModal({
           </div>
         </div>
       )}
-
-      <DictionariesModal
-        open={serviceDictOpen}
-        onClose={() => setServiceDictOpen(false)}
-        initialTab="services"
-        onlyTab="services"
-        onPickItem={(kind, item) => {
-          if (kind !== 'services') return;
-          setForm((prev) => ({ ...prev, serviceId: String(item.id) }));
-          setServiceDictOpen(false);
-        }}
-      />
 
       {createActOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">

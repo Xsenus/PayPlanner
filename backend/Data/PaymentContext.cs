@@ -608,6 +608,13 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<TimezoneDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TimezoneDictionaryItems"));
         modelBuilder.Entity<TaxSystemDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemDictionaryItems"));
         modelBuilder.Entity<TaxSystemModeDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemModeDictionaryItems"));
+        modelBuilder.Entity<InvoiceUnitDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "InvoiceUnitDictionaryItems"));
+        modelBuilder.Entity<InvoiceItemNameDictionaryItem>(entity =>
+        {
+            ConfigureSimpleDictionary(entity, "InvoiceItemNameDictionaryItems");
+            entity.Property(x => x.Unit).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.DefaultPrice).HasPrecision(18, 2);
+        });
 
         // ------------------ ClientStatusEntity ------------------
         modelBuilder.Entity<ClientStatusEntity>(entity =>
@@ -893,6 +900,8 @@ public class PaymentContext : DbContext
     public DbSet<TimezoneDictionaryItem> Timezones { get; set; }
     public DbSet<TaxSystemDictionaryItem> TaxSystems { get; set; }
     public DbSet<TaxSystemModeDictionaryItem> TaxSystemModes { get; set; }
+    public DbSet<InvoiceUnitDictionaryItem> InvoiceUnits { get; set; }
+    public DbSet<InvoiceItemNameDictionaryItem> InvoiceItemNames { get; set; }
 
     /// <summary>
     /// Статусы клиентов.

@@ -156,6 +156,38 @@ public class DictionariesAdminController : ControllerBase
                 (x, v) => ((TaxSystemModeDictionaryItem)x).IsActive = v,
                 x => _db.TaxSystemModes.Add((TaxSystemModeDictionaryItem)x),
                 x => _db.TaxSystemModes.Remove((TaxSystemModeDictionaryItem)x)),
+            "invoice-units" => new(
+                ct => _db.InvoiceUnits.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.InvoiceUnits.Select(item => (object)item).ToListAsync(ct),
+                (_, __) => { },
+                _ => string.Empty,
+                x => ((InvoiceUnitDictionaryItem)x).Id,
+                x => ((InvoiceUnitDictionaryItem)x).Name,
+                x => ((InvoiceUnitDictionaryItem)x).Description,
+                x => ((InvoiceUnitDictionaryItem)x).ColorHex,
+                x => ((InvoiceUnitDictionaryItem)x).IsActive,
+                (x, v) => ((InvoiceUnitDictionaryItem)x).Name = v,
+                (x, v) => ((InvoiceUnitDictionaryItem)x).Description = v,
+                (x, v) => ((InvoiceUnitDictionaryItem)x).ColorHex = v,
+                (x, v) => ((InvoiceUnitDictionaryItem)x).IsActive = v,
+                x => _db.InvoiceUnits.Add((InvoiceUnitDictionaryItem)x),
+                x => _db.InvoiceUnits.Remove((InvoiceUnitDictionaryItem)x)),
+            "invoice-item-names" => new(
+                ct => _db.InvoiceItemNames.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.InvoiceItemNames.Select(item => (object)item).ToListAsync(ct),
+                (_, __) => { },
+                _ => string.Empty,
+                x => ((InvoiceItemNameDictionaryItem)x).Id,
+                x => ((InvoiceItemNameDictionaryItem)x).Name,
+                x => ((InvoiceItemNameDictionaryItem)x).Description,
+                x => ((InvoiceItemNameDictionaryItem)x).ColorHex,
+                x => ((InvoiceItemNameDictionaryItem)x).IsActive,
+                (x, v) => ((InvoiceItemNameDictionaryItem)x).Name = v,
+                (x, v) => ((InvoiceItemNameDictionaryItem)x).Description = v,
+                (x, v) => ((InvoiceItemNameDictionaryItem)x).ColorHex = v,
+                (x, v) => ((InvoiceItemNameDictionaryItem)x).IsActive = v,
+                x => _db.InvoiceItemNames.Add((InvoiceItemNameDictionaryItem)x),
+                x => _db.InvoiceItemNames.Remove((InvoiceItemNameDictionaryItem)x)),
             _ => null,
         };
     }
@@ -580,6 +612,83 @@ public class DictionariesAdminController : ControllerBase
         return Ok(new { e.Id, e.IsActive });
     }
 
+    [HttpPost("invoice-units")]
+    public async Task<IActionResult> CreateInvoiceUnit([FromBody] InvoiceUnitDictionaryItem m)
+    {
+        _db.InvoiceUnits.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/invoice-units/{m.Id}", m);
+    }
+    [HttpPut("invoice-units/{id:int}")]
+    public async Task<IActionResult> UpdateInvoiceUnit(int id, [FromBody] InvoiceUnitDictionaryItem m)
+    {
+        var e = await _db.InvoiceUnits.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("invoice-units/{id:int}")]
+    public async Task<IActionResult> DeleteInvoiceUnit(int id)
+    {
+        var e = await _db.InvoiceUnits.FindAsync(id);
+        if (e is null) return NotFound();
+        _db.InvoiceUnits.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("invoice-units/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleInvoiceUnit(int id)
+    {
+        var e = await _db.InvoiceUnits.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    [HttpPost("invoice-item-names")]
+    public async Task<IActionResult> CreateInvoiceItemName([FromBody] InvoiceItemNameDictionaryItem m)
+    {
+        m.Unit = string.IsNullOrWhiteSpace(m.Unit) ? "шт" : m.Unit.Trim();
+        if (m.DefaultPrice < 0) m.DefaultPrice = 0;
+        _db.InvoiceItemNames.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/invoice-item-names/{m.Id}", m);
+    }
+    [HttpPut("invoice-item-names/{id:int}")]
+    public async Task<IActionResult> UpdateInvoiceItemName(int id, [FromBody] InvoiceItemNameDictionaryItem m)
+    {
+        var e = await _db.InvoiceItemNames.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name;
+        e.Unit = string.IsNullOrWhiteSpace(m.Unit) ? "шт" : m.Unit.Trim();
+        e.DefaultPrice = m.DefaultPrice < 0 ? 0 : m.DefaultPrice;
+        e.Description = m.Description;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("invoice-item-names/{id:int}")]
+    public async Task<IActionResult> DeleteInvoiceItemName(int id)
+    {
+        var e = await _db.InvoiceItemNames.FindAsync(id);
+        if (e is null) return NotFound();
+        _db.InvoiceItemNames.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("invoice-item-names/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleInvoiceItemName(int id)
+    {
+        var e = await _db.InvoiceItemNames.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
     // ClientStatusEntity
     [HttpPost("client-statuses")]
     public async Task<IActionResult> CreateClientStatus([FromBody] ClientStatusEntity m)
@@ -781,6 +890,8 @@ public class DictionariesAdminController : ControllerBase
             "timezones" => new TimezoneDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
             "tax-systems" => new TaxSystemDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
             "tax-system-modes" => new TaxSystemModeDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "invoice-units" => new InvoiceUnitDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
+            "invoice-item-names" => new InvoiceItemNameDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow },
             _ => throw new InvalidOperationException($"Unsupported kind: {kind}")
         };
 
@@ -794,6 +905,8 @@ public class DictionariesAdminController : ControllerBase
             TimezoneDictionaryItem x => x.Id,
             TaxSystemDictionaryItem x => x.Id,
             TaxSystemModeDictionaryItem x => x.Id,
+            InvoiceUnitDictionaryItem x => x.Id,
+            InvoiceItemNameDictionaryItem x => x.Id,
             _ => 0
         };
 }

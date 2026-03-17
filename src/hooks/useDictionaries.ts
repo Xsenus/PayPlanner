@@ -26,6 +26,8 @@ export function useDictionaries() {
   const [timezones, setTimezones] = useState<BaseDictItem[]>([]);
   const [taxSystems, setTaxSystems] = useState<BaseDictItem[]>([]);
   const [taxSystemModes, setTaxSystemModes] = useState<BaseDictItem[]>([]);
+  const [invoiceUnits, setInvoiceUnits] = useState<BaseDictItem[]>([]);
+  const [invoiceItemNames, setInvoiceItemNames] = useState<BaseDictItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +35,7 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp, invoiceUnitsResp, invoiceItemNamesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
@@ -48,6 +50,8 @@ export function useDictionaries() {
         apiService.getDict('timezones'),
         apiService.getDict('tax-systems'),
         apiService.getDict('tax-system-modes'),
+        apiService.getDict('invoice-units'),
+        apiService.getDict('invoice-item-names'),
       ]);
 
       setDealTypes(deal ?? []);
@@ -68,6 +72,8 @@ export function useDictionaries() {
       setTimezones((timezonesResp ?? []).filter((item) => item.isActive !== false));
       setTaxSystems((taxSystemsResp ?? []).filter((item) => item.isActive !== false));
       setTaxSystemModes((taxSystemModesResp ?? []).filter((item) => item.isActive !== false));
+      setInvoiceUnits((invoiceUnitsResp ?? []).filter((item) => item.isActive !== false));
+      setInvoiceItemNames((invoiceItemNamesResp ?? []).filter((item) => item.isActive !== false));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
     } finally {
@@ -99,6 +105,8 @@ export function useDictionaries() {
     timezones,
     taxSystems,
     taxSystemModes,
+    invoiceUnits,
+    invoiceItemNames,
     loading,
     error,
     refresh,

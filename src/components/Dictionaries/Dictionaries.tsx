@@ -28,13 +28,17 @@ type VisibleKind =
   | 'organization-forms'
   | 'timezones'
   | 'tax-systems'
-  | 'tax-system-modes';
+  | 'tax-system-modes'
+  | 'invoice-units'
+  | 'invoice-item-names';
 type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
 type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;
   name: string;
+  unit?: string;
+  defaultPrice?: number;
   description: string;
   colorHex: string;
   isActive: boolean;
@@ -64,6 +68,8 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'timezones', label: 'Часовые пояса' },
   { value: 'tax-systems', label: 'Системы налогообложения' },
   { value: 'tax-system-modes', label: 'Режимы налогообложения' },
+  { value: 'invoice-units', label: 'Единицы позиций счета' },
+  { value: 'invoice-item-names', label: 'Наименования позиций счета' },
 ];
 
 function defaultColor(kind: VisibleKind): string {
@@ -94,6 +100,10 @@ function defaultColor(kind: VisibleKind): string {
       return '#0EA5E9';
     case 'tax-system-modes':
       return '#0284C7';
+    case 'invoice-units':
+      return '#475569';
+    case 'invoice-item-names':
+      return '#334155';
   }
 }
 
@@ -129,11 +139,17 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
   return {
     id: x.id,
     name: x.name,
+    unit: 'unit' in x && typeof x.unit === 'string' ? x.unit : undefined,
+    defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
     description,
     colorHex,
     isActive,
     createdAt,
   };
+}
+
+function supportsInvoiceItemTemplateFields(kind: VisibleKind): boolean {
+  return kind === 'invoice-item-names';
 }
 
 export const Dictionaries = () => {
@@ -154,6 +170,8 @@ export const Dictionaries = () => {
     'timezones': [],
     'tax-systems': [],
     'tax-system-modes': [],
+    'invoice-units': [],
+    'invoice-item-names': [],
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +219,14 @@ export const Dictionaries = () => {
         {
           _key: makeKey(),
           mode: 'new' as const,
-          item: { name: '', description: '', colorHex: defaultColor(kind), isActive: true },
+          item: {
+            name: '',
+            unit: supportsInvoiceItemTemplateFields(kind) ? 'шт' : undefined,
+            defaultPrice: supportsInvoiceItemTemplateFields(kind) ? 0 : undefined,
+            description: '',
+            colorHex: defaultColor(kind),
+            isActive: true,
+          },
         },
         ...prev[kind],
       ],
@@ -262,12 +287,16 @@ export const Dictionaries = () => {
             description: item.description,
             colorHex: item.colorHex,
             paymentType: paymentTypeByKind(kind),
+            unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
+            defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
           })
         : await apiService.createDict(dictKindFor(kind), {
             name: item.name,
             isActive: item.isActive,
             description: item.description,
             colorHex: item.colorHex,
+            unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
+            defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
       setData((prev) => {
@@ -418,6 +447,30 @@ export const Dictionaries = () => {
           </div>
 
           <div className="lg:col-span-12">
+            {supportsInvoiceItemTemplateFields(kind) && (
+              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Ед. изм.</label>
+                  <input
+                    type="text"
+                    value={local.unit ?? 'шт'}
+                    onChange={(e) => set({ unit: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Цена по умолчанию</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={local.defaultPrice ?? 0}
+                    onChange={(e) => set({ defaultPrice: Number(e.target.value) || 0 })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+              </div>
+            )}
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Описание</label>
             <textarea
               placeholder="Короткое пояснение..."
@@ -499,6 +552,30 @@ export const Dictionaries = () => {
           </div>
 
           <div className="lg:col-span-12">
+            {supportsInvoiceItemTemplateFields(kind) && (
+              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Ед. изм.</label>
+                  <input
+                    type="text"
+                    value={local.unit ?? 'шт'}
+                    onChange={(e) => set({ unit: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Цена по умолчанию</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={local.defaultPrice ?? 0}
+                    onChange={(e) => set({ defaultPrice: Number(e.target.value) || 0 })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+              </div>
+            )}
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Описание</label>
             <textarea
               rows={2}
@@ -556,6 +633,11 @@ export const Dictionaries = () => {
             <div
               className={`mt-1.5 text-xs ${item.isActive ? 'text-slate-600' : 'text-slate-400'}`}>
               {item.description}
+            </div>
+          )}
+          {supportsInvoiceItemTemplateFields(kind) && (
+            <div className="mt-1.5 text-xs text-slate-600">
+              Ед.: {item.unit || 'шт'} · Цена: {(item.defaultPrice ?? 0).toFixed(2)}
             </div>
           )}
           {item.createdAt && (
