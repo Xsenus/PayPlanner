@@ -790,6 +790,97 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Invoices");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceItemNameDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DefaultPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_IsActive_Name");
+
+                    b.ToTable("InvoiceItemNames");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceUnitDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_IsActive_Name");
+
+                    b.ToTable("InvoiceUnits");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
                     b.Property<int>("Id")

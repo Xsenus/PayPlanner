@@ -361,35 +361,36 @@ namespace PayPlanner.Api.Services
 
             try
             {
-                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS InvoiceUnitDictionaryItems (Id INTEGER NOT NULL CONSTRAINT PK_InvoiceUnitDictionaryItems PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Description TEXT NOT NULL, ColorHex TEXT NOT NULL, IsActive INTEGER NOT NULL, CreatedAt TEXT NOT NULL);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceUnitDictionaryItems_IsActive ON InvoiceUnitDictionaryItems (IsActive);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceUnitDictionaryItems_Name ON InvoiceUnitDictionaryItems (Name);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceUnitDictionaryItems_IsActive_Name ON InvoiceUnitDictionaryItems (IsActive, Name);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceUnits\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceUnits\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_IsActive\" ON \"InvoiceUnits\" (\"IsActive\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_Name\" ON \"InvoiceUnits\" (\"Name\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_IsActive_Name\" ON \"InvoiceUnits\" (\"IsActive\", \"Name\");", cancellationToken);
 
-                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS InvoiceItemNameDictionaryItems (Id INTEGER NOT NULL CONSTRAINT PK_InvoiceItemNameDictionaryItems PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Unit TEXT NOT NULL DEFAULT 'шт', DefaultPrice TEXT NOT NULL DEFAULT '0', Description TEXT NOT NULL, ColorHex TEXT NOT NULL, IsActive INTEGER NOT NULL, CreatedAt TEXT NOT NULL);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceItemNameDictionaryItems_IsActive ON InvoiceItemNameDictionaryItems (IsActive);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceItemNameDictionaryItems_Name ON InvoiceItemNameDictionaryItems (Name);", cancellationToken);
-                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS IX_InvoiceItemNameDictionaryItems_IsActive_Name ON InvoiceItemNameDictionaryItems (IsActive, Name);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceItemNames\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceItemNames\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Unit\" TEXT NOT NULL DEFAULT 'шт', \"DefaultPrice\" TEXT NOT NULL DEFAULT '0', \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive\" ON \"InvoiceItemNames\" (\"IsActive\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_Name\" ON \"InvoiceItemNames\" (\"Name\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive_Name\" ON \"InvoiceItemNames\" (\"IsActive\", \"Name\");", cancellationToken);
 
-                var hasUnit = false;
-                var hasDefaultPrice = false;
-                await using (var checkCommand = connection.CreateCommand())
+                if (await TableExistsAsync(connection, "InvoiceUnitDictionaryItems", cancellationToken)
+                    && !await TableHasRowsAsync(connection, "InvoiceUnits", cancellationToken))
                 {
-                    checkCommand.CommandText = "PRAGMA table_info(\"InvoiceItemNameDictionaryItems\");";
-                    await using var reader = await checkCommand.ExecuteReaderAsync(cancellationToken);
-                    while (await reader.ReadAsync(cancellationToken))
-                    {
-                        var columnName = reader.GetString(1);
-                        if (string.Equals(columnName, "Unit", StringComparison.OrdinalIgnoreCase)) hasUnit = true;
-                        if (string.Equals(columnName, "DefaultPrice", StringComparison.OrdinalIgnoreCase)) hasDefaultPrice = true;
-                    }
+                    await ExecuteNonQueryAsync(connection,
+                        "INSERT INTO \"InvoiceUnits\" (\"Name\", \"Description\", \"ColorHex\", \"IsActive\", \"CreatedAt\") SELECT \"Name\", \"Description\", \"ColorHex\", \"IsActive\", COALESCE(\"CreatedAt\", CURRENT_TIMESTAMP) FROM \"InvoiceUnitDictionaryItems\";",
+                        cancellationToken);
                 }
 
-                if (!hasUnit)
-                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"InvoiceItemNameDictionaryItems\" ADD COLUMN \"Unit\" TEXT NOT NULL DEFAULT 'шт';", cancellationToken);
+                if (await TableExistsAsync(connection, "InvoiceItemNameDictionaryItems", cancellationToken)
+                    && !await TableHasRowsAsync(connection, "InvoiceItemNames", cancellationToken))
+                {
+                    var legacyHasUnit = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "Unit", cancellationToken);
+                    var legacyHasDefaultPrice = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "DefaultPrice", cancellationToken);
+                    var legacyUnitSql = legacyHasUnit ? "\"Unit\"" : "'шт'";
+                    var legacyDefaultPriceSql = legacyHasDefaultPrice ? "\"DefaultPrice\"" : "'0'";
 
-                if (!hasDefaultPrice)
-                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"InvoiceItemNameDictionaryItems\" ADD COLUMN \"DefaultPrice\" TEXT NOT NULL DEFAULT '0';", cancellationToken);
+                    await ExecuteNonQueryAsync(connection,
+                        $"INSERT INTO \"InvoiceItemNames\" (\"Name\", \"Unit\", \"DefaultPrice\", \"Description\", \"ColorHex\", \"IsActive\", \"CreatedAt\") SELECT \"Name\", {legacyUnitSql}, {legacyDefaultPriceSql}, \"Description\", \"ColorHex\", \"IsActive\", COALESCE(\"CreatedAt\", CURRENT_TIMESTAMP) FROM \"InvoiceItemNameDictionaryItems\";",
+                        cancellationToken);
+                }
             }
             finally
             {
@@ -451,6 +452,46 @@ namespace PayPlanner.Api.Services
             await using var command = connection.CreateCommand();
             command.CommandText = sql;
             await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static async Task<bool> TableExistsAsync(DbConnection connection, string tableName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1;";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "$name";
+            parameter.Value = tableName;
+            command.Parameters.Add(parameter);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null && result != DBNull.Value;
+        }
+
+        private static async Task<bool> TableHasRowsAsync(DbConnection connection, string tableName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT EXISTS(SELECT 1 FROM \"{tableName}\" LIMIT 1);";
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null && result != DBNull.Value && Convert.ToInt64(result) != 0;
+        }
+
+        private static async Task<bool> ColumnExistsAsync(DbConnection connection, string tableName, string columnName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
