@@ -2,9 +2,12 @@ import { ArrowLeft, Loader2, Plus, Save, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TablePagination } from '../ui/TablePagination';
 
 interface ContractCreatePageProps {
   onBack: () => void;
@@ -36,16 +39,25 @@ const createInitialForm = (): FormState => {
   };
 };
 
+const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
 export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const [form, setForm] = useState<FormState>(createInitialForm);
   const [localError, setLocalError] = useState<string | null>(null);
   const [selectedClients, setSelectedClients] = useState<ContractClient[]>([]);
+  const [selectedPage, setSelectedPage] = useState(1);
+  const [selectedPageSize, setSelectedPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
   const [clientSearch, setClientSearch] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const debouncedClientSearch = useDebouncedValue(clientSearch.trim(), 250);
   const [clientOptions, setClientOptions] = useState<ContractClient[]>([]);
   const [clientOptionsLoading, setClientOptionsLoading] = useState(false);
+  const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
+  const [clientOptionsPage, setClientOptionsPage] = useState(1);
+  const [clientOptionsPageSize, setClientOptionsPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
+  const [clientOptionsTotal, setClientOptionsTotal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -53,16 +65,18 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     let cancelled = false;
     const fetchClients = async () => {
       setClientOptionsLoading(true);
+      setClientOptionsError(null);
       try {
-        const response = await apiService.getClientsV1({
+        const response = await apiService.getClientsV2({
           search: debouncedClientSearch || undefined,
           sortBy: 'name',
           sortDir: 'asc',
-          limit: 50,
+          page: clientOptionsPage,
+          pageSize: clientOptionsPageSize,
         });
         if (cancelled) return;
         setClientOptions(
-          (response ?? []).map((client) => ({
+          (response.items ?? []).map((client) => ({
             id: client.id,
             name: client.name,
             company: client.company,
@@ -71,6 +85,14 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
             comment: '',
           })),
         );
+        setClientOptionsTotal(response.total ?? 0);
+      } catch (error) {
+        if (cancelled) return;
+        const message = extractDisplayErrorMessage(error, 'Не удалось загрузить клиентов');
+        setClientOptions([]);
+        setClientOptionsTotal(0);
+        setClientOptionsError(message);
+        toast.error(message, 'Ошибка загрузки');
       } finally {
         if (!cancelled) setClientOptionsLoading(false);
       }
@@ -80,13 +102,33 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     return () => {
       cancelled = true;
     };
-  }, [pickerOpen, debouncedClientSearch]);
+  }, [clientOptionsPage, clientOptionsPageSize, debouncedClientSearch, pickerOpen, toast]);
+
+  useEffect(() => {
+    setClientOptionsPage(1);
+  }, [clientOptionsPageSize, debouncedClientSearch]);
 
   const selectedClientIds = useMemo(() => new Set(selectedClients.map((x) => x.id)), [selectedClients]);
   const availableClientOptions = useMemo(
     () => clientOptions.filter((x) => !selectedClientIds.has(x.id)),
     [clientOptions, selectedClientIds],
   );
+  const selectedTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(selectedClients.length / selectedPageSize)),
+    [selectedClients.length, selectedPageSize],
+  );
+  const pagedSelectedClients = useMemo(() => {
+    const offset = (selectedPage - 1) * selectedPageSize;
+    return selectedClients.slice(offset, offset + selectedPageSize);
+  }, [selectedClients, selectedPage, selectedPageSize]);
+  const clientOptionsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(clientOptionsTotal / clientOptionsPageSize)),
+    [clientOptionsPageSize, clientOptionsTotal],
+  );
+
+  useEffect(() => {
+    setSelectedPage((prev) => Math.min(prev, selectedTotalPages));
+  }, [selectedTotalPages]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -133,9 +175,12 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     setSubmitting(true);
     try {
       await apiService.createContract(payload);
+      toast.success('Договор создан');
       onCreated();
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : (t('failedToSave') ?? 'Не удалось сохранить'));
+      const message = error instanceof Error ? error.message : (t('failedToSave') ?? '');
+      setLocalError(message);
+      toast.error(message, 'Ошибка сохранения');
     } finally {
       setSubmitting(false);
     }
@@ -208,7 +253,13 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                <colgroup>
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '16%' }} />
+                </colgroup>
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
                     <th className="px-3 py-2 text-left">ФИО</th>
@@ -225,7 +276,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                       </td>
                     </tr>
                   ) : (
-                    selectedClients.map((client) => (
+                    pagedSelectedClients.map((client) => (
                       <tr key={client.id}>
                         <td className="px-3 py-2">{client.name}</td>
                         <td className="px-3 py-2">{client.company || '—'}</td>
@@ -256,6 +307,18 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                 </tbody>
               </table>
             </div>
+            <TablePagination
+              page={selectedPage}
+              totalPages={selectedTotalPages}
+              totalItems={selectedClients.length}
+              pageSize={selectedPageSize}
+              pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
+              onPageChange={setSelectedPage}
+              onPageSizeChange={(value) => {
+                setSelectedPageSize(value);
+                setSelectedPage(1);
+              }}
+            />
           </div>
 
           {localError && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError}</div>}
@@ -293,8 +356,19 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                 />
               </div>
 
+              {clientOptionsError ? (
+                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {clientOptionsError}
+                </div>
+              ) : null}
+
               <div className="max-h-80 overflow-auto rounded border">
-                <table className="min-w-full divide-y text-sm">
+                <table className="min-w-full table-fixed divide-y text-sm">
+                  <colgroup>
+                    <col style={{ width: '44%' }} />
+                    <col style={{ width: '36%' }} />
+                    <col style={{ width: '20%' }} />
+                  </colgroup>
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>
                       <th className="px-3 py-2 text-left">ФИО</th>
@@ -335,6 +409,15 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                   </tbody>
                 </table>
               </div>
+              <TablePagination
+                page={clientOptionsPage}
+                totalPages={clientOptionsTotalPages}
+                totalItems={clientOptionsTotal}
+                pageSize={clientOptionsPageSize}
+                pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
+                onPageChange={setClientOptionsPage}
+                onPageSizeChange={setClientOptionsPageSize}
+              />
             </div>
           </div>
         </div>

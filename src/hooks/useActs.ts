@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Act, ActInput, ActStatus, ActsSummary } from '../types';
+import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type ActsSortKey =
   | 'date'
@@ -106,7 +107,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Не удалось загрузить акты';
+        const message = extractDisplayErrorMessage(err, 'Не удалось загрузить акты');
         setError(message);
         if (!hasLoadedRef.current) {
           setActs([]);
