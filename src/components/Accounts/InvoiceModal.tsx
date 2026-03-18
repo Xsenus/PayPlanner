@@ -356,7 +356,7 @@ export function InvoiceModal({
   onDeleteRelatedPayment,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
   const toast = useToast();
   const { setActiveTab } = useTabNavigation();
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
@@ -1149,7 +1149,12 @@ export function InvoiceModal({
           throw new Error('Сначала сохраните счёт, затем можно отправить документ.');
         }
         await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
-        await alert({ title: 'Счёт отправлен', description: selectedClient?.email ? `Документ WORD отправлен на ${selectedClient.email}.` : 'Документ WORD отправлен клиенту по email.', confirmLabel: 'ОК', variant: 'success' });
+        toast.success(
+          selectedClient?.email
+            ? `Документ WORD отправлен на ${selectedClient.email}.`
+            : 'Документ WORD отправлен клиенту по email.',
+          'Счет отправлен',
+        );
         return;
       }
 
@@ -1175,7 +1180,7 @@ export function InvoiceModal({
         const payload = buildInvoicePayload();
         payload.number = `${form.number || 'Счёт'} (копия)`;
         await apiService.createInvoice(payload);
-        await alert({ title: 'Копия создана', description: 'Создана копия текущего счёта через API /invoices (POST).', confirmLabel: 'ОК', variant: 'success' });
+        toast.success('Создана копия текущего счета.', 'Копия создана');
         return;
       }
 
@@ -1184,23 +1189,21 @@ export function InvoiceModal({
         const payload = buildInvoicePayload(nextStatus);
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
-        await alert({ title: 'Счёт обновлён', description: action === 'paid' ? 'Статус обновлён через API /invoices/:id (PUT): Оплачен.' : 'Статус обновлён через API /invoices/:id (PUT): Отменён.', confirmLabel: 'ОК', variant: 'success' });
+        toast.success(
+          action === 'paid' ? 'Статус счета обновлен: оплачен.' : 'Статус счета обновлен: отменен.',
+          'Счет обновлен',
+        );
         return;
       }
 
       if (action === 'delete' && invoice?.id) {
         await apiService.deleteInvoice(invoice.id);
-        await alert({ title: 'Счёт удалён', description: 'Счёт удалён через API /invoices/:id (DELETE).', confirmLabel: 'ОК', variant: 'success' });
+        toast.success('Счет удален.');
         onClose();
         return;
       }
     } catch (err) {
-      await alert({
-        title: 'Ошибка',
-        description: err instanceof Error ? err.message : 'Не удалось выполнить действие по счёту.',
-        confirmLabel: 'ОК',
-        variant: 'error',
-      });
+      toast.error(err instanceof Error ? err.message : 'Не удалось выполнить действие по счету.');
     }
   };
 
@@ -1635,7 +1638,15 @@ export function InvoiceModal({
                   <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
                 </div>
 
-                <table className="mt-3 w-full border-collapse text-xs sm:text-sm">
+                <table className="mt-3 w-full table-fixed border-collapse text-xs sm:text-sm">
+                  <colgroup>
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '40%' }} />
+                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '15%' }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="border border-slate-800 px-2 py-1 text-left">№</th>

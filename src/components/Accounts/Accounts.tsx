@@ -10,20 +10,21 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Settings2,
+  SlidersHorizontal,
   Trash2,
   WalletCards,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
-import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import { usePayments } from '../../hooks/usePayments';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useAccountsRegistry } from '../../hooks/useAccountsRegistry';
 import type {
+  AccountRegistryRow,
   Act,
   ActStatus,
   ActInput,
@@ -48,6 +49,8 @@ import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 
 interface AccountsProps {
   defaultType?: PaymentKind;
@@ -70,7 +73,7 @@ type ColumnKey =
   | 'type'
   | 'description';
 
-type SortState = { key: InvoicesSortKey; direction: 'asc' | 'desc' };
+type SortState = { key: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible'; direction: 'asc' | 'desc' };
 
 type SummaryCard = {
   key: 'total' | 'overdue' | 'paid';
@@ -87,27 +90,7 @@ type TableColumn = {
   sortable?: boolean;
 };
 
-type ColumnWidthMap = Partial<Record<ColumnKey, number>>;
-
-type AccountsTableSettings = {
-  from: string;
-  to: string;
-  visibleColumns: ColumnKey[];
-  columnOrder: ColumnKey[];
-  pageSize: number;
-  columnWidths: ColumnWidthMap;
-};
-
-type AccountRow = {
-  accountNumber: string;
-  invoice: Invoice | null;
-  payments: Payment[];
-  totalAmount: number;
-  dueDate?: string | null;
-  paidDate?: string | null;
-  status: AccountStatus;
-  type: PaymentKind;
-};
+type AccountRow = AccountRegistryRow;
 
 type PaymentModalInvoiceContext = {
   invoiceEntityId: number;
@@ -141,67 +124,20 @@ function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
   return [];
 }
 
-const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['date', 'number', 'amount', 'counterparty', 'status', 'dueDate', 'act'];
-const ALL_COLUMN_KEYS: ColumnKey[] = [
-  'date',
-  'number',
-  'amount',
-  'counterparty',
-  'status',
-  'dueDate',
-  'paidDate',
-  'act',
-  'responsible',
-  'type',
-  'description',
-];
-const TABLE_SETTINGS_DB_KEY = 'accounts_table_settings';
-const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> = {
-  date: 150,
-  number: 180,
-  amount: 150,
-  counterparty: 240,
-  status: 170,
-  dueDate: 150,
-  paidDate: 150,
-  act: 210,
-  responsible: 210,
-  type: 130,
-  description: 260,
-};
-
-function normalizeTableSettings(
-  parsed: Partial<AccountsTableSettings> | null | undefined,
-  fallbackFrom: string,
-  fallbackTo: string,
-): AccountsTableSettings {
-  const visibleColumns = Array.isArray(parsed?.visibleColumns)
-    ? parsed.visibleColumns.filter((value): value is ColumnKey => ALL_COLUMN_KEYS.includes(value as ColumnKey))
-    : [];
-
-  const rawOrder = Array.isArray(parsed?.columnOrder)
-    ? parsed.columnOrder.filter((value): value is ColumnKey => ALL_COLUMN_KEYS.includes(value as ColumnKey))
-    : [];
-  const columnOrder = rawOrder.length
-    ? [...rawOrder, ...ALL_COLUMN_KEYS.filter((value) => !rawOrder.includes(value))]
-    : ALL_COLUMN_KEYS;
-
-  const safeColumnWidths = Object.entries(parsed?.columnWidths ?? {}).reduce<ColumnWidthMap>((acc, [key, value]) => {
-    if (!ALL_COLUMN_KEYS.includes(key as ColumnKey)) return acc;
-    if (typeof value !== 'number' || Number.isNaN(value)) return acc;
-    acc[key as ColumnKey] = Math.max(96, value);
-    return acc;
-  }, {});
-
-  return {
-    from: parsed?.from || fallbackFrom,
-    to: parsed?.to || fallbackTo,
-    visibleColumns: visibleColumns.length ? visibleColumns : DEFAULT_VISIBLE_COLUMNS,
-    columnOrder,
-    pageSize: typeof parsed?.pageSize === 'number' ? Math.max(5, Math.min(parsed.pageSize, 100)) : 15,
-    columnWidths: { ...DEFAULT_COLUMN_WIDTHS, ...safeColumnWidths },
-  };
-}
+const PAGE_SIZE_OPTIONS = [10, 15, 25, 50, 100];
+const ACCOUNT_COLUMNS = [
+  { key: 'date', label: 'Дата', defaultVisible: true, defaultWidth: 150 },
+  { key: 'number', label: 'Номер счёта', defaultVisible: true, defaultWidth: 180 },
+  { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150 },
+  { key: 'counterparty', label: 'Поставщик услуг', defaultVisible: true, defaultWidth: 240 },
+  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 170 },
+  { key: 'dueDate', label: 'Оплатить до', defaultVisible: true, defaultWidth: 150 },
+  { key: 'paidDate', label: 'Дата оплаты', defaultVisible: false, defaultWidth: 150 },
+  { key: 'act', label: 'Акт', defaultVisible: true, defaultWidth: 210 },
+  { key: 'responsible', label: 'Ответственный', defaultVisible: false, defaultWidth: 210 },
+  { key: 'type', label: 'Тип', defaultVisible: false, defaultWidth: 130 },
+  { key: 'description', label: 'Описание', defaultVisible: false, defaultWidth: 260 },
+] as const;
 
 function deriveAccountStatus(invoice: Invoice): AccountStatus {
   if (invoice.status === 'Completed') return 'paid';
@@ -274,6 +210,8 @@ function mergePaymentsUnique(...groups: Payment[][]): Payment[] {
   });
 }
 
+void [accountKey, invoiceLegacyKey, paymentLegacyKey, mergePaymentsUnique];
+
 function safeRead<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -293,64 +231,9 @@ function safeWrite<T>(key: string, value: T) {
   }
 }
 
-function parseDraftMoney(value: string): number {
-  const normalized = value.replace(/\s+/g, '').replace(',', '.');
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function buildInvoiceFromDraft(draft: InvoiceEditorDraftState): Invoice | null {
-  if (!draft.invoiceId) return null;
-
-  const clientId = draft.form.clientId ? Number(draft.form.clientId) : null;
-  const contractId = draft.form.contractId ? Number(draft.form.contractId) : null;
-  const responsibleIds = draft.form.responsibleIds
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  return {
-    id: draft.invoiceId,
-    number: draft.form.number,
-    date: draft.form.date,
-    dueDate: draft.form.dueDate || null,
-    amount: parseDraftMoney(draft.form.amount),
-    type: draft.form.type,
-    status: draft.form.status,
-    isPaid: draft.form.status === 'Completed',
-    paidDate: draft.form.paidDate || null,
-    clientId,
-    contractId,
-    clientCaseId: draft.selectedClientCaseIds[0] ?? null,
-    clientCaseIds: draft.selectedClientCaseIds,
-    clientCaseReference: draft.form.clientCaseReference || null,
-    description: draft.form.description || null,
-    actReference: draft.form.actReference || null,
-    actId: draft.selectedActs[0]?.id ?? null,
-    actIds: draft.selectedActs.map((item) => item.id),
-    acts: draft.selectedActs.map((item) => ({
-      id: item.id,
-      number: item.number,
-      title: item.title ?? null,
-      date: item.date,
-      amount: item.amount,
-      status: item.status,
-      clientId: item.clientId ?? null,
-      clientName: item.clientName ?? null,
-    })),
-    lineItems: draft.lineItems.map((item) => ({
-      name: item.name,
-      quantity: parseDraftMoney(item.quantity),
-      unit: item.unit,
-      price: parseDraftMoney(item.price),
-    })),
-    responsibleIds,
-    createdAt: new Date().toISOString(),
-  };
-}
-
 export function Accounts({ defaultType, lockType = false, onOpenClient }: AccountsProps) {
   const { user } = useAuth();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
@@ -368,19 +251,6 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     () => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}),
     [storagePrefix],
   );
-  const savedColumns = useMemo(
-    () => safeRead<ColumnKey[]>(`${storagePrefix}.columns`, DEFAULT_VISIBLE_COLUMNS),
-    [storagePrefix],
-  );
-  const savedColumnOrder = useMemo(
-    () => safeRead<ColumnKey[]>(`${storagePrefix}.columnOrder`, ALL_COLUMN_KEYS),
-    [storagePrefix],
-  );
-  const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 15), [storagePrefix]);
-  const savedColumnWidths = useMemo(
-    () => safeRead<ColumnWidthMap>(`${storagePrefix}.columnWidths`, DEFAULT_COLUMN_WIDTHS),
-    [storagePrefix],
-  );
 
   const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
   const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
@@ -390,27 +260,12 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(Math.max(5, Math.min(savedPageSize, 100)));
-  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(savedColumns);
-  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(savedColumnOrder);
-  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(savedColumnWidths);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [draggingColumn, setDraggingColumn] = useState<ColumnKey | null>(null);
-  const resizingRef = useRef<{
-    columnKey: ColumnKey;
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-  const saveTimerRef = useRef<number | null>(null);
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
   const [paymentModalInvoiceContext, setPaymentModalInvoiceContext] = useState<PaymentModalInvoiceContext | null>(null);
-  const [actsByInvoice, setActsByInvoice] = useState<Record<string, Act[]>>({});
-  const [actsLoading, setActsLoading] = useState(false);
-  const [actsError, setActsError] = useState<string | null>(null);
   const [actModalOpen, setActModalOpen] = useState(false);
   const [actModalSubmitting, setActModalSubmitting] = useState(false);
   const [actModalError, setActModalError] = useState<string | null>(null);
@@ -422,48 +277,69 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
   const [actLookupsLoading, setActLookupsLoading] = useState(false);
   const [actLookupsError, setActLookupsError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [pageEditingInvoiceId, setPageEditingInvoiceId] = useState<number | null>(null);
+  const [pageEditingInvoice, setPageEditingInvoice] = useState<Invoice | null>(null);
+  const [pageInvoiceLoading, setPageInvoiceLoading] = useState(false);
+  const [resumeInvoiceDraft, setResumeInvoiceDraft] = useState<InvoiceEditorDraftState | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const {
-    invoices,
-    loading,
-    refreshing,
-    error,
-    summary,
-    refresh: refreshInvoices,
-    createInvoice,
-    updateInvoice,
-    deleteInvoice,
-  } = useInvoices({
-    from: from || undefined,
-    to: to || undefined,
-    status:
-      statusFilter === 'paid'
-        ? 'Completed'
-        : statusFilter === 'created'
-          ? 'Pending'
-          : statusFilter === 'partial'
-            ? 'Processing'
-            : undefined,
-    search: debouncedSearch || undefined,
-    type: typeFilter === 'All' ? undefined : typeFilter,
-    sortBy: sortState.key,
-    sortDir: sortState.direction,
-    page: 1,
-    pageSize: 2000,
+    columnOrder,
+    orderedVisibleColumns: orderedVisibleColumnKeys,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ColumnKey>({
+    storageKey: `${storagePrefix}.tableSettings.v2`,
+    settingsKey: 'accounts_table_settings',
+    columns: ACCOUNT_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultVisible: column.defaultVisible,
+      defaultWidth: column.defaultWidth,
+    })),
+    defaultPageSize: 15,
+    minPageSize: 5,
+    maxPageSize: 100,
+    minColumnWidth: 96,
   });
 
   const {
-    payments,
-    loading: paymentsLoading,
-    refreshing: paymentsRefreshing,
-    refresh: refreshPayments,
-    updatePayment,
-    deletePayment,
-    createPayment,
-  } = usePayments(from || undefined, to || undefined);
+    items: accountRows,
+    total: accountsTotal,
+    summary,
+    loading: isLoading,
+    refreshing: isRefreshing,
+    error,
+    refresh: refreshAccounts,
+  } = useAccountsRegistry({
+    from: from || undefined,
+    to: to || undefined,
+    status: statusFilter,
+    search: debouncedSearch || undefined,
+    type: typeFilter,
+    sortBy: sortState.key,
+    sortDir: sortState.direction,
+    page,
+    pageSize,
+  });
 
-  const isLoading = loading || paymentsLoading;
-  const isRefreshing = refreshing || paymentsRefreshing;
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil((accountsTotal || 0) / Math.max(1, pageSize || 1))),
+    [accountsTotal, pageSize],
+  );
 
   useEffect(() => {
     setPage(1);
@@ -482,75 +358,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [from, to, storagePrefix]);
 
   useEffect(() => {
-    safeWrite(`${storagePrefix}.columns`, visibleColumns);
-  }, [storagePrefix, visibleColumns]);
-
-  useEffect(() => {
-    safeWrite(`${storagePrefix}.columnOrder`, columnOrder);
-  }, [columnOrder, storagePrefix]);
-
-  useEffect(() => {
-    safeWrite(`${storagePrefix}.pageSize`, pageSize);
-  }, [pageSize, storagePrefix]);
-  useEffect(() => {
-    safeWrite(`${storagePrefix}.columnWidths`, columnWidths);
-  }, [columnWidths, storagePrefix]);
-
-  useEffect(() => {
-    let active = true;
-    const loadServerSettings = async () => {
-      try {
-        const response = await apiService.getUserSetting(TABLE_SETTINGS_DB_KEY);
-        if (!active || !response?.value) return;
-        const parsed = JSON.parse(response.value) as Partial<AccountsTableSettings>;
-        const normalized = normalizeTableSettings(parsed, startOfYear, todayYMD);
-        setFrom(normalized.from);
-        setTo(normalized.to);
-        setVisibleColumns(normalized.visibleColumns);
-        setColumnOrder(normalized.columnOrder);
-        setPageSize(normalized.pageSize);
-        setColumnWidths(normalized.columnWidths);
-      } catch {
-        /** */
-      } finally {
-        if (active) setSettingsLoaded(true);
-      }
-    };
-
-    void loadServerSettings();
-
-    return () => {
-      active = false;
-    };
-  }, [startOfYear, todayYMD]);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
+    if (page > totalPages) {
+      setPage(totalPages);
     }
-
-    const settings: AccountsTableSettings = {
-      from,
-      to,
-      visibleColumns,
-      columnOrder,
-      pageSize,
-      columnWidths,
-    };
-
-    saveTimerRef.current = window.setTimeout(() => {
-      void apiService.upsertUserSetting(TABLE_SETTINGS_DB_KEY, JSON.stringify(settings));
-    }, 600);
-
-    return () => {
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [columnOrder, columnWidths, from, pageSize, settingsLoaded, to, visibleColumns]);
-
-  const effectivePageSize = pageSize || 1;
+  }, [page, totalPages]);
 
   const statusLabels: Record<AccountStatus, string> = {
     created: 'Создан',
@@ -610,28 +421,21 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           t('invoiceSectionDescription') ??
           'Просматривайте все входящие и исходящие счета компании.';
 
-  const handleSort = (key: InvoicesSortKey) => {
+  const handleSort = (key: SortState['key']) => {
     setSortState((prev) => {
       if (prev.key === key) {
         return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
       }
-      return { key, direction: key === 'date' || key === 'createdAt' ? 'desc' : 'asc' };
+      return { key, direction: key === 'date' ? 'desc' : 'asc' };
     });
   };
-
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [pageEditingInvoice, setPageEditingInvoice] = useState<Invoice | null>(null);
-  const [resumeInvoiceDraft, setResumeInvoiceDraft] = useState<InvoiceEditorDraftState | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [modalError, setModalError] = useState<string | null>(null);
 
   const [clients, setClients] = useState<Client[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
   const ensureInvoiceLookups = useCallback(async () => {
-    if (!modalOpen && !pageEditingInvoice) return;
+    if (!modalOpen && !pageEditingInvoiceId) return;
     if (clients.length > 0 && actResponsibles.length > 0 && !lookupsError) return;
     setLookupsLoading(true);
     try {
@@ -649,7 +453,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, pageEditingInvoice, clients, actResponsibles.length, lookupsError]);
+  }, [modalOpen, pageEditingInvoiceId, clients, actResponsibles.length, lookupsError]);
 
   const ensureActLookups = useCallback(async () => {
     if (!actModalOpen) return;
@@ -674,10 +478,10 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   }, [actClients.length, actLookupsError, actModalOpen, actResponsibles.length, clients]);
 
   useEffect(() => {
-    if (modalOpen || pageEditingInvoice) {
+    if (modalOpen || pageEditingInvoiceId) {
       void ensureInvoiceLookups();
     }
-  }, [modalOpen, pageEditingInvoice, ensureInvoiceLookups]);
+  }, [modalOpen, pageEditingInvoiceId, ensureInvoiceLookups]);
 
   useEffect(() => {
     if (actModalOpen) {
@@ -693,22 +497,54 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setModalOpen(true);
   }, []);
 
-  const openEditPage = useCallback((invoice: Invoice, draft: InvoiceEditorDraftState | null = null) => {
+  const openEditPage = useCallback((invoiceId: number, draft: InvoiceEditorDraftState | null = null) => {
     clearInvoiceEditorDraft();
-    setPageEditingInvoice(invoice);
+    setPageEditingInvoiceId(invoiceId);
+    setPageEditingInvoice(null);
+    setPageInvoiceLoading(true);
     setResumeInvoiceDraft(draft);
     setModalError(null);
   }, []);
 
   useEffect(() => {
-    if (modalOpen || pageEditingInvoice) return;
+    if (!pageEditingInvoiceId) return;
+
+    let active = true;
+
+    const loadInvoice = async () => {
+      try {
+        setPageInvoiceLoading(true);
+        const invoice = await apiService.getInvoice(pageEditingInvoiceId);
+        if (!active) return;
+        setPageEditingInvoice(invoice);
+      } catch (err) {
+        if (!active) return;
+        toast.error(extractDisplayErrorMessage(err, 'Не удалось загрузить счет.'));
+        setPageEditingInvoiceId(null);
+        setPageEditingInvoice(null);
+      } finally {
+        if (active) {
+          setPageInvoiceLoading(false);
+        }
+      }
+    };
+
+    void loadInvoice();
+
+    return () => {
+      active = false;
+    };
+  }, [pageEditingInvoiceId, toast]);
+
+  useEffect(() => {
+    if (modalOpen || pageEditingInvoiceId) return;
 
     const draft = peekInvoiceEditorDraft();
     if (!draft) return;
 
     if (draft.mode === 'create') {
       openCreateModal(draft);
-      return;
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось сохранить счет.'));
     }
 
     if (!draft.invoiceId) {
@@ -716,21 +552,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       return;
     }
 
-    if (loading || refreshing) {
-      return;
-    }
-
-    const target = invoices.find((item) => item.id === draft.invoiceId) ?? buildInvoiceFromDraft(draft);
-    if (!target) {
-      clearInvoiceEditorDraft();
-      return;
-    }
-
-    openEditPage(target, draft);
-  }, [invoices, loading, modalOpen, openCreateModal, openEditPage, pageEditingInvoice, refreshing]);
+    openEditPage(draft.invoiceId, draft);
+  }, [modalOpen, openCreateModal, openEditPage, pageEditingInvoiceId]);
 
   useEffect(() => {
-    if (!canEdit || invoices.length === 0) return;
+    if (!canEdit) return;
     if (peekInvoiceEditorDraft()) return;
     let raw: string | null = null;
     try {
@@ -744,11 +570,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       try { localStorage.removeItem('pp.openInvoiceId'); } catch { /** */ }
       return;
     }
-    const target = invoices.find((invoice) => invoice.id === targetId);
-    if (!target) return;
-    openEditPage(target);
+    openEditPage(targetId);
     try { localStorage.removeItem('pp.openInvoiceId'); } catch { /** */ }
-  }, [canEdit, invoices]);
+  }, [canEdit, openEditPage]);
 
   const closeModal = () => {
     clearInvoiceEditorDraft();
@@ -760,7 +584,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
   const closeEditPage = () => {
     clearInvoiceEditorDraft();
+    setPageEditingInvoiceId(null);
     setPageEditingInvoice(null);
+    setPageInvoiceLoading(false);
     setResumeInvoiceDraft(null);
     setModalError(null);
   };
@@ -773,17 +599,25 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setSubmitting(true);
     setModalError(null);
     try {
-      if (pageEditingInvoice) {
-        await updateInvoice(pageEditingInvoice.id, payload);
+      if (pageEditingInvoiceId) {
+        await apiService.updateInvoice(pageEditingInvoiceId, payload);
         toast.success('Изменения по счету сохранены.', 'Счет обновлен');
+        await refreshAccounts();
         closeEditPage();
       } else {
-        await createInvoice(payload);
+        await apiService.createInvoice(payload);
+        if (page !== 1) {
+          setPage(1);
+        } else {
+          await refreshAccounts();
+        }
         toast.success('Счет успешно создан.', 'Счет сохранен');
         closeModal();
       }
     } catch (err) {
-      setModalError(extractDisplayErrorMessage(err, 'Не удалось сохранить счет'));
+      const message = extractDisplayErrorMessage(err, 'Не удалось сохранить счет.');
+      setModalError(message);
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
@@ -793,9 +627,15 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     if (!canDelete) return;
     if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
-      await deleteInvoice(invoice.id);
+      await apiService.deleteInvoice(invoice.id);
+      toast.success('Счет удален.');
+      if (accountRows.length === 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1));
+      } else {
+        await refreshAccounts();
+      }
     } catch (err) {
-      await alert(err instanceof Error ? err.message : 'Не удалось удалить счёт');
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить счет.'));
     }
   };
 
@@ -807,6 +647,73 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   };
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
+
+  const summaryBuckets = summary;
+  const mergedTotal = accountsTotal;
+  const pagedAccounts = accountRows;
+
+  const columns: TableColumn[] = useMemo(
+    () => [
+      { key: 'date', label: t('invoiceDate') ?? t('actDate') ?? 'Дата', sortable: true },
+      { key: 'number', label: t('invoiceNumber') ?? 'Номер счёта', sortable: true },
+      { key: 'amount', label: t('invoiceAmount') ?? t('amount') ?? 'Сумма', sortable: true },
+      { key: 'counterparty', label: t('invoiceClient') ?? 'Поставщик услуг', sortable: true },
+      { key: 'status', label: t('invoiceStatus') ?? t('status') ?? 'Статус', sortable: false },
+      { key: 'dueDate', label: t('invoiceDueDate') ?? 'Оплатить до', sortable: true },
+      { key: 'paidDate', label: t('paidDate') ?? 'Дата оплаты', sortable: false },
+      { key: 'act', label: t('invoiceAct') ?? 'Акт', sortable: false },
+      { key: 'responsible', label: t('invoiceResponsible') ?? 'Ответственный', sortable: true },
+      { key: 'type', label: t('invoiceType') ?? 'Тип', sortable: false },
+      { key: 'description', label: t('description') ?? 'Описание', sortable: false },
+    ],
+    [t],
+  );
+
+  const columnsByKey = useMemo(
+    () => Object.fromEntries(columns.map((column) => [column.key, column])) as Record<ColumnKey, TableColumn>,
+    [columns],
+  );
+
+  const orderedVisibleColumns = useMemo(
+    () => orderedVisibleColumnKeys.map((key) => columnsByKey[key]).filter(Boolean),
+    [columnsByKey, orderedVisibleColumnKeys],
+  );
+
+  const summaryCards: SummaryCard[] = useMemo(
+    () => [
+      {
+        key: 'total',
+        title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего',
+        amount: summaryBuckets.total.amount,
+        count: summaryBuckets.total.count,
+        accent: 'border border-blue-100 bg-blue-50 text-blue-700',
+        icon: WalletCards,
+      },
+      {
+        key: 'overdue',
+        title: t('invoiceSummaryOverdue') ?? 'Просрочено',
+        amount: summaryBuckets.overdue.amount,
+        count: summaryBuckets.overdue.count,
+        accent: 'border border-rose-100 bg-rose-50 text-rose-700',
+        icon: AlertTriangle,
+      },
+      {
+        key: 'paid',
+        title: t('invoiceSummaryPaid') ?? 'Оплачено',
+        amount: summaryBuckets.paid.amount,
+        count: summaryBuckets.paid.count,
+        accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700',
+        icon: CheckCircle2,
+      },
+    ],
+    [summaryBuckets, t],
+  );
+
+  const toggleExpanded = (key: string) => {
+    setExpandedAccounts((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  /*
 
   const paymentsByInvoiceEntityId = useMemo(() => {
     const map = new Map<number, Payment[]>();
@@ -1122,6 +1029,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     window.addEventListener('mouseup', handleMouseUp);
   };
 
+  */
+
   const buildPaymentModalInvoiceContext = useCallback(
     (invoice: Invoice | null | undefined): PaymentModalInvoiceContext | null => {
       const canonicalId = invoiceEntityId(invoice);
@@ -1170,12 +1079,12 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     const isUpdate = 'id' in payload;
 
     if (isUpdate) {
-      await updatePayment(payload as { id: number } & PaymentPayload);
+      await apiService.updatePayment(payload.id, payload);
     } else {
-      await createPayment(payload as PaymentPayload);
+      await apiService.createPayment(payload as PaymentPayload);
     }
 
-    await Promise.all([refreshPayments(), refreshInvoices()]);
+    await refreshAccounts();
     handleClosePaymentModal();
   };
 
@@ -1190,8 +1099,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     });
     if (!approved) return;
 
-    await deletePayment(payment.id);
-    await Promise.all([refreshPayments(), refreshInvoices()]);
+    await apiService.deletePayment(payment.id);
+    toast.success('Платеж удален.');
+    await refreshAccounts();
   };
 
   const openActCreateModal = (row: AccountRow) => {
@@ -1264,7 +1174,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           invoiceNumber: payload.invoiceNumber || actModalInvoice?.accountNumber || payload.number,
         });
       }
-      await loadActsForInvoices();
+      await refreshAccounts();
       closeActModal();
     } catch (err) {
       setActModalError(err instanceof Error ? err.message : 'Не удалось создать акт');
@@ -1273,9 +1183,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
   };
 
-  const currentPageInvoice = pageEditingInvoice
-    ? invoices.find((item) => item.id === pageEditingInvoice.id) ?? pageEditingInvoice
-    : null;
+  const currentPageInvoice = pageEditingInvoice;
   const currentPageAccountRow = currentPageInvoice
     ? accountRows.find((row) => {
         const rowCanonicalId = invoiceEntityId(row.invoice);
@@ -1298,19 +1206,34 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       onDelete={
         canDelete
           ? async (id) => {
-              await deletePayment(id);
-              await Promise.all([refreshPayments(), refreshInvoices()]);
+              await apiService.deletePayment(id);
+              toast.success('Платеж удален.');
+              await refreshAccounts();
               handleClosePaymentModal();
             }
           : undefined
       }
       onCreateRemainder={async (payload) => {
-        const created = await createPayment(payload);
-        await Promise.all([refreshPayments(), refreshInvoices()]);
+        const created = await apiService.createPayment(payload);
+        await refreshAccounts();
         return created;
       }}
     />
   );
+
+  if (pageEditingInvoiceId && pageInvoiceLoading && !currentPageInvoice) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto flex min-h-screen max-w-[calc(100vw-2rem)] items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
+          <div className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('loading') ?? 'Загрузка...'}
+          </div>
+        </div>
+        {paymentModalElement}
+      </div>
+    );
+  }
 
   if (currentPageInvoice) {
     return (
@@ -1336,7 +1259,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
           relatedPayments={currentPageAccountRow?.payments ?? []}
-          paymentsLoading={paymentsLoading || paymentsRefreshing}
+          paymentsLoading={isLoading || isRefreshing}
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
           onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
@@ -1488,7 +1411,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                   </button>
                   <button
                     type="button"
-                    onClick={() => void refreshInvoices()}
+                    onClick={() => void refreshAccounts()}
                     className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
                   >
                     {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
@@ -1498,12 +1421,16 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                     <button
                       type="button"
                       onClick={() => setColumnsOpen((prev) => !prev)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                        columnsOpen
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
+                      }`}
                     >
-                      <Settings2 className="h-4 w-4" />
+                      <SlidersHorizontal className="h-4 w-4" />
                       {t('tableSettings') ?? 'Таблица'}
                     </button>
-                    {columnsOpen && (
+                    {false && columnsOpen && (
                       <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
                         <div className="mb-2 text-xs font-semibold uppercase text-gray-500">
                           {t('visibleColumns') ?? 'Отображаемые столбцы'}
@@ -1530,11 +1457,42 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           </div>
         </div>
 
-        {actsError && (
-          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {actsError}
+        {columnsOpen ? (
+          <div className="mb-6">
+            <TableColumnSettings
+              columns={columns.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
           </div>
-        )}
+        ) : null}
 
         {summaryBuckets.pending?.count > 0 && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -1560,7 +1518,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                       const isSortable = column.sortable !== false && column.key !== 'status';
                       const isActive = sortState.key === column.key;
                       const direction = isActive ? sortState.direction : undefined;
-                      const sortKey = (column.key as InvoicesSortKey) ?? 'date';
+                      const sortKey = (column.key as SortState['key']) ?? 'date';
 
                       return (
                         <th
@@ -1571,15 +1529,16 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           onDragOver={handleColumnDragOver}
                           onDrop={(event) => handleColumnDrop(column.key, event)}
                         >
-                          <div
-                            className="absolute left-1 top-1/2 -translate-y-1/2 cursor-move text-gray-400"
+                          <button
+                            type="button"
+                            className="absolute left-1 top-1/2 z-10 inline-flex -translate-y-1/2 cursor-grab rounded p-1 text-gray-400 active:cursor-grabbing"
                             draggable
                             onDragStart={(event) => handleColumnDragStart(column.key, event)}
-                            onDragEnd={() => setDraggingColumn(null)}
+                            onDragEnd={handleColumnDragEnd}
                             title="Перетащите для изменения порядка"
                           >
                             <GripVertical className="h-3.5 w-3.5" />
-                          </div>
+                          </button>
                           {isSortable ? (
                             <button
                               type="button"
@@ -1587,18 +1546,18 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 handleSort(sortKey);
                                 setPage(1);
                               }}
-                              className="inline-flex items-center justify-center gap-1 pl-3 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                              className="inline-flex items-center justify-center gap-1 pl-6 text-xs font-semibold uppercase tracking-wide text-gray-500"
                             >
                               {column.label}
                               <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
                             </button>
                           ) : (
-                            <span className="inline-flex items-center justify-center pl-3">{column.label}</span>
+                            <span className="inline-flex items-center justify-center pl-6">{column.label}</span>
                           )}
                           <div
                             role="separator"
                             aria-label={`Изменить ширину колонки ${column.label}`}
-                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                            className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
                             onMouseDown={(event) => handleResizeStart(column.key, event)}
                             onDragStart={(dragEvent) => dragEvent.preventDefault()}
                           />
@@ -1635,8 +1594,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
-                    const invoiceKey = accountKey(row.accountNumber) ?? row.accountNumber;
-                    const actsForInvoice = invoiceKey ? actsByInvoice[invoiceKey] ?? [] : [];
+                    const actsForInvoice = row.acts ?? [];
                     const primaryName = invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
                     const caseLines = getInvoiceCaseSummary(invoice);
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
@@ -1649,7 +1607,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                           className={`hover:bg-gray-50/70 ${canEdit && invoice ? 'cursor-pointer' : ''}`}
                           onClick={() => {
                             if (canEdit && invoice) {
-                              openEditPage(invoice);
+                              openEditPage(invoice.id);
                             }
                           }}
                         >
@@ -1734,7 +1692,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
                                     <div className="flex flex-col items-center gap-2">
-                                      {actsLoading && actsForInvoice.length === 0 && (
+                                      {false && actsForInvoice.length === 0 && (
                                         <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'}</div>
                                       )}
                                       {actsForInvoice.length > 0 ? (
@@ -1813,7 +1771,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 {canEdit && invoice && (
                                   <button
                                     type="button"
-                                    onClick={(event) => { event.stopPropagation(); openEditPage(invoice); }}
+                                    onClick={(event) => { event.stopPropagation(); openEditPage(invoice.id); }}
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
                                     title={t('edit') ?? 'Редактировать'}
                                     aria-label={t('edit') ?? 'Редактировать'}
@@ -1856,7 +1814,14 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                   )}
                                 </div>
                                 <div className="overflow-x-auto">
-                                  <table className="min-w-full divide-y divide-gray-100 text-sm">
+                                  <table className="min-w-full table-fixed divide-y divide-gray-100 text-sm">
+                                    <colgroup>
+                                      <col style={{ width: canEdit || canDelete ? '18%' : '22%' }} />
+                                      <col style={{ width: '18%' }} />
+                                      <col style={{ width: '18%' }} />
+                                      <col style={{ width: canEdit || canDelete ? '30%' : '42%' }} />
+                                      {(canEdit || canDelete) ? <col style={{ width: '16%' }} /> : null}
+                                    </colgroup>
                                     <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500">
                                       <tr>
                                         <th className="px-4 py-2">{t('paymentDate') ?? 'Дата платежа'}</th>
@@ -1930,7 +1895,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
             <div className="border-t border-gray-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{String(error)}</div>
           )}
 
-          {!isLoading && mergedTotal > 0 && (
+          {false && !isLoading && mergedTotal > 0 && (
             <div className="flex flex-col gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-4">
                 <div>
@@ -1973,6 +1938,21 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                 </button>
               </div>
             </div>
+          )}
+          {!isLoading && mergedTotal > 0 && (
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              totalItems={mergedTotal}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              recordsLabel={t('recordsFound') ?? 'Найдено записей'}
+              pageSizeLabel={t('rowsPerPage') ?? 'Строк на странице'}
+              previousLabel={t('previous') ?? 'Назад'}
+              nextLabel={t('next') ?? 'Вперёд'}
+            />
           )}
         </div>
 

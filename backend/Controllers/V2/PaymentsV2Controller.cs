@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V2;
@@ -15,14 +16,21 @@ namespace PayPlanner.Api.Controllers.V2;
 public class PaymentsV2Controller : ControllerBase
 {
     private readonly PaymentContext _db;
+
     public PaymentsV2Controller(PaymentContext db) => _db = db;
 
     [HttpGet]
-    public async Task<IActionResult> Get(
+    public async Task<ActionResult<PaymentsPageResponse>> Get(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
+        [FromQuery] string? clientIds,
+        [FromQuery] string? categoryTokens,
+        [FromQuery] PaymentType? type,
+        [FromQuery] PaymentStatus? status,
+        [FromQuery] decimal? minAmount,
+        [FromQuery] decimal? maxAmount,
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
@@ -33,19 +41,69 @@ public class PaymentsV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
 
-        var q = _db.Payments.AsQueryable()
+        var query = _db.Payments.AsQueryable()
             .WithPaymentIncludes()
-            .ApplyPaymentFilters(from, to, clientId, caseId, search)
-            .ApplyPaymentSort(sortBy, sortDir);
+            .ApplyPaymentFilters(from, to, clientId, caseId, search);
 
-        var total = await q.CountAsync(ct);
-        var items = await q
+        var clientIdList = ParseIntList(clientIds);
+        if (clientIdList.Count > 0)
+        {
+            query = query.Where(payment => payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value));
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(payment => payment.Type == type.Value);
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(payment => payment.Status == status.Value);
+        }
+
+        if (minAmount.HasValue)
+        {
+            query = query.Where(payment => payment.Amount >= minAmount.Value);
+        }
+
+        if (maxAmount.HasValue)
+        {
+            query = query.Where(payment => payment.Amount <= maxAmount.Value);
+        }
+
+        query = ApplyCategoryFilters(query, categoryTokens);
+        query = query.ApplyPaymentSort(sortBy, sortDir);
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsNoTracking()
             .ToListAsync(ct);
 
-        return Ok(new { items, total, page, pageSize });
+        var summary = await query
+            .GroupBy(_ => 1)
+            .Select(group => new PaymentsListSummaryDto
+            {
+                Income = group.Where(payment => payment.Type == PaymentType.Income).Sum(payment => payment.Amount),
+                Expense = group.Where(payment => payment.Type == PaymentType.Expense).Sum(payment => payment.Amount),
+                Balance =
+                    group.Where(payment => payment.Type == PaymentType.Income).Sum(payment => payment.Amount) -
+                    group.Where(payment => payment.Type == PaymentType.Expense).Sum(payment => payment.Amount),
+                IncomeCount = group.Count(payment => payment.Type == PaymentType.Income),
+                ExpenseCount = group.Count(payment => payment.Type == PaymentType.Expense),
+                Total = group.Count(),
+            })
+            .FirstOrDefaultAsync(ct) ?? new PaymentsListSummaryDto();
+
+        return Ok(new PaymentsPageResponse
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            Summary = summary,
+        });
     }
 
     [HttpGet("{id:int}")]
@@ -54,7 +112,8 @@ public class PaymentsV2Controller : ControllerBase
         var entity = await _db.Payments
             .WithPaymentIncludes()
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == id, ct);
+            .FirstOrDefaultAsync(payment => payment.Id == id, ct);
+
         return entity is not null ? Ok(entity) : NotFound();
     }
 
@@ -63,11 +122,13 @@ public class PaymentsV2Controller : ControllerBase
     {
         if (model.IncomeTypeId.HasValue)
         {
-            var it = await _db.IncomeTypes.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
-            if (it is null) return BadRequest("Unknown IncomeTypeId");
-            if (it.PaymentType != model.Type)
+            var incomeType = await _db.IncomeTypes.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == model.IncomeTypeId.Value);
+            if (incomeType is null) return BadRequest("Unknown IncomeTypeId");
+            if (incomeType.PaymentType != model.Type)
+            {
                 return BadRequest("IncomeType.PaymentType mismatches payment.Type");
+            }
         }
 
         var now = DateTime.UtcNow;
@@ -89,73 +150,76 @@ public class PaymentsV2Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Payment model)
     {
-        var e = await _db.Payments.FindAsync(id);
-        if (e is null) return NotFound();
+        var entity = await _db.Payments.FindAsync(id);
+        if (entity is null) return NotFound();
 
         if (model.IncomeTypeId.HasValue)
         {
-            var it = await _db.IncomeTypes.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
-            if (it is null) return BadRequest("Unknown IncomeTypeId");
-            if (it.PaymentType != model.Type)
+            var incomeType = await _db.IncomeTypes.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == model.IncomeTypeId.Value);
+            if (incomeType is null) return BadRequest("Unknown IncomeTypeId");
+            if (incomeType.PaymentType != model.Type)
+            {
                 return BadRequest("IncomeType.PaymentType mismatches payment.Type");
+            }
         }
 
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
 
-        var originalDueDate = e.Date.Date;
-        var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
-        var originalPaidAmount = e.PaidAmount;
-        var originalStatus = e.Status;
-        var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
-        var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        var originalDueDate = entity.Date.Date;
+        var originalPlannedDate = (entity.PlannedDate == default ? entity.Date : entity.PlannedDate).Date;
+        var originalPaidAmount = entity.PaidAmount;
+        var originalStatus = entity.Status;
+        var originalRescheduleCount = Math.Max(0, entity.RescheduleCount);
+        var originalSystemNotes = entity.SystemNotes ?? string.Empty;
 
-        if (e.PlannedDate == default)
+        if (entity.PlannedDate == default)
         {
-            e.PlannedDate = originalPlannedDate;
+            entity.PlannedDate = originalPlannedDate;
         }
 
-        e.Date = model.Date;
+        entity.Date = model.Date;
         if (model.PlannedDate != default)
         {
-            e.PlannedDate = model.PlannedDate;
+            entity.PlannedDate = model.PlannedDate;
         }
-        e.Amount = model.Amount;
-        e.Type = model.Type;
-        e.Status = model.Status;
-        e.Description = model.Description ?? string.Empty;
-        e.Notes = model.Notes ?? string.Empty;
-        e.ClientId = model.ClientId;
-        e.ClientCaseId = model.ClientCaseId;
-        e.DealTypeId = model.DealTypeId;
-        e.IncomeTypeId = model.IncomeTypeId;
-        e.PaymentSourceId = model.PaymentSourceId;
-        e.PaymentStatusId = model.PaymentStatusId;
-        e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
-        e.AccountDate = model.AccountDate;
-        e.PaidDate = model.PaidDate;
-        e.PaidAmount = model.PaidAmount;
-        e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
-        e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
-        PaymentDomainService.Normalize(e);
+        entity.Amount = model.Amount;
+        entity.Type = model.Type;
+        entity.Status = model.Status;
+        entity.Description = model.Description ?? string.Empty;
+        entity.Notes = model.Notes ?? string.Empty;
+        entity.ClientId = model.ClientId;
+        entity.ClientCaseId = model.ClientCaseId;
+        entity.DealTypeId = model.DealTypeId;
+        entity.IncomeTypeId = model.IncomeTypeId;
+        entity.PaymentSourceId = model.PaymentSourceId;
+        entity.PaymentStatusId = model.PaymentStatusId;
+        entity.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+        entity.AccountDate = model.AccountDate;
+        entity.PaidDate = model.PaidDate;
+        entity.PaidAmount = model.PaidAmount;
+        entity.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? entity.LastPaymentDate;
+        entity.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
-        if (e.LastPaymentDate is null && e.PaidAmount > 0m)
+        PaymentDomainService.Normalize(entity);
+
+        if (entity.LastPaymentDate is null && entity.PaidAmount > 0m)
         {
-            e.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
+            entity.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
         }
 
-        PaymentDomainService.ApplyStatusRules(e, now);
+        PaymentDomainService.ApplyStatusRules(entity, now);
 
         var rescheduleCount = originalRescheduleCount;
-        var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
+        var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != entity.PlannedDate.Date;
         if (plannedDateChanged)
         {
             PaymentDomainService.AppendSystemNote(
-                e,
-                $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
+                entity,
+                $"РР·РјРµРЅРµРЅР° РїР»Р°РЅРѕРІР°СЏ РґР°С‚Р°: {originalPlannedDate:dd.MM.yyyy} в†’ {entity.PlannedDate:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -165,42 +229,111 @@ public class PaymentsV2Controller : ControllerBase
         {
             rescheduleCount++;
             PaymentDomainService.AppendSystemNote(
-                e,
-                $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
+                entity,
+                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° РёР·РјРµРЅРµРЅР°: {originalDueDate:dd.MM.yyyy} в†’ {entity.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
-        else if (originalDueDate != e.Date.Date)
+        else if (originalDueDate != entity.Date.Date)
         {
             PaymentDomainService.AppendSystemNote(
-                e,
-                $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
+                entity,
+                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅР° РЅР° {entity.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
 
-        if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
+        if (Math.Abs(originalPaidAmount - entity.PaidAmount) > 0.009m)
         {
             PaymentDomainService.AppendSystemNote(
-                e,
-                $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
+                entity,
+                $"РР·РјРµРЅРµРЅР° РѕРїР»Р°С‡РµРЅРЅР°СЏ СЃСѓРјРјР°: Р±С‹Р»Рѕ {originalPaidAmount.ToString("N2", culture)}, СЃС‚Р°Р»Рѕ {entity.PaidAmount.ToString("N2", culture)}",
                 now,
                 actor);
         }
 
-        if (originalStatus != e.Status)
+        if (originalStatus != entity.Status)
         {
             PaymentDomainService.AppendSystemNote(
-                e,
-                $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
+                entity,
+                $"РЎС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»С‘РЅ: {originalStatus.ToDisplayString()} в†’ {entity.Status.ToDisplayString()}",
                 now,
                 actor);
         }
 
-        e.RescheduleCount = rescheduleCount;
+        entity.RescheduleCount = rescheduleCount;
 
         await _db.SaveChangesAsync();
-        return Ok(e);
+        return Ok(entity);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var entity = await _db.Payments.FindAsync(id);
+        if (entity is null) return NotFound();
+        _db.Payments.Remove(entity);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private static IQueryable<Payment> ApplyCategoryFilters(IQueryable<Payment> query, string? categoryTokens)
+    {
+        if (string.IsNullOrWhiteSpace(categoryTokens))
+        {
+            return query;
+        }
+
+        var dealIds = new HashSet<int>();
+        var incomeIds = new HashSet<int>();
+        var sourceIds = new HashSet<int>();
+
+        foreach (var token in categoryTokens.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (token.StartsWith("deal-", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(token[5..], out var dealId))
+            {
+                dealIds.Add(dealId);
+                continue;
+            }
+
+            if (token.StartsWith("income-", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(token[7..], out var incomeId))
+            {
+                incomeIds.Add(incomeId);
+                continue;
+            }
+
+            if (token.StartsWith("source-", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(token[7..], out var sourceId))
+            {
+                sourceIds.Add(sourceId);
+            }
+        }
+
+        if (dealIds.Count == 0 && incomeIds.Count == 0 && sourceIds.Count == 0)
+        {
+            return query.Where(_ => false);
+        }
+
+        return query.Where(payment =>
+            (payment.DealTypeId.HasValue && dealIds.Contains(payment.DealTypeId.Value)) ||
+            (payment.IncomeTypeId.HasValue && incomeIds.Contains(payment.IncomeTypeId.Value)) ||
+            (payment.PaymentSourceId.HasValue && sourceIds.Contains(payment.PaymentSourceId.Value)));
+    }
+
+    private static HashSet<int> ParseIntList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
     }
 
     private static string MergeSystemNotes(string original, string? incoming)
@@ -223,15 +356,5 @@ public class PaymentsV2Controller : ControllerBase
         AppendLines(incoming ?? string.Empty);
 
         return string.Join("\n", lines);
-    }
-
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
-    {
-        var e = await _db.Payments.FindAsync(id);
-        if (e is null) return NotFound();
-        _db.Payments.Remove(e);
-        await _db.SaveChangesAsync();
-        return NoContent();
     }
 }

@@ -3,16 +3,22 @@ import type { JSX } from 'react';
 import { ChevronDown, Lock, Plus, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
-import { usePayments } from '../../hooks/usePayments';
+import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import type { Payment, PaymentPayload, PaymentStatus } from '../../types';
-import { PaymentsTable } from '../Calendar/PaymentsTable';
+import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { formatLocalYMD, fromInputToApiDate } from '../../utils/dateUtils';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { apiService } from '../../services/api';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -30,6 +36,25 @@ interface PaymentsProps {
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+const PAYMENT_COLUMN_CONFIGS = [
+  { key: 'date', defaultVisible: true, defaultWidth: 140 },
+  { key: 'plannedDate', defaultVisible: false, defaultWidth: 150 },
+  { key: 'client', defaultVisible: true, defaultWidth: 260 },
+  { key: 'description', defaultVisible: true, defaultWidth: 300 },
+  { key: 'type', defaultVisible: true, defaultWidth: 130 },
+  { key: 'status', defaultVisible: true, defaultWidth: 150 },
+  { key: 'category', defaultVisible: true, defaultWidth: 220 },
+  { key: 'amount', defaultVisible: true, defaultWidth: 150 },
+  { key: 'paidDate', defaultVisible: false, defaultWidth: 150 },
+  { key: 'createdAt', defaultVisible: false, defaultWidth: 150 },
+] satisfies ReadonlyArray<{
+  key: PaymentTableColumnKey;
+  defaultVisible?: boolean;
+  defaultWidth?: number;
+}>;
 
 interface MultiSelectOption {
   value: string;
@@ -176,6 +201,7 @@ export function Payments({
 }: PaymentsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
+  const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
   const { t } = useTranslation();
@@ -189,28 +215,17 @@ export function Payments({
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const {
-    payments,
-    loading,
-    refreshing,
-    refresh,
-    createPayment,
-    updatePayment,
-    deletePayment,
-    error,
-  } = usePayments(fromInputToApiDate(fromDate), fromInputToApiDate(toDate));
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<Payment['type']>(
     defaultType === 'Expense' ? 'Expense' : 'Income',
   );
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
-  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
-  const permissionTimerRef = useRef<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
 
@@ -220,9 +235,59 @@ export function Payments({
   const autoRetryAttemptsRef = useRef(0);
   const autoRetryTimerRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<PaymentTableColumnKey>({
+    storageKey: `pp.payments_table_settings.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'payments_table_settings',
+    columns: PAYMENT_COLUMN_CONFIGS,
+    defaultPageSize: 25,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 120,
+  });
 
   const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
+  const appliedTypeFilter: TypeFilter = lockType ? (defaultType ?? 'all') : typeFilter;
+
+  const {
+    payments,
+    total,
+    summary,
+    loading,
+    refreshing,
+    refresh,
+    error,
+  } = usePaymentsPaged({
+    from: fromInputToApiDate(fromDate),
+    to: fromInputToApiDate(toDate),
+    clientIds: selectedClients,
+    categoryTokens: selectedCategories,
+    type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
+    status: statusFilter === 'all' ? undefined : statusFilter,
+    minAmount: minAmountValue,
+    maxAmount: maxAmountValue,
+    search: search.trim() || undefined,
+    sortBy: 'date',
+    sortDir: 'desc',
+    page,
+    pageSize,
+  });
 
   const clientOptions = useMemo<MultiSelectOption[]>(
     () =>
@@ -283,24 +348,41 @@ export function Payments({
     return undefined;
   }, [loading, payments.length]);
 
-  useEffect(() => () => {
-    if (permissionTimerRef.current) {
-      window.clearTimeout(permissionTimerRef.current);
-    }
-  }, []);
+  const paymentColumns = useMemo(
+    () => [
+      { key: 'date' as const, label: t('date') ?? 'Дата' },
+      { key: 'plannedDate' as const, label: 'Плановая дата' },
+      { key: 'client' as const, label: t('clients') ?? 'Клиенты' },
+      { key: 'description' as const, label: t('description') ?? 'Описание' },
+      { key: 'type' as const, label: t('type') ?? 'Тип' },
+      { key: 'status' as const, label: t('status') ?? t('statusFilter') ?? 'Статус' },
+      { key: 'category' as const, label: t('category') ?? 'Категория' },
+      { key: 'amount' as const, label: t('amount') ?? 'Сумма' },
+      { key: 'paidDate' as const, label: 'Дата оплаты' },
+      { key: 'createdAt' as const, label: t('createdAt') ?? 'Создан' },
+    ],
+    [t],
+  );
+
+  const paymentColumnsByKey = useMemo(
+    () =>
+      Object.fromEntries(paymentColumns.map((column) => [column.key, column])) as Record<
+        PaymentTableColumnKey,
+        (typeof paymentColumns)[number]
+      >,
+    [paymentColumns],
+  );
+
+  const visiblePaymentColumns = useMemo(
+    () => orderedVisibleColumns.map((key) => paymentColumnsByKey[key]).filter(Boolean),
+    [orderedVisibleColumns, paymentColumnsByKey],
+  );
 
   const showPermissionNotice = useCallback(
     (message: string) => {
-      setPermissionMessage(message);
-      if (permissionTimerRef.current) {
-        window.clearTimeout(permissionTimerRef.current);
-      }
-      permissionTimerRef.current = window.setTimeout(() => {
-        setPermissionMessage(null);
-        permissionTimerRef.current = null;
-      }, 4000);
+      toast.error(message, 'Недостаточно прав');
     },
-    [],
+    [toast],
   );
 
   const statusLabels = useMemo(
@@ -315,14 +397,8 @@ export function Payments({
   );
 
   const availableStatuses = useMemo(() => {
-    const uniq = new Set<PaymentStatus>();
-    payments.forEach((payment) => {
-      uniq.add(payment.status);
-    });
-    const ordered = Array.from(uniq);
-    ordered.sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
-    return ordered;
-  }, [payments]);
+    return STATUS_ORDER;
+  }, []);
 
   const effectiveDefaultType: TypeFilter = defaultType ?? 'all';
   const headingText =
@@ -341,8 +417,6 @@ export function Payments({
     : null;
 
   const searchQuery = search.trim().toLowerCase();
-
-  const appliedTypeFilter: TypeFilter = lockType ? effectiveDefaultType : typeFilter;
 
   const filterSignature = useMemo(
     () =>
@@ -370,6 +444,11 @@ export function Payments({
     ],
   );
 
+  const requestSignature = useMemo(
+    () => `${filterSignature}|${page}|${pageSize}`,
+    [filterSignature, page, pageSize],
+  );
+
   useEffect(
     () => () => {
       isMountedRef.current = false;
@@ -388,7 +467,7 @@ export function Payments({
       window.clearTimeout(autoRetryTimerRef.current);
       autoRetryTimerRef.current = null;
     }
-  }, [filterSignature]);
+  }, [requestSignature]);
 
   useEffect(() => {
     if (!error || payments.length > 0) {
@@ -418,89 +497,20 @@ export function Payments({
     }, 800);
   }, [autoRetryScheduled, error, payments.length, refresh]);
 
-  const filteredPayments = useMemo(() => {
-    return payments.filter((payment) => {
-      const matchesType = appliedTypeFilter === 'all' || payment.type === appliedTypeFilter;
-      const matchesStatus = statusFilter === 'all' || payment.status === statusFilter;
-      const matchesClient =
-        selectedClients.length === 0 ||
-        (payment.clientId ? selectedClients.includes(String(payment.clientId)) : false);
-      const matchesCategory =
-        selectedCategories.length === 0 ||
-        selectedCategories.some((token) => {
-          if (token.startsWith('deal-')) {
-            const id = Number(token.slice(5));
-            return !Number.isNaN(id) && payment.dealTypeId === id;
-          }
-          if (token.startsWith('income-')) {
-            const id = Number(token.slice(7));
-            return !Number.isNaN(id) && payment.incomeTypeId === id;
-          }
-          if (token.startsWith('source-')) {
-            const id = Number(token.slice(7));
-            return !Number.isNaN(id) && payment.paymentSourceId === id;
-          }
-          return false;
-        });
-      const matchesAmount =
-        (minAmountValue === null || payment.amount >= minAmountValue) &&
-        (maxAmountValue === null || payment.amount <= maxAmountValue);
-      if (!matchesType || !matchesStatus) {
-        return false;
-      }
-      if (!matchesClient || !matchesCategory || !matchesAmount) {
-        return false;
-      }
-      if (!searchQuery) {
-        return true;
-      }
-      const fields: Array<string | null | undefined> = [
-        payment.description,
-        payment.notes,
-        payment.account,
-        payment.accountDate,
-        payment.client?.name,
-        payment.clientCase?.title,
-        payment.dealType?.name,
-        payment.incomeType?.name,
-        payment.paymentSource?.name,
-      ];
-      return fields.some((field) => field?.toLowerCase().includes(searchQuery));
-    });
-  }, [
-    appliedTypeFilter,
-    payments,
-    searchQuery,
-    selectedCategories,
-    selectedClients,
-    statusFilter,
-    minAmountValue,
-    maxAmountValue,
-  ]);
+  useEffect(() => {
+    setPage(1);
+  }, [filterSignature, pageSize]);
 
-  const summary = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    let incomeCount = 0;
-    let expenseCount = 0;
-    filteredPayments.forEach((payment) => {
-      if (payment.type === 'Income') {
-        income += payment.amount;
-        incomeCount += 1;
-      } else {
-        expense += payment.amount;
-        expenseCount += 1;
-      }
-    });
-    return {
-      income,
-      expense,
-      balance: income - expense,
-      incomeCount,
-      expenseCount,
-      total: filteredPayments.length,
-    };
-  }, [filteredPayments]);
+  const totalPages = useMemo(
+    () => (pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1),
+    [pageSize, total],
+  );
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -593,7 +603,7 @@ export function Payments({
         {summary.total.toLocaleString('ru-RU')}
       </div>
       <div className="mt-1 text-xs text-slate-500">
-        {t('recordsFound') ?? 'Найдено записей:'} {filteredPayments.length.toLocaleString('ru-RU')}
+        {t('recordsFound') ?? 'Найдено записей:'} {total.toLocaleString('ru-RU')}
       </div>
     </div>,
   );
@@ -676,31 +686,54 @@ export function Payments({
       if (!confirmed) {
         return;
       }
-      await deletePayment(payment.id);
-      await refresh();
+      try {
+        await apiService.deletePayment(payment.id);
+        toast.success(t('paymentDeleted') ?? 'Платёж удалён.', t('payments') ?? 'Платежи');
+        if (payments.length === 1 && page > 1) {
+          setPage((prev) => Math.max(1, prev - 1));
+        } else {
+          await refresh();
+        }
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, t('paymentsDeleteError') ?? 'Не удалось удалить платёж.');
+        toast.error(message, t('payments') ?? 'Платежи');
+      }
     },
-    [confirm, deletePayment, paymentsPermissions.canDelete, refresh, showPermissionNotice, t],
+    [confirm, page, payments.length, paymentsPermissions.canDelete, refresh, showPermissionNotice, t, toast],
   );
 
   const handleSubmit = useCallback(
     async (payload: SubmitDTO) => {
-      if ('id' in payload) {
-        await updatePayment(payload);
-      } else {
-        await createPayment(payload);
+      try {
+        if ('id' in payload) {
+          await apiService.updatePayment(payload.id, payload);
+          await refresh();
+          toast.success(t('paymentSaved') ?? 'Платёж обновлён.', t('payments') ?? 'Платежи');
+        } else {
+          await apiService.createPayment(payload);
+          toast.success(t('paymentSaved') ?? 'Платёж создан.', t('payments') ?? 'Платежи');
+          if (page !== 1) {
+            setPage(1);
+          } else {
+            await refresh();
+          }
+        }
+
+        setIsModalOpen(false);
+        setEditingPayment(null);
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, t('paymentsSaveError') ?? 'Не удалось сохранить платёж.');
+        toast.error(message, t('payments') ?? 'Платежи');
+        throw new Error(message);
       }
-      await refresh();
-      setIsModalOpen(false);
-      setEditingPayment(null);
     },
-    [createPayment, refresh, updatePayment],
+    [page, refresh, t, toast],
   );
 
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingPayment(null);
-    void refresh();
-  }, [refresh]);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     await refresh();
@@ -858,6 +891,20 @@ export function Payments({
 
           <button
             type="button"
+            onClick={() => setSettingsOpen((prev) => !prev)}
+            aria-expanded={settingsOpen}
+            aria-controls="payments-settings-panel"
+            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none ${
+              settingsOpen
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-900'
+            }`}>
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>{settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleRefresh}
             className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 ${
               refreshing ? 'cursor-wait opacity-70' : ''
@@ -890,12 +937,6 @@ export function Payments({
             </div>
           ) : null}
         </div>
-
-        {permissionMessage ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {permissionMessage}
-          </div>
-        ) : null}
 
         {filtersOpen ? (
           <div
@@ -1016,6 +1057,42 @@ export function Payments({
           </div>
         ) : null}
 
+        {settingsOpen ? (
+          <div id="payments-settings-panel">
+            <TableColumnSettings
+              columns={paymentColumns.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          </div>
+        ) : null}
+
         <div className="space-y-4">
           {initialLoading || showAutoRetrySpinner ? (
             <div className="flex justify-center py-12">
@@ -1052,16 +1129,39 @@ export function Payments({
               </button>
             </div>
           ) : (
-            <PaymentsTable
-              payments={filteredPayments}
-              onEditPayment={handleEditPayment}
-              onOpenClient={onOpenClient}
-              onAddPayment={handleAddPayment}
-              onDeletePayment={handleDeletePayment}
-              canAdd={paymentsPermissions.canCreate}
-              canEdit={paymentsPermissions.canEdit}
-              canDelete={paymentsPermissions.canDelete}
-            />
+            <>
+              <PaymentsTable
+                payments={payments}
+                onEditPayment={handleEditPayment}
+                onOpenClient={onOpenClient}
+                onAddPayment={handleAddPayment}
+                onDeletePayment={handleDeletePayment}
+                canAdd={paymentsPermissions.canCreate}
+                canEdit={paymentsPermissions.canEdit}
+                canDelete={paymentsPermissions.canDelete}
+                columns={visiblePaymentColumns}
+                draggingColumn={draggingColumn}
+                onColumnDragStart={handleColumnDragStart}
+                onColumnDragOver={handleColumnDragOver}
+                onColumnDrop={handleColumnDrop}
+                onColumnDragEnd={handleColumnDragEnd}
+                onResizeStart={handleResizeStart}
+                getColumnWidth={getColumnWidth}
+              />
+              <TablePagination
+                page={page}
+                totalPages={totalPages}
+                totalItems={total}
+                pageSize={pageSize}
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                recordsLabel={t('recordsFound') ?? 'Найдено записей'}
+                pageSizeLabel={t('rowsPerPage') ?? 'Строк на странице'}
+                previousLabel={t('previous') ?? 'Назад'}
+                nextLabel={t('next') ?? 'Вперед'}
+              />
+            </>
           )}
         </div>
 
@@ -1069,7 +1169,7 @@ export function Payments({
         !showAutoRetrySpinner &&
         !showErrorState &&
         !showTimeoutPlaceholder &&
-        filteredPayments.length === 0 ? (
+        payments.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-slate-500">
             {t('paymentsEmpty') ?? t('noPaymentsForFilter') ?? 'Платежи не найдены'}
           </div>
@@ -1080,16 +1180,27 @@ export function Payments({
         isOpen={isModalOpen}
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
-        onCreateRemainder={createPayment}
+        onCreateRemainder={apiService.createPayment}
         payment={editingPayment}
         type={modalType}
         onDelete={
           paymentsPermissions.canDelete
             ? async (id) => {
-                await deletePayment(id);
-                await refresh();
-                setIsModalOpen(false);
-                setEditingPayment(null);
+                try {
+                  await apiService.deletePayment(id);
+                  toast.success(t('paymentDeleted') ?? 'Платёж удалён.', t('payments') ?? 'Платежи');
+                  setIsModalOpen(false);
+                  setEditingPayment(null);
+                  if (payments.length === 1 && page > 1) {
+                    setPage((prev) => Math.max(1, prev - 1));
+                  } else {
+                    await refresh();
+                  }
+                } catch (error) {
+                  const message = extractDisplayErrorMessage(error, t('paymentsDeleteError') ?? 'Не удалось удалить платёж.');
+                  toast.error(message, t('payments') ?? 'Платежи');
+                  throw new Error(message);
+                }
               }
             : undefined
         }

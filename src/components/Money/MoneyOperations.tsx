@@ -4,6 +4,7 @@ import {
   Calendar,
   ChevronDown,
   Filter,
+  GripVertical,
   Plus,
   Pencil,
   Search,
@@ -12,17 +13,23 @@ import {
   WalletCards,
   UploadCloud,
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
+import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 import type {
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
 } from '../../types';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
@@ -32,6 +39,27 @@ const SOURCE_LABELS: Record<MoneyTab, string> = {
   Card: 'Карты',
   Total: 'Итого',
 };
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+const MONEY_OPERATION_COLUMNS = [
+  { key: 'date', label: 'Дата', defaultVisible: true, defaultWidth: 120 },
+  { key: 'recognitionDate', label: 'Дата признания', defaultVisible: true, defaultWidth: 150 },
+  { key: 'income', label: 'Приход', defaultVisible: true, defaultWidth: 130 },
+  { key: 'expense', label: 'Расход', defaultVisible: true, defaultWidth: 130 },
+  { key: 'currency', label: 'Валюта', defaultVisible: true, defaultWidth: 90 },
+  { key: 'accountName', label: 'Счета', defaultVisible: true, defaultWidth: 180 },
+  { key: 'counterpartyName', label: 'Контрагент', defaultVisible: true, defaultWidth: 180 },
+  { key: 'projectName', label: 'Проект', defaultVisible: true, defaultWidth: 160 },
+  { key: 'salesPointName', label: 'Точка продаж', defaultVisible: false, defaultWidth: 160 },
+  { key: 'directionName', label: 'Направление', defaultVisible: false, defaultWidth: 160 },
+  { key: 'paymentPriority', label: 'Приоритет в оплате', defaultVisible: false, defaultWidth: 150 },
+  { key: 'purpose', label: 'Назначение', defaultVisible: true, defaultWidth: 240 },
+  { key: 'paidAccountName', label: 'Опл. счета', defaultVisible: false, defaultWidth: 160 },
+  { key: 'categoryName', label: 'Статья', defaultVisible: true, defaultWidth: 160 },
+] as const;
+
+type MoneyOperationColumnKey = (typeof MONEY_OPERATION_COLUMNS)[number]['key'];
 
 const DEFAULT_FORM: MoneyOperation = {
   id: 0,
@@ -339,15 +367,19 @@ function MoneyOperationModal({
 }
 
 export function MoneyOperations({ source }: { source: MoneyTab }) {
+  const { user } = useAuth();
   const { setActiveTab } = useTabNavigation();
+  const toast = useToast();
   const [showFilters, setShowFilters] = useState(false);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
   const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
   const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
+  const [page, setPage] = useState(1);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -360,55 +392,84 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   };
 
   const debouncedSearch = useDebouncedValue(search, 300);
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<MoneyOperationColumnKey>({
+    storageKey: `pp.money_operations_table_settings.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'money_operations_table_settings',
+    columns: MONEY_OPERATION_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultVisible: column.defaultVisible,
+      defaultWidth: column.defaultWidth,
+    })),
+    defaultPageSize: 25,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 110,
+  });
 
   const apiSource = source === 'Total' ? undefined : source;
-  const { items, loading, error, setItems } = useMoneyOperations({
+  const effectivePageSize = source === 'Total' ? 1 : pageSize;
+  const { items, total, summary, loading, error, reload } = useMoneyOperations({
     from,
     to,
     source: apiSource,
     search: debouncedSearch,
+    page: source === 'Total' ? 1 : page,
+    pageSize: effectivePageSize,
   });
-
-  const summary = useMemo(() => {
-    const startBalance = 0;
-    const factIncomeOperations = items.filter((item) => item.direction === 'Income' && item.accountingType === 'Fact');
-    const factExpenseOperations = items.filter((item) => item.direction === 'Expense' && item.accountingType === 'Fact');
-    const income = factIncomeOperations.reduce((sum, item) => sum + item.amount, 0);
-    const expense = factExpenseOperations.reduce((sum, item) => sum + item.amount, 0);
-    return {
-      startBalance,
-      income,
-      expense,
-      endBalance: startBalance + income - expense,
-      incomeCount: factIncomeOperations.length,
-      expenseCount: factExpenseOperations.length,
-    };
-  }, [items]);
+  const totalPages = useMemo(
+    () => (effectivePageSize > 0 ? Math.max(1, Math.ceil(total / effectivePageSize)) : 1),
+    [effectivePageSize, total],
+  );
+  const moneyColumnsByKey = useMemo(
+    () =>
+      Object.fromEntries(MONEY_OPERATION_COLUMNS.map((column) => [column.key, column])) as Record<
+        MoneyOperationColumnKey,
+        (typeof MONEY_OPERATION_COLUMNS)[number]
+      >,
+    [],
+  );
+  const visibleMoneyColumns = useMemo(
+    () => orderedVisibleColumns.map((key) => moneyColumnsByKey[key]).filter(Boolean),
+    [moneyColumnsByKey, orderedVisibleColumns],
+  );
 
   const totalRows = useMemo(() => {
-    const bySource = items.reduce<Record<MoneyOperationSource, { start: number; income: number; expense: number }>>(
-      (acc, item) => {
-        const bucket = acc[item.source] ?? { start: 0, income: 0, expense: 0 };
-        if (item.direction === 'Income') bucket.income += item.amount;
-        if (item.direction === 'Expense') bucket.expense += item.amount;
-        acc[item.source] = bucket;
-        return acc;
-      },
-      {
-        Bank: { start: 0, income: 0, expense: 0 },
-        Cash: { start: 0, income: 0, expense: 0 },
-        Card: { start: 0, income: 0, expense: 0 },
-      },
-    );
+    const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
 
     const rows = ([
       { key: 'Cash', label: 'Касса' },
       { key: 'Bank', label: 'Банк' },
       { key: 'Card', label: 'E-money' },
     ] as const).map((row) => {
-      const data = bySource[row.key];
-      const end = data.start + data.income - data.expense;
-      return { label: row.label, ...data, end };
+      const data = bySource.get(row.key) ?? {
+        startBalance: 0,
+        income: 0,
+        expense: 0,
+        endBalance: 0,
+      };
+      return {
+        label: row.label,
+        start: data.startBalance,
+        income: data.income,
+        expense: data.expense,
+        end: data.endBalance,
+      };
     });
 
     const total = rows.reduce(
@@ -422,7 +483,84 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     );
 
     return { rows, total };
-  }, [items]);
+  }, [summary.bySource]);
+
+  const renderCell = (item: MoneyOperation, columnKey: MoneyOperationColumnKey) => {
+    switch (columnKey) {
+      case 'date':
+        return formatDate(item.date);
+      case 'recognitionDate':
+        return item.recognitionDate ? formatDate(item.recognitionDate) : '—';
+      case 'income':
+        return (
+          <span className="text-emerald-600">
+            {item.direction === 'Income' ? `${formatMoney(item.amount)} ₽` : '—'}
+          </span>
+        );
+      case 'expense':
+        return (
+          <span className="text-red-600">
+            {item.direction === 'Expense' ? `${formatMoney(item.amount)} ₽` : '—'}
+          </span>
+        );
+      case 'currency':
+        return item.currency ?? 'RUB';
+      case 'accountName':
+        return item.accountName ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab('accounts')}
+            className="text-blue-600 underline-offset-2 hover:underline">
+            {item.accountName}
+          </button>
+        ) : (
+          '—'
+        );
+      case 'counterpartyName':
+        return item.counterpartyName ?? '—';
+      case 'projectName':
+        return item.projectName ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab('clients')}
+            className="text-blue-600 underline-offset-2 hover:underline">
+            {item.projectName}
+          </button>
+        ) : (
+          '—'
+        );
+      case 'salesPointName':
+        return item.salesPointName ?? '—';
+      case 'directionName':
+        return item.directionName ?? '—';
+      case 'paymentPriority':
+        return item.paymentPriority ?? '—';
+      case 'purpose':
+        return (
+          <div className="line-clamp-3 text-slate-700" title={item.purpose ?? undefined}>
+            {item.purpose ?? '—'}
+          </div>
+        );
+      case 'paidAccountName':
+        return item.paidAccountName ?? '—';
+      case 'categoryName':
+        return item.categoryName ?? '—';
+      default:
+        return '—';
+    }
+  };
+
+  useEffect(() => {
+    if (source === 'Total') return;
+    setPage(1);
+  }, [debouncedSearch, from, pageSize, source, to]);
+
+  useEffect(() => {
+    if (source === 'Total') return;
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, source, totalPages]);
 
   const handleSave = async (payload: MoneyOperation) => {
     setSaving(true);
@@ -437,18 +575,28 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         paidAmount: normalizedPaidAmount,
       };
       if (editingOperation) {
-        const updated = await apiService.updateMoneyOperation(editingOperation.id, prepared);
-        setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        await apiService.updateMoneyOperation(editingOperation.id, prepared);
+        await reload();
+        toast.success('Операция обновлена.', 'Деньги');
       } else {
-        const created = await apiService.createMoneyOperation({
+        await apiService.createMoneyOperation({
           ...prepared,
           id: 0,
           createdAt: new Date().toISOString(),
         });
-        setItems((prev) => [created, ...prev]);
+        toast.success('Операция создана.', 'Деньги');
+        if (source !== 'Total' && page !== 1) {
+          setPage(1);
+        } else {
+          await reload();
+        }
       }
       setModalOpen(false);
       setEditingOperation(null);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить операцию.');
+      toast.error(message, 'Деньги');
+      throw new Error(message);
     } finally {
       setSaving(false);
     }
@@ -488,9 +636,19 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
   const confirmDeleteOperation = async () => {
     if (!confirmDelete) return;
-    await apiService.deleteMoneyOperation(confirmDelete.id);
-    setItems((prev) => prev.filter((entry) => entry.id !== confirmDelete.id));
-    setConfirmDelete(null);
+    try {
+      await apiService.deleteMoneyOperation(confirmDelete.id);
+      toast.success('Операция удалена.', 'Деньги');
+      setConfirmDelete(null);
+      if (source !== 'Total' && items.length === 1 && page > 1) {
+        setPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await reload();
+      }
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось удалить операцию.');
+      toast.error(message, 'Деньги');
+    }
   };
 
   return (
@@ -528,7 +686,14 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
           <div className="rounded-xl border border-slate-200 bg-white">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-sm">
+              <table className="w-full min-w-[900px] table-fixed text-sm">
+                <colgroup>
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '19%' }} />
+                </colgroup>
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Кошелёк</th>
@@ -634,10 +799,24 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             <button className="rounded-lg bg-blue-600 p-2 text-white">
               <WalletCards className="h-4 w-4" />
             </button>
-            <button className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((prev) => !prev)}
+              className={`rounded-lg border p-2 transition-colors ${
+                settingsOpen
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}>
               <SlidersHorizontal className="h-4 w-4" />
             </button>
-            <button className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedSearch((prev) => !prev)}
+              className={`rounded-lg border p-2 transition-colors ${
+                showAdvancedSearch
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}>
               <Search className="h-4 w-4" />
             </button>
           </div>
@@ -736,95 +915,113 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
           </div>
         )}
 
+        {settingsOpen && (
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
+            <TableColumnSettings
+              columns={MONEY_OPERATION_COLUMNS.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Строк на странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          </div>
+        )}
+
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-sm">
+          <table className="w-full min-w-[1500px] table-fixed text-sm">
+            <colgroup>
+              {orderedVisibleColumns.map((columnKey) => (
+                <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
+              ))}
+              <col style={{ width: 140 }} />
+            </colgroup>
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                {[
-                  'Дата',
-                  'Дата признания',
-                  'Приход',
-                  'Расход',
-                  'Валюта',
-                  'Счета',
-                  'Контрагент',
-                  'Проект',
-                  'Точка продаж',
-                  'Направление',
-                  'Приоритет в оплате',
-                  'Назначение',
-                  'Опл. счета',
-                  'Статья',
-                  'Действия',
-                ].map((label) => (
-                  <th key={label} className="px-3 py-2 text-left font-medium">
-                    {label}
+                {visibleMoneyColumns.map((column) => (
+                  <th
+                    key={column.key}
+                    style={{ width: getColumnWidth(column.key) }}
+                    className={`relative px-3 py-2 text-left font-medium ${
+                      draggingColumn === column.key ? 'bg-blue-50 text-blue-700' : ''
+                    }`}
+                    onDragOver={handleColumnDragOver}
+                    onDrop={(event) => handleColumnDrop(column.key, event)}>
+                    <button
+                      type="button"
+                      className="inline-flex min-w-0 items-center gap-2 rounded p-1 text-left text-slate-700 transition-colors cursor-grab active:cursor-grabbing"
+                      draggable
+                      onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                      onDragEnd={handleColumnDragEnd}
+                      title="Перетащите, чтобы изменить порядок">
+                      <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+                      <span className="truncate">{column.label}</span>
+                    </button>
+                    <div
+                      role="separator"
+                      aria-label={`Изменить ширину колонки ${column.label}`}
+                      className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                      onMouseDown={(event) => handleResizeStart(column.key, event)}
+                      onDragStart={(event) => event.preventDefault()}
+                    />
                   </th>
                 ))}
+                <th className="px-3 py-2 text-left font-medium">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={15} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-slate-500">
                     Загрузка операций...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={15} className="px-4 py-10 text-center text-red-500">
+                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-red-500">
                     {error}
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-slate-500">
                     В указанном периоде нет операций. Добавить операцию или импортировать из банка
                   </td>
                 </tr>
               ) : (
                 items.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="px-3 py-2">{formatDate(item.date)}</td>
-                    <td className="px-3 py-2">{item.recognitionDate ? formatDate(item.recognitionDate) : '—'}</td>
-                    <td className="px-3 py-2 text-emerald-600">
-                      {item.direction === 'Income' ? `${formatMoney(item.amount)} ₽` : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-red-600">
-                      {item.direction === 'Expense' ? `${formatMoney(item.amount)} ₽` : '—'}
-                    </td>
-                    <td className="px-3 py-2">{item.currency ?? 'RUB'}</td>
-                    <td className="px-3 py-2">
-                      {item.accountName ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('accounts')}
-                          className="text-blue-600 underline-offset-2 hover:underline">
-                          {item.accountName}
-                        </button>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{item.counterpartyName ?? '—'}</td>
-                    <td className="px-3 py-2">
-                      {item.projectName ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('clients')}
-                          className="text-blue-600 underline-offset-2 hover:underline">
-                          {item.projectName}
-                        </button>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{item.salesPointName ?? '—'}</td>
-                    <td className="px-3 py-2">{item.directionName ?? '—'}</td>
-                    <td className="px-3 py-2">{item.paymentPriority ?? '—'}</td>
-                    <td className="px-3 py-2">{item.purpose ?? '—'}</td>
-                    <td className="px-3 py-2">{item.paidAccountName ?? '—'}</td>
-                    <td className="px-3 py-2">{item.categoryName ?? '—'}</td>
+                    {visibleMoneyColumns.map((column) => (
+                      <td
+                        key={column.key}
+                        style={{ width: getColumnWidth(column.key) }}
+                        className="max-w-0 overflow-hidden px-3 py-2 align-top">
+                        {renderCell(item, column.key)}
+                      </td>
+                    ))}
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         {item.isReadonly && (
@@ -853,6 +1050,20 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
           </table>
         </div>
       </div>
+
+      <TablePagination
+        page={page}
+        totalPages={totalPages}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        recordsLabel="Найдено записей"
+        pageSizeLabel="Строк на странице"
+        previousLabel="Назад"
+        nextLabel="Вперед"
+      />
 
       <MoneyOperationModal
         source={apiSource ?? 'Bank'}

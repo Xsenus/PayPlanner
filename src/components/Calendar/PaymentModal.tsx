@@ -61,20 +61,12 @@ export function PaymentModal({
   type,
   linkedInvoice,
 }: PaymentModalProps) {
-  const accountInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-
-  function suppressBrowserAutocomplete() {
-    const el = accountInputRef.current;
-    if (!el) return;
-    el.setAttribute('readonly', 'true');
-    setTimeout(() => el.removeAttribute('readonly'), 80);
-  }
 
   const { clients, loading: clientsLoading } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
   const toast = useToast();
   const { isRequired } = useFormRequirements('payments', isOpen);
 
@@ -208,72 +200,11 @@ export function PaymentModal({
     };
   }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen]);
 
-  /* -------------------- Подсказки по счёту -------------------- */
+  /* -------------------- Legacy account fields stay read-only -------------------- */
   useEffect(() => {
-    if (!isOpen || hasSelectedInvoice) {
-      setAccountOpts([]);
-      setAccountLoading(false);
-      return;
-    }
-
-    let stop = false;
-    const timer = setTimeout(async () => {
-      try {
-        setAccountLoading(true);
-        const cid = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
-        const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
-
-        const params = {
-          clientId: cid,
-          caseId,
-          q: formData.account,
-          take: 20,
-          withDate: true,
-          dedupe: true,
-        };
-
-        const dataRaw = (await apiService.getAccounts(
-          params as unknown as Parameters<typeof apiService.getAccounts>[0],
-        )) as unknown;
-
-        let normalized: AccountOption[] = [];
-        if (Array.isArray(dataRaw)) {
-          normalized = dataRaw
-            .map((x): AccountOption | null => {
-              if (typeof x === 'string') {
-                const acc = x.trim();
-                return acc ? { account: acc } : null;
-              }
-              if (x && typeof x === 'object') {
-                const obj = x as { account?: unknown; accountDate?: unknown };
-                const acc = typeof obj.account === 'string' ? obj.account.trim() : '';
-                if (!acc) return null;
-                const accDate =
-                  typeof obj.accountDate === 'string' && obj.accountDate ? obj.accountDate : null;
-                return { account: acc, accountDate: accDate };
-              }
-              return null;
-            })
-            .filter((v): v is AccountOption => v !== null);
-        }
-
-        const uniq = new Map<string, AccountOption>();
-        for (const it of normalized) {
-          const key = `${it.account}__${it.accountDate ?? ''}`;
-          if (!uniq.has(key)) uniq.set(key, it);
-        }
-
-        if (!stop) setAccountOpts(Array.from(uniq.values()));
-      } finally {
-        if (!stop) setAccountLoading(false);
-      }
-    }, 250);
-
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [formData.account, formData.clientId, formData.clientCaseId, hasSelectedInvoice, isOpen]);
+    setAccountOpts([]);
+    setAccountLoading(false);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
@@ -694,7 +625,7 @@ export function PaymentModal({
     e.preventDefault();
     const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
     if (pickedCat && pickedCat.paymentType !== formData.type) {
-      await alert(
+      toast.error(
         t('invalidCategoryForDirection') ?? 'Тип категории не соответствует направлению платежа',
       );
       return;
@@ -729,7 +660,7 @@ export function PaymentModal({
     const normalizedRescheduleDate = rescheduleDate ? fromInputToApiDate(rescheduleDate) : undefined;
 
     if (rescheduleRemainder && remainder > 0 && !normalizedRescheduleDate) {
-      await alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
+      toast.error(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
       setLoading(false);
       return;
     }
@@ -767,6 +698,8 @@ export function PaymentModal({
           }`
         : undefined;
 
+      const shouldPersistLegacyAccountFields = Boolean(payment && !formData.invoiceId);
+
       const paymentData: PaymentPayload = {
         date: normalizedDate,
         plannedDate: normalizedPlannedDate ?? normalizedDate,
@@ -794,8 +727,11 @@ export function PaymentModal({
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
         invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
-        account: formData.account?.trim() || undefined,
-        accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
+        account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
+        accountDate:
+          shouldPersistLegacyAccountFields && formData.accountDate
+            ? fromInputToApiDate(formData.accountDate)
+            : undefined,
       };
 
       if (payment) {
@@ -876,6 +812,8 @@ export function PaymentModal({
     setFormData((prev) => ({
       ...prev,
       invoiceId: '',
+      account: '',
+      accountDate: '',
     }));
   };
 
@@ -949,6 +887,8 @@ export function PaymentModal({
         clientId: value,
         clientCaseId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
       return;
     }
@@ -959,6 +899,8 @@ export function PaymentModal({
         type: value as PaymentKind,
         incomeTypeId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
       return;
     }
@@ -968,6 +910,8 @@ export function PaymentModal({
         ...prev,
         clientCaseId: value,
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
       return;
     }
@@ -1469,45 +1413,24 @@ export function PaymentModal({
                   <div className="grid gap-3 sm:grid-cols-[2fr,1fr] sm:items-end">
                     <div className="relative">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {hasSelectedInvoice ? 'Номер счета (только просмотр)' : (t('account') ?? 'Счёт')}
+                        {(t('account') ?? 'Счёт') + ' (legacy, только чтение)'}
                       </label>
-                      {hasSelectedInvoice && (
-                        <p className="mb-2 text-xs text-gray-500">
-                          Номер берется из связанного счета и сохраняется по канонической ссылке.
-                        </p>
-                      )}
+                      <p className="mb-2 text-xs text-gray-500">
+                        Поле больше не редактируется вручную. Для привязки используйте блок «Связанный счёт» ниже.
+                      </p>
 
                       <input
-                        ref={accountInputRef}
                         name="account"
                         value={formData.account}
-                        onChange={handleChange}
-                        onFocus={() => {
-                          if (hasSelectedInvoice) return;
-                          suppressBrowserAutocomplete();
-                          setAccountOpen(true);
-                        }}
-                        onClick={() => {
-                          if (hasSelectedInvoice) return;
-                          suppressBrowserAutocomplete();
-                        }}
-                        onBlur={() => {
-                          if (hasSelectedInvoice) return;
-                          setTimeout(() => setAccountOpen(false), 150);
-                        }}
-                        placeholder="Например: Счет № 12345"
+                        placeholder="Например: Счёт № 12345"
                         maxLength={120}
-                        readOnly={hasSelectedInvoice}
-                        autoComplete="new-password"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                          hasSelectedInvoice ? 'bg-gray-50 text-gray-600' : ''
-                        }`}
+                        readOnly
+                        tabIndex={-1}
+                        className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-600"
                       />
 
-                      {!hasSelectedInvoice &&
+                      {false &&
+                        !hasSelectedInvoice &&
                         accountOpen &&
                         (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
                           <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
@@ -1704,15 +1627,15 @@ export function PaymentModal({
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('accountDate') ?? 'Дата счёта'}
+                        {(t('accountDate') ?? 'Дата счёта') + ' (legacy, только чтение)'}
                       </label>
                       <input
                         type="date"
                         name="accountDate"
                         value={formData.accountDate}
-                        onChange={handleChange}
-                        disabled={hasSelectedInvoice}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                        readOnly
+                        disabled
+                        className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-600"
                       />
                     </div>
 

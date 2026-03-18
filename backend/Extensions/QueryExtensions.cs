@@ -82,8 +82,22 @@ namespace PayPlanner.Api.Extensions
             this IQueryable<Payment> q,
             DateTime? from, DateTime? to, int? clientId, int? caseId, string? search)
         {
-            if (from.HasValue) q = q.Where(p => p.Date >= from.Value);
-            if (to.HasValue) q = q.Where(p => p.Date <= to.Value);
+            if (from.HasValue)
+            {
+                var fromDate = from.Value.Date;
+                q = q.Where(p =>
+                    p.Date >= fromDate ||
+                    (p.AccountDate.HasValue && p.AccountDate.Value >= fromDate));
+            }
+
+            if (to.HasValue)
+            {
+                var toDate = to.Value.Date;
+                q = q.Where(p =>
+                    p.Date <= toDate ||
+                    (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
+            }
+
             if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value);
             if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
 
@@ -93,7 +107,14 @@ namespace PayPlanner.Api.Extensions
                 q = q.Where(p =>
                     (p.Description != null && EF.Functions.Like(p.Description, $"%{search}%")) ||
                     (p.Notes != null && EF.Functions.Like(p.Notes, $"%{search}%")) ||
-                    (p.Account != null && EF.Functions.Like(p.Account, $"%{search}%")));
+                    (p.Account != null && EF.Functions.Like(p.Account, $"%{search}%")) ||
+                    (p.Client != null &&
+                        ((p.Client.Name != null && EF.Functions.Like(p.Client.Name, $"%{search}%")) ||
+                         (p.Client.Company != null && EF.Functions.Like(p.Client.Company, $"%{search}%")))) ||
+                    (p.ClientCase != null && p.ClientCase.Title != null && EF.Functions.Like(p.ClientCase.Title, $"%{search}%")) ||
+                    (p.DealType != null && p.DealType.Name != null && EF.Functions.Like(p.DealType.Name, $"%{search}%")) ||
+                    (p.IncomeType != null && p.IncomeType.Name != null && EF.Functions.Like(p.IncomeType.Name, $"%{search}%")) ||
+                    (p.PaymentSource != null && p.PaymentSource.Name != null && EF.Functions.Like(p.PaymentSource.Name, $"%{search}%")));
             }
             return q;
         }

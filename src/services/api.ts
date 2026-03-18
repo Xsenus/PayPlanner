@@ -264,6 +264,7 @@ export class ApiService {
     to?: string;
     status?: ActStatus;
     clientId?: number;
+    clientIds?: string;
     responsibleId?: number;
     search?: string;
     sortBy?: ActsSortKey;
@@ -382,6 +383,7 @@ export class ApiService {
     to?: string;
     status?: PaymentStatus;
     clientId?: number;
+    clientIds?: string;
     caseId?: number;
     responsibleId?: number;
     search?: string;
@@ -397,6 +399,10 @@ export class ApiService {
       pageSize: params?.pageSize ?? 20,
     });
     return this.request<PagedResult<Invoice>>(`/invoices${q}`);
+  }
+
+  async getInvoice(id: number) {
+    return this.request<Invoice>(`/invoices/${id}`);
   }
 
   async getInvoicesSummary(params?: {
@@ -454,6 +460,25 @@ export class ApiService {
 
   async deleteInvoice(id: number) {
     return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
+  }
+
+  async getAccountsRegistry(params?: {
+    from?: string;
+    to?: string;
+    status?: 'created' | 'paid' | 'partial' | 'cancelled';
+    search?: string;
+    type?: 'Income' | 'Expense';
+    sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';
+    sortDir?: SortDir;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(`/accounts/registry${q}`);
   }
 
   async downloadInvoiceDocument(id: number, format: 'word' | 'pdf' = 'word') {
@@ -570,6 +595,12 @@ export class ApiService {
     to?: string;
     clientId?: number;
     caseId?: number;
+    clientIds?: string;
+    categoryTokens?: string;
+    type?: PaymentKind;
+    status?: PaymentStatus;
+    minAmount?: number;
+    maxAmount?: number;
     search?: string;
     sortBy?: 'date' | 'amount' | 'createdAt';
     sortDir?: SortDir;
@@ -581,7 +612,7 @@ export class ApiService {
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
     });
-    return this.request<PagedResult<Payment>>(`/v2/payments${q}`);
+    return this.request<PagedResult<Payment> & { summary: PaymentsListSummary }>(`/v2/payments${q}`);
   }
 
   // ===== Clients =====
@@ -661,6 +692,15 @@ export class ApiService {
   async getLegalEntities(params?: { search?: string }) {
     const q = buildQuery({ search: params?.search });
     return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
+  }
+
+  async getLegalEntitiesPaged(params?: { search?: string; page?: number; pageSize?: number }) {
+    const q = buildQuery({
+      search: params?.search,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<LegalEntitySummary>>(`/legal-entities/paged${q}`);
   }
 
   async getLegalEntity(id: number) {
@@ -1125,6 +1165,20 @@ export class ApiService {
     return this.request<MoneyOperation[]>(`/money-operations${q}`);
   }
 
+  async getMoneyOperationsPaged(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    direction?: MoneyOperationDirection;
+    accountingType?: MoneyOperationAccountingType;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(`/money-operations/paged${q}`);
+  }
+
   async createMoneyOperation(payload: MoneyOperation) {
     return this.request<MoneyOperation>('/money-operations', {
       method: 'POST',
@@ -1195,6 +1249,8 @@ export const apiService = new ApiService();
 
 // ---- types import ----
 import type {
+  AccountRegistryRow,
+  AccountsSummary,
   Act,
   ActInput,
   ActResponsible,
@@ -1233,6 +1289,8 @@ import type {
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  MoneyOperationsSummary,
+  PaymentsListSummary,
   CleanedAddress,
   DadataAddressSuggestion,
   ClientReferenceItem,

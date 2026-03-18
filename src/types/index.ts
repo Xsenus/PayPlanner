@@ -404,6 +404,33 @@ export interface MoneyOperation {
   isReadonly?: boolean;
   relatedPaymentId?: number | null;
 }
+
+export interface MoneyOperationSourceSummary {
+  source: MoneyOperationSource;
+  startBalance: number;
+  income: number;
+  expense: number;
+  endBalance: number;
+}
+
+export interface MoneyOperationsSummary {
+  startBalance: number;
+  income: number;
+  expense: number;
+  endBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+  bySource: MoneyOperationSourceSummary[];
+}
+
+export interface PaymentsListSummary {
+  income: number;
+  expense: number;
+  balance: number;
+  incomeCount: number;
+  expenseCount: number;
+  total: number;
+}
 export interface IncomeType {
   id: number;
   name: string;
@@ -719,6 +746,33 @@ export interface InvoiceSummary {
     day91Plus: number;
     total: number;
   };
+}
+
+export interface AccountsSummaryBucket {
+  amount: number;
+  count: number;
+}
+
+export interface AccountsSummary {
+  total: AccountsSummaryBucket;
+  pending: AccountsSummaryBucket;
+  paid: AccountsSummaryBucket;
+  overdue: AccountsSummaryBucket;
+  cancelled: AccountsSummaryBucket;
+}
+
+export interface AccountRegistryRow {
+  groupKey: string;
+  accountNumber: string;
+  invoice?: Invoice | null;
+  payments: Payment[];
+  acts: Act[];
+  totalAmount: number;
+  dueDate?: string | null;
+  paidDate?: string | null;
+  status: 'created' | 'paid' | 'partial' | 'cancelled';
+  type: 'Income' | 'Expense';
+  isOverdue: boolean;
 }
 
 export type AccountSuggestion = {

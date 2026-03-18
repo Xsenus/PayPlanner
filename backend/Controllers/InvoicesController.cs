@@ -41,6 +41,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
         [FromQuery] int? clientId,
+        [FromQuery] string? clientIds,
         [FromQuery] int? caseId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
@@ -60,7 +61,7 @@ public class InvoicesController : ControllerBase
         }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type, ParseIntList(clientIds));
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -193,6 +194,24 @@ public class InvoicesController : ControllerBase
         };
 
         return Ok(summary);
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<InvoiceDto>> GetById(int id, CancellationToken ct)
+    {
+        var raw = await BuildInvoiceQuery()
+            .Where(x => x.Payment.Id == id)
+            .Select(ProjectionRaw)
+            .FirstOrDefaultAsync(ct);
+
+        if (raw is null)
+        {
+            return NotFound();
+        }
+
+        var dto = MapFromRaw(raw);
+        await EnrichInvoiceDtosAsync(new List<InvoiceDto> { dto }, ct);
+        return Ok(dto);
     }
 
     [HttpPost]
@@ -907,7 +926,8 @@ public class InvoicesController : ControllerBase
         int? caseId,
         int? responsibleId,
         string? search,
-        PaymentType? type)
+        PaymentType? type,
+        IReadOnlySet<int>? clientIds = null)
     {
         if (type.HasValue)
         {
@@ -934,6 +954,10 @@ public class InvoicesController : ControllerBase
         if (clientId.HasValue)
         {
             query = query.Where(x => x.Payment.ClientId == clientId.Value);
+        }
+        else if (clientIds is { Count: > 0 })
+        {
+            query = query.Where(x => x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value));
         }
 
         if (caseId.HasValue)
@@ -977,6 +1001,20 @@ public class InvoicesController : ControllerBase
         }
 
         return query;
+    }
+
+    private static HashSet<int> ParseIntList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
     }
 
     private static IQueryable<InvoiceQueryItem> ApplySort(
