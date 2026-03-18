@@ -160,15 +160,17 @@ export function PaymentsTable({
           return payment.client ? (
             <button
               type="button"
-              className="text-blue-600 hover:underline"
+              className="block w-full text-left leading-tight text-blue-600 hover:underline"
               onClick={() => {
                 if (payment.clientId) {
                   onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
                 }
               }}>
-              <span className="block text-left font-medium">{payment.client.name}</span>
+              <span className="block font-medium">{payment.client.name}</span>
               {payment.clientCase?.title ? (
-                <span className="block truncate text-xs text-gray-500">{payment.clientCase.title}</span>
+                <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
+                  {payment.clientCase.title}
+                </span>
               ) : null}
             </button>
           ) : (
