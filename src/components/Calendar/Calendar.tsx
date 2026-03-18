@@ -9,9 +9,11 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { Payment, PaymentPayload } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -73,6 +75,7 @@ function ymEnd(ym: string): string {
 export function Calendar({ onOpenClient }: CalendarProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
+  const toast = useToast();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
@@ -276,9 +279,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       variant: 'danger',
     });
     if (!ok) return;
-    await deletePayment(payment.id);
-    await refreshPayments();
-    bumpStats();
+    try {
+      await deletePayment(payment.id);
+      await refreshPayments();
+      bumpStats();
+      toast.error('Платёж удалён.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось удалить платёж.'),
+        'Платежи',
+      );
+    }
   };
 
   const handleCloseModal = async () => {
@@ -289,11 +300,25 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleSubmit = async (payload: SubmitDTO) => {
-    if ('id' in payload) await updatePayment(payload);
-    else await createPayment(payload);
+    const isUpdate = 'id' in payload;
 
-    await refreshPayments();
-    bumpStats();
+    try {
+      if (isUpdate) await updatePayment(payload);
+      else await createPayment(payload);
+
+      await refreshPayments();
+      bumpStats();
+      toast.success(isUpdate ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(
+          error,
+          isUpdate ? 'Не удалось обновить платёж.' : 'Не удалось создать платёж.',
+        ),
+        'Платежи',
+      );
+      throw error;
+    }
   };
 
   const filteredPayments = useMemo(() => {
@@ -714,11 +739,20 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onDelete={
             calendarPermissions.canDelete
               ? async (id) => {
-                  await deletePayment(id);
-                  await refreshPayments();
-                  setIsModalOpen(false);
-                  setEditingPayment(null);
-                  setTimeout(() => bumpStats(), 0);
+                  try {
+                    await deletePayment(id);
+                    await refreshPayments();
+                    setIsModalOpen(false);
+                    setEditingPayment(null);
+                    setTimeout(() => bumpStats(), 0);
+                    toast.error('Платёж удалён.', 'Платежи');
+                  } catch (error) {
+                    toast.error(
+                      extractDisplayErrorMessage(error, 'Не удалось удалить платёж.'),
+                      'Платежи',
+                    );
+                    throw error;
+                  }
                 }
               : undefined
           }
