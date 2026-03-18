@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
+import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TablePagination } from '../ui/TablePagination';
 import type {
   FormRequirementSectionMetadataDto,
   InvoiceCounterpartyCleanupResultDto,
@@ -16,8 +20,11 @@ type SettingsSection =
   | 'dictionary-merge'
   | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
+const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export function AppSettings() {
+  const { confirm } = useDialog();
+  const toast = useToast();
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
@@ -48,6 +55,8 @@ export function AppSettings() {
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
+  const [detailsPage, setDetailsPage] = useState(1);
+  const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
@@ -57,6 +66,39 @@ export function AppSettings() {
     if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
     return 'Работа с базой · Адреса';
   }, [activeSection]);
+
+  const migrationDetails = result?.details ?? [];
+  const migrationDetailsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(migrationDetails.length / detailsPageSize || 1)),
+    [detailsPageSize, migrationDetails.length],
+  );
+  const pagedMigrationDetails = useMemo(() => {
+    const offset = (detailsPage - 1) * detailsPageSize;
+    return migrationDetails.slice(offset, offset + detailsPageSize);
+  }, [detailsPage, detailsPageSize, migrationDetails]);
+
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    extractDisplayErrorMessage(error, fallback);
+
+  const handleReloadDuplicates = async () => {
+    const approved = await confirm({
+      title: '????????????? ??????????',
+      description: '???????? ?????? ?????? ??? ?????????? ????????????',
+      confirmLabel: '????????',
+      cancelLabel: '??????',
+    });
+    if (!approved) return;
+
+    await loadDuplicates(mergeKind, { showSuccessToast: true, showErrorToast: true });
+  };
+
+  useEffect(() => {
+    setDetailsPage(1);
+  }, [detailsPageSize, result]);
+
+  useEffect(() => {
+    setDetailsPage((prev) => Math.min(prev, migrationDetailsTotalPages));
+  }, [migrationDetailsTotalPages]);
 
   const loadFormRequirements = async () => {
     setRequirementsLoading(true);
@@ -84,14 +126,21 @@ export function AppSettings() {
     try {
       await apiService.upsertFormRequirement({ section, fieldKey, isRequired });
       await loadFormRequirements();
-      setRequirementsMessage('Настройки обязательных полей сохранены');
+      const message = '????????? ???????????? ????? ?????????';
+      setRequirementsMessage(message);
+      toast.success(message, '?????????');
     } catch (e) {
-      setRequirementsMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройку');
+      const message = getErrorMessage(e, '?? ??????? ????????? ?????????');
+      setRequirementsMessage(message);
+      toast.error(message, '?????????');
       setRequirementsLoading(false);
     }
   };
 
-  const loadDuplicates = async (kind: MergeKind) => {
+  const loadDuplicates = async (
+    kind: MergeKind,
+    options?: { showSuccessToast?: boolean; showErrorToast?: boolean },
+  ) => {
     setMergeLoading(true);
     setMergeError(null);
     setMergeMessage(null);
@@ -101,11 +150,23 @@ export function AppSettings() {
       const first = (data ?? [])[0];
       setSelectedGroupKey(first?.canonical ?? '');
       setPreferredId(first?.items?.[0]?.id ?? null);
+      if (options?.showSuccessToast) {
+        toast.success(
+          (data?.length ?? 0) > 0
+            ? `??????? ????? ??????: ${data?.length ?? 0}`
+            : '????? ? ????????? ??????????? ?? ???????',
+          '???????????',
+        );
+      }
     } catch (e) {
-      setMergeError(e instanceof Error ? e.message : 'Не удалось загрузить дубли');
+      const message = getErrorMessage(e, '?? ??????? ????????? ?????');
+      setMergeError(message);
       setDuplicates([]);
       setSelectedGroupKey('');
       setPreferredId(null);
+      if (options?.showErrorToast) {
+        toast.error(message, '???????????');
+      }
     } finally {
       setMergeLoading(false);
     }
@@ -114,9 +175,21 @@ export function AppSettings() {
   const runMerge = async () => {
     const group = duplicates.find((item) => item.canonical === selectedGroupKey);
     if (!group || group.items.length < 2 || !preferredId) {
-      setMergeError('Выберите группу дублей и базовое значение');
+      const message = '???????? ?????? ?????? ? ??????? ????????';
+      setMergeError(message);
+      toast.error(message, '???????????');
       return;
     }
+
+    const approved = await confirm({
+      title: '????????????? ???????????',
+      description: '?????????? ????????? ????? ? ???? ????????? ????????? ???????? ????????? ????????.',
+      confirmLabel: '??????????',
+      cancelLabel: '??????',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setMergeLoading(true);
     setMergeError(null);
     setMergeMessage(null);
@@ -130,11 +203,15 @@ export function AppSettings() {
         colorHex: primary.colorHex,
         isActive: primary.isActive,
       });
-      setMergeMessage(`Объединение выполнено: создано "${result.name}", обновлено юрлиц: ${result.replacedInLegalEntities}`);
+      const message = `??????????? ?????????: ??????? "${result.name}", ????????? ?????: ${result.replacedInLegalEntities}`;
+      setMergeMessage(message);
+      toast.success(message, '???????????');
       await loadDuplicates(mergeKind);
       window.dispatchEvent(new CustomEvent('dicts:changed'));
     } catch (e) {
-      setMergeError(e instanceof Error ? e.message : 'Не удалось выполнить объединение');
+      const message = getErrorMessage(e, '?? ??????? ????????? ???????????');
+      setMergeError(message);
+      toast.error(message, '???????????');
     } finally {
       setMergeLoading(false);
     }
@@ -159,6 +236,14 @@ export function AppSettings() {
   };
 
   const saveDaDataCredentials = async () => {
+    const approved = await confirm({
+      title: '????????????? ??????????',
+      description: '????????? ????? DaData ? ?????????? ???????????',
+      confirmLabel: '?????????',
+      cancelLabel: '??????',
+    });
+    if (!approved) return;
+
     setCredentialsLoading(true);
     setCredentialsMessage(null);
     try {
@@ -166,9 +251,13 @@ export function AppSettings() {
         apiService.upsertUserSetting('integrations.dadata.apiKey', dadataToken.trim()),
         apiService.upsertUserSetting('integrations.dadata.secret', dadataSecret.trim()),
       ]);
-      setCredentialsMessage('Ключи DaData сохранены');
+      const message = '????? DaData ?????????';
+      setCredentialsMessage(message);
+      toast.success(message, '??????????');
     } catch (e) {
-      setCredentialsMessage(e instanceof Error ? e.message : 'Не удалось сохранить ключи DaData');
+      const message = getErrorMessage(e, '?? ??????? ????????? ????? DaData');
+      setCredentialsMessage(message);
+      toast.error(message, '??????????');
     } finally {
       setCredentialsLoading(false);
     }
@@ -188,55 +277,110 @@ export function AppSettings() {
   };
 
   const saveInvoiceNumbering = async () => {
+    const approved = await confirm({
+      title: '????????????? ??????????',
+      description: '????????? ????????? ????????? ???????',
+      confirmLabel: '?????????',
+      cancelLabel: '??????',
+    });
+    if (!approved) return;
+
     setInvoiceNumberingLoading(true);
     setInvoiceNumberingMessage(null);
     try {
       const response = await apiService.updateInvoiceNumberingSettings(invoiceNumbering);
       setInvoiceNumbering(response);
-      setInvoiceNumberingMessage('Настройки нумерации счетов сохранены');
+      const message = '????????? ????????? ?????? ?????????';
+      setInvoiceNumberingMessage(message);
+      toast.success(message, '?????????');
     } catch (e) {
-      setInvoiceNumberingMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройки нумерации счетов');
+      const message = getErrorMessage(e, '?? ??????? ????????? ????????? ????????? ??????');
+      setInvoiceNumberingMessage(message);
+      toast.error(message, '?????????');
     } finally {
       setInvoiceNumberingLoading(false);
     }
   };
 
   const runInvoiceCounterpartyCleanup = async () => {
+    const approved = await confirm({
+      title: '????????????? ???????',
+      description: '???????? ?????????? ???? "?? ???? ????" ?? ???? ??????? ???????? ??????????.',
+      confirmLabel: '????????',
+      cancelLabel: '??????',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setInvoiceCounterpartyCleanupLoading(true);
     setInvoiceCounterpartyCleanupMessage(null);
     try {
       const response = await apiService.cleanupInvoiceCounterpartyNames();
       setInvoiceCounterpartyCleanupResult(response);
-      setInvoiceCounterpartyCleanupMessage('Очистка поля "От кого счёт" выполнена');
+      const message = '??????? ???? "?? ???? ????" ?????????';
+      setInvoiceCounterpartyCleanupMessage(message);
+      toast.success(message, '?????');
     } catch (e) {
+      const message = getErrorMessage(e, '?? ??????? ???????? ???? "?? ???? ????"');
       setInvoiceCounterpartyCleanupResult(null);
-      setInvoiceCounterpartyCleanupMessage(e instanceof Error ? e.message : 'Не удалось очистить поле "От кого счёт"');
+      setInvoiceCounterpartyCleanupMessage(message);
+      toast.error(message, '?????');
     } finally {
       setInvoiceCounterpartyCleanupLoading(false);
     }
   };
 
   const runMigration = async () => {
+    const approved = await confirm({
+      title: '????????????? ????????',
+      description: '????????? ??????? ?????? ???????? ???????? ????? ????????? ??????? ?????????? ????????.',
+      confirmLabel: '?????????',
+      cancelLabel: '??????',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setLoading(true);
     setError(null);
     try {
       const response = await apiService.migrateLegacyLegalEntityAddresses(validateWithDadata);
       setResult(response);
+      toast.success(
+        `??????? ??????? ????????. ?????????: ${response.added}, ?????????: ${response.updated}, ??????: ${response.failed}`,
+        '???? ??????',
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось выполнить перенос адресов');
+      const message = getErrorMessage(e, '?? ??????? ????????? ??????? ???????');
+      setError(message);
+      toast.error(message, '???? ??????');
     } finally {
       setLoading(false);
     }
   };
 
   const runInvoiceMigration = async () => {
+    const approved = await confirm({
+      title: '????????????? ??????????',
+      description: '???????? ????? ? ????? ?? legacy-?????????? ???????? ??????? ???????????? ????????.',
+      confirmLabel: '?????????',
+      cancelLabel: '??????',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setInvoiceMigrationLoading(true);
     setInvoiceMigrationError(null);
     try {
       const response = await apiService.migrateLegacyInvoiceLinks();
       setInvoiceMigrationResult(response);
+      toast.success(
+        `?????????? ?????? ?????????. ??????? ??????: ${response.createdInvoices}, ????? ????????: ${response.linkedPayments}`,
+        '?????',
+      );
     } catch (e) {
-      setInvoiceMigrationError(e instanceof Error ? e.message : 'Не удалось выполнить перенос счетов');
+      const message = getErrorMessage(e, '?? ??????? ????????? ??????? ??????');
+      setInvoiceMigrationError(message);
+      toast.error(message, '?????');
     } finally {
       setInvoiceMigrationLoading(false);
     }
@@ -670,7 +814,15 @@ export function AppSettings() {
                   <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-3">Детальный отчёт</h3>
                     <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
+                      <table className="min-w-full table-fixed text-sm">
+                        <colgroup>
+                          <col style={{ width: '18%' }} />
+                          <col style={{ width: '22%' }} />
+                          <col style={{ width: '22%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '16%' }} />
+                        </colgroup>
                         <thead>
                           <tr className="text-left text-gray-500 border-b border-gray-200">
                             <th className="py-2 pr-4">Карточка</th>
@@ -682,7 +834,7 @@ export function AppSettings() {
                           </tr>
                         </thead>
                         <tbody>
-                          {result.details.map((item, idx) => (
+                          {pagedMigrationDetails.map((item, idx) => (
                             <tr
                               key={`${item.ownerType ?? 'legal'}-${item.ownerId ?? item.legalEntityId ?? item.clientId ?? idx}-${idx}`}
                               className="border-b border-gray-100 align-top"
@@ -714,6 +866,15 @@ export function AppSettings() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination
+                      page={detailsPage}
+                      totalPages={migrationDetailsTotalPages}
+                      totalItems={migrationDetails.length}
+                      pageSize={detailsPageSize}
+                      pageSizeOptions={DETAILS_PAGE_SIZE_OPTIONS}
+                      onPageChange={setDetailsPage}
+                      onPageSizeChange={setDetailsPageSize}
+                    />
                   </div>
                 )}
               </>
@@ -794,7 +955,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void loadDuplicates(mergeKind)}
+                    onClick={handleReloadDuplicates}
                     disabled={mergeLoading}
                     className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                   >
