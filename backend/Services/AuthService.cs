@@ -33,6 +33,17 @@ public class AuthService
     private static string NormalizeEmail(string email)
         => (email ?? string.Empty).Trim().ToLowerInvariant();
 
+    private static IQueryable<User> ApplyUserStatusFilter(IQueryable<User> query, string? status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "pending" => query.Where(u => !u.IsApproved),
+            "approved" => query.Where(u => u.IsApproved),
+            "inactive" => query.Where(u => !u.IsActive),
+            _ => query
+        };
+    }
+
     private string GenerateJwtToken(User user)
     {
         var key = new SymmetricSecurityKey(
@@ -93,7 +104,8 @@ public class AuthService
         {
             Id = user.Role?.Id ?? 0,
             Name = user.Role?.Name ?? "user",
-            Description = user.Role?.Description ?? string.Empty
+            Description = user.Role?.Description ?? string.Empty,
+            CreatedAt = user.Role?.CreatedAt
         }
     };
 
@@ -187,11 +199,39 @@ public class AuthService
             {
                 Id = r.Id,
                 Name = r.Name,
-                Description = r.Description
+                Description = r.Description,
+                CreatedAt = r.CreatedAt
             })
             .ToListAsync();
 
         return roles;
+    }
+
+    public async Task<PagedResponse<UserDto>> GetUsersPagedAsync(string? status = null, int page = 1, int pageSize = 20)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var query = ApplyUserStatusFilter(
+            _context.Users
+                .AsNoTracking()
+                .Include(u => u.Role),
+            status);
+
+        var total = await query.CountAsync();
+        var users = await query
+            .OrderByDescending(u => u.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return new PagedResponse<UserDto>
+        {
+            Items = users.Select(MapToDto).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        };
     }
 
 
@@ -282,13 +322,9 @@ public class AuthService
 
     public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
     {
-        var q = _context.Users.Include(u => u.Role).AsQueryable();
+        var q = ApplyUserStatusFilter(_context.Users.Include(u => u.Role).AsQueryable(), status);
 
         // Äîïîëíåí ôèëüòð "inactive" (èç âòîðîãî âàðèàíòà), îñòàëüíîå — êàê áûëî.
-        if (status == "pending") q = q.Where(u => !u.IsApproved);
-        else if (status == "approved") q = q.Where(u => u.IsApproved);
-        else if (status == "inactive") q = q.Where(u => !u.IsActive);
-
         var users = await q.OrderByDescending(u => u.CreatedAt).ToListAsync();
         return users.Select(MapToDto).ToList();
     }

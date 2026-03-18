@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search, Trash2, Filter } from 'lucide-react';
+import { Shield, RefreshCw, Search, Trash2, Filter, GripVertical } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
+import { TextPromptModal } from '../ui/TextPromptModal';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type {
   UserActivityActor,
@@ -10,6 +15,7 @@ import type {
   UserActivityLogItem,
   UserActivityStatus,
 } from '../../types/userActivity';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 const statusStyles: Record<UserActivityStatus, string> = {
   Info: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -24,6 +30,22 @@ const statusLabels: Record<UserActivityStatus, string> = {
   Warning: 'Предупреждение',
   Failure: 'Ошибка',
 };
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+const USER_ACTIVITY_COLUMNS = [
+  { key: 'createdAt', label: 'Когда', defaultVisible: true, defaultWidth: 190 },
+  { key: 'user', label: 'Пользователь', defaultVisible: true, defaultWidth: 240 },
+  { key: 'categoryAction', label: 'Категория / действие', defaultVisible: true, defaultWidth: 220 },
+  { key: 'description', label: 'Описание', defaultVisible: true, defaultWidth: 320 },
+  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 140 },
+  { key: 'http', label: 'HTTP', defaultVisible: true, defaultWidth: 220 },
+  { key: 'section', label: 'Раздел', defaultVisible: true, defaultWidth: 160 },
+  { key: 'ipAddress', label: 'IP', defaultVisible: false, defaultWidth: 150 },
+  { key: 'duration', label: 'Длит.', defaultVisible: true, defaultWidth: 110 },
+] as const;
+
+type UserActivityColumnKey = (typeof USER_ACTIVITY_COLUMNS)[number]['key'];
 
 function formatDate(value: string) {
   try {
@@ -49,14 +71,13 @@ function formatMetadata(metadata: unknown): string {
 }
 
 export const UserActivity = () => {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [logs, setLogs] = useState<UserActivityLogItem[]>([]);
   const [filters, setFilters] = useState<UserActivityFiltersResponse | null>(null);
   const [actors, setActors] = useState<UserActivityActor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<UserActivityStatus | 'all'>('all');
@@ -71,7 +92,41 @@ export const UserActivity = () => {
   const [clearing, setClearing] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const { confirm, alert } = useDialog();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [clearPromptOpen, setClearPromptOpen] = useState(false);
+  const [clearPassword, setClearPassword] = useState('');
+  const [clearPromptError, setClearPromptError] = useState<string | null>(null);
+  const { confirm } = useDialog();
+  const toast = useToast();
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<UserActivityColumnKey>({
+    storageKey: `pp.user_activity_table_settings.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'user_activity_table_settings',
+    columns: USER_ACTIVITY_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultVisible: column.defaultVisible,
+      defaultWidth: column.defaultWidth,
+    })),
+    defaultPageSize: 25,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 110,
+  });
 
   const debouncedSearch = useDebouncedValue(search, 500);
 
@@ -119,12 +174,17 @@ export const UserActivity = () => {
 
   const handleClearLogs = async () => {
     if (!isAdmin()) return;
+    setClearPassword('');
+    setClearPromptError(null);
+    setClearPromptOpen(true);
+  };
 
-    const password = window.prompt('Для удаления всей истории контроля введите пароль безопасности:');
-    if (password === null) return;
-
+  const submitClearLogs = async () => {
+    const password = clearPassword.trim();
     if (password !== 'Qwerty!@#') {
-      await alert('Неверный пароль, журнал не был очищен.');
+      const message = 'Неверный пароль, журнал не был очищен.';
+      setClearPromptError(message);
+      toast.error(message, 'Очистка журнала');
       return;
     }
 
@@ -140,11 +200,19 @@ export const UserActivity = () => {
     try {
       setClearing(true);
       await apiService.deleteUserActivityLogs(password);
+      setClearPromptOpen(false);
+      setClearPassword('');
+      setClearPromptError(null);
       setRefreshToken((token) => token + 1);
-      await alert('История контроля успешно очищена.');
+      toast.success('История контроля успешно очищена.', 'Журнал активности');
     } catch (error) {
       console.error('Не удалось очистить журнал контроля', error);
-      await alert('Не удалось очистить историю. Попробуйте позже или проверьте подключение.');
+      const message = extractDisplayErrorMessage(
+        error,
+        'Не удалось очистить историю. Попробуйте позже или проверьте подключение.',
+      );
+      setClearPromptError(message);
+      toast.error(message, 'Журнал активности');
     } finally {
       setClearing(false);
     }
@@ -170,7 +238,7 @@ export const UserActivity = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, status, category, action, section, method, actor, from, to]);
+  }, [debouncedSearch, status, category, action, section, method, actor, from, to, pageSize]);
 
   useEffect(() => {
     if (!isAdmin()) {
@@ -211,6 +279,82 @@ export const UserActivity = () => {
   }, [actor, action, category, debouncedSearch, from, isAdmin, method, page, pageSize, refreshToken, section, status, to]);
 
   const totalPages = useMemo(() => (pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1), [total, pageSize]);
+
+  const activityColumnsByKey = useMemo(
+    () =>
+      Object.fromEntries(USER_ACTIVITY_COLUMNS.map((column) => [column.key, column])) as Record<
+        UserActivityColumnKey,
+        (typeof USER_ACTIVITY_COLUMNS)[number]
+      >,
+    [],
+  );
+
+  const visibleActivityColumns = useMemo(
+    () => orderedVisibleColumns.map((key) => activityColumnsByKey[key]).filter(Boolean),
+    [activityColumnsByKey, orderedVisibleColumns],
+  );
+
+  const renderCell = (log: UserActivityLogItem, columnKey: UserActivityColumnKey) => {
+    const actorName = log.userFullName || log.userEmail || 'Система';
+    const statusClass = statusStyles[log.status];
+
+    switch (columnKey) {
+      case 'createdAt':
+        return <span className="whitespace-nowrap text-slate-700">{formatDate(log.createdAt)}</span>;
+      case 'user':
+        return (
+          <>
+            <div className="font-medium text-slate-900">{actorName}</div>
+            {log.userEmail ? <div className="text-xs text-slate-500">{log.userEmail}</div> : null}
+          </>
+        );
+      case 'categoryAction':
+        return (
+          <>
+            <div className="font-medium text-slate-800">{log.category}</div>
+            <div className="text-xs text-slate-500">{log.action}</div>
+          </>
+        );
+      case 'description':
+        return (
+          <>
+            <div className="line-clamp-3 text-sm text-slate-700">{log.description || '—'}</div>
+            {log.objectType ? (
+              <div className="mt-1 text-xs text-slate-500">
+                {log.objectType} {log.objectId ? `#${log.objectId}` : ''}
+              </div>
+            ) : null}
+          </>
+        );
+      case 'status':
+        return (
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${statusClass}`}>
+            {statusLabels[log.status]}
+          </span>
+        );
+      case 'http':
+        return (
+          <>
+            <div className="font-mono text-xs text-slate-700">
+              {log.httpMethod || '—'} {log.httpStatusCode ?? ''}
+            </div>
+            {log.path ? <div className="mt-1 line-clamp-2 text-xs text-slate-500">{log.path}</div> : null}
+          </>
+        );
+      case 'section':
+        return <span className="text-xs text-slate-600">{log.section || '—'}</span>;
+      case 'ipAddress':
+        return <span className="text-xs text-slate-600">{log.ipAddress || '—'}</span>;
+      case 'duration':
+        return (
+          <span className="text-xs text-slate-600">
+            {typeof log.durationMs === 'number' ? `${log.durationMs} мс` : '—'}
+          </span>
+        );
+      default:
+        return '—';
+    }
+  };
 
   if (!isAdmin()) {
     return (
@@ -253,6 +397,14 @@ export const UserActivity = () => {
                     {activeFiltersSummary.length}
                   </span>
                 )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen((open) => !open)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+              >
+                <Filter className="w-4 h-4" />
+                {settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}
               </button>
               <button
                 type="button"
@@ -408,20 +560,6 @@ export const UserActivity = () => {
                   />
                 </label>
 
-                <label>
-                  <span className="text-sm font-medium text-slate-600">На странице</span>
-                  <select
-                    value={pageSize}
-                    onChange={(event) => setPageSize(Number.parseInt(event.target.value, 10) || 25)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
-                  >
-                    {[10, 25, 50, 100, 150, 200].map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
 
               <div className="mt-4 flex justify-end gap-2 text-sm">
@@ -461,85 +599,116 @@ export const UserActivity = () => {
             </div>
           )}
 
+          {settingsOpen && (
+            <TableColumnSettings
+              columns={USER_ACTIVITY_COLUMNS.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Строк на странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          )}
+
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>
           )}
 
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[1280px] w-full table-fixed text-sm">
+                <colgroup>
+                  {orderedVisibleColumns.map((columnKey) => (
+                    <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
+                  ))}
+                  <col style={{ width: 120 }} />
+                </colgroup>
                 <thead className="bg-slate-50 text-left text-slate-600 uppercase tracking-wide text-xs">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Когда</th>
-                    <th className="px-4 py-3 font-semibold">Пользователь</th>
-                    <th className="px-4 py-3 font-semibold">Категория / действие</th>
-                    <th className="px-4 py-3 font-semibold">Описание</th>
-                    <th className="px-4 py-3 font-semibold">Статус</th>
-                    <th className="px-4 py-3 font-semibold">HTTP</th>
-                    <th className="px-4 py-3 font-semibold">Раздел</th>
-                    <th className="px-4 py-3 font-semibold">IP</th>
-                    <th className="px-4 py-3 font-semibold">Длит.</th>
+                    {visibleActivityColumns.map((column) => (
+                      <th
+                        key={column.key}
+                        style={{ width: getColumnWidth(column.key) }}
+                        className={`relative px-4 py-3 font-semibold ${
+                          draggingColumn === column.key ? 'bg-blue-50 text-blue-700' : ''
+                        }`}
+                        onDragOver={handleColumnDragOver}
+                        onDrop={(event) => handleColumnDrop(column.key, event)}>
+                        <div
+                          className="inline-flex min-w-0 select-none items-center gap-2 cursor-grab active:cursor-grabbing"
+                          draggable
+                          onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                          onDragEnd={handleColumnDragEnd}
+                          title="Перетащите, чтобы изменить порядок">
+                          <GripVertical className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">{column.label}</span>
+                        </div>
+                        <div
+                          role="separator"
+                          aria-label={`Изменить ширину колонки ${column.label}`}
+                          className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                          onMouseDown={(event) => handleResizeStart(column.key, event)}
+                          onDragStart={(event) => event.preventDefault()}
+                        />
+                      </th>
+                    ))}
                     <th className="px-4 py-3 font-semibold text-right">Детали</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {loading ? (
                     <tr>
-                      <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+                      <td
+                        colSpan={visibleActivityColumns.length + 1}
+                        className="px-4 py-6 text-center text-slate-500">
                         Загружаем действия пользователей…
                       </td>
                     </tr>
                   ) : logs.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                      <td
+                        colSpan={visibleActivityColumns.length + 1}
+                        className="px-4 py-8 text-center text-slate-500">
                         Пока нет записей, удовлетворяющих условиям фильтра.
                       </td>
                     </tr>
                   ) : (
                     logs.map((log) => {
-                      const actorName = log.userFullName || log.userEmail || 'Система';
-                      const statusClass = statusStyles[log.status];
                       const isExpanded = expandedId === log.id;
 
                       return (
                         <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3 align-top text-slate-700 whitespace-nowrap">{formatDate(log.createdAt)}</td>
-                          <td className="px-4 py-3 align-top">
-                            <div className="font-medium text-slate-900">{actorName}</div>
-                            {log.userEmail && <div className="text-xs text-slate-500">{log.userEmail}</div>}
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <div className="font-medium text-slate-800">{log.category}</div>
-                            <div className="text-xs text-slate-500">{log.action}</div>
-                          </td>
-                          <td className="px-4 py-3 align-top max-w-xs">
-                            <div className="text-sm text-slate-700 line-clamp-3">{log.description || '—'}</div>
-                            {log.objectType && (
-                              <div className="text-xs text-slate-500 mt-1">
-                                {log.objectType} {log.objectId ? `#${log.objectId}` : ''}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusClass}`}>
-                              {statusLabels[log.status]}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <div className="font-mono text-xs text-slate-700">
-                              {log.httpMethod || '—'} {log.httpStatusCode ?? ''}
-                            </div>
-                            {log.path && <div className="text-xs text-slate-500 mt-1 line-clamp-2">{log.path}</div>}
-                          </td>
-                          <td className="px-4 py-3 align-top text-xs text-slate-600">
-                            {log.section || '—'}
-                          </td>
-                          <td className="px-4 py-3 align-top text-xs text-slate-600">
-                            {log.ipAddress || '—'}
-                          </td>
-                          <td className="px-4 py-3 align-top text-xs text-slate-600">
-                            {typeof log.durationMs === 'number' ? `${log.durationMs} мс` : '—'}
-                          </td>
+                          {visibleActivityColumns.map((column) => (
+                            <td
+                              key={column.key}
+                              style={{ width: getColumnWidth(column.key) }}
+                              className="max-w-0 overflow-hidden px-4 py-3 align-top">
+                              {renderCell(log, column.key)}
+                            </td>
+                          ))}
                           <td className="px-4 py-3 align-top text-right">
                             <button
                               type="button"
@@ -596,36 +765,49 @@ export const UserActivity = () => {
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    Страница {page} из {totalPages}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                      disabled={page <= 1}
-                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                      Назад
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                      disabled={page >= totalPages}
-                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Вперёд
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+                <TablePagination
+                  page={page}
+                  totalPages={totalPages}
+                  totalItems={total}
+                  pageSize={pageSize}
+                  pageSizeOptions={PAGE_SIZE_OPTIONS}
+                  onPageChange={setPage}
+                  onPageSizeChange={setPageSize}
+                  recordsLabel="Найдено записей"
+                  pageSizeLabel="Строк на странице"
+                  previousLabel="Назад"
+                  nextLabel="Вперед"
+                />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      <TextPromptModal
+        open={clearPromptOpen}
+        title="Очистить историю контроля"
+        description="Для удаления всей истории контроля введите пароль безопасности."
+        label="Пароль безопасности"
+        value={clearPassword}
+        onValueChange={(value) => {
+          setClearPassword(value);
+          if (clearPromptError) {
+            setClearPromptError(null);
+          }
+        }}
+        onCancel={() => {
+          if (clearing) return;
+          setClearPromptOpen(false);
+          setClearPassword('');
+          setClearPromptError(null);
+        }}
+        onConfirm={submitClearLogs}
+        confirmLabel="Продолжить"
+        cancelLabel="Отмена"
+        error={clearPromptError ?? undefined}
+        loading={clearing}
+      />
     </div>
   );
 };
