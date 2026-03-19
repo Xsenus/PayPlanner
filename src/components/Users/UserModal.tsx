@@ -1,13 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
-import { authService, User, Role, UpdateUserDto } from '../../services/authService';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { X } from 'lucide-react';
+import { authService, type Role, type UpdateUserDto, type User } from '../../services/authService';
+import { useToast } from '../../hooks/useToast';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 interface UserModalProps {
   user: User | null;
   onClose: () => void;
+  onSaved?: () => void;
 }
 
-export const UserModal = ({ user, onClose }: UserModalProps) => {
+export const UserModal = ({ user, onClose, onSaved }: UserModalProps) => {
+  const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -36,39 +40,67 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
       const data = await authService.getRoles();
       setRoles(data);
       if (data.length > 0 && !user) {
-        setRoleId(data.find((r) => r.name === 'user')?.id || data[0].id);
+        setRoleId(data.find((role) => role.name === 'user')?.id || data[0].id);
       }
     } catch (err) {
-      console.error('Ошибка загрузки ролей:', err);
+      const message = extractDisplayErrorMessage(err, 'Не удалось загрузить роли');
+      setError(message);
+      toast.error(message);
     }
-  }, [user]);
+  }, [toast, user]);
 
   useEffect(() => {
     void fetchRoles();
-    if (user) {
-      setEmail(user.email);
-      setFullName(user.fullName);
-      setFirstName(user.firstName || '');
-      setLastName(user.lastName || '');
-      setMiddleName(user.middleName || '');
-      setDateOfBirth(user.dateOfBirth ? user.dateOfBirth.split('T')[0] : '');
-      setPhotoUrl(user.photoUrl || '');
-      setPhoneNumber(user.phoneNumber || '');
-      setWhatsApp(user.whatsApp || '');
-      setTelegram(user.telegram || '');
-      setInstagram(user.instagram || '');
-      setMessenger(user.messenger || '');
-      setViber(user.viber || '');
-      setIsEmployee(user.isEmployee || false);
-      setEmploymentStartDate(user.employmentStartDate ? user.employmentStartDate.split('T')[0] : '');
-      setEmploymentEndDate(user.employmentEndDate ? user.employmentEndDate.split('T')[0] : '');
-      setRoleId(user.role.id);
-      setIsActive(user.isActive);
-    }
-  }, [user, fetchRoles]);
+  }, [fetchRoles]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!user) {
+      setEmail('');
+      setPassword('');
+      setFullName('');
+      setFirstName('');
+      setLastName('');
+      setMiddleName('');
+      setDateOfBirth('');
+      setPhotoUrl('');
+      setPhoneNumber('');
+      setWhatsApp('');
+      setTelegram('');
+      setInstagram('');
+      setMessenger('');
+      setViber('');
+      setIsEmployee(false);
+      setEmploymentStartDate('');
+      setEmploymentEndDate('');
+      setIsActive(true);
+      setError('');
+      return;
+    }
+
+    setEmail(user.email);
+    setPassword('');
+    setFullName(user.fullName);
+    setFirstName(user.firstName || '');
+    setLastName(user.lastName || '');
+    setMiddleName(user.middleName || '');
+    setDateOfBirth(user.dateOfBirth ? user.dateOfBirth.split('T')[0] : '');
+    setPhotoUrl(user.photoUrl || '');
+    setPhoneNumber(user.phoneNumber || '');
+    setWhatsApp(user.whatsApp || '');
+    setTelegram(user.telegram || '');
+    setInstagram(user.instagram || '');
+    setMessenger(user.messenger || '');
+    setViber(user.viber || '');
+    setIsEmployee(Boolean(user.isEmployee));
+    setEmploymentStartDate(user.employmentStartDate ? user.employmentStartDate.split('T')[0] : '');
+    setEmploymentEndDate(user.employmentEndDate ? user.employmentEndDate.split('T')[0] : '');
+    setRoleId(user.role.id);
+    setIsActive(user.isActive);
+    setError('');
+  }, [user]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
 
@@ -96,200 +128,213 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
 
       if (user) {
         await authService.updateUser(user.id, updateData);
+        toast.success('Пользователь обновлен');
       } else {
         await authService.createUser({
-          email,
+          email: email.trim(),
           password,
           fullName: normalizedFullName,
           roleId,
           isActive,
         });
+        toast.success('Пользователь создан');
       }
+
+      onSaved?.();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Произошла ошибка');
+      const message = extractDisplayErrorMessage(err, 'Не удалось сохранить пользователя');
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="my-8 w-full max-w-2xl rounded-xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 p-6">
           <h2 className="text-xl font-bold text-slate-900">
             {user ? 'Редактировать пользователя' : 'Новый пользователь'}
           </h2>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-            <X className="w-5 h-5" />
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 transition-colors hover:bg-slate-100"
+          >
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[calc(100vh-12rem)] overflow-y-auto">
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <form
+          onSubmit={handleSubmit}
+          className="max-h-[calc(100vh-12rem)] space-y-4 overflow-y-auto p-6"
+        >
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}
             </div>
-          )}
+          ) : null}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Полное имя</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Полное имя</label>
               <input
                 type="text"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setFullName(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Имя</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Имя</label>
               <input
                 type="text"
                 value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setFirstName(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Фамилия</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Фамилия</label>
               <input
                 type="text"
                 value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setLastName(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Отчество</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Отчество</label>
               <input
                 type="text"
                 value={middleName}
-                onChange={(e) => setMiddleName(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setMiddleName(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Дата рождения</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Дата рождения</label>
               <input
                 type="date"
                 value={dateOfBirth}
-                onChange={(e) => setDateOfBirth(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setDateOfBirth(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Email</label>
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
-                disabled={!!user}
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                disabled={Boolean(user)}
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Телефон</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Телефон</label>
               <input
                 type="tel"
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setPhoneNumber(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                 placeholder="+7 (999) 123-45-67"
               />
             </div>
           </div>
 
-          {!user && (
+          {!user ? (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Пароль</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Пароль</label>
               <input
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                 required
                 minLength={6}
               />
-              <p className="text-xs text-slate-500 mt-1">Минимум 6 символов</p>
+              <p className="mt-1 text-xs text-slate-500">Минимум 6 символов</p>
             </div>
-          )}
+          ) : null}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Фото (URL)</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Фото (URL)</label>
             <input
               type="url"
               value={photoUrl}
-              onChange={(e) => setPhotoUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+              onChange={(event) => setPhotoUrl(event.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
               placeholder="https://example.com/photo.jpg"
             />
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 mb-3">Социальные сети</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-900">Социальные сети</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">WhatsApp</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">WhatsApp</label>
                 <input
                   type="text"
                   value={whatsApp}
-                  onChange={(e) => setWhatsApp(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  onChange={(event) => setWhatsApp(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="+7 (999) 123-45-67"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Telegram</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Telegram</label>
                 <input
                   type="text"
                   value={telegram}
-                  onChange={(e) => setTelegram(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  onChange={(event) => setTelegram(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="@username"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Instagram</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Instagram</label>
                 <input
                   type="text"
                   value={instagram}
-                  onChange={(e) => setInstagram(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  onChange={(event) => setInstagram(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="@username"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Messenger</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Messenger</label>
                 <input
                   type="text"
                   value={messenger}
-                  onChange={(e) => setMessenger(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  onChange={(event) => setMessenger(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="Имя или ID"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Viber</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Viber</label>
                 <input
                   type="text"
                   value={viber}
-                  onChange={(e) => setViber(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  onChange={(event) => setViber(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="+7 (999) 123-45-67"
                 />
               </div>
@@ -297,58 +342,60 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
           </div>
 
           <div className="border-t border-slate-200 pt-4">
-            <div className="flex items-center gap-3 mb-4">
+            <div className="mb-4 flex items-center gap-3">
               <input
                 type="checkbox"
                 id="isEmployee"
                 checked={isEmployee}
-                onChange={(e) => setIsEmployee(e.target.checked)}
-                className="w-4 h-4 text-slate-900 border-slate-300 rounded focus:ring-slate-900"
+                onChange={(event) => setIsEmployee(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
               />
               <label htmlFor="isEmployee" className="text-sm font-medium text-slate-700">
                 Является сотрудником
               </label>
             </div>
 
-            {isEmployee && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ml-7">
+            {isEmployee ? (
+              <div className="ml-7 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
                     Дата начала работы
                   </label>
                   <input
                     type="date"
                     value={employmentStartDate}
-                    onChange={(e) => setEmploymentStartDate(e.target.value)}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    onChange={(event) => setEmploymentStartDate(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
                     Дата увольнения
                   </label>
                   <input
                     type="date"
                     value={employmentEndDate}
-                    onChange={(e) => setEmploymentEndDate(e.target.value)}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    onChange={(event) => setEmploymentEndDate(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
                   />
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Роль</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Роль</label>
             <select
               value={roleId}
-              onChange={(e) => setRoleId(Number(e.target.value))}
-              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
-              required>
+              onChange={(event) => setRoleId(Number(event.target.value))}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              required
+            >
               {roles.map((role) => (
                 <option key={role.id} value={role.id}>
-                  {role.name.charAt(0).toUpperCase() + role.name.slice(1)} — {role.description}
+                  {role.name.charAt(0).toUpperCase() + role.name.slice(1)}
+                  {role.description ? ` - ${role.description}` : ''}
                 </option>
               ))}
             </select>
@@ -359,8 +406,8 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
               type="checkbox"
               id="isActive"
               checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="w-4 h-4 text-slate-900 border-slate-300 rounded focus:ring-slate-900"
+              onChange={(event) => setIsActive(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
             />
             <label htmlFor="isActive" className="text-sm font-medium text-slate-700">
               Активный пользователь
@@ -371,14 +418,16 @@ export const UserModal = ({ user, onClose }: UserModalProps) => {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
+              className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-slate-700 transition-colors hover:bg-slate-50"
+            >
               Отмена
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50">
-              {loading ? 'Сохраняем…' : user ? 'Обновить' : 'Создать'}
+              className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
+            >
+              {loading ? 'Сохраняем...' : user ? 'Обновить' : 'Создать'}
             </button>
           </div>
         </form>

@@ -12,9 +12,11 @@ import {
   Loader2,
   Plus,
   Edit,
+  GripVertical,
   Trash2,
   RotateCcw,
   Search,
+  Settings2,
   WalletCards,
   CheckCircle2,
   Send,
@@ -29,14 +31,17 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
+import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { apiService } from '../../services/api';
-import { usePayments } from '../../hooks/usePayments';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import type {
   Act,
@@ -67,6 +72,9 @@ import { formatCurrencySmart } from '../../utils/formatters';
 import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
+import { FormPromptModal } from '../ui/FormPromptModal';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import {
@@ -78,6 +86,7 @@ import {
 interface ClientDetailProps {
   clientId: number;
   onBack: () => void;
+  onClientUpdated?: (client: Client) => void;
   initialCaseId?: number | 'all';
 }
 
@@ -92,6 +101,40 @@ type ClientDetailSection =
   | 'acts'
   | 'contracts'
   | 'settlement';
+
+type PaymentTableColumnKey =
+  | 'period'
+  | 'amountType'
+  | 'category'
+  | 'caseContact'
+  | 'details'
+  | 'status';
+
+type InvoiceTableColumnKey =
+  | 'date'
+  | 'number'
+  | 'amount'
+  | 'status'
+  | 'dueDate'
+  | 'responsible'
+  | 'createdAt';
+
+type ActTableColumnKey =
+  | 'date'
+  | 'number'
+  | 'title'
+  | 'amount'
+  | 'status'
+  | 'responsible'
+  | 'counterpartyInn';
+
+type ContractTableColumnKey =
+  | 'number'
+  | 'date'
+  | 'clients'
+  | 'amount'
+  | 'validUntil'
+  | 'createdAt';
 
 // Временно закомментировано: вкладки/документы профиля, чтобы не ломать lint до возвращения UI.
 // type ProfileTabKey =
@@ -116,6 +159,63 @@ const SECTION_ORDER: ClientDetailSection[] = [
   'acts',
   'contracts',
   'settlement',
+];
+
+const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = 'pp.client_detail_table';
+
+const PAYMENT_TABLE_COLUMNS: Array<{
+  key: PaymentTableColumnKey;
+  label: string;
+  defaultWidth: number;
+}> = [
+  { key: 'period', label: 'Период', defaultWidth: 210 },
+  { key: 'amountType', label: 'Сумма и тип', defaultWidth: 230 },
+  { key: 'category', label: 'Категория / источник', defaultWidth: 250 },
+  { key: 'caseContact', label: 'Дело и контакт', defaultWidth: 240 },
+  { key: 'details', label: 'Документы и комментарии', defaultWidth: 300 },
+  { key: 'status', label: 'Статус и прогресс', defaultWidth: 240 },
+];
+
+const INVOICE_TABLE_COLUMNS: Array<{
+  key: InvoiceTableColumnKey;
+  label: string;
+  defaultWidth: number;
+}> = [
+  { key: 'date', label: 'Дата', defaultWidth: 140 },
+  { key: 'number', label: 'Номер счета', defaultWidth: 240 },
+  { key: 'amount', label: 'Сумма', defaultWidth: 160 },
+  { key: 'status', label: 'Статус', defaultWidth: 170 },
+  { key: 'dueDate', label: 'Срок оплаты', defaultWidth: 170 },
+  { key: 'responsible', label: 'Ответственный', defaultWidth: 180 },
+  { key: 'createdAt', label: 'Создан', defaultWidth: 150 },
+];
+
+const ACT_TABLE_COLUMNS: Array<{
+  key: ActTableColumnKey;
+  label: string;
+  defaultWidth: number;
+}> = [
+  { key: 'date', label: 'Дата', defaultWidth: 140 },
+  { key: 'number', label: 'Номер', defaultWidth: 180 },
+  { key: 'title', label: 'Название', defaultWidth: 260 },
+  { key: 'amount', label: 'Сумма', defaultWidth: 160 },
+  { key: 'status', label: 'Статус', defaultWidth: 160 },
+  { key: 'responsible', label: 'Ответственный', defaultWidth: 180 },
+  { key: 'counterpartyInn', label: 'ИНН', defaultWidth: 160 },
+];
+
+const CONTRACT_TABLE_COLUMNS: Array<{
+  key: ContractTableColumnKey;
+  label: string;
+  defaultWidth: number;
+}> = [
+  { key: 'number', label: 'Номер договора', defaultWidth: 180 },
+  { key: 'date', label: 'Дата договора', defaultWidth: 150 },
+  { key: 'clients', label: 'Клиенты', defaultWidth: 260 },
+  { key: 'amount', label: 'Сумма договора', defaultWidth: 170 },
+  { key: 'validUntil', label: 'Действует до', defaultWidth: 170 },
+  { key: 'createdAt', label: 'Создано', defaultWidth: 150 },
 ];
 
 const SECTION_META: Record<
@@ -235,6 +335,19 @@ function toRuPaymentStatus(status?: string, fallback: string = '—'): string {
   if (normalized.includes('schedule')) return 'Запланировано';
   if (normalized.includes('fail') || normalized.includes('error')) return 'Ошибка';
   return fallback;
+}
+
+function toPaymentStatusFilter(s: 'all' | NormalizedStatus): PaymentStatus | undefined {
+  switch (s) {
+    case 'completed':
+      return 'Completed';
+    case 'overdue':
+      return 'Overdue';
+    case 'pending':
+      return 'Pending';
+    default:
+      return undefined;
+  }
 }
 
 const MIN_DATE = '1900-01-01';
@@ -680,11 +793,13 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     legacyNotes: profile.legacyNotes.trim(),
   });
 
-export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailProps) {
+export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId }: ClientDetailProps) {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const { confirm, alert } = useDialog();
+  const { user, isAdmin } = useAuth();
+  const { confirm } = useDialog();
+  const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
+  const userIsAdmin = isAdmin();
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
@@ -754,6 +869,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     comment: '',
     legacyNotes: '',
     legalEntityId: '',
+    responsibleUserId: '',
     isActive: true,
     clientStatusId: '',
   });
@@ -763,6 +879,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>([]);
   const [activeProfileGroup, setActiveProfileGroup] = useState<'main' | 'passports' | 'addresses' | 'education' | 'professions' | 'workplaces' | 'relatives' | 'birthCertificates' | 'militaryIds' | 'poa'>('main');
+  const [legalEntityPromptOpen, setLegalEntityPromptOpen] = useState(false);
+  const [legalEntityPromptSubmitting, setLegalEntityPromptSubmitting] = useState(false);
+  const [legalEntityPromptError, setLegalEntityPromptError] = useState<string | null>(null);
+  const [legalEntityDraft, setLegalEntityDraft] = useState({ shortName: '', inn: '' });
+  const [poaPromptOpen, setPoaPromptOpen] = useState(false);
+  const [poaPromptSubmitting, setPoaPromptSubmitting] = useState(false);
+  const [poaPromptError, setPoaPromptError] = useState<string | null>(null);
+  const [poaDraft, setPoaDraft] = useState({ number: '', issuedAt: formatLocalYMD(new Date()) });
 
   const hasMeaningfulValue = (value: unknown): boolean => {
     if (value === null || value === undefined) return false;
@@ -793,9 +917,80 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const hasAnyRequiredList = (requiredKeys: string[] | undefined) =>
     Boolean(requiredKeys?.some((requiredKey) => isRequired(requiredKey)));
 
+  const closeLegalEntityPrompt = (force = false) => {
+    if (legalEntityPromptSubmitting && !force) return;
+    setLegalEntityPromptOpen(false);
+    setLegalEntityPromptError(null);
+    setLegalEntityDraft({ shortName: '', inn: '' });
+  };
+
+  const submitQuickLegalEntity = async () => {
+    const shortName = legalEntityDraft.shortName.trim();
+    const inn = legalEntityDraft.inn.trim();
+
+    if (!shortName) {
+      setLegalEntityPromptError('Укажите название организации.');
+      return;
+    }
+
+    try {
+      setLegalEntityPromptSubmitting(true);
+      const created = await createLegalEntity({ shortName, inn: inn || undefined, clientIds: [] });
+      await refreshLegalEntities();
+      setClientFormState((prev) => ({
+        ...prev,
+        workplaces: prev.workplaces.length
+          ? prev.workplaces.map((workplace, index) =>
+              index === prev.workplaces.length - 1 ? { ...workplace, organizationName: created.shortName } : workplace,
+            )
+          : [{ organizationName: created.shortName, position: '', startDate: '', endDate: '' }],
+      }));
+      closeLegalEntityPrompt(true);
+      toast.success('Организация создана.', 'Юрлица');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось создать организацию');
+      setLegalEntityPromptError(message);
+      toast.error(message, 'Юрлица');
+    } finally {
+      setLegalEntityPromptSubmitting(false);
+    }
+  };
+
+  const closePoaPrompt = (force = false) => {
+    if (poaPromptSubmitting && !force) return;
+    setPoaPromptOpen(false);
+    setPoaPromptError(null);
+    setPoaDraft({ number: '', issuedAt: formatLocalYMD(new Date()) });
+  };
+
+  const submitQuickPowerOfAttorney = async () => {
+    const number = poaDraft.number.trim();
+    const issuedAt = poaDraft.issuedAt.trim();
+
+    if (!number || !issuedAt) {
+      setPoaPromptError('Укажите номер и дату выдачи доверенности.');
+      return;
+    }
+
+    try {
+      setPoaPromptSubmitting(true);
+      const created = await apiService.createClientPowerOfAttorney(clientId, { number, issuedAt, isActive: true });
+      setPowersOfAttorney((prev) => [created, ...prev]);
+      closePoaPrompt(true);
+      toast.success('Доверенность создана.', 'Доверенности');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось создать доверенность');
+      setPoaPromptError(message);
+      toast.error(message, 'Доверенности');
+    } finally {
+      setPoaPromptSubmitting(false);
+    }
+  };
+
   const fieldLabels: Record<string, string> = {
     Emails: 'Email',
     Relatives: 'Родственники',
+    ResponsibleUserId: 'Ответственный',
     ClientStatusId: 'Статус клиента',
     LastName: 'Фамилия',
     FirstName: 'Имя',
@@ -806,21 +1001,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   };
 
   const formatApiValidationError = (error: unknown, fallback: string) => {
-    const raw = error instanceof Error ? error.message : String(error);
-    const marker = ' - ';
-    const markerIndex = raw.indexOf(marker);
-    const payload = markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
-
-    try {
-      const parsed = JSON.parse(payload) as { message?: string; missingFields?: string[] };
-      const base = parsed.message?.trim() || fallback;
-      const missing = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
-      if (missing.length === 0) return base;
-      const mapped = missing.map((field) => fieldLabels[field] ?? field).join(', ');
-      return `${base}: ${mapped}`;
-    } catch {
-      return raw || fallback;
-    }
+    return extractDisplayErrorMessage(error, fallback, fieldLabels);
   };
 
   const { cases: serverCases } = useClientCases(clientId);
@@ -848,6 +1029,34 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | NormalizedStatus>('all');
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [paymentTableSettingsOpen, setPaymentTableSettingsOpen] = useState(false);
+  const {
+    columnOrder: paymentColumnOrder,
+    orderedVisibleColumns: paymentOrderedVisibleColumns,
+    visibleColumns: paymentVisibleColumns,
+    pageSize: paymentPageSize,
+    setPageSize: setPaymentPageSize,
+    draggingColumn: draggingPaymentColumn,
+    toggleColumn: togglePaymentColumn,
+    moveColumn: movePaymentColumn,
+    handleColumnDragStart: handlePaymentColumnDragStart,
+    handleColumnDragOver: handlePaymentColumnDragOver,
+    handleColumnDrop: handlePaymentColumnDrop,
+    handleColumnDragEnd: handlePaymentColumnDragEnd,
+    handleResizeStart: handlePaymentResizeStart,
+    getColumnWidth: getPaymentColumnWidth,
+    resetTableSettings: resetPaymentTableSettings,
+  } = usePersistedTableSettings<PaymentTableColumnKey>({
+    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.payments.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'client_detail_payments_table',
+    columns: PAYMENT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
+      key,
+      defaultWidth,
+    })),
+    defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
+    minColumnWidth: 120,
+  });
 
   const [actFrom, setActFrom] = useState<string>(() =>
     formatLocalYMD(new Date(new Date().getFullYear(), 0, 1)),
@@ -860,7 +1069,33 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     { key: 'date', direction: 'desc' },
   );
   const [actPage, setActPage] = useState(1);
-  const actPageSize = 10;
+  const [actTableSettingsOpen, setActTableSettingsOpen] = useState(false);
+  const {
+    columnOrder: actColumnOrder,
+    orderedVisibleColumns: actOrderedVisibleColumns,
+    visibleColumns: actVisibleColumns,
+    pageSize: actPageSize,
+    setPageSize: setActPageSize,
+    draggingColumn: draggingActColumn,
+    toggleColumn: toggleActColumn,
+    moveColumn: moveActColumn,
+    handleColumnDragStart: handleActColumnDragStart,
+    handleColumnDragOver: handleActColumnDragOver,
+    handleColumnDrop: handleActColumnDrop,
+    handleColumnDragEnd: handleActColumnDragEnd,
+    handleResizeStart: handleActResizeStart,
+    getColumnWidth: getActColumnWidth,
+    resetTableSettings: resetActTableSettings,
+  } = usePersistedTableSettings<ActTableColumnKey>({
+    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.acts.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'client_detail_acts_table',
+    columns: ACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
+      key,
+      defaultWidth,
+    })),
+    defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
+    minColumnWidth: 120,
+  });
 
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -887,7 +1122,33 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     direction: 'desc',
   });
   const [invoicePage, setInvoicePage] = useState(1);
-  const invoicePageSize = 15;
+  const [invoiceTableSettingsOpen, setInvoiceTableSettingsOpen] = useState(false);
+  const {
+    columnOrder: invoiceColumnOrder,
+    orderedVisibleColumns: invoiceOrderedVisibleColumns,
+    visibleColumns: invoiceVisibleColumns,
+    pageSize: invoicePageSize,
+    setPageSize: setInvoicePageSize,
+    draggingColumn: draggingInvoiceColumn,
+    toggleColumn: toggleInvoiceColumn,
+    moveColumn: moveInvoiceColumn,
+    handleColumnDragStart: handleInvoiceColumnDragStart,
+    handleColumnDragOver: handleInvoiceColumnDragOver,
+    handleColumnDrop: handleInvoiceColumnDrop,
+    handleColumnDragEnd: handleInvoiceColumnDragEnd,
+    handleResizeStart: handleInvoiceResizeStart,
+    getColumnWidth: getInvoiceColumnWidth,
+    resetTableSettings: resetInvoiceTableSettings,
+  } = usePersistedTableSettings<InvoiceTableColumnKey>({
+    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'client_detail_invoices_table',
+    columns: INVOICE_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
+      key,
+      defaultWidth,
+    })),
+    defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
+    minColumnWidth: 120,
+  });
 
   const [contractFrom, setContractFrom] = useState<string>(startOfYear);
   const [contractTo, setContractTo] = useState<string>(todayYMD);
@@ -898,7 +1159,33 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     direction: 'desc',
   });
   const [contractPage, setContractPage] = useState(1);
-  const contractPageSize = 10;
+  const [contractTableSettingsOpen, setContractTableSettingsOpen] = useState(false);
+  const {
+    columnOrder: contractColumnOrder,
+    orderedVisibleColumns: contractOrderedVisibleColumns,
+    visibleColumns: contractVisibleColumns,
+    pageSize: contractPageSize,
+    setPageSize: setContractPageSize,
+    draggingColumn: draggingContractColumn,
+    toggleColumn: toggleContractColumn,
+    moveColumn: moveContractColumn,
+    handleColumnDragStart: handleContractColumnDragStart,
+    handleColumnDragOver: handleContractColumnDragOver,
+    handleColumnDrop: handleContractColumnDrop,
+    handleColumnDragEnd: handleContractColumnDragEnd,
+    handleResizeStart: handleContractResizeStart,
+    getColumnWidth: getContractColumnWidth,
+    resetTableSettings: resetContractTableSettings,
+  } = usePersistedTableSettings<ContractTableColumnKey>({
+    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.contracts.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'client_detail_contracts_table',
+    columns: CONTRACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
+      key,
+      defaultWidth,
+    })),
+    defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
+    minColumnWidth: 120,
+  });
 
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceModalMode, setInvoiceModalMode] = useState<'create' | 'edit'>('create');
@@ -941,7 +1228,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     setActPage(1);
-  }, [actFrom, actTo, actStatusFilter, debouncedActSearch, clientId]);
+  }, [actFrom, actTo, actStatusFilter, debouncedActSearch, clientId, actPageSize]);
 
   const {
     invoices: clientInvoices,
@@ -965,7 +1252,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     setInvoicePage(1);
-  }, [clientId]);
+  }, [clientId, invoicePageSize]);
 
   const invoiceTotalPages = useMemo(() => {
     if (!invoicesPagination.pageSize) return 1;
@@ -1010,7 +1297,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
 
   useEffect(() => {
     setContractPage(1);
-  }, [contractFrom, contractTo, debouncedContractSearch, clientId]);
+  }, [contractFrom, contractTo, debouncedContractSearch, clientId, contractPageSize]);
 
   const contractTotalPages = useMemo(() => {
     if (!contractsPagination.pageSize) return 1;
@@ -1091,12 +1378,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     try {
       if (isEdit && selectedInvoice) {
         await updateClientInvoice(selectedInvoice.id, payload);
+        toast.success('Изменения по счету сохранены.', 'Счет обновлен');
       } else {
         await createClientInvoice(payload);
+        toast.success('Счет успешно создан.', 'Счет сохранен');
       }
       closeInvoiceModal();
     } catch (err) {
-      setInvoiceModalError(err instanceof Error ? err.message : 'Не удалось сохранить счёт');
+      setInvoiceModalError(extractDisplayErrorMessage(err, 'Не удалось сохранить счет'));
     } finally {
       setInvoiceSubmitting(false);
     }
@@ -1111,7 +1400,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     try {
       await deleteClientInvoice(invoice.id);
     } catch (err) {
-      await alert({ title: 'Ошибка', description: err instanceof Error ? err.message : 'Не удалось удалить счёт', variant: 'error' });
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить счёт'), 'Ошибка удаления');
     }
   };
 
@@ -1154,9 +1443,11 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       const updated = await apiService.updateClient(clientId, payload);
       setClientData(updated);
       setClientName(updated.name ?? `Client #${clientId}`);
+      onClientUpdated?.(updated);
+      return updated;
     } catch (err) {
       const message = formatApiValidationError(err, 'Не удалось обновить клиента');
-      await alert({ title: 'Ошибка', description: message, variant: 'error' });
+      toast.error(message, 'Ошибка сохранения');
       throw err instanceof Error ? err : new Error(message);
     }
   };
@@ -1191,9 +1482,9 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
         const usage = Array.isArray(parsed.usage) && parsed.usage.length > 0
           ? ` Используется в: ${parsed.usage.join(', ')}.`
           : '';
-        await alert({ title: 'Удаление невозможно', description: `${message}${usage}`.trim(), variant: 'error' });
+        toast.error(`${message}${usage}`.trim(), 'Удаление невозможно');
       } catch {
-        await alert({ title: 'Удаление невозможно', description: raw, variant: 'error' });
+        toast.error(raw, 'Удаление невозможно');
       }
     }
   };
@@ -1321,8 +1612,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
 
   const showPermissionWarning = useCallback((message: string) => {
-    void alert({ title: 'Недостаточно прав', description: message || 'Недостаточно прав для выполнения действия.', variant: 'error' });
-  }, [alert]);
+    toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
+  }, [toast]);
 
   useEffect(() => {
     let alive = true;
@@ -1394,6 +1685,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       comment: profile.comment,
       legacyNotes: profile.legacyNotes,
       legalEntityId: clientData.legalEntityId ? String(clientData.legalEntityId) : '',
+      responsibleUserId: clientData.responsibleUserId ? String(clientData.responsibleUserId) : '',
       isActive: clientData.isActive ?? true,
       clientStatusId: clientData.clientStatusId ? String(clientData.clientStatusId) : '',
     });
@@ -1421,43 +1713,68 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return { fromDateStr: MIN_DATE, toDateStr: MAX_DATE };
   }, [monthFrom, monthTo]);
 
-  const pollInterval = payModalOpen ? 0 : 5000;
   const {
     payments,
+    total: paymentsTotal,
     loading: loadingPayments,
-    error,
+    error: paymentsError,
     refresh: refreshPayments,
-    createPayment,
-    updatePayment,
-    deletePayment,
-  } = usePayments(fromDateStr, toDateStr, { pollInterval, clientId, caseId: caseIdForQuery });
+  } = usePaymentsPaged({
+    from: fromDateStr,
+    to: toDateStr,
+    clientId,
+    caseId: caseIdForQuery,
+    status: toPaymentStatusFilter(statusFilter),
+    sortBy: 'date',
+    sortDir: 'asc',
+    page: paymentPage,
+    pageSize: paymentPageSize,
+  });
 
-  function makeStatsSignature(arr: Payment[]): string {
-    if (!arr || arr.length === 0) return 'empty';
-    return arr
-      .map((p) => `${p.id}:${p.amount}:${p.status}:${p.type}`)
-      .sort()
-      .join('|');
-  }
-  const prevStatsSigRef = useRef<string>('init');
+  const visiblePayments = payments;
+  const visiblePaymentTableColumns = useMemo(() => {
+    const columnMap = new Map(PAYMENT_TABLE_COLUMNS.map((column) => [column.key, column]));
+    return paymentOrderedVisibleColumns.flatMap((columnKey) => {
+      const column = columnMap.get(columnKey);
+      return column ? [column] : [];
+    });
+  }, [paymentOrderedVisibleColumns]);
+  const visibleInvoiceTableColumns = useMemo(() => {
+    const columnMap = new Map(INVOICE_TABLE_COLUMNS.map((column) => [column.key, column]));
+    return invoiceOrderedVisibleColumns.flatMap((columnKey) => {
+      const column = columnMap.get(columnKey);
+      return column ? [column] : [];
+    });
+  }, [invoiceOrderedVisibleColumns]);
+  const visibleActTableColumns = useMemo(() => {
+    const columnMap = new Map(ACT_TABLE_COLUMNS.map((column) => [column.key, column]));
+    return actOrderedVisibleColumns.flatMap((columnKey) => {
+      const column = columnMap.get(columnKey);
+      return column ? [column] : [];
+    });
+  }, [actOrderedVisibleColumns]);
+  const visibleContractTableColumns = useMemo(() => {
+    const columnMap = new Map(CONTRACT_TABLE_COLUMNS.map((column) => [column.key, column]));
+    return contractOrderedVisibleColumns.flatMap((columnKey) => {
+      const column = columnMap.get(columnKey);
+      return column ? [column] : [];
+    });
+  }, [contractOrderedVisibleColumns]);
+  const paymentTotalPages = useMemo(() => {
+    if (!paymentPageSize) return 1;
+    return Math.max(1, Math.ceil((paymentsTotal ?? 0) / paymentPageSize));
+  }, [paymentPageSize, paymentsTotal]);
+
   useEffect(() => {
-    const sig = makeStatsSignature(payments);
-    if (prevStatsSigRef.current !== sig) {
-      prevStatsSigRef.current = sig;
-      bumpStats();
-    }
-  }, [payments]);
+    if (activeSection !== 'payments') setPaymentTableSettingsOpen(false);
+    if (activeSection !== 'accounts') setInvoiceTableSettingsOpen(false);
+    if (activeSection !== 'acts') setActTableSettingsOpen(false);
+    if (activeSection !== 'contracts') setContractTableSettingsOpen(false);
+  }, [activeSection]);
 
-  const lastPaymentDate = useMemo(() => {
-    if (!payments.length) return null;
-    return payments.map((p) => p.date).sort((a, b) => +new Date(b) - +new Date(a))[0];
-  }, [payments]);
-
-  const visiblePayments = useMemo(() => {
-    const list = payments.slice().sort((a, b) => +new Date(a.date) - +new Date(b.date));
-    if (statusFilter === 'all') return list;
-    return list.filter((p) => normalizeStatus(p.status) === statusFilter);
-  }, [payments, statusFilter]);
+  useEffect(() => {
+    setPaymentPage(1);
+  }, [caseIdForQuery, fromDateStr, paymentPageSize, statusFilter, toDateStr]);
 
   const actModalClients = useMemo(() => {
     const normalizedName = clientName && clientName !== '...' ? clientName : `Клиент #${clientId}`;
@@ -1473,6 +1790,8 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           notes: '',
           createdAt: '1970-01-01T00:00:00.000Z',
           isActive: true,
+          responsibleUserId: clientData?.responsibleUserId ?? null,
+          responsibleUserName: clientData?.responsibleUserName ?? null,
         } satisfies Client,
       ];
     }
@@ -1530,12 +1849,14 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
           notes: '',
           createdAt: '1970-01-01T00:00:00.000Z',
           isActive: true,
+          responsibleUserId: clientData?.responsibleUserId ?? null,
+          responsibleUserName: clientData?.responsibleUserName ?? null,
         } satisfies Client,
       ];
     }
 
     return invoiceClients;
-  }, [invoiceClients, clientId, clientName]);
+  }, [clientData?.responsibleUserId, clientData?.responsibleUserName, invoiceClients, clientId, clientName]);
 
   const contractDefaultClients = useMemo<ContractClient[]>(() => {
     const normalizedName =
@@ -1608,6 +1929,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     return Math.max(1, Math.ceil((actsPagination.total ?? 0) / size));
   }, [actsPagination.pageSize, actsPagination.total, actPageSize]);
 
+  useEffect(() => {
+    setActPage(1);
+  }, [actPageSize]);
+
   const editClientLabel = t('editClient') ?? 'Изменить клиента';
   const addCaseLabel = t('addCase') ?? 'Добавить дело';
 
@@ -1642,6 +1967,26 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     );
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
+  const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
+
+  const clientResponsibleOptions = useMemo(() => {
+    const options = [...actResponsibles];
+    const currentResponsibleId = clientFormState.responsibleUserId
+      ? Number(clientFormState.responsibleUserId)
+      : null;
+    if (
+      currentResponsibleId
+      && !options.some((responsible) => responsible.id === currentResponsibleId)
+      && clientData?.responsibleUserName
+    ) {
+      options.push({ id: currentResponsibleId, fullName: clientData.responsibleUserName });
+    }
+
+    return options.sort((a, b) =>
+      a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }),
+    );
+  }, [actResponsibles, clientData?.responsibleUserName, clientFormState.responsibleUserId]);
+
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
     if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
@@ -1666,6 +2011,12 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       void ensureActLookups();
     }
   }, [actModalOpen, ensureActLookups]);
+
+  useEffect(() => {
+    if (invoiceModalOpen || canManageClientResponsible) {
+      void ensureActLookups();
+    }
+  }, [canManageClientResponsible, ensureActLookups, invoiceModalOpen]);
 
   const openAddPayment = () => {
     if (!clientPermissions.canCreate) {
@@ -1741,15 +2092,26 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       showPermissionWarning(t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.');
       return;
     }
-    if (isEdit) {
-      const { id, ...rest } = payload;
-      await updatePayment({ id, ...toBody(rest) });
-    } else {
-      await createPayment(toBody(payload));
+    try {
+      if (isEdit) {
+        const { id, ...rest } = payload;
+        await apiService.updatePayment(id, toBody(rest));
+      } else {
+        await apiService.createPayment(toBody(payload));
+      }
+      await refreshPayments();
+      bumpStats();
+      toast.success(isEdit ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(
+          error,
+          isEdit ? 'Не удалось сохранить платёж' : 'Не удалось создать платёж',
+        ),
+        'Платежи',
+      );
+      throw error;
     }
-    closePayModal();
-    await refreshPayments();
-    bumpStats();
   };
 
   const removePayment = async (id: number) => {
@@ -1758,9 +2120,20 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
       return;
     }
     if (!(await confirm({ title: 'Подтверждение удаления', description: 'Удалить платёж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
-    await deletePayment(id);
-    await refreshPayments();
-    bumpStats();
+    try {
+      await apiService.deletePayment(id);
+      if (payments.length === 1 && paymentPage > 1) {
+        setPaymentPage((currentPage) => Math.max(1, currentPage - 1));
+      } else {
+        await refreshPayments();
+      }
+      bumpStats();
+      toast.success('Платёж удалён.', 'Платежи');
+      return true;
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить платёж'), 'Платежи');
+      return false;
+    }
   };
 
   const submitAct = async (payload: ActInput) => {
@@ -1811,7 +2184,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     try {
       await deleteAct(act.id);
     } catch (error) {
-      await alert({ title: 'Ошибка', description: error instanceof Error ? error.message : 'Не удалось удалить акт', variant: 'error' });
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить акт'), 'Ошибка удаления');
     }
   };
 
@@ -1889,7 +2262,7 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     setSelectedCaseId('all');
   };
 
-  const notFound = !loadingPayments && clientName === '...' && payments.length === 0;
+  const notFound = !clientData && clientName === `Client #${clientId}`;
 
   const handleClientFormChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -1897,6 +2270,10 @@ export function ClientDetail({ clientId, onBack, initialCaseId }: ClientDetailPr
     const { name, value } = event.target;
     if (name === 'legalEntityId') {
       setClientFormState((prev) => ({ ...prev, legalEntityId: value }));
+      return;
+    }
+    if (name === 'responsibleUserId') {
+      setClientFormState((prev) => ({ ...prev, responsibleUserId: value }));
       return;
     }
     if (name === 'clientStatusId') {
@@ -2081,7 +2458,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
       const suggestions = await apiService.suggestClientAddresses(raw, 7);
       setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: suggestions ?? [] }));
     } catch (error) {
-      await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось получить подсказки адресов', variant: 'error' });
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось получить подсказки адресов'), 'DaData');
     }
   };
 
@@ -2156,7 +2533,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
       }
 
       if (!options?.silent) {
-        await alert({ title: 'DaData', description: error instanceof Error ? error.message : 'Не удалось найти адрес', variant: 'error' });
+        toast.error(extractDisplayErrorMessage(error, 'Не удалось найти адрес'), 'DaData');
         return;
       }
       throw error;
@@ -2271,25 +2648,36 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         ? registrationAddress
         : profile.actualAddress.trim();
       if (profile.kind === 'legal' && !clientFormState.legalEntityId) {
-        await alert({ title: 'Проверка данных', description: 'Для карточки юридического лица выберите юридическое лицо из списка.', variant: 'error' });
+        toast.error(
+          'Для карточки юридического лица выберите юридическое лицо из списка.',
+          'Проверка данных',
+        );
         return;
       }
-      await handleUpdateClient({
-        name: buildClientDisplayName(profile, selectedLegalEntity?.shortName ?? selectedLegalEntity?.fullName ?? undefined),
-        email: normalizedEmails[0] ?? '',
-        phone: normalizedPhones[0] ?? '',
-        company: profile.kind === 'legal' ? selectedLegalEntity?.shortName ?? 'Юридическое лицо' : '',
-        address: registrationAddress || actualAddress || normalizedAddresses[0] || '',
-        notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,
-        isActive: clientFormState.isActive,
-        legalEntityId:
-          profile.kind === 'legal' && clientFormState.legalEntityId
-            ? Number(clientFormState.legalEntityId)
+      try {
+        await handleUpdateClient({
+          name: buildClientDisplayName(profile, selectedLegalEntity?.shortName ?? selectedLegalEntity?.fullName ?? undefined),
+          email: normalizedEmails[0] ?? '',
+          phone: normalizedPhones[0] ?? '',
+          company: profile.kind === 'legal' ? selectedLegalEntity?.shortName ?? 'Юридическое лицо' : '',
+          address: registrationAddress || actualAddress || normalizedAddresses[0] || '',
+          notes: `${CLIENT_PROFILE_NOTES_PREFIX}${serializeClientExtendedProfile(profile)}`,
+          isActive: clientFormState.isActive,
+          legalEntityId:
+            profile.kind === 'legal' && clientFormState.legalEntityId
+              ? Number(clientFormState.legalEntityId)
+              : null,
+          responsibleUserId: clientFormState.responsibleUserId
+            ? Number(clientFormState.responsibleUserId)
             : null,
-        clientStatusId: clientFormState.clientStatusId
-          ? Number(clientFormState.clientStatusId)
-          : null,
-      });
+          clientStatusId: clientFormState.clientStatusId
+            ? Number(clientFormState.clientStatusId)
+            : null,
+        });
+      toast.success('Изменения карточки клиента сохранены.', 'Клиент обновлен');
+      } catch {
+        return;
+      }
     } finally {
       setClientFormSaving(false);
     }
@@ -2332,6 +2720,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
             className="flex-1 min-w-0 text-2xl font-bold text-gray-900 flex flex-wrap items-center gap-3"
             title={clientName}>
             <span className="truncate">{clientName}</span>
+            {clientData?.responsibleUserName && (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                Ответственный: {clientData.responsibleUserName}
+              </span>
+            )}
             <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -2430,13 +2823,39 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
               </div>
-              <div className="w-full max-w-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>
-                <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ClientStatusId', clientFormState.clientStatusId)}`}>
-                  <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
-                  {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
-                </select>
-                {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
+              <div className="w-full max-w-2xl grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {'Ответственный' + requiredMark('ResponsibleUserId')}
+                  </label>
+                  <select
+                    name="responsibleUserId"
+                    value={clientFormState.responsibleUserId}
+                    onChange={handleClientFormChange}
+                    disabled={!canManageClientResponsible}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ResponsibleUserId', clientFormState.responsibleUserId)}`}
+                  >
+                    <option value="">Не указан</option>
+                    {clientResponsibleOptions.map((responsible) => (
+                      <option key={responsible.id} value={responsible.id}>
+                        {responsible.fullName}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {canManageClientResponsible
+                      ? 'По умолчанию подставляется пользователь, который создал клиента.'
+                      : 'Назначается автоматически при создании клиента. Изменение доступно администратору.'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>
+                  <select name="clientStatusId" value={clientFormState.clientStatusId} onChange={handleClientFormChange} disabled={!clientPermissions.canEdit} className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ClientStatusId', clientFormState.clientStatusId)}`}>
+                    <option value="">{t('clientStatusNotSelected') || 'Без статуса'}</option>
+                    {sortedClientStatuses.map((status) => (<option key={status.id} value={status.id}>{status.name}</option>))}
+                  </select>
+                  {selectedClientStatus?.description && <p className="mt-2 text-xs text-gray-500">{selectedClientStatus.description}</p>}
+                </div>
               </div>
             </div>
             {!clientPermissions.canEdit && (
@@ -2682,22 +3101,10 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button
                     type="button"
                     disabled={!clientPermissions.canEdit}
-                    onClick={async () => {
-                      const shortName = window.prompt('Название организации');
-                      if (!shortName) return;
-                      const inn = window.prompt('ИНН (опционально)') || undefined;
-                      try {
-                        const created = await createLegalEntity({ shortName, inn, clientIds: [] });
-                        await refreshLegalEntities();
-                        setClientFormState((prev) => ({
-                          ...prev,
-                          workplaces: prev.workplaces.length
-                            ? prev.workplaces.map((w, i) => (i === prev.workplaces.length - 1 ? { ...w, organizationName: created.shortName } : w))
-                            : [{ organizationName: created.shortName, position: "", startDate: "", endDate: "" }],
-                        }));
-                      } catch (error) {
-                        await alert({ title: 'Организация', description: error instanceof Error ? error.message : 'Не удалось создать организацию', variant: 'error' });
-                      }
+                    onClick={() => {
+                      setLegalEntityPromptError(null);
+                      setLegalEntityDraft({ shortName: '', inn: '' });
+                      setLegalEntityPromptOpen(true);
                     }}
                     className="text-sm text-indigo-600"
                   >
@@ -2781,16 +3188,10 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button
                     type="button"
                     disabled={!clientPermissions.canEdit}
-                    onClick={async () => {
-                      const number = window.prompt('Номер доверенности');
-                      const issuedAt = window.prompt('Дата выдачи (YYYY-MM-DD)', formatLocalYMD(new Date()));
-                      if (!number || !issuedAt) return;
-                      try {
-                        const created = await apiService.createClientPowerOfAttorney(clientId, { number, issuedAt, isActive: true });
-                        setPowersOfAttorney((prev) => [created, ...prev]);
-                      } catch (error) {
-                        await alert({ title: 'Доверенности', description: error instanceof Error ? error.message : 'Не удалось создать доверенность', variant: 'error' });
-                      }
+                    onClick={() => {
+                      setPoaPromptError(null);
+                      setPoaDraft({ number: '', issuedAt: formatLocalYMD(new Date()) });
+                      setPoaPromptOpen(true);
                     }}
                     className="text-sm text-emerald-600"
                   >
@@ -2865,7 +3266,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               to={toDateStr}
               statusFilter={toStatsStatusFilter(statusFilter)}
               reloadToken={statsReloadToken}
-              rawPayments={payments}
+              storageKey={`pp.client-detail.stats_panels.${user?.id ?? 'guest'}`}
               className="mb-6"
             />
 
@@ -3035,19 +3436,77 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               <h2 className="text-xl font-semibold text-gray-900">
                 {SECTION_META[activeSection].label}
               </h2>
-              {activeSection === 'payments' && lastPaymentDate && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <CalendarIcon size={16} />
-                  Последний платёж: {toRuDate(lastPaymentDate)}
-                </div>
-              )}
+              {activeSection === 'payments' || activeSection === 'accounts' || activeSection === 'acts' || activeSection === 'contracts' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeSection === 'payments') {
+                      setPaymentTableSettingsOpen((prev) => !prev);
+                    } else if (activeSection === 'accounts') {
+                      setInvoiceTableSettingsOpen((prev) => !prev);
+                    } else if (activeSection === 'acts') {
+                      setActTableSettingsOpen((prev) => !prev);
+                    } else if (activeSection === 'contracts') {
+                      setContractTableSettingsOpen((prev) => !prev);
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {(activeSection === 'payments' && paymentTableSettingsOpen) ||
+                  (activeSection === 'accounts' && invoiceTableSettingsOpen) ||
+                  (activeSection === 'acts' && actTableSettingsOpen) ||
+                  (activeSection === 'contracts' && contractTableSettingsOpen)
+                    ? 'Скрыть настройки'
+                    : 'Настроить таблицу'}
+                </button>
+              ) : null}
             </div>
           </div>
 
           <div className="p-6">
             {activeSection === 'payments' ? (
-              loadingPayments ? (
+              <>
+                {paymentTableSettingsOpen ? (
+                  <div className="mb-6">
+                    <TableColumnSettings
+                      columns={PAYMENT_TABLE_COLUMNS.map((column) => ({
+                        key: column.key,
+                        label: column.label,
+                      }))}
+                      columnOrder={paymentColumnOrder}
+                      visibleColumns={paymentVisibleColumns}
+                      draggingColumn={draggingPaymentColumn}
+                      onToggleColumn={togglePaymentColumn}
+                      onMoveColumn={movePaymentColumn}
+                      onDragStart={handlePaymentColumnDragStart}
+                      onDragOver={handlePaymentColumnDragOver}
+                      onDrop={handlePaymentColumnDrop}
+                      onDragEnd={handlePaymentColumnDragEnd}
+                      onReset={resetPaymentTableSettings}
+                      footer={
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <span>Строк на странице</span>
+                          <select
+                            value={paymentPageSize}
+                            onChange={(event) => setPaymentPageSize(Number(event.target.value) || paymentPageSize)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                          >
+                            {DETAIL_PAGE_SIZE_OPTIONS.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      }
+                    />
+                  </div>
+                ) : null}
+              {loadingPayments ? (
                 <div className="text-center py-8 text-gray-500">Загрузка...</div>
+              ) : paymentsError ? (
+                <div className="text-center py-8 text-red-600">{paymentsError}</div>
               ) : visiblePayments.length === 0 ? (
                 <div className="text-center py-8">
                   <CalendarIcon size={48} className="mx-auto mb-4 text-gray-300" />
@@ -3055,25 +3514,47 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <p className="text-gray-500">Нет платежей по выбранному фильтру</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full table-fixed divide-y divide-gray-200 text-sm">
                     <colgroup>
-                      <col className="w-48" />
-                      <col className="w-56" />
-                      <col className="w-60" />
-                      <col className="w-56" />
-                      <col className="w-[18rem]" />
-                      <col className="w-56" />
+                      {visiblePaymentTableColumns.map((column) => (
+                        <col key={column.key} style={{ width: getPaymentColumnWidth(column.key) }} />
+                      ))}
                       {clientPermissions.canEdit || clientPermissions.canDelete ? <col className="w-36" /> : null}
                     </colgroup>
                     <thead className="bg-slate-50">
                       <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        <th scope="col" className="px-4 py-3">Период</th>
-                        <th scope="col" className="px-4 py-3">Сумма и тип</th>
-                        <th scope="col" className="px-4 py-3">Категория / источник</th>
-                        <th scope="col" className="px-4 py-3">Дело и контакт</th>
-                        <th scope="col" className="px-4 py-3">Документы и комментарии</th>
-                        <th scope="col" className="px-4 py-3">Статус и прогресс</th>
+                        {visiblePaymentTableColumns.map((column) => (
+                          <th
+                            key={column.key}
+                            scope="col"
+                            style={{ width: getPaymentColumnWidth(column.key) }}
+                            className={`relative px-4 py-3 ${
+                              draggingPaymentColumn === column.key ? 'bg-blue-50 text-blue-700' : ''
+                            }`}
+                            onDragOver={handlePaymentColumnDragOver}
+                            onDrop={(event) => handlePaymentColumnDrop(column.key, event)}
+                          >
+                            <div
+                              className="inline-flex min-w-0 select-none items-center gap-2"
+                              draggable
+                              onDragStart={(event) => handlePaymentColumnDragStart(column.key, event)}
+                              onDragEnd={handlePaymentColumnDragEnd}
+                              title="Перетащите, чтобы изменить порядок"
+                            >
+                              <GripVertical className="h-4 w-4 text-slate-400" />
+                              <span className="truncate">{column.label}</span>
+                            </div>
+                            <div
+                              role="separator"
+                              aria-label={`Изменить ширину колонки ${column.label}`}
+                              className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                              onMouseDown={(event) => handlePaymentResizeStart(column.key, event)}
+                              onDragStart={(event) => event.preventDefault()}
+                            />
+                          </th>
+                        ))}
                         {(clientPermissions.canEdit || clientPermissions.canDelete) && (
                           <th scope="col" className="px-4 py-3 text-right">Действия</th>
                         )}
@@ -3116,134 +3597,150 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
                         return (
                           <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">
-                            <td className="px-4 py-4 text-slate-600">
-                              <div className="font-medium text-slate-900">{toRuDate(payment.date)}</div>
-                              {payment.plannedDate && payment.plannedDate !== payment.date ? (
-                                <div className="mt-1 text-xs text-slate-500">
-                                  План: {toRuDate(payment.plannedDate)}
-                                </div>
-                              ) : null}
-                              {payment.paidDate ? (
-                                <div className="mt-1 text-xs text-emerald-600">
-                                  Оплачен: {toRuDate(payment.paidDate)}
-                                </div>
-                              ) : null}
-                              <div className="mt-2 text-xs text-slate-400">
-                                Создан: {toRuDate(payment.createdAt)}
-                              </div>
-                              {payment.rescheduleCount > 0 ? (
-                                <div className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                                  <RotateCcw size={12} className="mr-1" /> Переносов: {payment.rescheduleCount}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-4">
-                              <div
-                                className={`flex items-center gap-2 text-sm font-semibold ${
-                                  payment.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'
-                                }`}
-                                title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}>
-                                <DirectionIcon size={18} />
-                                {formatCurrencySmart(payment.amount).full}
-                              </div>
-                              <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                                {payment.type === 'Income' ? 'Поступление' : 'Списание'}
-                              </div>
-                              {payment.outstandingAmount > 0 ? (
-                                <div className="mt-2 text-xs text-rose-600">
-                                  Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
-                                </div>
-                              ) : null}
-                              {payment.hasPartialPayment && payment.paidAmount > 0 ? (
-                                <div className="mt-2">
-                                  <div className="flex items-center justify-between text-xs text-slate-500">
-                                    <span>Оплачено</span>
-                                    <span className="font-medium text-slate-700">
-                                      {formatCurrencySmart(payment.paidAmount).full}
-                                    </span>
-                                  </div>
-                                  <div className="mt-1 h-1.5 w-full rounded-full bg-slate-200">
-                                    <div
-                                      className={`h-full rounded-full ${
-                                        payment.type === 'Income' ? 'bg-emerald-500' : 'bg-rose-500'
-                                      }`}
-                                      style={{ width: `${Math.max(0, Math.min(100, paidProgress * 100))}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-4">
-                              <div className="font-medium text-slate-900">{directionLabel}</div>
-                              {secondaryDirections.length ? (
-                                <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
-                                  {secondaryDirections.map((label) => (
-                                    <li key={label}>{label}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                              {payment.account ? (
-                                <div className="mt-2 text-xs text-slate-500">Счёт: {payment.account}</div>
-                              ) : null}
-                              {payment.accountDate ? (
-                                <div className="text-xs text-slate-400">
-                                  Дата счёта: {toRuDate(payment.accountDate)}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-4">
-                              {payment.clientCase?.title ? (
-                                <div className="font-medium text-slate-900">{payment.clientCase.title}</div>
-                              ) : (
-                                <div className="text-xs text-slate-400">Дело не указано</div>
-                              )}
-                              {payment.client?.name ? (
-                                <div className="mt-1 text-xs text-slate-500">{payment.client.name}</div>
-                              ) : null}
-                              {payment.clientCase?.status ? (
-                                <div className="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-                                  {caseStatusLabel(payment.clientCase.status)}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-4">
-                              {payment.description ? (
-                                <div className="text-slate-800">{payment.description}</div>
-                              ) : (
-                                <div className="text-xs text-slate-400">Без описания</div>
-                              )}
-                              {payment.notes ? (
-                                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={payment.notes}>
-                                  <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
-                                </div>
-                              ) : null}
-                              {payment.systemNotes ? (
-                                <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={payment.systemNotes}>
-                                  <span className="font-medium text-slate-600">Системно:</span> {payment.systemNotes}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-4">
-                              <div
-                                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}
+                            {visiblePaymentTableColumns.map((column) => (
+                              <td
+                                key={column.key}
+                                style={{ width: getPaymentColumnWidth(column.key) }}
+                                className="max-w-0 overflow-hidden px-4 py-4 align-top"
                               >
-                                <StatusIcon size={14} />
-                                <span className="leading-none">{statusLabel}</span>
-                              </div>
-                              {payment.delayDays ? (
-                                <div className="mt-2 inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-700">
-                                  <AlertTriangle size={12} className="mr-1" /> Просрочка: {payment.delayDays} дн.
-                                </div>
-                              ) : null}
-                              {payment.lastPaymentDate ? (
-                                <div className="mt-2 text-xs text-slate-500">
-                                  Последний платёж: {toRuDate(payment.lastPaymentDate)}
-                                </div>
-                              ) : null}
-                              {payment.hasPartialPayment && !hasProgress ? (
-                                <div className="mt-2 text-xs text-slate-500">Оплачено частично</div>
-                              ) : null}
-                            </td>
+                                {column.key === 'period' ? (
+                                  <div className="text-slate-600">
+                                    <div className="font-medium text-slate-900">{toRuDate(payment.date)}</div>
+                                    {payment.plannedDate && payment.plannedDate !== payment.date ? (
+                                      <div className="mt-1 text-xs text-slate-500">
+                                        План: {toRuDate(payment.plannedDate)}
+                                      </div>
+                                    ) : null}
+                                    {payment.paidDate ? (
+                                      <div className="mt-1 text-xs text-emerald-600">
+                                        Оплачен: {toRuDate(payment.paidDate)}
+                                      </div>
+                                    ) : null}
+                                    <div className="mt-2 text-xs text-slate-400">
+                                      Создан: {toRuDate(payment.createdAt)}
+                                    </div>
+                                    {payment.rescheduleCount > 0 ? (
+                                      <div className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                        <RotateCcw size={12} className="mr-1" /> Переносов: {payment.rescheduleCount}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : column.key === 'amountType' ? (
+                                  <>
+                                    <div
+                                      className={`flex items-center gap-2 text-sm font-semibold ${
+                                        payment.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'
+                                      }`}
+                                      title={formatCurrencySmart(payment.amount, { alwaysCents: true }).full}
+                                    >
+                                      <DirectionIcon size={18} />
+                                      {formatCurrencySmart(payment.amount).full}
+                                    </div>
+                                    <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                      {payment.type === 'Income' ? 'Поступление' : 'Списание'}
+                                    </div>
+                                    {payment.outstandingAmount > 0 ? (
+                                      <div className="mt-2 text-xs text-rose-600">
+                                        Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
+                                      </div>
+                                    ) : null}
+                                    {payment.hasPartialPayment && payment.paidAmount > 0 ? (
+                                      <div className="mt-2">
+                                        <div className="flex items-center justify-between text-xs text-slate-500">
+                                          <span>Оплачено</span>
+                                          <span className="font-medium text-slate-700">
+                                            {formatCurrencySmart(payment.paidAmount).full}
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 h-1.5 w-full rounded-full bg-slate-200">
+                                          <div
+                                            className={`h-full rounded-full ${
+                                              payment.type === 'Income' ? 'bg-emerald-500' : 'bg-rose-500'
+                                            }`}
+                                            style={{ width: `${Math.max(0, Math.min(100, paidProgress * 100))}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : column.key === 'category' ? (
+                                  <>
+                                    <div className="font-medium text-slate-900">{directionLabel}</div>
+                                    {secondaryDirections.length ? (
+                                      <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+                                        {secondaryDirections.map((label) => (
+                                          <li key={label}>{label}</li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                    {payment.account ? (
+                                      <div className="mt-2 text-xs text-slate-500">Счёт: {payment.account}</div>
+                                    ) : null}
+                                    {payment.accountDate ? (
+                                      <div className="text-xs text-slate-400">
+                                        Дата счёта: {toRuDate(payment.accountDate)}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : column.key === 'caseContact' ? (
+                                  <>
+                                    {payment.clientCase?.title ? (
+                                      <div className="font-medium text-slate-900">{payment.clientCase.title}</div>
+                                    ) : (
+                                      <div className="text-xs text-slate-400">Дело не указано</div>
+                                    )}
+                                    {payment.client?.name ? (
+                                      <div className="mt-1 text-xs text-slate-500">{payment.client.name}</div>
+                                    ) : null}
+                                    {payment.clientCase?.status ? (
+                                      <div className="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+                                        {caseStatusLabel(payment.clientCase.status)}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : column.key === 'details' ? (
+                                  <>
+                                    {payment.description ? (
+                                      <div className="text-slate-800">{payment.description}</div>
+                                    ) : (
+                                      <div className="text-xs text-slate-400">Без описания</div>
+                                    )}
+                                    {payment.notes ? (
+                                      <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={payment.notes}>
+                                        <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
+                                      </div>
+                                    ) : null}
+                                    {payment.systemNotes ? (
+                                      <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={payment.systemNotes}>
+                                        <span className="font-medium text-slate-600">Системно:</span> {payment.systemNotes}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <>
+                                    <div
+                                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}
+                                    >
+                                      <StatusIcon size={14} />
+                                      <span className="leading-none">{statusLabel}</span>
+                                    </div>
+                                    {payment.delayDays ? (
+                                      <div className="mt-2 inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                                        <AlertTriangle size={12} className="mr-1" /> Просрочка: {payment.delayDays} дн.
+                                      </div>
+                                    ) : null}
+                                    {payment.lastPaymentDate ? (
+                                      <div className="mt-2 text-xs text-slate-500">
+                                        Последний платёж: {toRuDate(payment.lastPaymentDate)}
+                                      </div>
+                                    ) : null}
+                                    {payment.hasPartialPayment && !hasProgress ? (
+                                      <div className="mt-2 text-xs text-slate-500">Оплачено частично</div>
+                                    ) : null}
+                                  </>
+                                )}
+                              </td>
+                            ))}
                             {(clientPermissions.canEdit || clientPermissions.canDelete) && (
                               <td className="px-4 py-4">
                                 <div className="flex items-center justify-end gap-2">
@@ -3276,11 +3773,58 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         );
                       })}
                     </tbody>
-                  </table>
-                </div>
-              )
+                    </table>
+                  </div>
+                  <TablePagination
+                    page={paymentPage}
+                    totalPages={paymentTotalPages}
+                    totalItems={paymentsTotal}
+                    pageSize={paymentPageSize}
+                    pageSizeOptions={DETAIL_PAGE_SIZE_OPTIONS}
+                    onPageChange={setPaymentPage}
+                    onPageSizeChange={setPaymentPageSize}
+                  />
+                </>
+              )}
+              </>
             ) : activeSection === 'accounts' ? (
               <>
+                {invoiceTableSettingsOpen ? (
+                  <div className="mb-6">
+                    <TableColumnSettings
+                      columns={INVOICE_TABLE_COLUMNS.map((column) => ({
+                        key: column.key,
+                        label: column.label,
+                      }))}
+                      columnOrder={invoiceColumnOrder}
+                      visibleColumns={invoiceVisibleColumns}
+                      draggingColumn={draggingInvoiceColumn}
+                      onToggleColumn={toggleInvoiceColumn}
+                      onMoveColumn={moveInvoiceColumn}
+                      onDragStart={handleInvoiceColumnDragStart}
+                      onDragOver={handleInvoiceColumnDragOver}
+                      onDrop={handleInvoiceColumnDrop}
+                      onDragEnd={handleInvoiceColumnDragEnd}
+                      onReset={resetInvoiceTableSettings}
+                      footer={
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <span>Строк на странице</span>
+                          <select
+                            value={invoicePageSize}
+                            onChange={(event) => setInvoicePageSize(Number(event.target.value) || invoicePageSize)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                          >
+                            {DETAIL_PAGE_SIZE_OPTIONS.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      }
+                    />
+                  </div>
+                ) : null}
                 {invoicesLoading ? (
                   <div className="py-10 text-center text-gray-500">
                     <div className="inline-flex items-center gap-2">
@@ -3293,113 +3837,173 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     {invoicesError ?? t('invoicesEmpty') ?? 'Счета не найдены'}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          {[
-                            { key: 'date' as InvoicesSortKey, label: t('invoiceDate') ?? 'Дата' },
-                            { key: 'number' as InvoicesSortKey, label: t('invoiceNumber') ?? 'Номер счёта' },
-                            { key: 'amount' as InvoicesSortKey, label: t('invoiceAmount') ?? 'Сумма' },
-                            { key: 'status' as InvoicesSortKey, label: t('invoiceStatus') ?? 'Статус' },
-                            { key: 'dueDate' as InvoicesSortKey, label: t('invoiceDueDate') ?? 'Срок оплаты' },
-                            { key: 'responsible' as InvoicesSortKey, label: t('invoiceResponsible') ?? 'Ответственный' },
-                            { key: 'createdAt' as InvoicesSortKey, label: t('createdAt') ?? 'Создан' },
-                            { key: 'number' as InvoicesSortKey, label: t('actions') ?? 'Действия', sortable: false },
-                          ].map((column) => {
-                            const isSortable = column.sortable !== false;
-                            const isActive = invoiceSort.key === column.key;
-                            const direction = isActive ? invoiceSort.direction : undefined;
-                            return (
-                              <th key={column.label} scope="col" className="px-4 py-3">
-                                {isSortable ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full table-fixed divide-y divide-gray-200">
+                        <colgroup>
+                          {visibleInvoiceTableColumns.map((column) => (
+                            <col key={column.key} style={{ width: getInvoiceColumnWidth(column.key) }} />
+                          ))}
+                          <col style={{ width: 110 }} />
+                        </colgroup>
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            {visibleInvoiceTableColumns.map((column) => {
+                              const sortKey = column.key as InvoicesSortKey;
+                              const isActive = invoiceSort.key === sortKey;
+                              const direction = isActive ? invoiceSort.direction : undefined;
+                              return (
+                                <th
+                                  key={column.key}
+                                  scope="col"
+                                  style={{ width: getInvoiceColumnWidth(column.key) }}
+                                  className={`relative px-4 py-3 ${draggingInvoiceColumn === column.key ? 'bg-blue-50 text-blue-700' : ''}`}
+                                  onDragOver={handleInvoiceColumnDragOver}
+                                  onDrop={(event) => handleInvoiceColumnDrop(column.key, event)}
+                                >
                                   <button
                                     type="button"
-                                    onClick={() => handleInvoiceSort(column.key)}
+                                    onClick={() => handleInvoiceSort(sortKey)}
                                     className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
                                   >
-                                    {column.label}
-                                    <span className="text-gray-400">
-                                      {isActive ? (direction === 'asc' ? '▲' : '▼') : ''}
+                                    <span
+                                      className="inline-flex min-w-0 select-none items-center gap-2"
+                                      draggable
+                                      onDragStart={(event) => handleInvoiceColumnDragStart(column.key, event)}
+                                      onDragEnd={handleInvoiceColumnDragEnd}
+                                      title="Перетащите, чтобы изменить порядок"
+                                    >
+                                      <GripVertical className="h-4 w-4 text-slate-400" />
+                                      <span className="truncate">{column.label}</span>
                                     </span>
+                                    <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
                                   </button>
-                                ) : (
-                                  <span>{column.label}</span>
-                                )}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
-                        {clientInvoices.map((invoice) => (
-                          <tr key={invoice.id} className="hover:bg-gray-50/80">
-                            <td className="px-4 py-3 font-medium text-gray-900">{toRuDate(invoice.date)}</td>
-                            <td className="px-4 py-3">
-                              <div className="font-medium text-gray-900">№{invoice.number}</div>
-                              {invoice.clientCaseTitle ? (
-                                <div className="text-xs text-gray-500">{invoice.clientCaseTitle}</div>
-                              ) : null}
-                              {invoice.actNumber ? (
-                                <div className="text-xs text-gray-500">
-                                  {(t('invoiceAct') ?? 'Акт')} №{invoice.actNumber}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-gray-900">
-                              {formatCurrencySmart(invoice.amount).full}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${invoiceStatusClasses[invoice.status]}`}
-                              >
-                                {invoiceStatusLabels[invoice.status]}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-gray-900">
-                              {invoice.dueDate ? toRuDate(invoice.dueDate) : '—'}
-                              {invoice.paidDate ? (
-                                <div className="text-xs text-emerald-600">
-                                  {(t('invoicePaidOn') ?? 'Оплачен') + ': '} {toRuDate(invoice.paidDate)}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-4 py-3 text-gray-900">{invoice.responsibleName ?? '—'}</td>
-                            <td className="px-4 py-3 text-gray-900">{toRuDate(invoice.createdAt)}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                {accountPermissions.canEdit && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openInvoiceEdit(invoice)}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                    title={t('edit') ?? 'Редактировать'}
-                                    aria-label={t('edit') ?? 'Редактировать'}
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                )}
-                                {accountPermissions.canDelete && (
-                                  <button
-                                    type="button"
-                                    onClick={() => removeInvoice(invoice)}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
-                                    title={t('delete') ?? 'Удалить'}
-                                    aria-label={t('delete') ?? 'Удалить'}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
+                                  <div
+                                    role="separator"
+                                    aria-label={`Изменить ширину колонки ${column.label}`}
+                                    className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                                    onMouseDown={(event) => handleInvoiceResizeStart(column.key, event)}
+                                    onDragStart={(event) => event.preventDefault()}
+                                  />
+                                </th>
+                              );
+                            })}
+                            <th scope="col" className="px-4 py-3 text-right">
+                              {t('actions') ?? 'Действия'}
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
+                          {clientInvoices.map((invoice) => (
+                            <tr key={invoice.id} className="hover:bg-gray-50/80">
+                              {visibleInvoiceTableColumns.map((column) => (
+                                <td
+                                  key={column.key}
+                                  style={{ width: getInvoiceColumnWidth(column.key) }}
+                                  className="max-w-0 overflow-hidden px-4 py-3 align-top"
+                                >
+                                  {column.key === 'date' ? (
+                                    <span className="font-medium text-gray-900">{toRuDate(invoice.date)}</span>
+                                  ) : column.key === 'number' ? (
+                                    (() => {
+                                      const caseLabels = invoice.clientCases?.length
+                                        ? invoice.clientCases.map((item) => item.title?.trim() || `Дело #${item.id}`)
+                                        : invoice.clientCaseTitle
+                                          ? [invoice.clientCaseTitle]
+                                          : invoice.clientCaseId
+                                            ? [`Дело #${invoice.clientCaseId}`]
+                                            : [];
+                                      const actLabels = invoice.acts?.length
+                                        ? invoice.acts.map((item) => {
+                                            const parts: string[] = [];
+                                            if (item.number) parts.push(`№${item.number}`);
+                                            if (item.title) parts.push(item.title);
+                                            return parts.join(' · ') || `Акт #${item.id}`;
+                                          })
+                                        : invoice.actNumber
+                                          ? [`${t('invoiceAct') ?? 'Акт'} №${invoice.actNumber}${invoice.actTitle ? ` · ${invoice.actTitle}` : ''}`]
+                                          : [];
+
+                                      return (
+                                        <>
+                                          <div className="font-medium text-gray-900">№{invoice.number}</div>
+                                          {caseLabels.map((label) => (
+                                            <div key={label} className="text-xs text-gray-500">{label}</div>
+                                          ))}
+                                          {actLabels.map((label) => (
+                                            <div key={label} className="text-xs text-gray-500">{label}</div>
+                                          ))}
+                                        </>
+                                      );
+                                    })()
+                                  ) : column.key === 'amount' ? (
+                                    <span className="font-semibold text-gray-900">{formatCurrencySmart(invoice.amount).full}</span>
+                                  ) : column.key === 'status' ? (
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${invoiceStatusClasses[invoice.status]}`}
+                                    >
+                                      {invoiceStatusLabels[invoice.status]}
+                                    </span>
+                                  ) : column.key === 'dueDate' ? (
+                                    <span className="text-gray-900">
+                                      {invoice.dueDate ? toRuDate(invoice.dueDate) : '—'}
+                                      {invoice.paidDate ? (
+                                        <div className="text-xs text-emerald-600">
+                                          {(t('invoicePaidOn') ?? 'Оплачен') + ': '} {toRuDate(invoice.paidDate)}
+                                        </div>
+                                      ) : null}
+                                    </span>
+                                  ) : column.key === 'responsible' ? (
+                                    <span className="text-gray-900">{invoice.responsibleName ?? '—'}</span>
+                                  ) : (
+                                    <span className="text-gray-900">{toRuDate(invoice.createdAt)}</span>
+                                  )}
+                                </td>
+                              ))}
+                              <td className="px-4 py-3">
+                                <div className="flex items-center justify-end gap-2">
+                                  {accountPermissions.canEdit && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openInvoiceEdit(invoice)}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                      title={t('edit') ?? 'Редактировать'}
+                                      aria-label={t('edit') ?? 'Редактировать'}
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                  {accountPermissions.canDelete && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeInvoice(invoice)}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                      title={t('delete') ?? 'Удалить'}
+                                      aria-label={t('delete') ?? 'Удалить'}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                 )}
-                {clientInvoices.length > 0 && !invoicesLoading ? (
-                  <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                {!invoicesLoading && (invoicesPagination.total ?? clientInvoices.length) > 0 ? (
+                  <>
+                  <TablePagination
+                    page={invoicesPagination.page || invoicePage}
+                    totalPages={invoiceTotalPages}
+                    totalItems={invoicesPagination.total ?? clientInvoices.length}
+                    pageSize={invoicesPagination.pageSize || invoicePageSize}
+                    pageSizeOptions={DETAIL_PAGE_SIZE_OPTIONS}
+                    onPageChange={setInvoicePage}
+                    onPageSizeChange={setInvoicePageSize}
+                  />
+                  {/*
+                  <TablePagination
                     <div>
                       {(t('recordsFound') ?? 'Найдено записей')}: {invoicesPagination.total}
                     </div>
@@ -3424,7 +4028,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         {t('next') ?? 'Вперёд'}
                       </button>
                     </div>
-                  </div>
+                  */}
+                  </>
                 ) : null}
               </>
             ) : activeSection === 'acts' ? (
@@ -3525,170 +4130,227 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          {(
-                            [
-                              { key: 'date', label: t('actDate') ?? 'Дата', sortable: true },
-                              { key: 'number', label: t('actNumber') ?? '№', sortable: true },
-                              { key: 'title' as const, label: t('actTitle') ?? 'Название', sortable: false },
-                              { key: 'amount', label: t('actAmount') ?? 'Сумма', sortable: true },
-                              { key: 'status', label: t('actStatus') ?? 'Статус', sortable: true },
-                              { key: 'responsible', label: t('actResponsible') ?? 'Ответственный', sortable: true },
-                              { key: 'counterpartyInn', label: t('actInn') ?? 'ИНН', sortable: true },
-                              { key: 'actions' as const, label: t('actions') ?? 'Действия', sortable: false },
-                            ] as Array<{ key: ActsSortKey | 'title' | 'actions'; label: string; sortable?: boolean }>
-                          ).map((column) => {
-                            const isSortable =
-                              column.sortable !== false && column.key !== 'title' && column.key !== 'actions';
-                            const isActive = actSort.key === column.key;
-                            const direction = isActive ? actSort.direction : undefined;
-                            return (
-                              <th key={column.key} scope="col" className="px-4 py-3">
-                                {isSortable ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleActSort(column.key as ActsSortKey)}
-                                    className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
-                                  >
-                                    <span>{column.label}</span>
-                                    <span className="text-gray-400">
-                                      {isActive ? (direction === 'asc' ? '▲' : '▼') : ''}
-                                    </span>
-                                  </button>
-                                ) : (
-                                  <span>{column.label}</span>
-                                )}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
-                        {actsLoading ? (
-                          <tr>
-                            <td colSpan={8} className="py-10 text-center text-gray-500">
-                              <div className="inline-flex items-center gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                {t('loading') ?? 'Загрузка...'}
-                              </div>
-                            </td>
-                          </tr>
-                        ) : clientActs.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="py-10 text-center text-gray-500">
-                              {actsError ?? t('actsEmpty') ?? 'Документы не найдены'}
-                            </td>
-                          </tr>
-                        ) : (
-                          <>
-                            {clientActs.map((act) => {
-                              const title = act.title?.trim();
-                              const displayTitle = title && title !== `№${act.number}` ? title : `Акт №${act.number}`;
+                {actTableSettingsOpen ? (
+                  <div className="mb-6">
+                    <TableColumnSettings
+                      columns={ACT_TABLE_COLUMNS.map((column) => ({
+                        key: column.key,
+                        label: column.label,
+                      }))}
+                      columnOrder={actColumnOrder}
+                      visibleColumns={actVisibleColumns}
+                      draggingColumn={draggingActColumn}
+                      onToggleColumn={toggleActColumn}
+                      onMoveColumn={moveActColumn}
+                      onDragStart={handleActColumnDragStart}
+                      onDragOver={handleActColumnDragOver}
+                      onDrop={handleActColumnDrop}
+                      onDragEnd={handleActColumnDragEnd}
+                      onReset={resetActTableSettings}
+                      footer={
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <span>Строк на странице</span>
+                          <select
+                            value={actPageSize}
+                            onChange={(event) => setActPageSize(Number(event.target.value) || actPageSize)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                          >
+                            {DETAIL_PAGE_SIZE_OPTIONS.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      }
+                    />
+                  </div>
+                ) : null}
+
+                  <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full table-fixed divide-y divide-gray-200">
+                        <colgroup>
+                          {visibleActTableColumns.map((column) => (
+                            <col key={column.key} style={{ width: getActColumnWidth(column.key) }} />
+                          ))}
+                          <col style={{ width: 110 }} />
+                        </colgroup>
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            {visibleActTableColumns.map((column) => {
+                              const sortKey = column.key === 'title' ? null : (column.key as ActsSortKey);
+                              const isActive = sortKey ? actSort.key === sortKey : false;
+                              const direction = isActive ? actSort.direction : undefined;
                               return (
-                                <tr key={act.id} className="hover:bg-gray-50/80">
-                                  <td className="px-4 py-3 font-medium text-gray-900">{toRuDate(act.date)}</td>
-                                <td className="px-4 py-3">
-                                  <div className="font-medium text-gray-900">№{act.number}</div>
-                                  {act.invoiceNumber && (
-                                    <div className="text-xs text-gray-500">
-                                      {(t('actInvoice') ?? 'Счёт')} {act.invoiceNumber}
+                                <th
+                                  key={column.key}
+                                  scope="col"
+                                  style={{ width: getActColumnWidth(column.key) }}
+                                  className={`relative px-4 py-3 ${draggingActColumn === column.key ? 'bg-blue-50 text-blue-700' : ''}`}
+                                  onDragOver={handleActColumnDragOver}
+                                  onDrop={(event) => handleActColumnDrop(column.key, event)}
+                                >
+                                  {sortKey ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleActSort(sortKey)}
+                                      className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                                    >
+                                      <span
+                                        className="inline-flex min-w-0 select-none items-center gap-2"
+                                        draggable
+                                        onDragStart={(event) => handleActColumnDragStart(column.key, event)}
+                                        onDragEnd={handleActColumnDragEnd}
+                                        title="Перетащите, чтобы изменить порядок"
+                                      >
+                                        <GripVertical className="h-4 w-4 text-slate-400" />
+                                        <span className="truncate">{column.label}</span>
+                                      </span>
+                                      <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
+                                    </button>
+                                  ) : (
+                                    <div
+                                      className="inline-flex min-w-0 select-none items-center gap-2"
+                                      draggable
+                                      onDragStart={(event) => handleActColumnDragStart(column.key, event)}
+                                      onDragEnd={handleActColumnDragEnd}
+                                      title="Перетащите, чтобы изменить порядок"
+                                    >
+                                      <GripVertical className="h-4 w-4 text-slate-400" />
+                                      <span className="truncate">{column.label}</span>
                                     </div>
                                   )}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="font-medium text-gray-900">{displayTitle}</div>
-                                  {act.comment && (
-                                    <div className="text-xs text-gray-500">{act.comment}</div>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 font-semibold text-gray-900">
-                                  {formatCurrencySmart(act.amount).full}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span
-                                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${ACT_STATUS_CLASSES[act.status]}`}
-                                  >
-                                    {actStatusLabels[act.status]}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-gray-900">
-                                  {act.responsibleName ?? t('actResponsibleNotSelected') ?? '—'}
-                                </td>
-                                <td className="px-4 py-3 text-gray-900">{act.counterpartyInn ?? '—'}</td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    {actPermissions.canEdit && (
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditAct(act)}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                                        title={t('edit') ?? 'Редактировать'}
-                                        aria-label={t('edit') ?? 'Редактировать'}
+                                  <div
+                                    role="separator"
+                                    aria-label={`Изменить ширину колонки ${column.label}`}
+                                    className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                                    onMouseDown={(event) => handleActResizeStart(column.key, event)}
+                                    onDragStart={(event) => event.preventDefault()}
+                                  />
+                                </th>
+                              );
+                            })}
+                            <th scope="col" className="px-4 py-3 text-right">
+                              {t('actions') ?? 'Действия'}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
+                          {actsLoading ? (
+                            <tr>
+                              <td colSpan={visibleActTableColumns.length + 1} className="py-10 text-center text-gray-500">
+                                <div className="inline-flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  {t('loading') ?? 'Загрузка...'}
+                                </div>
+                              </td>
+                            </tr>
+                          ) : clientActs.length === 0 ? (
+                            <tr>
+                              <td colSpan={visibleActTableColumns.length + 1} className="py-10 text-center text-gray-500">
+                                {actsError ?? t('actsEmpty') ?? 'Документы не найдены'}
+                              </td>
+                            </tr>
+                          ) : (
+                            <>
+                              {clientActs.map((act) => {
+                                const title = act.title?.trim();
+                                const displayTitle = title && title !== `№${act.number}` ? title : `Акт №${act.number}`;
+                                return (
+                                  <tr key={act.id} className="hover:bg-gray-50/80">
+                                    {visibleActTableColumns.map((column) => (
+                                      <td
+                                        key={column.key}
+                                        style={{ width: getActColumnWidth(column.key) }}
+                                        className="max-w-0 overflow-hidden px-4 py-3 align-top"
                                       >
-                                        <Edit className="h-4 w-4" />
-                                      </button>
-                                    )}
-                                    {actPermissions.canDelete && (
-                                      <button
-                                        type="button"
-                                        onClick={() => removeAct(act)}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
-                                        title={t('delete') ?? 'Удалить'}
-                                        aria-label={t('delete') ?? 'Удалить'}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                            {actsError && (
-                              <tr>
-                                <td colSpan={8} className="bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                                  {actsError}
-                                </td>
-                              </tr>
-                            )}
-                          </>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  {clientActs.length > 0 && !actsLoading && (
-                    <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                      <div>
-                        {(t('recordsFound') ?? 'Найдено записей')}: {actsPagination.total}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setActPage((pageValue) => Math.max(1, pageValue - 1))}
-                          disabled={actPage <= 1}
-                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('previous') ?? 'Назад'}
-                        </button>
-                        <span>
-                          {actsPagination.page} / {actTotalPages}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setActPage((pageValue) => Math.min(actTotalPages, pageValue + 1))}
-                          disabled={actPage >= actTotalPages}
-                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('next') ?? 'Вперёд'}
-                        </button>
-                      </div>
+                                        {column.key === 'date' ? (
+                                          <span className="font-medium text-gray-900">{toRuDate(act.date)}</span>
+                                        ) : column.key === 'number' ? (
+                                          <>
+                                            <div className="font-medium text-gray-900">№{act.number}</div>
+                                            {act.invoiceNumber && (
+                                              <div className="text-xs text-gray-500">
+                                                {(t('actInvoice') ?? 'Счёт')} {act.invoiceNumber}
+                                              </div>
+                                            )}
+                                          </>
+                                        ) : column.key === 'title' ? (
+                                          <>
+                                            <div className="font-medium text-gray-900">{displayTitle}</div>
+                                            {act.comment && <div className="text-xs text-gray-500">{act.comment}</div>}
+                                          </>
+                                        ) : column.key === 'amount' ? (
+                                          <span className="font-semibold text-gray-900">{formatCurrencySmart(act.amount).full}</span>
+                                        ) : column.key === 'status' ? (
+                                          <span
+                                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${ACT_STATUS_CLASSES[act.status]}`}
+                                          >
+                                            {actStatusLabels[act.status]}
+                                          </span>
+                                        ) : column.key === 'responsible' ? (
+                                          <span className="text-gray-900">
+                                            {act.responsibleName ?? t('actResponsibleNotSelected') ?? '—'}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-900">{act.counterpartyInn ?? '—'}</span>
+                                        )}
+                                      </td>
+                                    ))}
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center justify-end gap-2">
+                                        {actPermissions.canEdit && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openEditAct(act)}
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                            title={t('edit') ?? 'Редактировать'}
+                                            aria-label={t('edit') ?? 'Редактировать'}
+                                          >
+                                            <Edit className="h-4 w-4" />
+                                          </button>
+                                        )}
+                                        {actPermissions.canDelete && (
+                                          <button
+                                            type="button"
+                                            onClick={() => removeAct(act)}
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 hover:bg-red-50"
+                                            title={t('delete') ?? 'Удалить'}
+                                            aria-label={t('delete') ?? 'Удалить'}
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {actsError && (
+                                <tr>
+                                  <td colSpan={visibleActTableColumns.length + 1} className="bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                                    {actsError}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-                  )}
-                </div>
+                    {clientActs.length > 0 && !actsLoading ? (
+                      <TablePagination
+                        page={actsPagination.page || actPage}
+                        totalPages={actTotalPages}
+                        totalItems={actsPagination.total ?? clientActs.length}
+                        pageSize={actPageSize}
+                        pageSizeOptions={DETAIL_PAGE_SIZE_OPTIONS}
+                        onPageChange={setActPage}
+                        onPageSizeChange={setActPageSize}
+                      />
+                    ) : null}
+                  </div>
               </>
             ) : activeSection === 'contracts' ? (
               <>
@@ -3754,6 +4416,43 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   </div>
                 ) : null}
 
+                {contractTableSettingsOpen ? (
+                  <div className="mb-6">
+                    <TableColumnSettings
+                      columns={CONTRACT_TABLE_COLUMNS.map((column) => ({
+                        key: column.key,
+                        label: column.label,
+                      }))}
+                      columnOrder={contractColumnOrder}
+                      visibleColumns={contractVisibleColumns}
+                      draggingColumn={draggingContractColumn}
+                      onToggleColumn={toggleContractColumn}
+                      onMoveColumn={moveContractColumn}
+                      onDragStart={handleContractColumnDragStart}
+                      onDragOver={handleContractColumnDragOver}
+                      onDrop={handleContractColumnDrop}
+                      onDragEnd={handleContractColumnDragEnd}
+                      onReset={resetContractTableSettings}
+                      footer={
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <span>Строк на странице</span>
+                          <select
+                            value={contractPageSize}
+                            onChange={(event) => setContractPageSize(Number(event.target.value) || contractPageSize)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                          >
+                            {DETAIL_PAGE_SIZE_OPTIONS.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      }
+                    />
+                  </div>
+                ) : null}
+
                 {contractsLoading ? (
                   <div className="py-10 text-center text-gray-500">
                     <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
@@ -3770,121 +4469,121 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead className="bg-gray-50">
-                          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            <th scope="col" className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => handleContractSort('number')}
-                                className="flex items-center gap-1"
-                              >
-                                {t('contractNumber') ?? 'Номер договора'}
-                                <span className="text-gray-400">
-                                  {contractSort.key === 'number'
-                                    ? contractSort.direction === 'asc'
-                                      ? '▲'
-                                      : '▼'
-                                    : ''}
-                                </span>
-                              </button>
-                            </th>
-                            <th scope="col" className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => handleContractSort('date')}
-                                className="flex items-center gap-1"
-                              >
-                                {t('contractDate') ?? 'Дата договора'}
-                                <span className="text-gray-400">
-                                  {contractSort.key === 'date'
-                                    ? contractSort.direction === 'asc'
-                                      ? '▲'
-                                      : '▼'
-                                    : ''}
-                                </span>
-                              </button>
-                            </th>
-                            <th scope="col" className="px-4 py-3">
-                              {t('contractClients') ?? 'Клиенты'}
-                            </th>
-                            <th scope="col" className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => handleContractSort('amount')}
-                                className="flex items-center gap-1"
-                              >
-                                {t('contractAmount') ?? 'Сумма договора'}
-                                <span className="text-gray-400">
-                                  {contractSort.key === 'amount'
-                                    ? contractSort.direction === 'asc'
-                                      ? '▲'
-                                      : '▼'
-                                    : ''}
-                                </span>
-                              </button>
-                            </th>
-                            <th scope="col" className="px-4 py-3">
-                              {t('contractValidUntil') ?? 'Действует до'}
-                            </th>
-                            <th scope="col" className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => handleContractSort('createdAt')}
-                                className="flex items-center gap-1"
-                              >
-                                {t('contractCreatedAt') ?? 'Создано'}
-                                <span className="text-gray-400">
-                                  {contractSort.key === 'createdAt'
-                                    ? contractSort.direction === 'asc'
-                                      ? '▲'
-                                      : '▼'
-                                    : ''}
-                                </span>
-                              </button>
-                            </th>
-                            {(contractPermissions.canEdit || contractPermissions.canDelete) && (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full table-fixed divide-y divide-gray-200 text-sm">
+                          <colgroup>
+                            {visibleContractTableColumns.map((column) => (
+                              <col key={column.key} style={{ width: getContractColumnWidth(column.key) }} />
+                            ))}
+                            <col style={{ width: 110 }} />
+                          </colgroup>
+                          <thead className="bg-gray-50">
+                            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              {visibleContractTableColumns.map((column) => {
+                                const sortKey =
+                                  column.key === 'clients' || column.key === 'validUntil'
+                                    ? null
+                                    : (column.key as ContractsSortKey);
+                                const isActive = sortKey ? contractSort.key === sortKey : false;
+                                const direction = isActive ? contractSort.direction : undefined;
+                                return (
+                                  <th
+                                    key={column.key}
+                                    scope="col"
+                                    style={{ width: getContractColumnWidth(column.key) }}
+                                    className={`relative px-4 py-3 ${draggingContractColumn === column.key ? 'bg-blue-50 text-blue-700' : ''}`}
+                                    onDragOver={handleContractColumnDragOver}
+                                    onDrop={(event) => handleContractColumnDrop(column.key, event)}
+                                  >
+                                    {sortKey ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleContractSort(sortKey)}
+                                        className="flex items-center gap-1"
+                                      >
+                                        <span
+                                          className="inline-flex min-w-0 select-none items-center gap-2"
+                                          draggable
+                                          onDragStart={(event) => handleContractColumnDragStart(column.key, event)}
+                                          onDragEnd={handleContractColumnDragEnd}
+                                          title="Перетащите, чтобы изменить порядок"
+                                        >
+                                          <GripVertical className="h-4 w-4 text-slate-400" />
+                                          <span className="truncate">{column.label}</span>
+                                        </span>
+                                        <span className="text-gray-400">{isActive ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
+                                      </button>
+                                    ) : (
+                                      <div
+                                        className="inline-flex min-w-0 select-none items-center gap-2"
+                                        draggable
+                                        onDragStart={(event) => handleContractColumnDragStart(column.key, event)}
+                                        onDragEnd={handleContractColumnDragEnd}
+                                        title="Перетащите, чтобы изменить порядок"
+                                      >
+                                        <GripVertical className="h-4 w-4 text-slate-400" />
+                                        <span className="truncate">{column.label}</span>
+                                      </div>
+                                    )}
+                                    <div
+                                      role="separator"
+                                      aria-label={`Изменить ширину колонки ${column.label}`}
+                                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                                      onMouseDown={(event) => handleContractResizeStart(column.key, event)}
+                                      onDragStart={(event) => event.preventDefault()}
+                                    />
+                                  </th>
+                                );
+                              })}
                               <th scope="col" className="px-4 py-3">
                                 {t('actions') ?? 'Действия'}
                               </th>
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 text-gray-700">
-                          {clientContracts.map((contract) => (
-                            <tr key={contract.id} className="hover:bg-gray-50/80">
-                              <td className="px-4 py-3 font-medium text-gray-900">№{contract.number}</td>
-                              <td className="px-4 py-3 text-gray-900">{toRuDate(contract.date)}</td>
-                              <td className="px-4 py-3">
-                                {contract.clients.length === 0 ? (
-                                  <span className="text-xs text-gray-500">
-                                    {t('contractClientsRequired') ?? 'Клиенты не указаны'}
-                                  </span>
-                                ) : (
-                                  <div className="flex flex-wrap gap-1">
-                                    {contract.clients.map((client) => (
-                                      <span
-                                        key={client.id}
-                                        className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700"
-                                      >
-                                        {client.name}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 text-gray-700">
+                            {clientContracts.map((contract) => (
+                              <tr key={contract.id} className="hover:bg-gray-50/80">
+                                {visibleContractTableColumns.map((column) => (
+                                  <td
+                                    key={column.key}
+                                    style={{ width: getContractColumnWidth(column.key) }}
+                                    className="max-w-0 overflow-hidden px-4 py-3 align-top"
+                                  >
+                                    {column.key === 'number' ? (
+                                      <span className="font-medium text-gray-900">№{contract.number}</span>
+                                    ) : column.key === 'date' ? (
+                                      <span className="text-gray-900">{toRuDate(contract.date)}</span>
+                                    ) : column.key === 'clients' ? (
+                                      contract.clients.length === 0 ? (
+                                        <span className="text-xs text-gray-500">
+                                          {t('contractClientsRequired') ?? 'Клиенты не указаны'}
+                                        </span>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-1">
+                                          {contract.clients.map((client) => (
+                                            <span
+                                              key={client.id}
+                                              className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700"
+                                            >
+                                              {client.name}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )
+                                    ) : column.key === 'amount' ? (
+                                      <span className="font-semibold text-gray-900">
+                                        {contract.amount !== null && contract.amount !== undefined
+                                          ? formatCurrencySmart(contract.amount).full
+                                          : '—'}
                                       </span>
-                                    ))}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 font-semibold text-gray-900">
-                                {contract.amount !== null && contract.amount !== undefined
-                                  ? formatCurrencySmart(contract.amount).full
-                                  : '—'}
-                              </td>
-                              <td className="px-4 py-3 text-gray-900">
-                                {contract.validUntil ? toRuDate(contract.validUntil) : '—'}
-                              </td>
-                              <td className="px-4 py-3 text-gray-900">{toRuDate(contract.createdAt)}</td>
-                              {(contractPermissions.canEdit || contractPermissions.canDelete) && (
+                                    ) : column.key === 'validUntil' ? (
+                                      <span className="text-gray-900">{contract.validUntil ? toRuDate(contract.validUntil) : '—'}</span>
+                                    ) : (
+                                      <span className="text-gray-900">{toRuDate(contract.createdAt)}</span>
+                                    )}
+                                  </td>
+                                ))}
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-2">
                                     {contractPermissions.canEdit && (
@@ -3911,39 +4610,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                     )}
                                   </div>
                                 </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                      <div>
-                        {(t('recordsFound') ?? 'Найдено записей')}: {contractsPagination.total ?? clientContracts.length}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setContractPage((value) => Math.max(1, value - 1))}
-                          disabled={contractPage <= 1}
-                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('previous') ?? 'Назад'}
-                        </button>
-                        <span>
-                          {(contractsPagination.page ?? contractPage)} / {contractTotalPages}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setContractPage((value) => Math.min(contractTotalPages, value + 1))}
-                          disabled={contractPage >= contractTotalPages}
-                          className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('next') ?? 'Вперёд'}
-                        </button>
-                      </div>
-                    </div>
-                  </>
+                      <TablePagination
+                        page={contractsPagination.page || contractPage}
+                        totalPages={contractTotalPages}
+                        totalItems={contractsPagination.total ?? clientContracts.length}
+                        pageSize={contractPageSize}
+                        pageSizeOptions={DETAIL_PAGE_SIZE_OPTIONS}
+                        onPageChange={setContractPage}
+                        onPageSizeChange={setContractPageSize}
+                      />
+                    </>
                 )}
               </>
             ) : (
@@ -3981,6 +4662,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}
+          defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
         />
 
         <ActModal
@@ -4015,10 +4697,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
-          onCreateRemainder={createPayment}
+          onCreateRemainder={async (payload) => {
+            try {
+              await apiService.createPayment(toBody(payload));
+              await refreshPayments();
+              bumpStats();
+            } catch (error) {
+              toast.error(extractDisplayErrorMessage(error, 'Не удалось создать остаток платежа'), 'Платежи');
+              throw error;
+            }
+          }}
           onDelete={async (id: number) => {
-            await removePayment(id);
-            closePayModal();
+            const removed = await removePayment(id);
+            if (removed) {
+              closePayModal();
+            }
           }}
           type={editingPayment?.type ?? 'Income'}
           defaultClientId={clientId}
@@ -4047,11 +4740,86 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           />
         )}
 
-        {error && (
-          <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {String(error)}
-          </div>
-        )}
+        <FormPromptModal
+          open={legalEntityPromptOpen}
+          title="Новая организация"
+          description="Быстрое создание юрлица из карточки клиента."
+          fields={[
+            {
+              key: 'shortName',
+              label: 'Название организации',
+              value: legalEntityDraft.shortName,
+              onChange: (value) => {
+                setLegalEntityDraft((prev) => ({ ...prev, shortName: value }));
+                if (legalEntityPromptError) {
+                  setLegalEntityPromptError(null);
+                }
+              },
+              placeholder: 'ООО Ромашка',
+              required: true,
+              autoFocus: true,
+            },
+            {
+              key: 'inn',
+              label: 'ИНН',
+              value: legalEntityDraft.inn,
+              onChange: (value) => {
+                setLegalEntityDraft((prev) => ({ ...prev, inn: value }));
+                if (legalEntityPromptError) {
+                  setLegalEntityPromptError(null);
+                }
+              },
+              placeholder: 'Опционально',
+            },
+          ]}
+          onCancel={closeLegalEntityPrompt}
+          onConfirm={submitQuickLegalEntity}
+          confirmLabel="Создать"
+          cancelLabel="Отмена"
+          error={legalEntityPromptError ?? undefined}
+          loading={legalEntityPromptSubmitting}
+        />
+
+        <FormPromptModal
+          open={poaPromptOpen}
+          title="Новая доверенность"
+          description="Добавление доверенности без перехода в отдельную форму."
+          fields={[
+            {
+              key: 'number',
+              label: 'Номер доверенности',
+              value: poaDraft.number,
+              onChange: (value) => {
+                setPoaDraft((prev) => ({ ...prev, number: value }));
+                if (poaPromptError) {
+                  setPoaPromptError(null);
+                }
+              },
+              placeholder: 'Например 12/24',
+              required: true,
+              autoFocus: true,
+            },
+            {
+              key: 'issuedAt',
+              label: 'Дата выдачи',
+              value: poaDraft.issuedAt,
+              onChange: (value) => {
+                setPoaDraft((prev) => ({ ...prev, issuedAt: value }));
+                if (poaPromptError) {
+                  setPoaPromptError(null);
+                }
+              },
+              type: 'date',
+              required: true,
+            },
+          ]}
+          onCancel={closePoaPrompt}
+          onConfirm={submitQuickPowerOfAttorney}
+          confirmLabel="Создать"
+          cancelLabel="Отмена"
+          error={poaPromptError ?? undefined}
+          loading={poaPromptSubmitting}
+        />
 
         {notFound && (
           <div className="min-h-[120px] flex items-center justify-center text-gray-500">

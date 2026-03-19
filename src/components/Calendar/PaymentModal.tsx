@@ -1,18 +1,31 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Trash2, Info, History } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Trash2, Info, History, Search, UserRoundSearch } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Payment, PaymentStatus, ClientCase, PaymentPayload } from '../../types';
+import type { Payment, PaymentStatus, Client, ClientCase, PaymentPayload, Invoice, InvoiceInput, ActResponsible } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useDialog } from '../../hooks/useDialog';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import { useToast } from '../../hooks/useToast';
+import { InvoiceModal } from '../Accounts/InvoiceModal';
+import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 
 type PaymentKind = 'Income' | 'Expense';
 type AccountOption = { account: string; accountDate?: string | null };
+type LinkedInvoiceContext = {
+  invoiceEntityId: number;
+  invoiceRecordId?: number | null;
+  number: string;
+  date: string;
+  clientId?: number | null;
+  clientCaseId?: number | null;
+  type?: PaymentKind;
+};
 
 function parseDecimal(value: string): number {
   if (!value) return 0;
@@ -21,11 +34,32 @@ function parseDecimal(value: string): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+function formatMoneyDisplayValue(value: number | string | null | undefined): string {
+  const num =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+      ? parseDecimal(value)
+      : NaN;
+
+  if (!Number.isFinite(num)) return '';
+
+  const [intPart, fracPart] = num.toFixed(2).split('.');
+  return `${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}.${fracPart}`;
+}
+
+function normalizeMoneyInputValue(value: string): string {
+  if (!value.trim()) return '';
+  const num = parseDecimal(value);
+  return Number.isFinite(num) ? num.toFixed(2) : '';
+}
+
 interface PaymentModalProps {
   defaultClientId?: number;
   defaultClientCaseId?: number;
   casesPrefetch?: ClientCase[];
   type?: PaymentKind;
+  linkedInvoice?: LinkedInvoiceContext | null;
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<unknown>;
@@ -45,21 +79,15 @@ export function PaymentModal({
   defaultClientCaseId,
   casesPrefetch,
   type,
+  linkedInvoice,
 }: PaymentModalProps) {
-  const accountInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
-  function suppressBrowserAutocomplete() {
-    const el = accountInputRef.current;
-    if (!el) return;
-    el.setAttribute('readonly', 'true');
-    setTimeout(() => el.removeAttribute('readonly'), 80);
-  }
-
-  const { clients } = useClients();
+  const { clients, loading: clientsLoading } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
+  const toast = useToast();
   const { isRequired } = useFormRequirements('payments', isOpen);
 
   const [loading, setLoading] = useState(false);
@@ -83,6 +111,7 @@ export function PaymentModal({
     incomeTypeId: '',
     paymentSourceId: '',
     paymentStatusId: '',
+    invoiceId: '',
     type: (type ?? 'Income') as PaymentKind,
     account: '',
     accountDate: '',
@@ -105,76 +134,206 @@ export function PaymentModal({
     () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
     [clients, formData.clientId],
   );
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientPickerSearch, setClientPickerSearch] = useState('');
+  const filteredClients = useMemo(() => {
+    const query = clientPickerSearch.trim().toLowerCase();
+    if (!query) {
+      return clients;
+    }
+
+    return clients.filter((client) =>
+      [client.name, client.company, client.email, client.phone]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [clientPickerSearch, clients]);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [invoicePickerLoading, setInvoicePickerLoading] = useState(false);
+  const [invoicePickerError, setInvoicePickerError] = useState<string | null>(null);
+  const [invoiceOptions, setInvoiceOptions] = useState<Invoice[]>([]);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceCreateOpen, setInvoiceCreateOpen] = useState(false);
+  const [invoiceCreateSubmitting, setInvoiceCreateSubmitting] = useState(false);
+  const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
+  const [invoiceCreateResponsibles, setInvoiceCreateResponsibles] = useState<ActResponsible[]>([]);
+  const [invoiceCreateLookupsLoading, setInvoiceCreateLookupsLoading] = useState(false);
+  const [invoiceCreateLookupsError, setInvoiceCreateLookupsError] = useState<string | null>(null);
   const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
   const [showProcessHelp, setShowProcessHelp] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<'details' | 'system'>('details');
+  const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
+  const hasSelectedInvoice = hasLockedInvoice || Boolean(formData.invoiceId);
+  const selectedInvoiceSummary = useMemo(() => {
+    if (!formData.invoiceId) return null;
 
-  /* -------------------- Подсказки по счёту -------------------- */
+    const selectedId = parseInt(formData.invoiceId, 10);
+    const matched = invoiceOptions.find((item) => item.invoiceEntityId === selectedId) ?? null;
+    if (matched) {
+      return {
+        id: selectedId,
+        title: `Счет № ${matched.number}`,
+        meta: `${toRuDate(matched.date) || matched.date || '—'}${matched.clientCaseTitle ? ` · ${matched.clientCaseTitle}` : ''}`,
+      };
+    }
+
+    return {
+      id: selectedId,
+      title: formData.account?.trim() ? `Счет № ${formData.account.trim()}` : `Счет #${selectedId}`,
+      meta: formData.accountDate ? toRuDate(formData.accountDate) || formData.accountDate : 'Связь со счетом установлена',
+    };
+  }, [formData.account, formData.accountDate, formData.invoiceId, invoiceOptions]);
+  const invoiceCreateDraft = useMemo<InvoiceEditorDraftState | null>(() => {
+    if (!invoiceCreateOpen) return null;
+
+    const clientId = formData.clientId || (defaultClientId ? String(defaultClientId) : '');
+    const clientCaseId = formData.clientCaseId ? Number(formData.clientCaseId) : null;
+    const invoiceDate = formData.accountDate || formData.date || todayYMD();
+    const dueDate = formData.date || invoiceDate;
+    const amount = formData.amount.trim();
+    const description = formData.description.trim();
+    const lineItemName = description || 'Платеж';
+
+    return {
+      invoiceId: null,
+      mode: 'create',
+      presentation: 'modal',
+      pageViewMode: false,
+      form: {
+        number: formData.account.trim(),
+        date: invoiceDate,
+        dueDate,
+        amount,
+        type: formData.type,
+        status: formData.status,
+        clientId,
+        contractId: '',
+        clientCaseReference: '',
+        description,
+        actReference: '',
+        paidDate: formData.paidDate || '',
+        responsibleIds: [],
+      },
+      lineItems: [
+        {
+          id: `${Date.now()}-linked-invoice`,
+          name: lineItemName,
+          quantity: '1',
+          unit: 'усл. ед.',
+          price: amount,
+        },
+      ],
+      selectedActs: [],
+      selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
+    };
+  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen]);
+
+  /* -------------------- Legacy account fields stay read-only -------------------- */
   useEffect(() => {
-    let stop = false;
+    setAccountOpts([]);
+    setAccountLoading(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
+      setInvoicePickerLoading(false);
+      setInvoicePickerError(null);
+      return;
+    }
+
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    if (!clientId) {
+      setInvoiceOptions([]);
+      setInvoicePickerLoading(false);
+      setInvoicePickerError('Сначала выберите клиента.');
+      return;
+    }
+
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        setAccountLoading(true);
-        const cid = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+        setInvoicePickerLoading(true);
+        setInvoicePickerError(null);
         const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
-
-        const params = {
-          clientId: cid,
+        const response = await apiService.getInvoices({
+          clientId,
           caseId,
-          q: formData.account,
-          take: 20,
-          withDate: true,
-          dedupe: true,
-        };
+          type: formData.type,
+          search:
+            invoiceSearch.trim() ||
+            (!formData.invoiceId && formData.account.trim() ? formData.account.trim() : undefined),
+          page: 1,
+          pageSize: 20,
+        });
 
-        const dataRaw = (await apiService.getAccounts(
-          params as unknown as Parameters<typeof apiService.getAccounts>[0],
-        )) as unknown;
+        if (cancelled) return;
 
-        let normalized: AccountOption[] = [];
-        if (Array.isArray(dataRaw)) {
-          normalized = dataRaw
-            .map((x): AccountOption | null => {
-              if (typeof x === 'string') {
-                const acc = x.trim();
-                return acc ? { account: acc } : null;
-              }
-              if (x && typeof x === 'object') {
-                const obj = x as { account?: unknown; accountDate?: unknown };
-                const acc = typeof obj.account === 'string' ? obj.account.trim() : '';
-                if (!acc) return null;
-                const accDate =
-                  typeof obj.accountDate === 'string' && obj.accountDate ? obj.accountDate : null;
-                return { account: acc, accountDate: accDate };
-              }
-              return null;
-            })
-            .filter((v): v is AccountOption => v !== null);
+        const canonicalItems = (response.items ?? []).filter(
+          (item) => typeof item.invoiceEntityId === 'number' && item.invoiceEntityId > 0,
+        );
+        setInvoiceOptions(canonicalItems);
+      } catch (e) {
+        if (!cancelled) {
+          setInvoiceOptions([]);
+          setInvoicePickerError(e instanceof Error ? e.message : 'Не удалось загрузить счета клиента.');
         }
-
-        const uniq = new Map<string, AccountOption>();
-        for (const it of normalized) {
-          const key = `${it.account}__${it.accountDate ?? ''}`;
-          if (!uniq.has(key)) uniq.set(key, it);
-        }
-
-        if (!stop) setAccountOpts(Array.from(uniq.values()));
       } finally {
-        if (!stop) setAccountLoading(false);
+        if (!cancelled) {
+          setInvoicePickerLoading(false);
+        }
       }
-    }, 250);
+    }, 200);
 
     return () => {
-      stop = true;
+      cancelled = true;
       clearTimeout(timer);
     };
-  }, [formData.account, formData.clientId, formData.clientCaseId]);
+  }, [
+    formData.account,
+    formData.clientCaseId,
+    formData.clientId,
+    formData.type,
+    hasLockedInvoice,
+    invoicePickerOpen,
+    invoiceSearch,
+    isOpen,
+  ]);
+
+  useEffect(() => {
+    if (!invoiceCreateOpen) return;
+    if (invoiceCreateResponsibles.length > 0 || invoiceCreateLookupsLoading) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        setInvoiceCreateLookupsLoading(true);
+        setInvoiceCreateLookupsError(null);
+        const responsibles = await apiService.getActResponsibles();
+        if (!cancelled) {
+          setInvoiceCreateResponsibles(responsibles ?? []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setInvoiceCreateLookupsError(e instanceof Error ? e.message : 'Не удалось загрузить ответственных.');
+        }
+      } finally {
+        if (!cancelled) {
+          setInvoiceCreateLookupsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceCreateLookupsLoading, invoiceCreateOpen, invoiceCreateResponsibles.length]);
 
   const prevOpenRef = useRef(false);
   const paymentRef = useRef<Payment | null>(null);
@@ -185,13 +344,18 @@ export function PaymentModal({
     }
   }, [payment]);
 
-  const formatMoneyString = (value: number | null | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '';
+  const formatMoneyString = (value: number | null | undefined) => formatMoneyDisplayValue(value);
 
   useEffect(() => {
     if (!isOpen) {
       prevOpenRef.current = false;
       setSyncDateWithPayment(false);
+      setDetailsTab('details');
+      setClientPickerOpen(false);
+      setClientPickerSearch('');
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -210,19 +374,26 @@ export function PaymentModal({
           paidDate: toDateInputValue(p.paidDate) || '',
           lastPaymentDate: toDateInputValue(p.lastPaymentDate) || '',
           notes: p.notes || '',
-          clientId: (p.clientId ?? defaultClientId)?.toString() || '',
-          clientCaseId: (p.clientCaseId ?? defaultClientCaseId)?.toString() || '',
+          clientId: (linkedInvoice?.clientId ?? p.clientId ?? defaultClientId)?.toString() || '',
+          clientCaseId:
+            (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
           incomeTypeId: p.incomeTypeId?.toString() || '',
           paymentSourceId: p.paymentSourceId?.toString() || '',
           paymentStatusId: p.paymentStatusId?.toString() || '',
-          type: (p.type as PaymentKind) ?? type ?? 'Income',
-          account: p.account ?? '',
-          accountDate: toDateInputValue(p.accountDate) || '',
+          invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
+          type: (p.type as PaymentKind) ?? linkedInvoice?.type ?? type ?? 'Income',
+          account: linkedInvoice?.number ?? p.account ?? '',
+          accountDate: toDateInputValue(linkedInvoice?.date) || toDateInputValue(p.accountDate) || '',
           systemNotes: p.systemNotes ?? '',
           rescheduleCount: p.rescheduleCount ?? 0,
         });
         setSyncDateWithPayment(Boolean(p.hasPartialPayment && p.lastPaymentDate));
+        setClientPickerOpen(false);
+        setClientPickerSearch('');
+        setInvoicePickerOpen(false);
+        setInvoiceSearch('');
+        setInvoicePickerError(null);
       } else {
         setFormData({
           date: todayYMD(),
@@ -235,19 +406,25 @@ export function PaymentModal({
           paidDate: '',
           lastPaymentDate: '',
           notes: '',
-          clientId: defaultClientId?.toString() || '',
-          clientCaseId: defaultClientCaseId?.toString() || '',
+          clientId: (linkedInvoice?.clientId ?? defaultClientId)?.toString() || '',
+          clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
           paymentSourceId: '',
           paymentStatusId: '',
-          type: (type ?? 'Income') as PaymentKind,
-          account: '',
-          accountDate: '',
+          invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
+          type: (linkedInvoice?.type ?? type ?? 'Income') as PaymentKind,
+          account: linkedInvoice?.number ?? '',
+          accountDate: toDateInputValue(linkedInvoice?.date) || '',
           systemNotes: '',
           rescheduleCount: 0,
         });
         setSyncDateWithPayment(false);
+        setClientPickerOpen(false);
+        setClientPickerSearch('');
+        setInvoicePickerOpen(false);
+        setInvoiceSearch('');
+        setInvoicePickerError(null);
       }
 
       const fallbackDate =
@@ -257,28 +434,36 @@ export function PaymentModal({
 
       prevOpenRef.current = true;
     }
-  }, [isOpen, defaultClientId, defaultClientCaseId, type]);
+  }, [defaultClientCaseId, defaultClientId, isOpen, linkedInvoice, type]);
 
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (clientPickerOpen) {
+          setClientPickerOpen(false);
+          return;
+        }
+        if (invoicePickerOpen) {
+          setInvoicePickerOpen(false);
+          return;
+        }
+        onClose();
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
         formRef.current?.requestSubmit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  }, [clientPickerOpen, invoicePickerOpen, isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
     setFormData((s) => {
       if (!s.amount?.trim()) return s;
-      const n = Number(String(s.amount).replace(',', '.'));
-      if (!Number.isFinite(n)) return s;
-      const fixed = n.toFixed(2);
-      return s.amount === fixed ? s : { ...s, amount: fixed };
+      const formatted = formatMoneyDisplayValue(s.amount);
+      return !formatted || s.amount === formatted ? s : { ...s, amount: formatted };
     });
   }, [isOpen]);
 
@@ -416,6 +601,13 @@ export function PaymentModal({
     }));
 
   const amountRef = useRef<HTMLInputElement>(null);
+  const handleMoneyFieldFocus = (field: 'amount' | 'paidAmount') => {
+    setFormData((prev) => {
+      const raw = normalizeMoneyInputValue(prev[field]);
+      return raw === prev[field] ? prev : { ...prev, [field]: raw };
+    });
+  };
+
   const handleAmountInput = (raw: string, el?: HTMLInputElement) => {
     let v = raw.replace(/[^\d.,]/g, '');
     const caret = el?.selectionStart ?? v.length;
@@ -471,8 +663,7 @@ export function PaymentModal({
       setFormData((s) => ({ ...s, amount: '' }));
       return;
     }
-    const fixed = num.toFixed(2);
-    setFormData((s) => ({ ...s, amount: fixed }));
+    setFormData((s) => ({ ...s, amount: formatMoneyDisplayValue(num) }));
   };
 
   const formatPaidAmountOnBlur = () => {
@@ -487,14 +678,14 @@ export function PaymentModal({
       setFormData((s) => ({ ...s, paidAmount: '' }));
       return;
     }
-    setFormData((s) => ({ ...s, paidAmount: num.toFixed(2) }));
+    setFormData((s) => ({ ...s, paidAmount: formatMoneyDisplayValue(num) }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
     if (pickedCat && pickedCat.paymentType !== formData.type) {
-      await alert(
+      toast.error(
         t('invalidCategoryForDirection') ?? 'Тип категории не соответствует направлению платежа',
       );
       return;
@@ -529,7 +720,7 @@ export function PaymentModal({
     const normalizedRescheduleDate = rescheduleDate ? fromInputToApiDate(rescheduleDate) : undefined;
 
     if (rescheduleRemainder && remainder > 0 && !normalizedRescheduleDate) {
-      await alert(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
+      toast.error(t('rescheduleDateRequired') ?? 'Укажите новую дату для остатка платежа.');
       setLoading(false);
       return;
     }
@@ -540,6 +731,19 @@ export function PaymentModal({
       safePaidAmount > 0 &&
       Number.isFinite(remainder) &&
       Boolean(normalizedRescheduleDate);
+
+    if (!payment) {
+      const approved = await confirm({
+        title: 'Подтверждение добавления платежа',
+        description: 'Добавить новый платеж с текущими данными?',
+        confirmLabel: 'Добавить платеж',
+        cancelLabel: 'Отмена',
+        variant: 'primary',
+      });
+      if (!approved) {
+        return;
+      }
+    }
 
     try {
       const baseAmount = shouldCreateRemainder ? Number(safePaidAmount.toFixed(2)) : amountNum;
@@ -560,12 +764,12 @@ export function PaymentModal({
         : [];
 
       const payableBreakdownNote = shouldCreateRemainder
-        ? `${t('partialCloseNote') ?? 'Частичная оплата'}: ${safePaidAmount.toFixed(2)} / ${amountNum.toFixed(
-            2,
-          )} • ${t('remainderNoteLabel') ?? 'Остаток'} ${remainder.toFixed(2)} → ${
-            toRuDate(rescheduleDate) || rescheduleDate
-          }`
+        ? `Частичная оплата: ${formatMoneyDisplayValue(safePaidAmount)} / ${formatMoneyDisplayValue(
+            amountNum,
+          )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`
         : undefined;
+
+      const shouldPersistLegacyAccountFields = Boolean(payment && !formData.invoiceId);
 
       const paymentData: PaymentPayload = {
         date: normalizedDate,
@@ -593,8 +797,12 @@ export function PaymentModal({
         paymentStatusId: formData.paymentStatusId
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
-        account: formData.account?.trim() || undefined,
-        accountDate: formData.accountDate ? fromInputToApiDate(formData.accountDate) : undefined,
+        invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
+        account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
+        accountDate:
+          shouldPersistLegacyAccountFields && formData.accountDate
+            ? fromInputToApiDate(formData.accountDate)
+            : undefined,
       };
 
       if (payment) {
@@ -615,16 +823,10 @@ export function PaymentModal({
           isPaid: false,
           paidDate: undefined,
           systemNotes: [
-            `${t('remainderNotePrefix') ?? 'Остаток после частичной оплаты'} (${toRuDate(
-              formData.date,
-            ) || formData.date})`,
-            `${
-              t('remainderOriginNote') ?? 'Источник платежа'
-            }${payment?.id ? ` #${payment.id}` : ''}: ${amountNum.toFixed(2)} • ${t('paidLabel') ?? 'Оплачено'} ${
-              safePaidAmount.toFixed(2)
-            } • ${t('remainderNoteLabel') ?? 'Остаток'} ${remainder.toFixed(2)} → ${
-              toRuDate(rescheduleDate) || rescheduleDate
-            }`,
+            `Остаток после частичной оплаты (${toRuDate(formData.date) || formData.date})`,
+            `Источник платежа${payment?.id ? ` #${payment.id}` : ''}: ${formatMoneyDisplayValue(amountNum)} • Оплачено ${formatMoneyDisplayValue(
+              safePaidAmount,
+            )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`,
           ].join('\n'),
           rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
         };
@@ -632,8 +834,130 @@ export function PaymentModal({
       }
 
       onClose();
+    } catch {
+      return;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openClientPicker = () => {
+    if (hasLockedInvoice) {
+      return;
+    }
+
+    setClientPickerSearch('');
+    setClientPickerOpen(true);
+  };
+
+  const handleClientPick = (client: Client) => {
+    setFormData((prev) => ({
+      ...prev,
+      clientId: String(client.id),
+      clientCaseId: '',
+      invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+      account: hasLockedInvoice ? prev.account : '',
+      accountDate: hasLockedInvoice ? prev.accountDate : '',
+    }));
+    setClientPickerOpen(false);
+    setInvoicePickerOpen(false);
+    setInvoiceSearch('');
+    setInvoicePickerError(null);
+  };
+
+  const openInvoicePicker = () => {
+    if (hasLockedInvoice || !formData.clientId) {
+      return;
+    }
+
+    setInvoiceSearch('');
+    setInvoicePickerError(null);
+    setInvoicePickerOpen(true);
+  };
+
+  const applyInvoiceSelection = (invoice: Invoice) => {
+    const canonicalId = invoice.invoiceEntityId;
+    if (!canonicalId || canonicalId <= 0) {
+      toast.error(
+        'У выбранного счета еще нет канонической связи. Сначала обновите счета в настройках.',
+        'Связанный счет',
+      );
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      invoiceId: String(canonicalId),
+      account: invoice.number,
+      accountDate: toDateInputValue(invoice.date) || prev.accountDate,
+      type: invoice.type ?? prev.type,
+      clientId: invoice.clientId ? String(invoice.clientId) : prev.clientId,
+      clientCaseId: invoice.clientCaseId ? String(invoice.clientCaseId) : prev.clientCaseId,
+    }));
+    setInvoicePickerOpen(false);
+    setInvoiceSearch('');
+  };
+
+  const clearInvoiceSelection = async () => {
+    if (hasLockedInvoice) return;
+
+    const approved = await confirm({
+      title: 'Убрать связь со счетом',
+      description: 'Удалить привязку текущего платежа к выбранному счету?',
+      confirmLabel: 'Убрать связь',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      invoiceId: '',
+      account: '',
+      accountDate: '',
+    }));
+  };
+
+  const handleCreateInvoiceFromPayment = async () => {
+    if (hasLockedInvoice) return;
+
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    if (!clientId) {
+      toast.error('Сначала выберите клиента, затем можно создать счет из платежа.', 'Создание счета');
+      return;
+    }
+
+    setInvoiceCreateError(null);
+    setInvoicePickerOpen(false);
+    setInvoiceCreateOpen(true);
+  };
+
+  const handleSubmitCreatedInvoice = async (payload: InvoiceInput) => {
+    try {
+      setInvoiceCreateSubmitting(true);
+      setInvoiceCreateError(null);
+
+      const created = await apiService.createInvoice(payload);
+      const normalizedCreated: Invoice = created.invoiceEntityId
+        ? created
+        : {
+            ...created,
+            invoiceEntityId: created.id,
+          };
+
+      setInvoiceOptions((prev) => {
+        const next = prev.filter((item) => item.invoiceEntityId !== normalizedCreated.invoiceEntityId);
+        return [normalizedCreated, ...next];
+      });
+
+      applyInvoiceSelection(normalizedCreated);
+      setInvoiceCreateOpen(false);
+      toast.success('Счет создан и привязан к платежу.', 'Создание счета');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось создать счет.';
+      setInvoiceCreateError(message);
+    } finally {
+      setInvoiceCreateSubmitting(false);
     }
   };
 
@@ -659,7 +983,18 @@ export function PaymentModal({
     }
 
     if (name === 'clientId') {
-      setFormData((prev) => ({ ...prev, clientId: value, clientCaseId: '' }));
+      setFormData((prev) => ({
+        ...prev,
+        clientId: value,
+        clientCaseId: '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      }));
+      setClientPickerOpen(false);
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -668,7 +1003,27 @@ export function PaymentModal({
         ...prev,
         type: value as PaymentKind,
         incomeTypeId: '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
+      return;
+    }
+
+    if (name === 'clientCaseId') {
+      setFormData((prev) => ({
+        ...prev,
+        clientCaseId: value,
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      }));
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -688,6 +1043,25 @@ export function PaymentModal({
     }));
   };
 
+  const handleSyncDateWithPaymentChange = async (checked: boolean) => {
+    if (!checked) {
+      setSyncDateWithPayment(false);
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Включить синхронизацию дат?',
+      description:
+        'При изменении даты фактического платежа ожидаемая дата платежа будет автоматически становиться такой же.',
+      confirmLabel: 'Включить',
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+
+    if (!approved) return;
+    setSyncDateWithPayment(true);
+  };
+
   const canDelete = !!payment && !!onDelete;
   if (!isOpen) return null;
 
@@ -700,10 +1074,21 @@ export function PaymentModal({
   const selDealTypeId = formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined;
   const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
   const selSourceId = formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined;
+  const formId = payment ? `payment-form-${payment.id}` : 'payment-form-new';
+  const centeredLabelClass = 'mb-2 block text-center text-sm font-medium text-gray-700';
+  const centeredFieldClass =
+    'w-full rounded-lg border border-gray-300 px-3 py-2 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-500';
+  const paymentInfoSelectClass =
+    'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500';
+  const statCardBaseClass = 'flex min-h-[110px] flex-col rounded-xl border px-4 py-3 shadow-sm';
+  const statLabelClass = 'text-xs uppercase tracking-[0.08em] text-gray-500';
+  const statValueClass = 'mt-2 whitespace-nowrap text-[1.9rem] font-semibold leading-none tracking-tight tabular-nums';
+  const serviceTabHasContent =
+    Boolean(formData.notes.trim()) || systemNotesEntries.length > 0 || transferTrail.length > 0;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-6xl w-full max-h-[92vh] shadow-2xl flex flex-col">
+  const modal = (
+    <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 p-4">
+      <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/95 px-6 py-4 backdrop-blur">
           <div>
             <p className="text-xs uppercase tracking-[0.08em] text-gray-500">
@@ -733,7 +1118,7 @@ export function PaymentModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6">
-          <form ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-6 py-4">
+          <form id={formId} ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-6 py-4">
             {showProcessHelp && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 shadow-sm">
                 <div className="flex items-center gap-2 font-semibold">
@@ -761,52 +1146,94 @@ export function PaymentModal({
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('amount')} {isRequired('Amount') ? '*' : ''}</p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-semibold text-gray-900">{amountNum.toFixed(2)}</span>
-                  <span className="text-xs text-gray-500" title={t('plannedScheduleDate') ?? 'Плановая дата по графику'}>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[220px,repeat(3,minmax(0,1fr))]">
+              <div className="flex min-h-[110px] items-center">
+                <div className="inline-flex w-full rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setDetailsTab('details')}
+                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                      detailsTab === 'details'
+                        ? 'bg-gray-900 text-white shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}>
+                    Основное
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsTab('system')}
+                    className={`flex flex-1 items-center justify-center gap-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                      detailsTab === 'system'
+                        ? 'bg-gray-900 text-white shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}>
+                    <span>Заметки</span>
+                    {serviceTabHasContent ? (
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full ${
+                          detailsTab === 'system' ? 'bg-amber-300' : 'bg-amber-500'
+                        }`}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </button>
+                </div>
+              </div>
+
+              <div className={`${statCardBaseClass} items-center border-gray-200 bg-gray-50/70 text-center`}>
+                <p className={`${statLabelClass} text-center`}>
+                  {t('amount')} {isRequired('Amount') ? '*' : ''}
+                </p>
+                <div className={`${statValueClass} w-full text-center text-gray-900`}>
+                  {formatMoneyDisplayValue(amountNum)}
+                </div>
+                <div className="mt-3 w-full space-y-1 text-center text-xs text-gray-500">
+                  <div>{t('plannedScheduleDate') ?? 'Плановая дата по графику'}</div>
+                  <div className="font-medium text-gray-700">
                     {toRuDate(formData.plannedDate) || t('notSpecified') || 'Не указана'}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">{t('plannedScheduleDate') ?? 'Плановая дата по графику'}</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{t('paidAmount') ?? 'Получено'}</p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-semibold text-emerald-600">{paidAmountNum.toFixed(2)}</span>
-                  <span className="text-xs text-gray-500">{t('lastPaymentDate') ?? 'Факт'}</span>
+                  </div>
                 </div>
               </div>
+
+              <div className={`${statCardBaseClass} items-center border-gray-200 bg-white text-center`}>
+                <p className={`${statLabelClass} text-center`}>{t('paidAmount') ?? 'Получено фактически'}</p>
+                <div className={`${statValueClass} w-full text-center text-emerald-600`}>
+                  {formatMoneyDisplayValue(paidAmountNum)}
+                </div>
+                <div className="mt-3 w-full space-y-1 text-center text-xs text-gray-500">
+                  <div>{t('lastPaymentDate') ?? 'Дата фактического платежа'}</div>
+                  <div className="font-medium text-gray-700">
+                    {toRuDate(formData.lastPaymentDate) || 'Не указана'}
+                  </div>
+                </div>
+              </div>
+
               <div
-                className={`rounded-xl px-4 py-3 shadow-sm border ${
+                className={`${statCardBaseClass} items-center text-center ${
                   remainingAmount > 0
                     ? 'border-amber-200 bg-amber-50'
                     : 'border-emerald-200 bg-emerald-50'
                 }`}>
-                <p className="text-xs uppercase tracking-[0.08em] text-gray-600">
-                  {remainingAmount > 0
-                    ? t('partialPaidInfoRemaining') ?? 'Остаток'
-                    : t('paymentReceived') ?? 'Закрыт'}
+                <p className={`text-center text-xs uppercase tracking-[0.08em] ${remainingAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                  {remainingAmount > 0 ? 'Остаток' : t('paymentReceived') ?? 'Закрыт'}
                 </p>
-                <div className="flex items-baseline gap-2">
-                  <span
-                    className={`text-2xl font-semibold ${
-                      remainingAmount > 0 ? 'text-amber-700' : 'text-emerald-700'
-                    }`}>
-                    {remainingAmount > 0 ? remainingAmount.toFixed(2) : t('completedStatus')}
-                  </span>
-                  {hasPartial && (
-                    <span className="inline-flex items-center rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
-                      {t('rescheduleRemainderOption') ?? 'Перенос остатка'}
+                <div
+                  className={`${statValueClass} w-full text-center ${
+                    remainingAmount > 0 ? 'text-amber-700' : 'text-emerald-700'
+                  }`}>
+                  {remainingAmount > 0 ? formatMoneyDisplayValue(remainingAmount) : 'Выполнено'}
+                </div>
+                <div className="mt-3 flex min-h-[20px] w-full justify-center">
+                  {hasPartial ? (
+                    <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
+                      Перенос остатка
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
 
-            {(transferTrail.length > 0 || (formData.rescheduleCount ?? 0) > 0 || hasPartial) && (
+            {detailsTab === 'system' && (transferTrail.length > 0 || (formData.rescheduleCount ?? 0) > 0 || hasPartial) && (
               <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-center gap-2 text-amber-800">
@@ -847,223 +1274,132 @@ export function PaymentModal({
               </div>
             )}
 
-            <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
-              <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
-                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                  <span className="h-6 w-6 rounded-full bg-blue-50 text-blue-600 grid place-items-center text-xs font-bold">1</span>
-                  <span>{t('expectedPaymentDate') ?? 'Планирование платежа'}</span>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
-                  <div className="lg:col-span-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('type') ?? 'Тип'}
-                    </label>
-                    <select
-                      name="type"
-                      value={formData.type}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                      <option value="Income">{t('income') ?? 'Доход'}</option>
-                      <option value="Expense">{t('expense') ?? 'Расход'}</option>
-                    </select>
-                  </div>
-
-                  <div className="lg:col-span-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
-                    <select
-                      name="status"
-                      value={formData.status}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                      <option value="Pending">{t('pending')}</option>
-                      <option value="Completed">{t('completedStatus')}</option>
-                      <option value="Overdue">{t('overdue')}</option>
-                    </select>
-                  </div>
-
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
-                  <div className="lg:col-span-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}
-                    </label>
-                    <input
-                      type="date"
-                      name="date"
-                      value={formData.date}
-                      onChange={handleChange}
-                      required
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Date') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
-                    />
-                  </div>
-                  <div className="lg:col-span-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('plannedScheduleDate') ?? 'Плановая дата по графику'}
-                    </label>
-                    <input
-                      type="date"
-                      name="plannedDate"
-                      value={formData.plannedDate}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
-                  <div className="lg:col-span-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('amount')}</label>
-                    <input
-                      ref={amountRef}
-                      type="text"
-                      name="amount"
-                      value={formData.amount}
-                      onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)}
-                      onBlur={formatAmountOnBlur}
-                      onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
-                      inputMode="decimal"
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${isRequired('Amount') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
-                      placeholder="0.00"
-                    />
-                  </div>
-
-                  <div className="lg:col-span-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('paidAmount')}</label>
-                    <input
-                      type="text"
-                      name="paidAmount"
-                      value={formData.paidAmount}
-                      onChange={(e) =>
-                        setFormData((s) => ({
-                          ...s,
-                          paidAmount: e.target.value,
-                        }))
-                      }
-                      onBlur={formatPaidAmountOnBlur}
-                      inputMode="decimal"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="0.00"
-                    />
-                  </div>
-
-                  <div className="lg:col-span-4 space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">{t('paidDate')}</label>
-                    <input
-                      type="date"
-                      name="paidDate"
-                      value={formData.paidDate}
-                      onChange={handleChange}
-                      disabled={!formData.isPaid}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                    />
-                  </div>
-                </div>
-
-                {hasPartial && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow-inner">
-                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
-                      <span className="flex items-center gap-1">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-amber-700 ring-1 ring-amber-200">
-                          {t('remaining') ?? 'Остаток'}
-                        </span>
-                        {t('remainingAmount', { amount: remainingAmount.toFixed(2) }) ??
-                          `Остаток: ${remainingAmount.toFixed(2)}`}
-                      </span>
-                      <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
-                        {t('partialPaidBadge') ?? 'частичный платёж'}
-                      </span>
+            {detailsTab === 'details' && (
+              <>
+                <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+                  <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                      <span className="grid h-6 w-6 place-items-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">1</span>
+                      <span>{'Информация о платеже'}</span>
                     </div>
-                    <p className="mt-2 text-xs text-amber-700">
-                      {t('partialPaidReminder') ??
-                        'Обновите ожидаемую дату поступления оставшейся суммы.'}
-                    </p>
-                    <div className="mt-3 space-y-2 rounded-md border border-amber-200 bg-white/80 p-3 text-amber-900">
-                      <label className="flex items-start gap-2 text-sm font-medium text-amber-900">
-                        <input
-                          type="checkbox"
-                          checked={rescheduleRemainder}
-                          onChange={(e) => setRescheduleRemainder(e.target.checked)}
-                          className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
-                        />
-                        <span>{t('rescheduleRemainderOption') ?? 'Перенести остаток на новую дату'}</span>
-                      </label>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto,1fr] sm:items-center">
-                        <label className="text-sm text-gray-700" htmlFor="reschedule-date">
-                          {t('rescheduleRemainderDate') ?? 'Новая дата остатка'}
-                        </label>
-                        <input
-                          id="reschedule-date"
-                          type="date"
-                          value={rescheduleDate}
-                          onChange={(e) => setRescheduleDate(e.target.value)}
-                          disabled={!rescheduleRemainder}
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
-                        />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={centeredLabelClass}>{t('type') ?? 'Type'}</label>
+                        <select name="type" value={formData.type} onChange={handleChange} disabled={hasLockedInvoice} className={paymentInfoSelectClass}>
+                          <option value="Income">{t('income') ?? 'Income'}</option><option value="Expense">{t('expense') ?? 'Expense'}</option>
+                        </select>
                       </div>
-                      <p className="text-xs text-amber-700">
-                        {t('rescheduleRemainderHint') ??
-                          'Текущий платёж будет закрыт на внесённую сумму, остаток появится в календаре новой записью.'}
-                      </p>
+                      <div>
+                        <label className={centeredLabelClass}>{t('status')}</label>
+                        <select name="status" value={formData.status} onChange={handleChange} className={paymentInfoSelectClass}>
+                          <option value="Pending">{t('pending')}</option><option value="Completed">{t('completedStatus')}</option><option value="Overdue">{t('overdue')}</option>
+                        </select>
+                      </div>
                     </div>
-                  </div>
-                )}
-
-                {overpaid && (
-                  <div className="text-sm text-rose-600">
-                    {t('partialPaidOverpaid') ??
-                      'Внесённая сумма превышает запланированную. Она будет ограничена суммой платежа.'}{' '}
-                    {amountNum.toFixed(2)}
-                  </div>
-                )}
-
-                {formData.rescheduleCount > 0 && (
-                  <div className="text-sm text-gray-600">
-                    {(t('rescheduleCountLabel') ?? 'Количество переносов:')}{' '}
-                    {formData.rescheduleCount}
-                  </div>
-                )}
-
-                <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
-                  <div className="lg:col-span-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('lastPaymentDate') ?? 'Дата фактического платежа'}
-                    </label>
-                    <input
-                      type="date"
-                      name="lastPaymentDate"
-                      value={formData.lastPaymentDate}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div className="lg:col-span-4">
-                    <label className="flex h-full items-center gap-2 text-sm font-medium text-gray-700">
-                      <input
-                        type="checkbox"
-                        name="isPaid"
-                        checked={formData.isPaid}
-                        onChange={handleChange}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <span>{t('paymentReceived')}</span>
-                    </label>
-                  </div>
-
-                  <div className="lg:col-span-4">
-                    <label className="flex h-full items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={syncDateWithPayment}
-                        onChange={(e) => setSyncDateWithPayment(e.target.checked)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
-                    </label>
-                  </div>
-                </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={centeredLabelClass}>{t('dealType')}</label>
+                        <select name="dealTypeId" value={formData.dealTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
+                          <option value="">{t('selectDealType')}</option>
+                          {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (<option key={d.id} value={String(d.id)}>{d.name}{!d.isActive ? ' (inactive)' : ''}</option>))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={centeredLabelClass}>{formData.type === 'Income' ? t('incomeType') ?? 'Income type' : t('expenseType') ?? 'Expense type'}</label>
+                        <select name="incomeTypeId" value={formData.incomeTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
+                          <option value="">{formData.type === 'Income' ? t('selectIncomeType') ?? 'Select income type' : t('selectExpenseType') ?? 'Select expense type'}</option>
+                          {buildOptionsWithSelected(incomeTypes, selIncomeTypeId, (it) => it.isActive && it.paymentType === formData.type).map((it) => (<option key={it.id} value={String(it.id)}>{it.name}{!it.isActive ? ' (inactive)' : ''}{it.paymentType !== formData.type ? ' (other direction)' : ''}</option>))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div><label className={centeredLabelClass}>{t('expectedPaymentDate') ?? 'Expected date'}</label><input type="date" name="date" value={formData.date} onChange={handleChange} required className={`${centeredFieldClass} ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} /></div>
+                      <div><label className={centeredLabelClass}>{t('plannedScheduleDate') ?? 'Planned date'}</label><input type="date" name="plannedDate" value={formData.plannedDate} onChange={handleChange} className={centeredFieldClass} /></div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div><label className={centeredLabelClass}>{t('amount')}</label><input ref={amountRef} type="text" name="amount" value={formData.amount} onFocus={() => handleMoneyFieldFocus('amount')} onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)} onBlur={formatAmountOnBlur} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()} inputMode="decimal" className={`${centeredFieldClass} ${isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} placeholder="0.00" /></div>
+                      <div><label className={centeredLabelClass}>{t('paidAmount') ?? 'Получено фактически'}</label><input type="text" name="paidAmount" value={formData.paidAmount} onFocus={() => handleMoneyFieldFocus('paidAmount')} onChange={(e) => setFormData((s) => ({ ...s, paidAmount: e.target.value }))} onBlur={formatPaidAmountOnBlur} inputMode="decimal" className={centeredFieldClass} placeholder="0.00" /></div>
+                    </div>
+                    {hasPartial && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-inner">
+                        <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+                          <div className="space-y-3 rounded-md border border-amber-200/80 bg-white/70 p-3">
+                            <div>
+                              <div className="text-center text-xs font-medium uppercase tracking-[0.08em] text-amber-700">
+                                Остаток
+                              </div>
+                              <div className="mt-1 text-center text-2xl font-semibold text-amber-900">
+                                {formatMoneyDisplayValue(remainingAmount)}
+                              </div>
+                            </div>
+                            <p className="text-xs leading-5 text-amber-700">
+                              Обновите ожидаемую дату поступления оставшейся суммы.
+                            </p>
+                            <div className="flex justify-center">
+                              <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+                                Частичный платёж
+                              </span>
+                            </div>
+                          </div>
+                          <div className="space-y-3 rounded-md border border-amber-200 bg-white/80 p-3 text-amber-900">
+                            <label className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                              <input
+                                type="checkbox"
+                                checked={rescheduleRemainder}
+                                onChange={(e) => setRescheduleRemainder(e.target.checked)}
+                                className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                              />
+                              <span>Перенести остаток</span>
+                            </label>
+                            <div className="space-y-2">
+                              <label className="block text-center text-sm font-medium text-gray-700" htmlFor="reschedule-date">
+                                Новая дата остатка
+                              </label>
+                              <input
+                                id="reschedule-date"
+                                type="date"
+                                value={rescheduleDate}
+                                onChange={(e) => setRescheduleDate(e.target.value)}
+                                disabled={!rescheduleRemainder}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-center focus:border-amber-500 focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
+                              />
+                              {formData.rescheduleCount > 0 && (
+                                <div className="text-center text-xs text-gray-600">
+                                  {`Количество переносов: ${formData.rescheduleCount}`}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {overpaid && <div className="text-sm text-rose-600">{'Внесённая сумма превышает запланированную.'} {formatMoneyDisplayValue(amountNum)}</div>}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={centeredLabelClass}>{t('lastPaymentDate') ?? 'Дата фактического платежа'}</label>
+                        <input type="date" name="lastPaymentDate" value={formData.lastPaymentDate} onChange={handleChange} className={centeredFieldClass} />
+                      </div>
+                      <div>
+                        {formData.isPaid ? (
+                          <>
+                            <label className={centeredLabelClass}>{t('paidDate') ?? 'Дата оплаты'}</label>
+                            <input type="date" name="paidDate" value={formData.paidDate} onChange={handleChange} className={centeredFieldClass} />
+                          </>
+                        ) : (
+                          <div className="hidden h-full sm:block" aria-hidden="true" />
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-3 rounded-lg border border-gray-100 bg-gray-50/70 p-3">
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input type="checkbox" name="isPaid" checked={formData.isPaid} onChange={handleChange} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        <span>{t('paymentReceived')}</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input type="checkbox" checked={syncDateWithPayment} onChange={(e) => { void handleSyncDateWithPaymentChange(e.target.checked); }} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
+                      </label>
+                    </div>
               </div>
 
               <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
@@ -1072,6 +1408,12 @@ export function PaymentModal({
                   <span>{t('client')}</span>
                 </div>
                 <div className="space-y-4">
+                  {hasLockedInvoice && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                      Платеж привязан к счету № {linkedInvoice?.number || '—'} от{' '}
+                      {toRuDate(linkedInvoice?.date) || linkedInvoice?.date || '—'}.
+                    </div>
+                  )}
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <label className="block text-sm font-medium text-gray-700">{t('client')} {isRequired('ClientId') ? '*' : ''}</label>
@@ -1079,11 +1421,44 @@ export function PaymentModal({
                         <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
                       ) : null}
                     </div>
+                    <div className="mb-2 flex gap-2">
+                      <input
+                        type="text"
+                        value={selectedClient?.name ?? ''}
+                        readOnly
+                        placeholder={t('selectClient')}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={openClientPicker}
+                        disabled={hasLockedInvoice || clientsLoading}
+                        className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={t('selectClient') ?? 'Выбрать клиента'}>
+                        <UserRoundSearch className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {clientsLoading ? (
+                      <div className="mb-2 text-xs text-gray-500">{t('loading') ?? 'Загрузка...'}</div>
+                    ) : null}
+                    {(selectedClient?.company || selectedClient?.responsibleUserName) ? (
+                      <div className="mb-2 space-y-1 rounded-xl border border-gray-100 bg-gray-50 p-2">
+                        {selectedClient?.company ? (
+                          <div className="text-xs text-gray-600">{selectedClient.company}</div>
+                        ) : null}
+                        {selectedClient?.responsibleUserName ? (
+                          <div className="text-xs text-gray-500">Ответственный: {selectedClient.responsibleUserName}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <select
                       name="clientId"
                       value={formData.clientId}
                       onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      disabled={hasLockedInvoice}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="hidden">
                       <option value="">{t('selectClient')}</option>
                       {clients.map((client) => (
                         <option key={client.id} value={client.id}>
@@ -1159,327 +1534,449 @@ export function PaymentModal({
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-[2fr,1fr] sm:items-end">
-                    <div className="relative">
+                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('account') ?? 'Счёт'}
+                        {t('account') ?? '\u0421\u0447\u0451\u0442'}
                       </label>
-
                       <input
-                        ref={accountInputRef}
                         name="account"
                         value={formData.account}
-                        onChange={handleChange}
-                        onFocus={() => {
-                          suppressBrowserAutocomplete();
-                          setAccountOpen(true);
-                        }}
-                        onClick={suppressBrowserAutocomplete}
-                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
-                        placeholder="Например: Счет № 12345"
+                        placeholder={'\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: \u0421\u0447\u0451\u0442 \u2116 12345'}
                         maxLength={120}
-                        autoComplete="new-password"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        readOnly
+                        tabIndex={-1}
+                        className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-600"
                       />
-
-                      {accountOpen &&
-                        (accountOpts.length > 0 || (formData.account ?? '').trim() !== '') && (
-                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
-                            {accountLoading && (
-                              <div className="px-3 py-2 text-sm text-gray-500">Загрузка…</div>
-                            )}
-
-                            {formData.account &&
-                              !accountOpts.some(
-                                (x) => x.account.toLowerCase() === formData.account.trim().toLowerCase(),
-                              ) && (
-                                <button
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => setAccountOpen(false)}>
-                                  Создать «{formData.account.trim()}»
-                                </button>
-                              )}
-
-                            {accountOpts.map((opt) => {
-                              const key = `${opt.account}__${opt.accountDate ?? ''}`;
-                              const human =
-                                opt.account + (opt.accountDate ? ` от ${toRuDate(opt.accountDate)}` : '');
-
-                              return (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={async () => {
-                                    setFormData((s) => ({ ...s, account: opt.account }));
-                                    setAccountOpen(false);
-
-                                    if (opt.accountDate) {
-                                      setFormData((s) => ({
-                                        ...s,
-                                        accountDate: toDateInputValue(opt.accountDate),
-                                      }));
-                                      return;
-                                    }
-
-                                    try {
-                                      const cid = formData.clientId
-                                        ? parseInt(formData.clientId, 10)
-                                        : undefined;
-                                      const caseId = formData.clientCaseId
-                                        ? parseInt(formData.clientCaseId, 10)
-                                        : undefined;
-
-                                      const resp = await apiService.getAccounts({
-                                        clientId: cid,
-                                        caseId,
-                                        q: opt.account,
-                                        take: 50,
-                                        withDate: true as const,
-                                        dedupe: false,
-                                      });
-
-                                      const found = resp.find(
-                                        (x) => x.account === opt.account && x.accountDate,
-                                      );
-                                      if (found?.accountDate) {
-                                        setFormData((s) => ({
-                                          ...s,
-                                          accountDate: toDateInputValue(found.accountDate),
-                                        }));
-                                      }
-                                    } catch {
-                                      /* no-op */
-                                    }
-                                  }}>
-                                  {human}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('accountDate') ?? 'Дата счёта'}
+                        {t('accountDate') ?? '\u0414\u0430\u0442\u0430 \u0441\u0447\u0451\u0442\u0430'}
                       </label>
                       <input
                         type="date"
                         name="accountDate"
                         value={formData.accountDate}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        readOnly
+                        disabled
+                        className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-600"
                       />
                     </div>
-                  </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('dealType')}
-                      </label>
-                      <select
-                        name="dealTypeId"
-                        value={formData.dealTypeId}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <option value="">{t('selectDealType')}</option>
-                        {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (
-                          <option key={d.id} value={String(d.id)}>
-                            {d.name}
-                            {!d.isActive ? ' (не активно)' : ''}
-                          </option>
-                        ))}
-                      </select>{' '}
-                      {(() => {
-                        const picked = dealTypes.find((d) => d.id === selDealTypeId);
-                        if (picked && !picked.isActive) {
-                          return (
-                            <div className="mt-1 text-xs text-amber-600">
-                              Внимание: выбранный тип сделки деактивирован. Вы можете сохранить платёж как есть или выбрать
-                              актуальный тип.
+                    <div className="sm:col-span-2">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">{'\u0421\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0439 \u0441\u0447\u0451\u0442'}</div>
+                            <div className="text-xs text-gray-500">
+                              {'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439 \u0441\u0447\u0451\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430 \u0438\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442 \u0438\u0437 \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u043f\u043b\u0430\u0442\u0435\u0436\u0430.'}
                             </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {formData.type === 'Income'
-                          ? t('incomeType') ?? 'Тип дохода'
-                          : t('expenseType') ?? 'Тип расхода'}
-                      </label>
-                      <select
-                        name="incomeTypeId"
-                        value={formData.incomeTypeId}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <option value="">
-                          {formData.type === 'Income'
-                            ? t('selectIncomeType') ?? 'Выберите тип дохода'
-                            : t('selectExpenseType') ?? 'Выберите тип расхода'}
-                        </option>
-                        {buildOptionsWithSelected(
-                          incomeTypes,
-                          selIncomeTypeId,
-                          (it) => it.isActive && it.paymentType === formData.type,
-                        ).map((it) => (
-                          <option key={it.id} value={String(it.id)}>
-                            {it.name}
-                            {!it.isActive ? ' (не активно)' : ''}
-                            {it.paymentType !== formData.type ? ' (другое направление)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {(() => {
-                        const picked = incomeTypes.find((it) => it.id === selIncomeTypeId);
-                        if (!picked) return null;
-                        if (!picked.isActive || picked.paymentType !== formData.type) {
-                          return (
-                            <div className="mt-1 text-xs text-amber-600">
-                              Внимание: выбранная категория
-                              {!picked.isActive ? ' деактивирована' : ''}
-                              {picked.paymentType !== formData.type ? ' и относится к другому направлению' : ''}.
-                              Вы можете сохранить платёж как есть или выбрать актуальную категорию.
+                          </div>
+                          {!hasLockedInvoice && (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={openInvoicePicker}
+                                disabled={!formData.clientId}
+                                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
+                                {selectedInvoiceSummary ? 'Сменить счёт' : 'Выбрать счёт'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleCreateInvoiceFromPayment()}
+                                disabled={invoiceCreateSubmitting || !formData.clientId}
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
+                                {invoiceCreateSubmitting ? '\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c...' : '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0441\u0447\u0451\u0442'}
+                              </button>
+                              {selectedInvoiceSummary && (
+                                <button
+                                  type="button"
+                                  onClick={clearInvoiceSelection}
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100">
+                                  {'\u0423\u0431\u0440\u0430\u0442\u044c \u0441\u0432\u044f\u0437\u044c'}
+                                </button>
+                              )}
                             </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  </div>
+                          )}
+                        </div>
 
-                  <div className="grid gap-3 sm:grid-cols-[auto,1fr] sm:items-center">
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        name="isPaid"
-                        checked={formData.isPaid}
-                        onChange={handleChange}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <span>{t('paymentReceived')}</span>
-                    </label>
+                        {selectedInvoiceSummary ? (
+                          <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                            <div className="text-sm font-semibold text-gray-900">{selectedInvoiceSummary.title}</div>
+                            <div className="mt-1 text-xs text-gray-500">{selectedInvoiceSummary.meta}</div>
+                          </div>
+                        ) : (
+                          <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-sm text-gray-500">
+                            {'\u0421\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0439 \u0441\u0447\u0451\u0442 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d.'}
+                          </div>
+                        )}
 
-                    {formData.isPaid && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {t('paidDate')}
-                        </label>
-                        <input
-                          type="date"
-                          name="paidDate"
-                          value={formData.paidDate}
-                          onChange={handleChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        {false && !hasLockedInvoice && invoicePickerOpen && (
+                          <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3">
+                            <input
+                              type="text"
+                              value={invoiceSearch}
+                              onChange={(event) => setInvoiceSearch(event.target.value)}
+                              placeholder={'\u041f\u043e\u0438\u0441\u043a \u0441\u0447\u0451\u0442\u0430 \u043f\u043e \u043d\u043e\u043c\u0435\u0440\u0443, \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u044e \u0438\u043b\u0438 \u0434\u0435\u043b\u0443'}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                            />
+
+                            {invoicePickerLoading && (
+                              <div className="text-sm text-gray-500">{'\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0441\u0447\u0451\u0442\u043e\u0432...'}</div>
+                            )}
+
+                            {invoicePickerError && (
+                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                {invoicePickerError}
+                              </div>
+                            )}
+
+                            {!invoicePickerLoading && !invoicePickerError && invoiceOptions.length === 0 && (
+                              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                                {'\u041f\u043e\u0434\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u0441\u0447\u0451\u0442\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b. \u041c\u043e\u0436\u043d\u043e \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442 \u0438\u0437 \u044d\u0442\u043e\u0433\u043e \u043f\u043b\u0430\u0442\u0435\u0436\u0430.'}
+                              </div>
+                            )}
+
+                            {!invoicePickerLoading && invoiceOptions.length > 0 && (
+                              <div className="max-h-56 space-y-2 overflow-y-auto">
+                                {invoiceOptions.map((invoiceOption) => {
+                                  const canonicalId = invoiceOption.invoiceEntityId;
+                                  const selected = canonicalId && String(canonicalId) === formData.invoiceId;
+                                  const caseLabel = invoiceOption.clientCases?.length
+                                    ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
+                                    : invoiceOption.clientCaseTitle;
+
+                                  return (
+                                    <button
+                                      key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
+                                      type="button"
+                                      onClick={() => applyInvoiceSelection(invoiceOption)}
+                                      className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                                        selected
+                                          ? 'border-emerald-300 bg-emerald-50'
+                                          : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                                      }`}>
+                                      <div className="text-sm font-semibold text-gray-900">{'\u0421\u0447\u0451\u0442 \u2116 '}{invoiceOption.number}</div>
+                                      <div className="mt-1 text-xs text-gray-500">
+                                        {toRuDate(invoiceOption.date) || invoiceOption.date}
+                                        {caseLabel ? ` - ${caseLabel}` : ''}
+                                        {invoiceOption.description ? ` - ${invoiceOption.description}` : ''}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
+
                 </div>
               </div>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('description')} {isRequired('Description') ? '*' : ''}
-                </label>
-                <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  rows={3}
-                  className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${isRequired('Description') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
-                  placeholder={t('paymentDescription')}
-                />
-              </div>
-
-              <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
-                <textarea
-                  name="notes"
-                  value={formData.notes}
-                  onChange={handleChange}
-                  rows={3}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder={t('additionalNotes')}
-                />
-              </div>
-            </div>
-
-            {systemNotesEntries.length > 0 && (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 shadow-sm">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('systemNotesLabel') ?? 'Служебные заметки'}
-                </label>
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
-                  <ul className="space-y-2">
-                    {systemNotesEntries.map((note, idx) => (
-                      <li key={`${note}-${idx}`} className="flex gap-2">
-                        <span className="text-gray-400 leading-6">•</span>
-                        <span className="flex-1 whitespace-pre-wrap">{note}</span>
-                      </li>
-                    ))}
-                  </ul>
+                <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {t('description')} {isRequired('Description') ? '*' : ''}
+                  </label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleChange}
+                    rows={4}
+                    className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${isRequired('Description') ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
+                    placeholder={t('paymentDescription')}
+                  />
                 </div>
+              </>
+            )}
+
+            {detailsTab === 'system' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleChange}
+                    rows={8}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder={t('additionalNotes')}
+                  />
+                </div>
+
+                {systemNotesEntries.length > 0 ? (
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 shadow-sm">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {t('systemNotesLabel') ?? '\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0435 \u0437\u0430\u043c\u0435\u0442\u043a\u0438'}
+                    </label>
+                    <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+                      <ul className="space-y-2">
+                        {systemNotesEntries.map((note, idx) => (
+                          <li key={`${note}-${idx}`} className="flex gap-2">
+                            <span className="text-gray-400 leading-6">{'•'}</span>
+                            <span className="flex-1 whitespace-pre-wrap">{note}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : !formData.notes.trim() && !(transferTrail.length > 0 || (formData.rescheduleCount ?? 0) > 0 || hasPartial) ? (
+                  <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 shadow-sm">
+                    {'\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0445 \u0437\u0430\u043c\u0435\u0442\u043e\u043a \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.'}
+                  </div>
+                ) : null}
               </div>
             )}
 
-            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-gray-200 bg-white/95 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-              {canDelete && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!payment) return;
-                    const ok = await confirm({ title: 'Подтверждение удаления', description: t('confirmDeletePayment') ?? 'Удалить платеж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
-                    if (!ok) return;
-                    await onDelete!(payment.id);
-                    onClose();
-                  }}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-50 px-4 py-2 font-medium text-red-700 transition-colors hover:bg-red-100 sm:w-auto sm:min-w-40">
-                  <Trash2 className="h-4 w-4" />
-                  {t('delete')}
-                </button>
-              )}
+            <div className="border-t border-gray-200 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center">
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!payment) return;
+                        const ok = await confirm({
+                          title: '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f',
+                          description: t('confirmDeletePayment') ?? '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0451\u0436\u003f',
+                          confirmLabel: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c',
+                          cancelLabel: '\u041e\u0442\u043c\u0435\u043d\u0430',
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
+                        try {
+                          await onDelete!(payment.id);
+                          onClose();
+                        } catch {
+                          return;
+                        }
+                      }}
+                      className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-red-50 px-4 py-2 font-medium text-red-700 transition-colors hover:bg-red-100">
+                      <Trash2 className="h-4 w-4" />
+                      {t('delete')}
+                    </button>
+                  )}
+                </div>
 
-              <div className="flex w-full gap-3 sm:w-auto sm:justify-end">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`flex-1 rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 sm:flex-none ${
-                    formData.type === 'Income'
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      : 'bg-red-600 text-white hover:bg-red-700'
-                  } disabled:opacity-50`}>
-                  {loading
-                    ? payment
-                      ? t('updating')
-                      : t('adding')
-                    : payment
-                    ? t('save')
-                    : t('addPayment')}
-                </button>
+                <div className="flex w-full justify-end gap-3 sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300 sm:min-w-40">
+                    {t('cancel')}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300 sm:min-w-40 sm:flex-none">
-                  {t('cancel')}
-                </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className={`rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 ${
+                      formData.type === 'Income'
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        : 'bg-red-600 text-white hover:bg-red-700'
+                    } disabled:opacity-50`}>
+                    {loading
+                      ? payment
+                        ? t('updating')
+                        : t('adding')
+                      : payment
+                      ? t('save')
+                      : t('addPayment')}
+                  </button>
+                </div>
               </div>
             </div>
           </form>
+
+          {clientPickerOpen && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
+              <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-base font-semibold text-slate-900">Выбор клиента</h3>
+                  <button
+                    type="button"
+                    onClick={() => setClientPickerOpen(false)}
+                    className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={clientPickerSearch}
+                    onChange={(event) => setClientPickerSearch(event.target.value)}
+                    placeholder={t('search') ?? 'Поиск'}
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+
+                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                  {clientsLoading ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">{t('loading') ?? 'Загрузка...'}</div>
+                  ) : filteredClients.length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">Подходящие клиенты не найдены.</div>
+                  ) : (
+                    filteredClients.map((client) => (
+                      <button
+                        key={client.id}
+                        type="button"
+                        onClick={() => handleClientPick(client)}
+                        className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{client.name}</div>
+                          {client.company ? (
+                            <div className="mt-1 truncate text-xs text-slate-500">{client.company}</div>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {client.clientStatus?.name ? (
+                            <div className="text-xs text-slate-500">{client.clientStatus.name}</div>
+                          ) : (
+                            <div className="text-xs text-slate-400">Клиент</div>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {invoicePickerOpen && !hasLockedInvoice && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
+              <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-base font-semibold text-slate-900">Выбор счёта</h3>
+                  <button
+                    type="button"
+                    onClick={() => setInvoicePickerOpen(false)}
+                    className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={invoiceSearch}
+                    onChange={(event) => setInvoiceSearch(event.target.value)}
+                    placeholder="Поиск счёта по номеру, описанию или делу"
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+
+                {invoicePickerLoading ? (
+                  <div className="rounded-lg border border-slate-200 px-3 py-4 text-sm text-slate-500">Загрузка счетов...</div>
+                ) : invoicePickerError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-4 text-sm text-rose-700">
+                    {invoicePickerError}
+                  </div>
+                ) : invoiceOptions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                    Подходящие счета не найдены. Можно создать новый счёт из текущего платежа.
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                    {invoiceOptions.map((invoiceOption) => {
+                      const canonicalId = invoiceOption.invoiceEntityId;
+                      const selected = canonicalId && String(canonicalId) === formData.invoiceId;
+                      const caseLabel = invoiceOption.clientCases?.length
+                        ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
+                        : invoiceOption.clientCaseTitle;
+
+                      return (
+                        <button
+                          key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
+                          type="button"
+                          onClick={() => applyInvoiceSelection(invoiceOption)}
+                          className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 ${
+                            selected ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                          }`}>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">Счёт № {invoiceOption.number}</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {toRuDate(invoiceOption.date) || invoiceOption.date}
+                              {caseLabel ? ` • ${caseLabel}` : ''}
+                            </div>
+                            {invoiceOption.description ? (
+                              <div className="mt-1 truncate text-xs text-slate-400">{invoiceOption.description}</div>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-right">
+                            {invoiceOption.clientName ? (
+                              <div className="max-w-44 truncate text-xs text-slate-500">{invoiceOption.clientName}</div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setInvoicePickerOpen(false)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                    Закрыть
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateInvoiceFromPayment()}
+                    disabled={invoiceCreateSubmitting || !formData.clientId}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
+                    {invoiceCreateSubmitting ? 'Открываем...' : 'Создать счёт'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
+  );
+
+  const createInvoiceModal = (
+    <InvoiceModal
+      open={invoiceCreateOpen}
+      mode="create"
+      invoice={null}
+      resumeDraft={invoiceCreateDraft}
+      onClose={() => {
+        setInvoiceCreateOpen(false);
+        setInvoiceCreateError(null);
+      }}
+      onSubmit={handleSubmitCreatedInvoice}
+      submitting={invoiceCreateSubmitting}
+      errorMessage={invoiceCreateError}
+      clients={clients}
+      responsibles={invoiceCreateResponsibles}
+      lookupsLoading={clientsLoading || invoiceCreateLookupsLoading}
+      lookupsError={invoiceCreateLookupsError}
+      defaultClientId={formData.clientId ? Number(formData.clientId) : defaultClientId}
+      defaultType={formData.type}
+    />
+  );
+
+  if (typeof document === 'undefined') {
+    return (
+      <>
+        {modal}
+        {createInvoiceModal}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {createPortal(modal, document.body)}
+      {createInvoiceModal}
+    </>
   );
 }

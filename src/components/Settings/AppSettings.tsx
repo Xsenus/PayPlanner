@@ -1,11 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/api';
-import type { FormRequirementSectionMetadataDto, InvoiceLegacyMigrationSummaryDto, InvoiceNumberingSettingsDto, LegacyAddressMigrationResult } from '../../services/api';
+import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TablePagination } from '../ui/TablePagination';
+import type {
+  FormRequirementSectionMetadataDto,
+  InvoiceCounterpartyCleanupResultDto,
+  InvoiceLegacyMigrationSummaryDto,
+  InvoiceNumberingSettingsDto,
+  InvoiceRulesSettingsDto,
+  LegacyAddressMigrationResult,
+} from '../../services/api';
 
-type SettingsSection = 'general' | 'integrations' | 'import-addresses' | 'dictionary-merge' | 'form-requirements';
+type SettingsSection =
+  | 'general'
+  | 'integrations'
+  | 'db-invoices'
+  | 'db-addresses'
+  | 'dictionary-merge'
+  | 'form-requirements';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
+const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export function AppSettings() {
+  const { confirm } = useDialog();
+  const toast = useToast();
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
@@ -30,17 +50,59 @@ export function AppSettings() {
   const [invoiceNumbering, setInvoiceNumbering] = useState<InvoiceNumberingSettingsDto>({ startNumber: 1, allocationStrategy: 'max-plus-one' });
   const [invoiceNumberingLoading, setInvoiceNumberingLoading] = useState(false);
   const [invoiceNumberingMessage, setInvoiceNumberingMessage] = useState<string | null>(null);
+  const [invoiceRules, setInvoiceRules] = useState<InvoiceRulesSettingsDto>({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
+  const [invoiceRulesLoading, setInvoiceRulesLoading] = useState(false);
+  const [invoiceRulesMessage, setInvoiceRulesMessage] = useState<string | null>(null);
+  const [invoiceCounterpartyCleanupLoading, setInvoiceCounterpartyCleanupLoading] = useState(false);
+  const [invoiceCounterpartyCleanupMessage, setInvoiceCounterpartyCleanupMessage] = useState<string | null>(null);
+  const [invoiceCounterpartyCleanupResult, setInvoiceCounterpartyCleanupResult] = useState<InvoiceCounterpartyCleanupResultDto | null>(null);
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
+  const [detailsPage, setDetailsPage] = useState(1);
+  const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
     if (activeSection === 'form-requirements') return 'Обязательные поля форм';
-    return 'Импорт · Перенос адресов';
+    if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
+    return 'Работа с базой · Адреса';
   }, [activeSection]);
+
+  const migrationDetails = result?.details ?? [];
+  const migrationDetailsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(migrationDetails.length / detailsPageSize || 1)),
+    [detailsPageSize, migrationDetails.length],
+  );
+  const pagedMigrationDetails = useMemo(() => {
+    const offset = (detailsPage - 1) * detailsPageSize;
+    return migrationDetails.slice(offset, offset + detailsPageSize);
+  }, [detailsPage, detailsPageSize, migrationDetails]);
+
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    extractDisplayErrorMessage(error, fallback);
+
+  const handleReloadDuplicates = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Обновить список групп для объединения справочников',
+      confirmLabel: 'Обновить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    await loadDuplicates(mergeKind, { showSuccessToast: true, showErrorToast: true });
+  };
+
+  useEffect(() => {
+    setDetailsPage(1);
+  }, [detailsPageSize, result]);
+
+  useEffect(() => {
+    setDetailsPage((prev) => Math.min(prev, migrationDetailsTotalPages));
+  }, [migrationDetailsTotalPages]);
 
   const loadFormRequirements = async () => {
     setRequirementsLoading(true);
@@ -68,14 +130,21 @@ export function AppSettings() {
     try {
       await apiService.upsertFormRequirement({ section, fieldKey, isRequired });
       await loadFormRequirements();
-      setRequirementsMessage('Настройки обязательных полей сохранены');
+      const message = 'Настройки обязательных полей сохранены';
+      setRequirementsMessage(message);
+      toast.success(message, 'Настройки');
     } catch (e) {
-      setRequirementsMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройку');
+      const message = getErrorMessage(e, 'Не удалось сохранить настройку');
+      setRequirementsMessage(message);
+      toast.error(message, 'Настройки');
       setRequirementsLoading(false);
     }
   };
 
-  const loadDuplicates = async (kind: MergeKind) => {
+  const loadDuplicates = async (
+    kind: MergeKind,
+    options?: { showSuccessToast?: boolean; showErrorToast?: boolean },
+  ) => {
     setMergeLoading(true);
     setMergeError(null);
     setMergeMessage(null);
@@ -85,11 +154,23 @@ export function AppSettings() {
       const first = (data ?? [])[0];
       setSelectedGroupKey(first?.canonical ?? '');
       setPreferredId(first?.items?.[0]?.id ?? null);
+      if (options?.showSuccessToast) {
+        toast.success(
+          (data?.length ?? 0) > 0
+            ? `Найдено групп дублей: ${data?.length ?? 0}`
+            : 'Группы с доступными дублями не найдены',
+          'Справочники',
+        );
+      }
     } catch (e) {
-      setMergeError(e instanceof Error ? e.message : 'Не удалось загрузить дубли');
+      const message = getErrorMessage(e, 'Не удалось загрузить дубли');
+      setMergeError(message);
       setDuplicates([]);
       setSelectedGroupKey('');
       setPreferredId(null);
+      if (options?.showErrorToast) {
+        toast.error(message, 'Справочники');
+      }
     } finally {
       setMergeLoading(false);
     }
@@ -98,9 +179,21 @@ export function AppSettings() {
   const runMerge = async () => {
     const group = duplicates.find((item) => item.canonical === selectedGroupKey);
     if (!group || group.items.length < 2 || !preferredId) {
-      setMergeError('Выберите группу дублей и базовое значение');
+      const message = 'Выберите группу дублей и базовое значение';
+      setMergeError(message);
+      toast.error(message, 'Справочники');
       return;
     }
+
+    const approved = await confirm({
+      title: 'Подтверждение объединения',
+      description: 'Объединить выбранные записи в одно значение и заменить ссылки во всех карточках юрлиц.',
+      confirmLabel: 'Объединить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setMergeLoading(true);
     setMergeError(null);
     setMergeMessage(null);
@@ -114,11 +207,15 @@ export function AppSettings() {
         colorHex: primary.colorHex,
         isActive: primary.isActive,
       });
-      setMergeMessage(`Объединение выполнено: создано "${result.name}", обновлено юрлиц: ${result.replacedInLegalEntities}`);
+      const message = `Объединение выполнено: создано "${result.name}", обновлено юрлиц: ${result.replacedInLegalEntities}`;
+      setMergeMessage(message);
+      toast.success(message, 'Справочники');
       await loadDuplicates(mergeKind);
       window.dispatchEvent(new CustomEvent('dicts:changed'));
     } catch (e) {
-      setMergeError(e instanceof Error ? e.message : 'Не удалось выполнить объединение');
+      const message = getErrorMessage(e, 'Не удалось выполнить объединение');
+      setMergeError(message);
+      toast.error(message, 'Справочники');
     } finally {
       setMergeLoading(false);
     }
@@ -143,6 +240,14 @@ export function AppSettings() {
   };
 
   const saveDaDataCredentials = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить ключи DaData в пользовательских настройках',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
     setCredentialsLoading(true);
     setCredentialsMessage(null);
     try {
@@ -150,9 +255,13 @@ export function AppSettings() {
         apiService.upsertUserSetting('integrations.dadata.apiKey', dadataToken.trim()),
         apiService.upsertUserSetting('integrations.dadata.secret', dadataSecret.trim()),
       ]);
-      setCredentialsMessage('Ключи DaData сохранены');
+      const message = 'Ключи DaData сохранены';
+      setCredentialsMessage(message);
+      toast.success(message, 'Интеграции');
     } catch (e) {
-      setCredentialsMessage(e instanceof Error ? e.message : 'Не удалось сохранить ключи DaData');
+      const message = getErrorMessage(e, 'Не удалось сохранить ключи DaData');
+      setCredentialsMessage(message);
+      toast.error(message, 'Интеграции');
     } finally {
       setCredentialsLoading(false);
     }
@@ -172,40 +281,152 @@ export function AppSettings() {
   };
 
   const saveInvoiceNumbering = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить настройки нумерации счетов',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
     setInvoiceNumberingLoading(true);
     setInvoiceNumberingMessage(null);
     try {
       const response = await apiService.updateInvoiceNumberingSettings(invoiceNumbering);
       setInvoiceNumbering(response);
-      setInvoiceNumberingMessage('Настройки нумерации счетов сохранены');
+      const message = 'Настройки нумерации счетов сохранены';
+      setInvoiceNumberingMessage(message);
+      toast.success(message, 'Настройки');
     } catch (e) {
-      setInvoiceNumberingMessage(e instanceof Error ? e.message : 'Не удалось сохранить настройки нумерации счетов');
+      const message = getErrorMessage(e, 'Не удалось сохранить настройки нумерации счетов');
+      setInvoiceNumberingMessage(message);
+      toast.error(message, 'Настройки');
     } finally {
       setInvoiceNumberingLoading(false);
     }
   };
 
+  const loadInvoiceRules = async () => {
+    setInvoiceRulesLoading(true);
+    setInvoiceRulesMessage(null);
+    try {
+      const response = await apiService.getInvoiceRulesSettings();
+      setInvoiceRules(response);
+    } catch (e) {
+      setInvoiceRulesMessage(e instanceof Error ? e.message : 'Не удалось загрузить ограничения счёта');
+    } finally {
+      setInvoiceRulesLoading(false);
+    }
+  };
+
+  const saveInvoiceRules = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить ограничения по количеству дел и актов в счёте',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setInvoiceRulesLoading(true);
+    setInvoiceRulesMessage(null);
+    try {
+      const response = await apiService.updateInvoiceRulesSettings({
+        maxClientCasesPerInvoice: Math.max(1, Number(invoiceRules.maxClientCasesPerInvoice) || 1),
+        maxActsPerInvoice: Math.max(1, Number(invoiceRules.maxActsPerInvoice) || 1),
+      });
+      setInvoiceRules(response);
+      const message = 'Ограничения счёта сохранены';
+      setInvoiceRulesMessage(message);
+      toast.success(message, 'Настройки');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить ограничения счёта');
+      setInvoiceRulesMessage(message);
+      toast.error(message, 'Настройки');
+    } finally {
+      setInvoiceRulesLoading(false);
+    }
+  };
+
+  const runInvoiceCounterpartyCleanup = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение очистки',
+      description: 'Очистить содержимое поля "От кого счёт" во всех старых счетах канонической структуры.',
+      confirmLabel: 'Очистить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setInvoiceCounterpartyCleanupLoading(true);
+    setInvoiceCounterpartyCleanupMessage(null);
+    try {
+      const response = await apiService.cleanupInvoiceCounterpartyNames();
+      setInvoiceCounterpartyCleanupResult(response);
+      const message = 'Очистка поля "От кого счёт" выполнена';
+      setInvoiceCounterpartyCleanupMessage(message);
+      toast.success(message, 'Счета');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось очистить поле "От кого счёт"');
+      setInvoiceCounterpartyCleanupResult(null);
+      setInvoiceCounterpartyCleanupMessage(message);
+      toast.error(message, 'Счета');
+    } finally {
+      setInvoiceCounterpartyCleanupLoading(false);
+    }
+  };
+
   const runMigration = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение миграции',
+      description: 'Перенести старые адреса карточек юрлиц и физлиц в отдельные структурированные сущности.',
+      confirmLabel: 'Перенести',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setLoading(true);
     setError(null);
     try {
       const response = await apiService.migrateLegacyLegalEntityAddresses(validateWithDadata);
       setResult(response);
+      toast.success(
+        `Перенос адресов завершён. Добавлено: ${response.added}, обновлено: ${response.updated}, ошибок: ${response.failed}`,
+        'База данных',
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось выполнить перенос адресов');
+      const message = getErrorMessage(e, 'Не удалось выполнить перенос адресов');
+      setError(message);
+      toast.error(message, 'База данных');
     } finally {
       setLoading(false);
     }
   };
 
   const runInvoiceMigration = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Создать счета и связи из legacy-структуры старых платежей канонического реестра.',
+      confirmLabel: 'Запустить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
     setInvoiceMigrationLoading(true);
     setInvoiceMigrationError(null);
     try {
       const response = await apiService.migrateLegacyInvoiceLinks();
       setInvoiceMigrationResult(response);
+      toast.success(
+        `Миграция счетов завершена. Создано счетов: ${response.createdInvoices}, связей платежей: ${response.linkedPayments}`,
+        'Счета',
+      );
     } catch (e) {
-      setInvoiceMigrationError(e instanceof Error ? e.message : 'Не удалось выполнить перенос счетов');
+      const message = getErrorMessage(e, 'Не удалось выполнить перенос счетов');
+      setInvoiceMigrationError(message);
+      toast.error(message, 'Счета');
     } finally {
       setInvoiceMigrationLoading(false);
     }
@@ -217,6 +438,7 @@ export function AppSettings() {
     }
     if (activeSection === 'general') {
       void loadInvoiceNumbering();
+      void loadInvoiceRules();
     }
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
@@ -271,17 +493,28 @@ export function AppSettings() {
               </button>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
-                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Импорт</div>
+                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Работа с базой</div>
                 <button
                   type="button"
-                  onClick={() => setActiveSection('import-addresses')}
+                  onClick={() => setActiveSection('db-invoices')}
                   className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'import-addresses'
+                    activeSection === 'db-invoices'
                       ? 'bg-blue-50 text-blue-700 border border-blue-200'
                       : 'text-gray-700 hover:bg-white border border-transparent'
                   }`}
                 >
-                  ↳ Перенос адресов
+                  ↳ Счета
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('db-addresses')}
+                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    activeSection === 'db-addresses'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-white border border-transparent'
+                  }`}
+                >
+                  ↳ Адреса
                 </button>
               </div>
 
@@ -314,7 +547,9 @@ export function AppSettings() {
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
-                    : 'Перенос старых адресов и legacy-счетов в новые сущности с детальной сводкой.'}
+                    : activeSection === 'db-invoices'
+                      ? 'Операции по формированию канонических счетов и перепривязке платежей к актуальным сущностям счета.'
+                      : 'Операции по переносу и выравниванию адресов. Позже здесь можно будет добавить другие сервисные процедуры.'}
               </p>
             </div>
 
@@ -359,14 +594,87 @@ export function AppSettings() {
                   </button>
                   {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
                 </div>
+
+                <div className="border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-900">Ограничения счёта</h4>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Временно можно ограничить количество связанных дел и актов в одном счёте. Ограничение действует и в форме, и на сервере.
+                  </p>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700">Максимум дел в счёте</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={invoiceRules.maxClientCasesPerInvoice}
+                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxClientCasesPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700">Максимум актов в счёте</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={invoiceRules.maxActsPerInvoice}
+                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxActsPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveInvoiceRules}
+                      disabled={invoiceRulesLoading}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {invoiceRulesLoading ? 'Сохранение…' : 'Сохранить ограничения'}
+                    </button>
+                    {invoiceRulesMessage && <span className="text-sm text-gray-600">{invoiceRulesMessage}</span>}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-900">Очистка устаревшего поля счета</h4>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Удаляет сохраненные значения поля "От кого счёт" и снимает старое требование заполнения.
+                  </p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={runInvoiceCounterpartyCleanup}
+                      disabled={invoiceCounterpartyCleanupLoading}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {invoiceCounterpartyCleanupLoading ? 'Очищаем…' : 'Очистить поле'}
+                    </button>
+                    {invoiceCounterpartyCleanupMessage && (
+                      <span className="text-sm text-gray-600">{invoiceCounterpartyCleanupMessage}</span>
+                    )}
+                  </div>
+                  {invoiceCounterpartyCleanupResult && (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p>Очищено счетов: {invoiceCounterpartyCleanupResult.cleared}</p>
+                      <p>Удалено legacy-требований: {invoiceCounterpartyCleanupResult.removedRequirements}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {activeSection === 'import-addresses' && (
+            {activeSection === 'db-invoices' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
-                  <h4 className="text-base font-semibold text-gray-900">Ручной перенос счетов в новую сущность</h4>
-                  <p className="text-sm text-gray-600 mt-1">Запускает перенос legacy-счетов из платежей в отдельную сущность счетов и связывает платежи со счетами. Безопасно для повторного запуска. Если номер/год совпадают, несколько платежей привязываются к одному счету.</p>
+                  <h4 className="text-base font-semibold text-gray-900">Формирование канонических счетов из операций</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Операция анализирует платежи, у которых заполнен legacy-счет, и формирует канонические счета с привязкой по клиенту, номеру счета, году и делу.
+                    Платежи с одинаковым счетом и одним делом объединяются в один счет; одинаковый номер счета, но разные дела, разделяются на разные счета.
+                    После этого платежи перепривязываются к актуальному счету через `invoiceId`.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -376,7 +684,7 @@ export function AppSettings() {
                     disabled={invoiceMigrationLoading}
                     className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {invoiceMigrationLoading ? 'Переносим…' : 'Перенести счета'}
+                    {invoiceMigrationLoading ? 'Обрабатываем…' : 'Обновить счета и связи'}
                   </button>
                 </div>
 
@@ -386,18 +694,25 @@ export function AppSettings() {
 
                 {invoiceMigrationResult && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                    <p className="font-medium mb-2">Сводка переноса счетов</p>
+                    <p className="font-medium mb-2">Сводка обновления счетов</p>
                     <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                       <li>Проверено платежей: <b>{invoiceMigrationResult.scannedPayments}</b></li>
-                      <li>Платежей-счетов: <b>{invoiceMigrationResult.invoicePayments}</b></li>
-                      <li>Переведено в тип «Счёт»: <b>{invoiceMigrationResult.convertedToInvoiceKind}</b></li>
-                      <li>Уже были связаны: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
+                      <li>Из них legacy invoice-строк: <b>{invoiceMigrationResult.invoicePayments}</b></li>
+                      <li>Уже были связаны правильно: <b>{invoiceMigrationResult.alreadyLinked}</b></li>
                       <li>Пропущено без номера: <b>{invoiceMigrationResult.missingNumberSkipped}</b></li>
+                      <li>Пропущено без клиента: <b>{invoiceMigrationResult.missingClientSkipped}</b></li>
+                      <li>Групп к обработке: <b>{invoiceMigrationResult.distinctLegacyGroups}</b></li>
+                      <li>Групп с делом: <b>{invoiceMigrationResult.groupsWithCase}</b></li>
+                      <li>Групп без дела: <b>{invoiceMigrationResult.groupsWithoutCase}</b></li>
                       <li>Связано с существующими счетами: <b>{invoiceMigrationResult.linkedToExistingInvoice}</b></li>
                       <li>Создано новых счетов: <b>{invoiceMigrationResult.createdInvoices}</b></li>
-                      <li>Всего связанных платежей: <b>{invoiceMigrationResult.linkedPayments}</b></li>
-                      <li>Уникальных ключей в legacy: <b>{invoiceMigrationResult.distinctLegacyInvoiceKeys}</b></li>
-                      <li>Ключей-дублей уже в Invoices: <b>{invoiceMigrationResult.existingDuplicateInvoiceKeys}</b></li>
+                      <li>Новых привязок платежей: <b>{invoiceMigrationResult.linkedPayments}</b></li>
+                      <li>Перепривязано к новым счетам: <b>{invoiceMigrationResult.relinkedPayments}</b></li>
+                      <li>Обновлено карточек счета/дела: <b>{invoiceMigrationResult.representativePaymentsUpdated}</b></li>
+                      <li>Legacy-групп по ключу: <b>{invoiceMigrationResult.distinctLegacyInvoiceKeys}</b></li>
+                      <li>Дубликатов ключей в счетах: <b>{invoiceMigrationResult.existingDuplicateInvoiceKeys}</b></li>
+                      <li>Общих счетов на несколько ключей: <b>{invoiceMigrationResult.sharedInvoiceEntities}</b></li>
+                      <li>Групп, которые пришлось разделить: <b>{invoiceMigrationResult.splitSharedInvoiceGroups}</b></li>
                     </ul>
                   </div>
                 )}
@@ -512,7 +827,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'import-addresses' && (
+            {activeSection === 'db-addresses' && (
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                   <label className="flex items-start gap-3 text-sm text-gray-700">
@@ -589,7 +904,15 @@ export function AppSettings() {
                   <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-3">Детальный отчёт</h3>
                     <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
+                      <table className="min-w-full table-fixed text-sm">
+                        <colgroup>
+                          <col style={{ width: '18%' }} />
+                          <col style={{ width: '22%' }} />
+                          <col style={{ width: '22%' }} />
+                          <col style={{ width: '12%' }} />
+                          <col style={{ width: '10%' }} />
+                          <col style={{ width: '16%' }} />
+                        </colgroup>
                         <thead>
                           <tr className="text-left text-gray-500 border-b border-gray-200">
                             <th className="py-2 pr-4">Карточка</th>
@@ -601,7 +924,7 @@ export function AppSettings() {
                           </tr>
                         </thead>
                         <tbody>
-                          {result.details.map((item, idx) => (
+                          {pagedMigrationDetails.map((item, idx) => (
                             <tr
                               key={`${item.ownerType ?? 'legal'}-${item.ownerId ?? item.legalEntityId ?? item.clientId ?? idx}-${idx}`}
                               className="border-b border-gray-100 align-top"
@@ -633,6 +956,15 @@ export function AppSettings() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination
+                      page={detailsPage}
+                      totalPages={migrationDetailsTotalPages}
+                      totalItems={migrationDetails.length}
+                      pageSize={detailsPageSize}
+                      pageSizeOptions={DETAILS_PAGE_SIZE_OPTIONS}
+                      onPageChange={setDetailsPage}
+                      onPageSizeChange={setDetailsPageSize}
+                    />
                   </div>
                 )}
               </>
@@ -713,7 +1045,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void loadDuplicates(mergeKind)}
+                    onClick={handleReloadDuplicates}
                     disabled={mergeLoading}
                     className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                   >

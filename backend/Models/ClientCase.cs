@@ -3,47 +3,52 @@ using System.ComponentModel.DataAnnotations;
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Дело/задача клиента (кейc), к которому можно привязывать платежи.
+    /// Р”РµР»Рѕ/Р·Р°РґР°С‡Р° РєР»РёРµРЅС‚Р° (РєРµР№c), Рє РєРѕС‚РѕСЂРѕРјСѓ РјРѕР¶РЅРѕ РїСЂРёРІСЏР·С‹РІР°С‚СЊ РїР»Р°С‚РµР¶Рё.
     /// </summary>
     public class ClientCase
     {
         /// <summary>
-        /// Навигация на клиента-владельца.
+        /// РќР°РІРёРіР°С†РёСЏ РЅР° РєР»РёРµРЅС‚Р°-РІР»Р°РґРµР»СЊС†Р°.
         /// </summary>
         public Client? Client { get; set; }
 
         /// <summary>
-        /// Идентификатор клиента-владельца дела.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР»РёРµРЅС‚Р°-РІР»Р°РґРµР»СЊС†Р° РґРµР»Р°.
         /// </summary>
         public int ClientId { get; set; }
 
         /// <summary>
-        /// Дата создания дела (UTC).
+        /// Р”Р°С‚Р° СЃРѕР·РґР°РЅРёСЏ РґРµР»Р° (UTC).
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание или примечания по делу.
+        /// РћРїРёСЃР°РЅРёРµ РёР»Рё РїСЂРёРјРµС‡Р°РЅРёСЏ РїРѕ РґРµР»Сѓ.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Уникальный идентификатор дела.
+        /// РЈРЅРёРєР°Р»СЊРЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РґРµР»Р°.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Платежи, привязанные к этому делу.
+        /// РџР»Р°С‚РµР¶Рё, РїСЂРёРІСЏР·Р°РЅРЅС‹Рµ Рє СЌС‚РѕРјСѓ РґРµР»Сѓ.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
         /// <summary>
-        /// Статус дела (черновик/в работе/закрыто).
+        /// РЎС‡РµС‚Р°, СЃРІСЏР·Р°РЅРЅС‹Рµ СЃ РґРµР»РѕРј С‡РµСЂРµР· РѕС‚РґРµР»СЊРЅСѓСЋ С‚Р°Р±Р»РёС†Сѓ СЃРІСЏР·РµР№.
+        /// </summary>
+        public ICollection<InvoiceClientCase> InvoiceClientCases { get; set; } = new List<InvoiceClientCase>();
+
+        /// <summary>
+        /// РЎС‚Р°С‚СѓСЃ РґРµР»Р° (С‡РµСЂРЅРѕРІРёРє/РІ СЂР°Р±РѕС‚Рµ/Р·Р°РєСЂС‹С‚Рѕ).
         /// </summary>
         public ClientCaseStatus Status { get; set; } = ClientCaseStatus.Open;
 
         /// <summary>
-        /// Короткое название/тема дела.
+        /// РљРѕСЂРѕС‚РєРѕРµ РЅР°Р·РІР°РЅРёРµ/С‚РµРјР° РґРµР»Р°.
         /// </summary>
         [MaxLength(200)]
         public string Title { get; set; } = string.Empty;

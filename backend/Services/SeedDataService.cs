@@ -60,6 +60,7 @@ namespace PayPlanner.Api.Services
             await EnsureIncomeTypeSchemaAsync(context);
             await EnsureServiceDictionarySchemaAsync(context);
             await EnsureLegalEntityProfileDictionarySchemaAsync(context);
+            await EnsureInvoiceLineDictionarySchemaAsync(context);
 
             try
             {
@@ -235,6 +236,40 @@ namespace PayPlanner.Api.Services
                 );
                 await context.SaveChangesAsync();
             }
+
+            if (!await context.InvoiceUnits.AnyAsync())
+            {
+                context.InvoiceUnits.AddRange(
+                    new InvoiceUnitDictionaryItem { Name = "усл. ед.", Description = "Условная единица", ColorHex = "#475569" },
+                    new InvoiceUnitDictionaryItem { Name = "шт", Description = "Штуки", ColorHex = "#334155" },
+                    new InvoiceUnitDictionaryItem { Name = "час", Description = "Часы", ColorHex = "#1E293B" },
+                    new InvoiceUnitDictionaryItem { Name = "день", Description = "Дни", ColorHex = "#0F172A" },
+                    new InvoiceUnitDictionaryItem { Name = "мес", Description = "Месяцы", ColorHex = "#64748B" },
+                    new InvoiceUnitDictionaryItem { Name = "кг", Description = "Килограммы", ColorHex = "#475569" },
+                    new InvoiceUnitDictionaryItem { Name = "л", Description = "Литры", ColorHex = "#334155" },
+                    new InvoiceUnitDictionaryItem { Name = "м", Description = "Метры", ColorHex = "#1E293B" },
+                    new InvoiceUnitDictionaryItem { Name = "м²", Description = "Квадратные метры", ColorHex = "#0F172A" },
+                    new InvoiceUnitDictionaryItem { Name = "м³", Description = "Кубические метры", ColorHex = "#64748B" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.InvoiceItemNames.AnyAsync())
+            {
+                context.InvoiceItemNames.AddRange(
+                    new InvoiceItemNameDictionaryItem { Name = "Юридическая консультация", Unit = "усл. ед.", DefaultPrice = 5000m, Description = "Разовая консультация", ColorHex = "#334155" },
+                    new InvoiceItemNameDictionaryItem { Name = "Составление документов", Unit = "усл. ед.", DefaultPrice = 12000m, Description = "Подготовка процессуальных и договорных документов", ColorHex = "#1E293B" },
+                    new InvoiceItemNameDictionaryItem { Name = "Представительство в суде", Unit = "день", DefaultPrice = 15000m, Description = "Участие в судебных заседаниях", ColorHex = "#0F172A" },
+                    new InvoiceItemNameDictionaryItem { Name = "Абонентское обслуживание", Unit = "мес", DefaultPrice = 30000m, Description = "Регулярное юридическое сопровождение", ColorHex = "#475569" },
+                    new InvoiceItemNameDictionaryItem { Name = "Аудит документов", Unit = "усл. ед.", DefaultPrice = 8000m, Description = "Проверка и анализ документации", ColorHex = "#64748B" },
+                    new InvoiceItemNameDictionaryItem { Name = "Подготовка претензии", Unit = "усл. ед.", DefaultPrice = 7000m, Description = "Досудебная претензионная работа", ColorHex = "#334155" },
+                    new InvoiceItemNameDictionaryItem { Name = "Согласование договора", Unit = "усл. ед.", DefaultPrice = 10000m, Description = "Правки и согласование условий договора", ColorHex = "#1E293B" },
+                    new InvoiceItemNameDictionaryItem { Name = "Выезд специалиста", Unit = "час", DefaultPrice = 4000m, Description = "Работа специалиста на выезде", ColorHex = "#0F172A" },
+                    new InvoiceItemNameDictionaryItem { Name = "Аналитическая справка", Unit = "усл. ед.", DefaultPrice = 9000m, Description = "Подготовка письменной аналитики", ColorHex = "#475569" },
+                    new InvoiceItemNameDictionaryItem { Name = "Подготовка отчета", Unit = "усл. ед.", DefaultPrice = 11000m, Description = "Подготовка итогового отчета", ColorHex = "#64748B" }
+                );
+                await context.SaveChangesAsync();
+            }
         }
 
         private static async Task EnsureServiceDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
@@ -313,6 +348,59 @@ namespace PayPlanner.Api.Services
             }
         }
 
+
+        private static async Task EnsureInvoiceLineDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
+        {
+            var connection = context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            try
+            {
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceUnits\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceUnits\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_IsActive\" ON \"InvoiceUnits\" (\"IsActive\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_Name\" ON \"InvoiceUnits\" (\"Name\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_IsActive_Name\" ON \"InvoiceUnits\" (\"IsActive\", \"Name\");", cancellationToken);
+
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceItemNames\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceItemNames\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Unit\" TEXT NOT NULL DEFAULT 'шт', \"DefaultPrice\" TEXT NOT NULL DEFAULT '0', \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive\" ON \"InvoiceItemNames\" (\"IsActive\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_Name\" ON \"InvoiceItemNames\" (\"Name\");", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive_Name\" ON \"InvoiceItemNames\" (\"IsActive\", \"Name\");", cancellationToken);
+
+                if (await TableExistsAsync(connection, "InvoiceUnitDictionaryItems", cancellationToken)
+                    && !await TableHasRowsAsync(connection, "InvoiceUnits", cancellationToken))
+                {
+                    await ExecuteNonQueryAsync(connection,
+                        "INSERT INTO \"InvoiceUnits\" (\"Name\", \"Description\", \"ColorHex\", \"IsActive\", \"CreatedAt\") SELECT \"Name\", \"Description\", \"ColorHex\", \"IsActive\", COALESCE(\"CreatedAt\", CURRENT_TIMESTAMP) FROM \"InvoiceUnitDictionaryItems\";",
+                        cancellationToken);
+                }
+
+                if (await TableExistsAsync(connection, "InvoiceItemNameDictionaryItems", cancellationToken)
+                    && !await TableHasRowsAsync(connection, "InvoiceItemNames", cancellationToken))
+                {
+                    var legacyHasUnit = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "Unit", cancellationToken);
+                    var legacyHasDefaultPrice = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "DefaultPrice", cancellationToken);
+                    var legacyUnitSql = legacyHasUnit ? "\"Unit\"" : "'шт'";
+                    var legacyDefaultPriceSql = legacyHasDefaultPrice ? "\"DefaultPrice\"" : "'0'";
+
+                    await ExecuteNonQueryAsync(connection,
+                        $"INSERT INTO \"InvoiceItemNames\" (\"Name\", \"Unit\", \"DefaultPrice\", \"Description\", \"ColorHex\", \"IsActive\", \"CreatedAt\") SELECT \"Name\", {legacyUnitSql}, {legacyDefaultPriceSql}, \"Description\", \"ColorHex\", \"IsActive\", COALESCE(\"CreatedAt\", CURRENT_TIMESTAMP) FROM \"InvoiceItemNameDictionaryItems\";",
+                        cancellationToken);
+                }
+            }
+            finally
+            {
+                if (shouldClose && connection.State == ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
         private static async Task EnsureIncomeTypeSchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
         {
             var connection = context.Database.GetDbConnection();
@@ -364,6 +452,46 @@ namespace PayPlanner.Api.Services
             await using var command = connection.CreateCommand();
             command.CommandText = sql;
             await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static async Task<bool> TableExistsAsync(DbConnection connection, string tableName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1;";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "$name";
+            parameter.Value = tableName;
+            command.Parameters.Add(parameter);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null && result != DBNull.Value;
+        }
+
+        private static async Task<bool> TableHasRowsAsync(DbConnection connection, string tableName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT EXISTS(SELECT 1 FROM \"{tableName}\" LIMIT 1);";
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null && result != DBNull.Value && Convert.ToInt64(result) != 0;
+        }
+
+        private static async Task<bool> ColumnExistsAsync(DbConnection connection, string tableName, string columnName, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

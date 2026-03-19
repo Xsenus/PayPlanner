@@ -1,17 +1,22 @@
 import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, Table, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, Table, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
 import { PaymentModal } from './PaymentModal';
-import { PaymentsTable } from './PaymentsTable';
+import { PaymentsTable, type PaymentTableColumnKey } from './PaymentsTable';
 import { usePayments } from '../../hooks/usePayments';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useTranslation } from '../../hooks/useTranslation';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import type { Payment, PaymentPayload } from '../../types';
 import { formatLocalYMD } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
@@ -26,6 +31,23 @@ type TableFilter = {
 };
 
 const VIEW_MODE_STORAGE_KEY = 'pp.calendar_view';
+const CALENDAR_TABLE_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const CALENDAR_PAYMENT_COLUMN_CONFIGS = [
+  { key: 'date', defaultVisible: true, defaultWidth: 140 },
+  { key: 'plannedDate', defaultVisible: false, defaultWidth: 150 },
+  { key: 'client', defaultVisible: true, defaultWidth: 260 },
+  { key: 'description', defaultVisible: true, defaultWidth: 300 },
+  { key: 'type', defaultVisible: true, defaultWidth: 130 },
+  { key: 'status', defaultVisible: true, defaultWidth: 150 },
+  { key: 'category', defaultVisible: true, defaultWidth: 220 },
+  { key: 'amount', defaultVisible: true, defaultWidth: 150 },
+  { key: 'paidDate', defaultVisible: false, defaultWidth: 150 },
+  { key: 'createdAt', defaultVisible: false, defaultWidth: 150 },
+] satisfies ReadonlyArray<{
+  key: PaymentTableColumnKey;
+  defaultVisible?: boolean;
+  defaultWidth?: number;
+}>;
 
 type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -53,6 +75,7 @@ function ymEnd(ym: string): string {
 export function Calendar({ onOpenClient }: CalendarProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
+  const toast = useToast();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
@@ -74,6 +97,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     return 'calendar';
   });
   const [tableFilter, setTableFilter] = useState<TableFilter | null>(null);
+  const [tablePage, setTablePage] = useState(1);
+  const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
   const permissions = useRolePermissions(user?.role?.id);
   const calendarPermissions = permissions.calendar;
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
@@ -83,6 +108,31 @@ export function Calendar({ onOpenClient }: CalendarProps) {
 
   const { t, formatMonth } = useTranslation();
   const permissionTimerRef = useRef<number | null>(null);
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<PaymentTableColumnKey>({
+    storageKey: `pp.calendar_table_settings.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'calendar_table_settings',
+    columns: CALENDAR_PAYMENT_COLUMN_CONFIGS,
+    defaultPageSize: 25,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 120,
+  });
 
   const showPermissionNotice = (message: string) => {
     setPermissionMessage(message);
@@ -229,9 +279,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       variant: 'danger',
     });
     if (!ok) return;
-    await deletePayment(payment.id);
-    await refreshPayments();
-    bumpStats();
+    try {
+      await deletePayment(payment.id);
+      await refreshPayments();
+      bumpStats();
+      toast.error('Платёж удалён.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось удалить платёж.'),
+        'Платежи',
+      );
+    }
   };
 
   const handleCloseModal = async () => {
@@ -242,11 +300,25 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleSubmit = async (payload: SubmitDTO) => {
-    if ('id' in payload) await updatePayment(payload);
-    else await createPayment(payload);
+    const isUpdate = 'id' in payload;
 
-    await refreshPayments();
-    bumpStats();
+    try {
+      if (isUpdate) await updatePayment(payload);
+      else await createPayment(payload);
+
+      await refreshPayments();
+      bumpStats();
+      toast.success(isUpdate ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(
+          error,
+          isUpdate ? 'Не удалось обновить платёж.' : 'Не удалось создать платёж.',
+        ),
+        'Платежи',
+      );
+      throw error;
+    }
   };
 
   const filteredPayments = useMemo(() => {
@@ -281,6 +353,43 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       return true;
     });
   }, [filteredPayments, tableFilter]);
+
+  const paymentColumns = useMemo(
+    () => [
+      { key: 'date' as const, label: t('date') ?? 'Дата' },
+      { key: 'plannedDate' as const, label: 'Плановая дата' },
+      { key: 'client' as const, label: t('clients') ?? 'Клиенты' },
+      { key: 'description' as const, label: t('description') ?? 'Описание' },
+      { key: 'type' as const, label: t('type') ?? 'Тип' },
+      { key: 'status' as const, label: t('status') ?? 'Статус' },
+      { key: 'category' as const, label: t('category') ?? 'Категория' },
+      { key: 'amount' as const, label: t('amount') ?? 'Сумма' },
+      { key: 'paidDate' as const, label: 'Дата оплаты' },
+      { key: 'createdAt' as const, label: t('createdAt') ?? 'Создан' },
+    ],
+    [t],
+  );
+
+  const paymentColumnsByKey = useMemo(
+    () =>
+      Object.fromEntries(paymentColumns.map((column) => [column.key, column])) as Record<
+        PaymentTableColumnKey,
+        (typeof paymentColumns)[number]
+      >,
+    [paymentColumns],
+  );
+
+  const visiblePaymentColumns = useMemo(
+    () => orderedVisibleColumns.map((key) => paymentColumnsByKey[key]).filter(Boolean),
+    [orderedVisibleColumns, paymentColumnsByKey],
+  );
+
+  const tableTotalPages = Math.max(1, Math.ceil(tableFilteredPayments.length / pageSize));
+
+  const pagedTablePayments = useMemo(() => {
+    const start = (tablePage - 1) * pageSize;
+    return tableFilteredPayments.slice(start, start + pageSize);
+  }, [pageSize, tableFilteredPayments, tablePage]);
 
   const handleViewModeChange = (mode: CalendarViewMode) => {
     setViewMode(mode);
@@ -318,6 +427,22 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     });
     setViewMode('table');
   };
+
+  useEffect(() => {
+    if (viewMode !== 'table') {
+      setTableSettingsOpen(false);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [deferredSearch, fromDateStr, pageSize, statusFilter, tableFilter, toDateStr]);
+
+  useEffect(() => {
+    if (tablePage > tableTotalPages) {
+      setTablePage(tableTotalPages);
+    }
+  }, [tablePage, tableTotalPages]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -453,6 +578,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             search={deferredSearch}
             reloadToken={statsReloadKey}
             rawPayments={payments}
+            storageKey={`pp.calendar.stats_panels.${user?.id ?? 'guest'}`}
             onCardSelect={handleStatCardSelect}
           />
         ) : (
@@ -505,16 +631,62 @@ export function Calendar({ onOpenClient }: CalendarProps) {
                 {(t('recordsFound') ?? 'Найдено записей:')} {tableFilteredPayments.length}
               </div>
             </div>
-            {tableFilter ? (
+            <div className="mt-3 flex items-center justify-end gap-2 sm:mt-0">
               <button
                 type="button"
-                onClick={handleClearTableFilter}
-                className="mt-3 sm:mt-0 inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
-                <X className="h-4 w-4" /> {t('clear') ?? 'Очистить'}
+                onClick={() => setTableSettingsOpen((prev) => !prev)}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
+                  tableSettingsOpen
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}>
+                <SlidersHorizontal className="h-4 w-4" />
+                {tableSettingsOpen ? 'Скрыть колонки' : 'Настроить таблицу'}
               </button>
-            ) : null}
+              {tableFilter ? (
+                <button
+                  type="button"
+                  onClick={handleClearTableFilter}
+                  className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+                  <X className="h-4 w-4" /> {t('clear') ?? 'Очистить'}
+                </button>
+              ) : null}
+            </div>
           </div>
         )}
+
+        {viewMode === 'table' && tableSettingsOpen ? (
+          <div className="mb-6">
+            <TableColumnSettings
+              columns={paymentColumns}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Строк на странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                    {CALENDAR_TABLE_PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          </div>
+        ) : null}
 
         {viewMode === 'calendar' ? (
           <CalendarGrid
@@ -525,16 +697,37 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             onOpenClient={onOpenClient}
           />
         ) : (
-          <PaymentsTable
-            payments={tableFilteredPayments}
-            onEditPayment={handleEditPayment}
-            onOpenClient={onOpenClient}
-            onAddPayment={handleAddPayment}
-            onDeletePayment={handleDeletePayment}
-            canAdd={calendarPermissions.canCreate}
-            canEdit={calendarPermissions.canEdit}
-            canDelete={calendarPermissions.canDelete}
-          />
+          <>
+            <PaymentsTable
+              payments={pagedTablePayments}
+              onEditPayment={handleEditPayment}
+              onOpenClient={onOpenClient}
+              onAddPayment={handleAddPayment}
+              onDeletePayment={handleDeletePayment}
+              canAdd={calendarPermissions.canCreate}
+              canEdit={calendarPermissions.canEdit}
+              canDelete={calendarPermissions.canDelete}
+              columns={visiblePaymentColumns}
+              draggingColumn={draggingColumn}
+              onColumnDragStart={handleColumnDragStart}
+              onColumnDragOver={handleColumnDragOver}
+              onColumnDrop={handleColumnDrop}
+              onColumnDragEnd={handleColumnDragEnd}
+              onResizeStart={handleResizeStart}
+              getColumnWidth={getColumnWidth}
+            />
+            {tableFilteredPayments.length > 0 ? (
+              <TablePagination
+                page={tablePage}
+                totalPages={tableTotalPages}
+                totalItems={tableFilteredPayments.length}
+                pageSize={pageSize}
+                pageSizeOptions={CALENDAR_TABLE_PAGE_SIZE_OPTIONS}
+                onPageChange={setTablePage}
+                onPageSizeChange={setPageSize}
+              />
+            ) : null}
+          </>
         )}
 
         <PaymentModal
@@ -547,11 +740,20 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onDelete={
             calendarPermissions.canDelete
               ? async (id) => {
-                  await deletePayment(id);
-                  await refreshPayments();
-                  setIsModalOpen(false);
-                  setEditingPayment(null);
-                  setTimeout(() => bumpStats(), 0);
+                  try {
+                    await deletePayment(id);
+                    await refreshPayments();
+                    setIsModalOpen(false);
+                    setEditingPayment(null);
+                    setTimeout(() => bumpStats(), 0);
+                    toast.error('Платёж удалён.', 'Платежи');
+                  } catch (error) {
+                    toast.error(
+                      extractDisplayErrorMessage(error, 'Не удалось удалить платёж.'),
+                      'Платежи',
+                    );
+                    throw error;
+                  }
                 }
               : undefined
           }

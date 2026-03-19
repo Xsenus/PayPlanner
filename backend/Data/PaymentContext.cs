@@ -59,7 +59,7 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(e => e.Invoice)
-                  .WithMany()
+                  .WithMany(p => p.Acts)
                   .HasForeignKey(e => e.InvoiceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
@@ -151,6 +151,21 @@ public class PaymentContext : DbContext
                 .HasForeignKey(x => x.PaymentId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(x => x.PaymentId).HasDatabaseName("IX_ContractPayments_PaymentId");
+        });
+
+        modelBuilder.Entity<InvoiceClientCase>(entity =>
+        {
+            entity.HasKey(x => new { x.PaymentId, x.ClientCaseId });
+            entity.ToTable("InvoiceClientCases");
+            entity.HasOne(x => x.Payment)
+                .WithMany(x => x.InvoiceClientCases)
+                .HasForeignKey(x => x.PaymentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ClientCase)
+                .WithMany(x => x.InvoiceClientCases)
+                .HasForeignKey(x => x.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ClientCaseId).HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
         });
 
         // ------------------ Invoice ------------------
@@ -250,11 +265,14 @@ public class PaymentContext : DbContext
             entity.Property(e => e.DocumentKind).HasConversion<string>();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
+            entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);
             entity.Property(p => p.Account).HasMaxLength(120);
+            entity.Property(p => p.LegacyAccountNumber).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
+            entity.Property(p => p.LegacyAccountDate).HasColumnType("date");
             entity.Property(p => p.Date).HasColumnType("date");
             entity.Property(p => p.PlannedDate).HasColumnType("date");
             entity.Property(p => p.LastPaymentDate).HasColumnType("date");
@@ -318,10 +336,18 @@ public class PaymentContext : DbContext
                   .HasForeignKey(pr => pr.PaymentId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasMany(e => e.InvoiceClientCases)
+                  .WithOne(x => x.Payment)
+                  .HasForeignKey(x => x.PaymentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             // ---- Индексы Account
             entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
+            entity.HasIndex(e => e.LegacyAccountNumber).HasDatabaseName("IX_Payments_LegacyAccountNumber");
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
+            entity.HasIndex(e => e.LegacyAccountDate).HasDatabaseName("IX_Payments_LegacyAccountDate");
             entity.HasIndex(e => new { e.Account, e.AccountDate }).HasDatabaseName("IX_Payments_Account_AccountDate");
+            entity.HasIndex(e => new { e.LegacyAccountNumber, e.LegacyAccountDate }).HasDatabaseName("IX_Payments_LegacyAccount_LegacyAccountDate");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Payments_Date");
             entity.HasIndex(e => e.PlannedDate).HasDatabaseName("IX_Payments_PlannedDate");
             entity.HasIndex(e => e.LastPaymentDate).HasDatabaseName("IX_Payments_LastPaymentDate");
@@ -515,6 +541,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ClientStatusId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ResponsibleUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ResponsibleUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_Clients_Name");
             entity.HasIndex(e => e.Email).HasDatabaseName("IX_Clients_Email");
@@ -523,6 +554,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Clients_IsActive_Name");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Clients_LegalEntityId");
             entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_Clients_ClientStatusId");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_Clients_ResponsibleUserId");
         });
 
         // ------------------ ClientCase ------------------
@@ -608,6 +640,13 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<TimezoneDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TimezoneDictionaryItems"));
         modelBuilder.Entity<TaxSystemDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemDictionaryItems"));
         modelBuilder.Entity<TaxSystemModeDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "TaxSystemModeDictionaryItems"));
+        modelBuilder.Entity<InvoiceUnitDictionaryItem>(entity => ConfigureSimpleDictionary(entity, "InvoiceUnitDictionaryItems"));
+        modelBuilder.Entity<InvoiceItemNameDictionaryItem>(entity =>
+        {
+            ConfigureSimpleDictionary(entity, "InvoiceItemNameDictionaryItems");
+            entity.Property(x => x.Unit).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.DefaultPrice).HasPrecision(18, 2);
+        });
 
         // ------------------ ClientStatusEntity ------------------
         modelBuilder.Entity<ClientStatusEntity>(entity =>
@@ -795,6 +834,16 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Value).HasColumnType("text").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => e.Key).IsUnique().HasDatabaseName("IX_SystemSettings_Key");
+        });
+
         // ------------------ FormFieldRequirements ------------------
         modelBuilder.Entity<FormFieldRequirement>(entity =>
         {
@@ -856,6 +905,8 @@ public class PaymentContext : DbContext
 
     public DbSet<ContractPayment> ContractPayments { get; set; }
 
+    public DbSet<InvoiceClientCase> InvoiceClientCases { get; set; }
+
     /// <summary>
     /// Счета.
     /// </summary>
@@ -893,6 +944,8 @@ public class PaymentContext : DbContext
     public DbSet<TimezoneDictionaryItem> Timezones { get; set; }
     public DbSet<TaxSystemDictionaryItem> TaxSystems { get; set; }
     public DbSet<TaxSystemModeDictionaryItem> TaxSystemModes { get; set; }
+    public DbSet<InvoiceUnitDictionaryItem> InvoiceUnits { get; set; }
+    public DbSet<InvoiceItemNameDictionaryItem> InvoiceItemNames { get; set; }
 
     /// <summary>
     /// Статусы клиентов.
@@ -924,7 +977,7 @@ public class PaymentContext : DbContext
     /// Пользовательские настройки.
     /// </summary>
     public DbSet<UserSetting> UserSettings { get; set; }
-
+    public DbSet<SystemSetting> SystemSettings { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
 
     /// <summary>

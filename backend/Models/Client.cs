@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace PayPlanner.Api.Models
 {
@@ -36,6 +38,14 @@ namespace PayPlanner.Api.Models
         /// Статус клиента из справочника.
         /// </summary>
         public ClientStatusEntity? ClientStatus { get; set; }
+
+        public int? ResponsibleUserId { get; set; }
+
+        [JsonIgnore]
+        public User? ResponsibleUser { get; set; }
+
+        [NotMapped]
+        public string? ResponsibleUserName { get; set; }
 
         /// <summary>
         /// Дата и время создания записи (UTC).

@@ -1,15 +1,31 @@
-import { FileSignature, Loader2, Pencil, RefreshCcw, Search, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  GripVertical,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
-import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useDialog } from '../../hooks/useDialog';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Client, Contract } from '../../types';
-import { toDateInputValue, toRuDate } from '../../utils/dateUtils';
+import { toRuDate, toDateInputValue } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 
 type SortState = { key: ContractsSortKey; direction: 'asc' | 'desc' };
 
@@ -18,15 +34,48 @@ interface ContractsProps {
   onOpenClient?: (id: number) => void;
 }
 
-const formatDate = (value?: string | null) => (value ? (toRuDate(value) || value) : '—');
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
+const CONTRACT_COLUMNS = [
+  { key: 'number', label: 'Номер договора', defaultVisible: true, defaultWidth: 180, sortKey: 'number' as const },
+  { key: 'date', label: 'Дата договора', defaultVisible: true, defaultWidth: 150, sortKey: 'date' as const },
+  { key: 'startDate', label: 'Начало действия', defaultVisible: true, defaultWidth: 170 },
+  { key: 'validUntil', label: 'Окончание действия', defaultVisible: true, defaultWidth: 180 },
+  { key: 'terminationDate', label: 'Дата расторжения', defaultVisible: false, defaultWidth: 180 },
+  { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150, sortKey: 'amount' as const },
+  { key: 'description', label: 'Описание', defaultVisible: true, defaultWidth: 280 },
+  { key: 'clients', label: 'Клиенты', defaultVisible: true, defaultWidth: 320 },
+  { key: 'createdAt', label: 'Создан', defaultVisible: false, defaultWidth: 150, sortKey: 'createdAt' as const },
+] as const;
+
+type ContractColumnKey = (typeof CONTRACT_COLUMNS)[number]['key'];
+
+const CONTRACT_COLUMN_LABELS: Record<ContractColumnKey, string> = CONTRACT_COLUMNS.reduce(
+  (acc, column) => ({ ...acc, [column.key]: column.label }),
+  {} as Record<ContractColumnKey, string>,
+);
+
+function formatDate(value?: string | null) {
+  return value ? toRuDate(value) || value : '—';
+}
+
+function formatMoney(value?: number | null) {
+  if (typeof value !== 'number') return '—';
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
 
 export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const { user } = useAuth();
   const { setActiveTab } = useTabNavigation();
   const permissions = useRolePermissions(user?.role?.id).contracts;
-  const { t } = useTranslation();
+  const toast = useToast();
   const { confirm } = useDialog();
+  const { t } = useTranslation();
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -35,13 +84,43 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
   const clientIdFilter = clientFilter === 'all' ? undefined : Number(clientFilter);
 
-  const { contracts, loading, refreshing, error, pagination, refresh, deleteContract } = useContracts({
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ContractColumnKey>({
+    storageKey: `pp.contracts_table_settings.${user?.id ?? 'guest'}.v1`,
+    settingsKey: 'contracts_table_settings',
+    columns: CONTRACT_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultVisible: column.defaultVisible,
+      defaultWidth: column.defaultWidth,
+    })),
+    defaultPageSize: 20,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 120,
+  });
+
+  const { contracts, loading, refreshing, error, pagination, refresh } = useContracts({
     from: from || undefined,
     to: to || undefined,
     clientId: Number.isNaN(clientIdFilter) ? undefined : clientIdFilter,
@@ -49,12 +128,12 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
-    pageSize: 20,
+    pageSize,
   });
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, clientFilter, debouncedSearch, sortState]);
+  }, [from, to, clientFilter, debouncedSearch, sortState, pageSize]);
 
   useEffect(() => {
     void apiService
@@ -63,219 +142,461 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       .catch(() => setClients([]));
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil((pagination.total || 0) / (pagination.pageSize || 20)));
+  useEffect(() => {
+    if (!error) return;
+    toast.error(error);
+  }, [error, toast]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil((pagination.total || 0) / (pagination.pageSize || pageSize || 1))),
+    [pageSize, pagination.pageSize, pagination.total],
+  );
+
+  const columnsByKey = useMemo(
+    () => Object.fromEntries(CONTRACT_COLUMNS.map((column) => [column.key, column])) as Record<ContractColumnKey, (typeof CONTRACT_COLUMNS)[number]>,
+    [],
+  );
+
+  const visibleColumnsOrdered = useMemo(
+    () => orderedVisibleColumns.map((key) => columnsByKey[key]).filter(Boolean),
+    [columnsByKey, orderedVisibleColumns],
+  );
+
+  const handleSort = (key: ContractsSortKey) => {
+    setSortState((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: key === 'date' || key === 'createdAt' ? 'desc' : 'asc' };
+    });
+  };
+
+  const handleResetFilters = () => {
+    setFrom('');
+    setTo('');
+    setClientFilter('all');
+    setSearch('');
+  };
 
   const handleDelete = useCallback(
     async (contract: Contract) => {
       if (!permissions.canDelete) return;
-      const ok = await confirm({
+
+      const confirmed = await confirm({
         title: 'Подтверждение удаления',
         description: `Удалить договор «${contract.number}»?`,
         confirmLabel: 'Удалить',
         cancelLabel: 'Отмена',
         variant: 'danger',
       });
-      if (!ok) return;
+      if (!confirmed) return;
+
       setDeletingId(contract.id);
       try {
-        await deleteContract(contract.id);
-      } catch (e) {
-        setActionError(e instanceof Error ? e.message : 'Не удалось удалить договор');
+        await apiService.deleteContract(contract.id);
+        toast.success('Договор удален.');
+        if (contracts.length === 1 && page > 1) {
+          setPage((current) => Math.max(1, current - 1));
+        } else {
+          await refresh();
+        }
+      } catch (err) {
+        toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить договор.'));
       } finally {
         setDeletingId(null);
       }
     },
-    [confirm, deleteContract, permissions.canDelete],
+    [confirm, contracts.length, page, permissions.canDelete, refresh, toast],
   );
 
-  const renderSort = (key: ContractsSortKey) =>
-    sortState.key !== key ? '↕' : sortState.direction === 'asc' ? '↑' : '↓';
+  const renderSortIcon = (sortKey?: ContractsSortKey) => {
+    if (!sortKey || sortState.key !== sortKey) {
+      return null;
+    }
+
+    return sortState.direction === 'asc' ? (
+      <ArrowUp className="h-4 w-4 text-blue-600" />
+    ) : (
+      <ArrowDown className="h-4 w-4 text-blue-600" />
+    );
+  };
+
+  const renderCell = (contract: Contract, columnKey: ContractColumnKey) => {
+    switch (columnKey) {
+      case 'number':
+        return (
+          <button
+            type="button"
+            className="font-medium text-emerald-700 transition-colors hover:text-emerald-800 hover:underline"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenContract?.(contract.id);
+            }}
+          >
+            {contract.number}
+          </button>
+        );
+      case 'date':
+        return formatDate(contract.date);
+      case 'startDate':
+        return formatDate(contract.startDate);
+      case 'validUntil':
+        return formatDate(contract.validUntil);
+      case 'terminationDate':
+        return formatDate(contract.terminationDate);
+      case 'amount':
+        return <span className="font-medium text-slate-900">{formatMoney(contract.amount)}</span>;
+      case 'description':
+        return contract.description?.trim() ? (
+          <div className="truncate text-slate-700" title={contract.description}>
+            {contract.description}
+          </div>
+        ) : (
+          '—'
+        );
+      case 'clients':
+        return contract.clients.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {contract.clients.map((client) => (
+              <button
+                key={client.id}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenClient?.(client.id);
+                }}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-blue-700 transition-colors hover:border-blue-200 hover:bg-blue-50"
+              >
+                <span className="max-w-[180px] truncate">{client.name}</span>
+                {client.clientStatus ? <ClientStatusBadge status={client.clientStatus} /> : null}
+              </button>
+            ))}
+          </div>
+        ) : (
+          '—'
+        );
+      case 'createdAt':
+        return formatDate(contract.createdAt);
+      default:
+        return '—';
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
-      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 pt-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FileSignature className="h-9 w-9 text-emerald-500" />
-            <h1 className="text-2xl font-bold text-slate-900">{t('contracts') ?? 'Договоры'}</h1>
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-slate-900">{t('contracts') ?? 'Договоры'}</h1>
+            <p className="max-w-2xl text-sm text-slate-600">
+              {t('contractsSubtitle') ?? 'Управляйте договорами и привязывайте их к клиентам.'}
+            </p>
           </div>
-          <div className="flex gap-2">
-            {permissions.canCreate && (
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((prev) => !prev)}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
+                settingsOpen
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {t('tableSettings') ?? 'Таблица'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              className={`inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 ${
+                refreshing ? 'cursor-wait opacity-70' : ''
+              }`}
+            >
+              <RotateCcw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+              {t('update') ?? 'Обновить'}
+            </button>
+            {permissions.canCreate ? (
               <button
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white"
+                type="button"
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
                 onClick={() => setActiveTab('contractCreate')}
               >
-                Создать
+                {t('contractsCreate') ?? t('create') ?? 'Новый договор'}
               </button>
-            )}
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsFrom') ?? 'С даты'}
+              <input
+                type="date"
+                value={toDateInputValue(from)}
+                onChange={(event) => setFrom(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsTo') ?? 'По дату'}
+              <input
+                type="date"
+                value={toDateInputValue(to)}
+                onChange={(event) => setTo(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
+              <select
+                value={clientFilter}
+                onChange={(event) => setClientFilter(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="all">{t('allClients') ?? 'Все клиенты'}</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('search') ?? 'Поиск'}
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('contractsSearchPlaceholder') ?? 'Поиск по номеру, названию или описанию договора'}
+                />
+              </div>
+            </label>
+          </div>
+          <div className="mt-4 flex justify-end">
             <button
-              className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
-              onClick={() => void refresh()}
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
             >
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              <RotateCcw className="h-4 w-4" />
+              {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
             </button>
           </div>
         </div>
 
-        <div className="mb-4 grid gap-4 rounded-2xl border bg-white p-4 md:grid-cols-4">
-          <label className="text-sm text-slate-700">
-            С даты
-            <input
-              type="date"
-              value={toDateInputValue(from)}
-              onChange={(e) => setFrom(e.target.value)}
-              className="mt-1 w-full rounded-lg border px-3 py-2"
+        {settingsOpen ? (
+          <div className="mb-6">
+            <TableColumnSettings
+              columns={CONTRACT_COLUMNS.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
             />
-          </label>
-          <label className="text-sm text-slate-700">
-            По дату
-            <input
-              type="date"
-              value={toDateInputValue(to)}
-              onChange={(e) => setTo(e.target.value)}
-              className="mt-1 w-full rounded-lg border px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-slate-700">
-            Клиент
-            <select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              className="mt-1 w-full rounded-lg border px-3 py-2"
-            >
-              <option value="all">Все клиенты</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-slate-700">
-            Поиск
-            <div className="relative mt-1">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-lg border py-2 pl-8 pr-3"
-                placeholder="Поиск по номеру, названию или описанию"
-              />
-            </div>
-          </label>
-        </div>
-
-        {actionError && (
-          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
-            {actionError}
           </div>
-        )}
-        {error && (
-          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
-            {error}
-          </div>
-        )}
+        ) : null}
 
-        <div className="overflow-hidden rounded-2xl border bg-white">
-          {loading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          ) : (
-            <table className="min-w-full divide-y">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1180px] table-fixed">
+              <colgroup>
+                {orderedVisibleColumns.map((columnKey) => (
+                  <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
+                ))}
+                <col style={{ width: 120 }} />
+              </colgroup>
+              <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
-                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'number', direction: s.key === 'number' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Номер договора {renderSort('number')}</button></th>
-                  <th className="px-3 py-2 text-left"><button onClick={() => setSortState((s) => ({ key: 'date', direction: s.key === 'date' && s.direction === 'asc' ? 'desc' : 'asc' }))}>Дата договора {renderSort('date')}</button></th>
-                  <th className="px-3 py-2 text-left">Дата начала действия</th>
-                  <th className="px-3 py-2 text-left">Дата окончания действия</th>
-                  <th className="px-3 py-2 text-left">Дата расторжения</th>
-                  <th className="px-3 py-2 text-left">Описание</th>
-                  <th className="px-3 py-2 text-left">Клиенты</th>
-                  <th className="px-3 py-2 text-right">Действия</th>
+                  {visibleColumnsOrdered.map((column) => (
+                    <th
+                      key={column.key}
+                      style={{ width: getColumnWidth(column.key) }}
+                      className={`relative px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${
+                        draggingColumn === column.key ? 'bg-blue-50 text-blue-700' : 'text-slate-700'
+                      }`}
+                      onDragOver={handleColumnDragOver}
+                      onDrop={(event) => handleColumnDrop(column.key, event)}
+                    >
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                        onDragEnd={handleColumnDragEnd}
+                        className="absolute left-2 top-1/2 z-10 inline-flex -translate-y-1/2 cursor-grab rounded p-1 text-slate-400 active:cursor-grabbing"
+                        title="Перетащите, чтобы изменить порядок"
+                        aria-label={`Перетащите колонку ${CONTRACT_COLUMN_LABELS[column.key]}, чтобы изменить порядок`}
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
+                      <div className="flex items-center justify-between gap-2">
+                        {column.sortKey ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSort(column.sortKey)}
+                            className="inline-flex min-w-0 items-center gap-2 text-left transition-colors hover:text-blue-700"
+                          >
+                            <div
+                              className="inline-flex min-w-0 items-center gap-2 pl-8"
+                              draggable
+                              onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                              onDragEnd={handleColumnDragEnd}
+                              title="Перетащите, чтобы изменить порядок"
+                            >
+                              <span className="truncate">{CONTRACT_COLUMN_LABELS[column.key]}</span>
+                            </div>
+                            {renderSortIcon(column.sortKey)}
+                          </button>
+                        ) : (
+                          <div
+                            className="inline-flex min-w-0 items-center gap-2 pl-8"
+                            draggable
+                            onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                            onDragEnd={handleColumnDragEnd}
+                            title="Перетащите, чтобы изменить порядок"
+                          >
+                            <span className="truncate">{CONTRACT_COLUMN_LABELS[column.key]}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        role="separator"
+                        aria-label={`Изменить ширину колонки ${CONTRACT_COLUMN_LABELS[column.key]}`}
+                        className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                        onMouseDown={(event) => handleResizeStart(column.key, event)}
+                        onDragStart={(event) => event.preventDefault()}
+                      />
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    {t('actions') ?? 'Действия'}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
-                {contracts.map((contract) => (
-                  <tr key={contract.id} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}>
-                    <td className="px-3 py-2">
-                      <button
-                        className="text-left text-emerald-700 hover:underline"
-                        onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
-                      >
-                        {contract.number}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">{formatDate(contract.date)}</td>
-                    <td className="px-3 py-2">{formatDate(contract.startDate)}</td>
-                    <td className="px-3 py-2">{formatDate(contract.validUntil)}</td>
-                    <td className="px-3 py-2">{formatDate(contract.terminationDate)}</td>
-                    <td className="px-3 py-2">{contract.description || '—'}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
-                        {contract.clients.map((c) => (
-                          <button
-                            key={c.id}
-                            className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
-                            onClick={(e) => { e.stopPropagation(); onOpenClient?.(c.id); }}
-                          >
-                            {c.name}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onOpenContract?.(contract.id); }}
-                          className="rounded border p-1 text-slate-700 hover:bg-slate-100"
-                          title="Редактировать договор"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        {permissions.canDelete && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); void handleDelete(contract); }}
-                            className="rounded border p-1 text-rose-600"
-                            title="Удалить"
-                          >
-                            {deletingId === contract.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={visibleColumnsOrdered.length + 1} className="px-4 py-12 text-center text-slate-500">
+                      <div className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t('loading') ?? 'Загрузка...'}
                       </div>
                     </td>
                   </tr>
-                ))}
+                ) : error ? (
+                  <tr>
+                    <td colSpan={visibleColumnsOrdered.length + 1} className="px-4 py-12 text-center text-rose-600">
+                      {error}
+                    </td>
+                  </tr>
+                ) : contracts.length === 0 ? (
+                  <tr>
+                    <td colSpan={visibleColumnsOrdered.length + 1} className="px-4 py-12 text-center text-slate-500">
+                      {t('contractsEmptyTitle') ?? 'Договоры отсутствуют'}
+                    </td>
+                  </tr>
+                ) : (
+                  contracts.map((contract) => (
+                    <tr
+                      key={contract.id}
+                      className="cursor-pointer transition-colors hover:bg-slate-50"
+                      onClick={() => onOpenContract?.(contract.id)}
+                    >
+                      {visibleColumnsOrdered.map((column) => (
+                        <td
+                          key={column.key}
+                          style={{ width: getColumnWidth(column.key) }}
+                          className="max-w-0 overflow-hidden px-4 py-4 align-top text-sm text-slate-700"
+                        >
+                          {renderCell(contract, column.key)}
+                        </td>
+                      ))}
+                      <td className="px-4 py-4">
+                        <div className="flex items-center justify-end gap-2">
+                          {permissions.canEdit ? (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenContract?.(contract.id);
+                              }}
+                              className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                              title={t('edit') ?? 'Редактировать'}
+                              aria-label={t('edit') ?? 'Редактировать'}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                          {permissions.canDelete ? (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDelete(contract);
+                              }}
+                              className="rounded-lg p-2 text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700"
+                              title={t('delete') ?? 'Удалить'}
+                              aria-label={t('delete') ?? 'Удалить'}
+                            >
+                              {deletingId === contract.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
-          )}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span>{pagination.total || 0} записей</span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded border px-2 py-1"
-            >
-              Назад
-            </button>
-            <span>
-              {page}/{totalPages}
-            </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded border px-2 py-1"
-            >
-              Вперёд
-            </button>
           </div>
+
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={pagination.total || 0}
+            pageSize={pageSize}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            recordsLabel={t('recordsFound') ?? 'Найдено записей'}
+            pageSizeLabel={t('rowsPerPage') ?? 'Строк на странице'}
+            previousLabel={t('previous') ?? 'Назад'}
+            nextLabel={t('next') ?? 'Вперед'}
+          />
         </div>
       </div>
     </div>

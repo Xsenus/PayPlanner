@@ -35,6 +35,7 @@ public class ActsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] ActStatus? status,
         [FromQuery] int? clientId,
+        [FromQuery] string? clientIds,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
@@ -49,6 +50,12 @@ public class ActsController : ControllerBase
         var query = _db.Acts.AsNoTracking()
             .ApplyActFilters(from, to, status, clientId, responsibleId, search)
             .ApplyActSort(sortBy, sortDir);
+
+        var clientIdList = ParseIntList(clientIds);
+        if (clientIdList.Count > 0)
+        {
+            query = query.Where(act => act.ClientId.HasValue && clientIdList.Contains(act.ClientId.Value));
+        }
 
         var total = await query.CountAsync(ct);
         var skip = (page - 1) * pageSize;
@@ -79,6 +86,20 @@ public class ActsController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(new { items, total, page, pageSize });
+    }
+
+    private static HashSet<int> ParseIntList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
     }
 
     [HttpGet("{id:int}")]

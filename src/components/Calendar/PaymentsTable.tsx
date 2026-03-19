@@ -1,7 +1,32 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { GripVertical } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import type { Payment } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { formatCurrencySmart } from '../../utils/formatters';
+
+export type PaymentTableColumnKey =
+  | 'date'
+  | 'plannedDate'
+  | 'client'
+  | 'description'
+  | 'type'
+  | 'status'
+  | 'category'
+  | 'amount'
+  | 'paidDate'
+  | 'createdAt';
+
+export interface PaymentTableColumnDefinition {
+  key: PaymentTableColumnKey;
+  label: string;
+}
 
 interface PaymentsTableProps {
   payments: Payment[];
@@ -12,6 +37,14 @@ interface PaymentsTableProps {
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  columns?: PaymentTableColumnDefinition[];
+  draggingColumn?: PaymentTableColumnKey | null;
+  onColumnDragStart?: (key: PaymentTableColumnKey, event: ReactDragEvent<HTMLElement>) => void;
+  onColumnDragOver?: (event: ReactDragEvent<HTMLElement>) => void;
+  onColumnDrop?: (key: PaymentTableColumnKey, event: ReactDragEvent<HTMLElement>) => void;
+  onColumnDragEnd?: () => void;
+  onResizeStart?: (key: PaymentTableColumnKey, event: ReactMouseEvent<HTMLDivElement>) => void;
+  getColumnWidth?: (key: PaymentTableColumnKey) => number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -33,6 +66,14 @@ export function PaymentsTable({
   canAdd,
   canEdit,
   canDelete,
+  columns,
+  draggingColumn = null,
+  onColumnDragStart,
+  onColumnDragOver,
+  onColumnDrop,
+  onColumnDragEnd,
+  onResizeStart,
+  getColumnWidth,
 }: PaymentsTableProps) {
   const { t, formatDate } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState>(null);
@@ -48,17 +89,22 @@ export function PaymentsTable({
     [t],
   );
 
-  const columns = useMemo(
+  const defaultColumns = useMemo<PaymentTableColumnDefinition[]>(
     () => [
-      t('date') ?? 'Дата',
-      t('clients') ?? 'Клиенты',
-      t('description') ?? 'Описание',
-      t('type') ?? 'Тип',
-      t('status') ?? t('statusFilter') ?? 'Статус',
-      t('category') ?? 'Категория',
-      t('amount') ?? 'Сумма',
+      { key: 'date', label: t('date') ?? 'Дата' },
+      { key: 'client', label: t('clients') ?? 'Клиенты' },
+      { key: 'description', label: t('description') ?? 'Описание' },
+      { key: 'type', label: t('type') ?? 'Тип' },
+      { key: 'status', label: t('status') ?? t('statusFilter') ?? 'Статус' },
+      { key: 'category', label: t('category') ?? 'Категория' },
+      { key: 'amount', label: t('amount') ?? 'Сумма' },
     ],
     [t],
+  );
+
+  const visibleColumns = columns?.length ? columns : defaultColumns;
+  const supportsColumnSettings = Boolean(
+    onColumnDragStart && onColumnDragOver && onColumnDrop && onColumnDragEnd && onResizeStart && getColumnWidth,
   );
 
   const closeMenu = useCallback(() => setMenuState(null), []);
@@ -78,7 +124,7 @@ export function PaymentsTable({
   }, [menuState]);
 
   const openMenu = useCallback(
-    (event: React.MouseEvent<HTMLTableRowElement>, payment: Payment) => {
+    (event: ReactMouseEvent<HTMLTableRowElement>, payment: Payment) => {
       if (!canAdd && !canEdit && !canDelete) return;
       event.preventDefault();
       const width = 220;
@@ -96,18 +142,133 @@ export function PaymentsTable({
     [canAdd, canEdit, canDelete],
   );
 
+  const renderCell = useCallback(
+    (payment: Payment, columnKey: PaymentTableColumnKey) => {
+      const isIncome = payment.type === 'Income';
+      const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
+      const amountText = formatCurrencySmart(payment.amount).full;
+      const category =
+        payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
+      const statusLabel = statusLabels[payment.status] ?? payment.status;
+
+      switch (columnKey) {
+        case 'date':
+          return payment.date ? formatDate(payment.date) : '—';
+        case 'plannedDate':
+          return payment.plannedDate ? formatDate(payment.plannedDate) : '—';
+        case 'client':
+          return payment.client ? (
+            <button
+              type="button"
+              className="block w-full text-left leading-tight text-blue-600 hover:underline"
+              onClick={() => {
+                if (payment.clientId) {
+                  onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
+                }
+              }}>
+              <span className="block font-medium">{payment.client.name}</span>
+              {payment.clientCase?.title ? (
+                <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
+                  {payment.clientCase.title}
+                </span>
+              ) : null}
+            </button>
+          ) : (
+            <span className="text-gray-400">—</span>
+          );
+        case 'description':
+          return (
+            <>
+              <div className="truncate" title={payment.description || undefined}>
+                {payment.description || t('noDescription') || 'Без описания'}
+              </div>
+              {payment.notes ? (
+                <div className="truncate text-xs text-gray-500" title={payment.notes}>
+                  {payment.notes}
+                </div>
+              ) : null}
+            </>
+          );
+        case 'type':
+          return (
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                isIncome ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+              }`}>
+              {isIncome ? t('income') ?? 'Доход' : t('expense') ?? 'Расход'}
+            </span>
+          );
+        case 'status':
+          return (
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
+              {statusLabel}
+            </span>
+          );
+        case 'category':
+          return category;
+        case 'amount':
+          return <span className="font-semibold text-gray-900">{amountText}</span>;
+        case 'paidDate':
+          return payment.paidDate || payment.lastPaymentDate
+            ? formatDate(payment.paidDate || payment.lastPaymentDate || '')
+            : '—';
+        case 'createdAt':
+          return payment.createdAt ? formatDate(payment.createdAt) : '—';
+        default:
+          return '—';
+      }
+    },
+    [formatDate, onOpenClient, statusLabels, t],
+  );
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[820px] w-full divide-y divide-gray-200">
+        <table className="min-w-[960px] w-full table-fixed divide-y divide-gray-200">
+          <colgroup>
+            {visibleColumns.map((column) => (
+              <col
+                key={column.key}
+                style={getColumnWidth ? { width: getColumnWidth(column.key) } : undefined}
+              />
+            ))}
+          </colgroup>
           <thead className="bg-gray-50">
             <tr>
-              {columns.map((col, idx) => (
+              {visibleColumns.map((column) => (
                 <th
-                  key={idx}
+                  key={column.key}
                   scope="col"
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  {col}
+                  style={getColumnWidth ? { width: getColumnWidth(column.key) } : undefined}
+                  className={`relative px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${
+                    draggingColumn === column.key ? 'bg-blue-50 text-blue-700' : 'text-gray-500'
+                  }`}
+                  onDragOver={onColumnDragOver}
+                  onDrop={onColumnDrop ? (event) => onColumnDrop(column.key, event) : undefined}>
+                  <div className="flex items-center justify-between gap-2">
+                    {supportsColumnSettings ? (
+                      <div
+                        className="inline-flex min-w-0 select-none items-center gap-2"
+                        draggable
+                        onDragStart={(event) => onColumnDragStart(column.key, event)}
+                        onDragEnd={onColumnDragEnd}
+                        title="Перетащите, чтобы изменить порядок">
+                        <GripVertical className="h-4 w-4 text-slate-400" />
+                        <span className="truncate">{column.label}</span>
+                      </div>
+                    ) : (
+                      <span className="truncate">{column.label}</span>
+                    )}
+                  </div>
+                  {onResizeStart ? (
+                    <div
+                      role="separator"
+                      aria-label={`Изменить ширину колонки ${column.label}`}
+                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                      onMouseDown={(event) => onResizeStart(column.key, event)}
+                      onDragStart={(event) => event.preventDefault()}
+                    />
+                  ) : null}
                 </th>
               ))}
             </tr>
@@ -115,89 +276,36 @@ export function PaymentsTable({
           <tbody className="divide-y divide-gray-100">
             {payments.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-gray-500">
+                <td
+                  colSpan={visibleColumns.length}
+                  className="px-4 py-6 text-center text-sm text-gray-500">
                   {t('noPaymentsForFilter') ?? 'Нет платежей, подходящих под выбранные условия.'}
                 </td>
               </tr>
             ) : (
-              payments.map((payment) => {
-                const isIncome = payment.type === 'Income';
-                const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
-                const amountFmt = formatCurrencySmart(payment.amount).full;
-                const category =
-                  payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
-
-                const statusLabel = statusLabels[payment.status] ?? payment.status;
-
-                return (
-                  <tr
-                    key={payment.id}
-                    onContextMenu={(event) => openMenu(event, payment)}
-                    onDoubleClick={() => {
-                      if (canEdit) onEditPayment(payment);
-                    }}
-                    className="hover:bg-gray-50/60 transition-colors cursor-default"
-                    title={
-                      canAdd || canEdit || canDelete
-                        ? t('contextMenuHint') ?? 'ПКМ для действий'
-                        : undefined
-                    }>
-                    <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
-                      {payment.date ? formatDate(payment.date) : '—'}
+              payments.map((payment) => (
+                <tr
+                  key={payment.id}
+                  onContextMenu={(event) => openMenu(event, payment)}
+                  onDoubleClick={() => {
+                    if (canEdit) onEditPayment(payment);
+                  }}
+                  className="cursor-default transition-colors hover:bg-gray-50/60"
+                  title={
+                    canAdd || canEdit || canDelete
+                      ? t('contextMenuHint') ?? 'ПКМ для действий'
+                      : undefined
+                  }>
+                  {visibleColumns.map((column) => (
+                    <td
+                      key={column.key}
+                      style={getColumnWidth ? { width: getColumnWidth(column.key) } : undefined}
+                      className="max-w-0 overflow-hidden px-4 py-3 align-top text-sm text-gray-700">
+                      {renderCell(payment, column.key)}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 min-w-[160px]">
-                      {payment.client ? (
-                        <button
-                          type="button"
-                          className="text-blue-600 hover:underline"
-                          onClick={() => {
-                            if (payment.clientId) {
-                              onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
-                            }
-                          }}>
-                          <span className="font-medium text-left block">{payment.client.name}</span>
-                          {payment.clientCase?.title ? (
-                            <span className="text-xs text-gray-500 truncate block">
-                              {payment.clientCase.title}
-                            </span>
-                          ) : null}
-                        </button>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 max-w-[260px]">
-                      <div className="truncate" title={payment.description || undefined}>
-                        {payment.description || t('noDescription') || 'Без описания'}
-                      </div>
-                      {payment.notes ? (
-                        <div className="text-xs text-gray-500 truncate" title={payment.notes}>
-                          {payment.notes}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          isIncome ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                        }`}>
-                        {isIncome ? t('income') ?? 'Доход' : t('expense') ?? 'Расход'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
-                        {statusLabel}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {category}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 whitespace-nowrap">
-                      {amountFmt}
-                    </td>
-                  </tr>
-                );
-              })
+                  ))}
+                </tr>
+              ))
             )}
           </tbody>
         </table>
@@ -223,8 +331,8 @@ export function PaymentsTable({
                 closeMenu();
                 if (canAdd) onAddPayment?.(menuState.payment.type, menuState.payment);
               }}
-              className={`flex w-full items-center justify-between px-4 py-2 text-sm text-left transition-colors ${
-                canAdd ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-400 cursor-not-allowed'
+              className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
+                canAdd ? 'text-gray-700 hover:bg-gray-100' : 'cursor-not-allowed text-gray-400'
               }`}
               disabled={!canAdd}
               title={
@@ -240,8 +348,8 @@ export function PaymentsTable({
                 closeMenu();
                 if (canEdit) onEditPayment(menuState.payment);
               }}
-              className={`flex w-full items-center justify-between px-4 py-2 text-sm text-left transition-colors ${
-                canEdit ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-400 cursor-not-allowed'
+              className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
+                canEdit ? 'text-gray-700 hover:bg-gray-100' : 'cursor-not-allowed text-gray-400'
               }`}
               disabled={!canEdit}
               title={
@@ -259,10 +367,8 @@ export function PaymentsTable({
                 if (!canDelete) return;
                 await onDeletePayment?.(menuState.payment);
               }}
-              className={`flex w-full items-center justify-between px-4 py-2 text-sm text-left transition-colors ${
-                canDelete
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-gray-400 cursor-not-allowed'
+              className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
+                canDelete ? 'text-red-600 hover:bg-red-50' : 'cursor-not-allowed text-gray-400'
               }`}
               disabled={!canDelete}
               title={

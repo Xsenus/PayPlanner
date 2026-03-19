@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Invoice, InvoiceInput, InvoiceSummary, PaymentKind, PaymentStatus } from '../types';
+import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type InvoicesSortKey =
   | 'date'
@@ -108,7 +109,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Не удалось загрузить счета';
+        const message = extractDisplayErrorMessage(err, 'Не удалось загрузить счета');
         setError(message);
         if (!hasLoadedRef.current) {
           setInvoices([]);

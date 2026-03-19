@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type {
   Client,
   LegalEntityDetail,
@@ -24,7 +25,9 @@ import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import { useToast } from '../../hooks/useToast';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
+import { TablePagination } from '../ui/TablePagination';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -32,7 +35,6 @@ interface LegalEntityModalProps {
   onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail>;
   onDelete?: () => Promise<void>;
   initial?: LegalEntityDetail | null;
-  clients: Client[];
   suggest: (payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>;
   findById: (payload: { query: string; kpp?: string }) => Promise<LegalEntityDadataDetails>;
   allowEdit: boolean;
@@ -40,6 +42,11 @@ interface LegalEntityModalProps {
   mode?: 'modal' | 'page';
   onBack?: () => void;
 }
+
+type ClientAssociationItem = Pick<
+  Client,
+  'id' | 'name' | 'company' | 'phone' | 'email' | 'clientStatus' | 'clientStatusId'
+>;
 
 interface FormState {
   shortName: string;
@@ -165,6 +172,37 @@ const ADDRESS_TYPE_OPTIONS = [
 ] as const;
 
 const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2';
+const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
+function toClientAssociationItem(
+  client: Partial<ClientAssociationItem> & Pick<ClientAssociationItem, 'id' | 'name'>,
+): ClientAssociationItem {
+  return {
+    id: client.id,
+    name: client.name,
+    company: client.company ?? null,
+    phone: client.phone ?? null,
+    email: client.email ?? null,
+    clientStatus: client.clientStatus ?? null,
+    clientStatusId: client.clientStatusId ?? null,
+  };
+}
+
+function mergeClientAssociationItems(
+  primary: ClientAssociationItem[],
+  fallback: ClientAssociationItem[],
+): ClientAssociationItem[] {
+  const seen = new Set<number>();
+  const merged: ClientAssociationItem[] = [];
+
+  for (const item of [...primary, ...fallback]) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+
+  return merged;
+}
 
 const createEmptyLegalEntityAddressEntry = (): ClientAddressEntryFormValue => ({
   type: 'legal',
@@ -309,7 +347,6 @@ export function LegalEntityModal({
   onSubmit,
   onDelete,
   initial,
-  clients,
   suggest,
   findById,
   allowEdit,
@@ -318,7 +355,8 @@ export function LegalEntityModal({
   onBack,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
+  const toast = useToast();
 
   const legalEntityFieldLabels: Record<string, string> = {
     ShortName: t('legalEntityShortName') || 'Краткое название',
@@ -367,12 +405,22 @@ export function LegalEntityModal({
   const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries();
   const { isRequired } = useFormRequirements('legal-entities', isOpen);
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
-  const [clientIds, setClientIds] = useState<number[]>([]);
+  const [selectedClients, setSelectedClients] = useState<ClientAssociationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
+  const debouncedPickerSearch = useDebouncedValue(pickerSearch.trim(), 250);
+  const [pickerClients, setPickerClients] = useState<ClientAssociationItem[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+  const [pickerPage, setPickerPage] = useState(1);
+  const [pickerPageSize, setPickerPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
+  const [pickerTotal, setPickerTotal] = useState(0);
+  const [selectedClientsPage, setSelectedClientsPage] = useState(1);
+  const [selectedClientsPageSize, setSelectedClientsPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
+  const [hydratedSelectedClientIds, setHydratedSelectedClientIds] = useState<number[]>([]);
   const [dadataQuery, setDadataQuery] = useState('');
   const [suggestions, setSuggestions] = useState<LegalEntitySuggestion[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
@@ -394,7 +442,6 @@ export function LegalEntityModal({
   const [contactEmails, setContactEmails] = useState<string[]>([]);
   const [dictModalOpen, setDictModalOpen] = useState(false);
   const [dictModalTab, setDictModalTab] = useState<LegalEntityDictTab>('countries');
-  const [saveToast, setSaveToast] = useState<string | null>(null);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
 
   const readOnly = !allowEdit && !!initial;
@@ -464,7 +511,16 @@ export function LegalEntityModal({
         treasuryKbk: initial.treasuryKbk ?? '',
         notes: initial.notes ?? '',
       });
-      setClientIds((initial.clients ?? []).map((c) => c.id));
+      setSelectedClients(
+        (initial.clients ?? []).map((client) =>
+          toClientAssociationItem({
+            id: client.id,
+            name: client.name,
+            phone: client.phone ?? null,
+            email: client.email ?? null,
+          }),
+        ),
+      );
       setBankAccounts(parseJsonOrDefault<BankAccountItem[]>(initial.bankAccountsJson, []));
       setCashRegisters(parseJsonOrDefault<CashRegisterItem[]>(initial.cashRegistersJson, []));
       setCards(parseJsonOrDefault<CardItem[]>(initial.cardsJson, []));
@@ -490,7 +546,7 @@ export function LegalEntityModal({
       setContactEmails(parseJsonOrDefault<string[]>(initial.contactEmailsJson, initial.email ? [initial.email] : []));
     } else {
       setFormState(DEFAULT_STATE);
-      setClientIds([]);
+      setSelectedClients([]);
       setBankAccounts([]);
       setCashRegisters([]);
       setCards([]);
@@ -511,6 +567,12 @@ export function LegalEntityModal({
     setDadataQuery('');
     setPickerOpen(false);
     setPickerSearch('');
+    setPickerClients([]);
+    setPickerError(null);
+    setPickerPage(1);
+    setPickerTotal(0);
+    setSelectedClientsPage(1);
+    setHydratedSelectedClientIds([]);
   }, [initial, isOpen]);
 
   useEffect(() => () => {
@@ -518,34 +580,122 @@ export function LegalEntityModal({
   }, []);
 
   useEffect(() => {
-    if (!saveToast) return;
-    const timer = window.setTimeout(() => setSaveToast(null), 2600);
-    return () => window.clearTimeout(timer);
-  }, [saveToast]);
-
-  useEffect(() => {
     if (!isOpen) return;
     void apiService.getActResponsibles().then((items) => setResponsibles(items ?? [])).catch(() => setResponsibles([]));
   }, [isOpen]);
 
-  const selectedClients = useMemo(
-    () => clients.filter((client) => clientIds.includes(client.id)),
-    [clientIds, clients],
+  useEffect(() => {
+    if (!isOpen || selectedClients.length === 0) return;
+
+    const idsToHydrate = selectedClients
+      .map((client) => client.id)
+      .filter((id) => !hydratedSelectedClientIds.includes(id));
+
+    if (idsToHydrate.length === 0) return;
+
+    let cancelled = false;
+
+    const loadSelectedClients = async () => {
+      try {
+        const responses = await Promise.all(
+          idsToHydrate.map((id) =>
+            apiService
+              .getClient(id)
+              .then((client) => toClientAssociationItem(client))
+              .catch(() => null),
+          ),
+        );
+
+        if (cancelled) return;
+
+        const detailedClients = responses.filter((client): client is ClientAssociationItem => client !== null);
+        if (detailedClients.length > 0) {
+          setSelectedClients((prev) => {
+            const detailedById = new Map(detailedClients.map((client) => [client.id, client]));
+            return prev.map((client) => detailedById.get(client.id) ?? client);
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setHydratedSelectedClientIds((prev) => [...new Set([...prev, ...idsToHydrate])]);
+        }
+      }
+    };
+
+    void loadSelectedClients();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydratedSelectedClientIds, isOpen, selectedClients]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+
+    const fetchPickerClients = async () => {
+      setPickerLoading(true);
+      setPickerError(null);
+      try {
+        const response = await apiService.getClientsV2({
+          search: debouncedPickerSearch || undefined,
+          sortBy: 'name',
+          sortDir: 'asc',
+          page: pickerPage,
+          pageSize: pickerPageSize,
+        });
+
+        if (cancelled) return;
+
+        setPickerClients((response.items ?? []).map((client) => toClientAssociationItem(client)));
+        setPickerTotal(response.total ?? 0);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Не удалось загрузить клиентов';
+        setPickerClients([]);
+        setPickerTotal(0);
+        setPickerError(message);
+        toast.error(message, 'Ошибка загрузки');
+      } finally {
+        if (!cancelled) {
+          setPickerLoading(false);
+        }
+      }
+    };
+
+    void fetchPickerClients();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedPickerSearch, pickerOpen, pickerPage, pickerPageSize, toast]);
+
+  useEffect(() => {
+    setPickerPage(1);
+  }, [debouncedPickerSearch, pickerPageSize]);
+
+  const clientIds = useMemo(() => selectedClients.map((client) => client.id), [selectedClients]);
+  const selectedClientIds = useMemo(() => new Set(clientIds), [clientIds]);
+  const availableClients = useMemo(
+    () => pickerClients.filter((client) => !selectedClientIds.has(client.id)),
+    [pickerClients, selectedClientIds],
+  );
+  const selectedClientsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(selectedClients.length / selectedClientsPageSize)),
+    [selectedClients.length, selectedClientsPageSize],
+  );
+  const pagedSelectedClients = useMemo(() => {
+    const offset = (selectedClientsPage - 1) * selectedClientsPageSize;
+    return selectedClients.slice(offset, offset + selectedClientsPageSize);
+  }, [selectedClients, selectedClientsPage, selectedClientsPageSize]);
+  const pickerTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(pickerTotal / pickerPageSize)),
+    [pickerPageSize, pickerTotal],
   );
 
-  const availableClients = useMemo(() => {
-    const selected = new Set(clientIds);
-    const term = pickerSearch.trim().toLowerCase();
-
-    return clients
-      .filter((client) => !selected.has(client.id))
-      .filter((client) => {
-        if (!term) return true;
-        return `${client.name ?? ''} ${client.company ?? ''} ${client.phone ?? ''} ${client.email ?? ''}`
-          .toLowerCase()
-          .includes(term);
-      });
-  }, [clientIds, clients, pickerSearch]);
+  useEffect(() => {
+    setSelectedClientsPage((prev) => Math.min(prev, selectedClientsTotalPages));
+  }, [selectedClientsTotalPages]);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -556,11 +706,16 @@ export function LegalEntityModal({
   };
 
   const handleAddClient = (id: number) => {
-    setClientIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    const client = pickerClients.find((item) => item.id === id);
+    if (!client) return;
+
+    setSelectedClients((prev) => (prev.some((item) => item.id === id) ? prev : [...prev, client]));
+    setHydratedSelectedClientIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   const handleRemoveClient = (id: number) => {
-    setClientIds((prev) => prev.filter((clientId) => clientId !== id));
+    setSelectedClients((prev) => prev.filter((client) => client.id !== id));
+    setHydratedSelectedClientIds((prev) => prev.filter((clientId) => clientId !== id));
   };
 
   const handleImageUpload = async (
@@ -935,7 +1090,20 @@ export function LegalEntityModal({
         treasuryKbk: saved.treasuryKbk ?? prev.treasuryKbk,
         notes: saved.notes ?? prev.notes,
       }));
-      setClientIds((saved.clients ?? []).map((c) => c.id));
+      setSelectedClients((prev) =>
+        mergeClientAssociationItems(
+          prev.filter((client) => (saved.clients ?? []).some((savedClient) => savedClient.id === client.id)),
+          (saved.clients ?? []).map((client) =>
+            toClientAssociationItem({
+              id: client.id,
+              name: client.name,
+              phone: client.phone ?? null,
+              email: client.email ?? null,
+            }),
+          ),
+        ),
+      );
+      setHydratedSelectedClientIds((saved.clients ?? []).map((client) => client.id));
       setBankAccounts(parseJsonOrDefault<BankAccountItem[]>(saved.bankAccountsJson, bankAccounts));
       setCashRegisters(parseJsonOrDefault<CashRegisterItem[]>(saved.cashRegistersJson, cashRegisters));
       setCards(parseJsonOrDefault<CardItem[]>(saved.cardsJson, cards));
@@ -948,18 +1116,13 @@ export function LegalEntityModal({
       setAddressEntries((saved.addresses ?? []).map((a) => ({ ...createEmptyLegalEntityAddressEntry(), type: mapAddressTypeToForm(a.type), fullAddress: a.value ?? '', postalCode: a.postalCode ?? '', region: a.regionWithType ?? '', city: a.cityWithType ?? '', street: a.streetWithType ?? '', house: a.house ?? '', flat: a.flat ?? '' })));
       setContactPhones(parseJsonOrDefault<string[]>(saved.contactPhonesJson, contactPhones));
       setContactEmails(parseJsonOrDefault<string[]>(saved.contactEmailsJson, contactEmails));
-      setSaveToast('Юридическое лицо успешно сохранено.');
       if (!isPageMode) {
         onClose();
       }
     } catch (err) {
       const message = extractErrorMessage(err, t('saveError') || 'Не удалось сохранить');
       setError(message);
-      await alert({
-        title: 'Ошибка сохранения',
-        description: message,
-        variant: 'error',
-      });
+      toast.error(message, 'Ошибка сохранения');
     } finally {
       setLoading(false);
     }
@@ -977,11 +1140,7 @@ export function LegalEntityModal({
     } catch (err) {
       const message = extractErrorMessage(err, t('legalEntityDeleteError') || 'Не удалось удалить запись');
       setError(message);
-      await alert({
-        title: 'Удаление недоступно',
-        description: message,
-        variant: 'error',
-      });
+      toast.error(message, 'Удаление недоступно');
     } finally {
       setDeleting(false);
     }
@@ -1009,7 +1168,13 @@ export function LegalEntityModal({
       </div>
 
       <div className="mt-3 overflow-x-auto">
-        <table className="min-w-full divide-y text-sm">
+        <table className="min-w-full table-fixed divide-y text-sm">
+          <colgroup>
+            <col style={{ width: '28%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '36%' }} />
+            <col style={{ width: '16%' }} />
+          </colgroup>
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-3 py-2 text-left">ФИО</th>
@@ -1019,7 +1184,7 @@ export function LegalEntityModal({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {selectedClients.map((client) => (
+            {pagedSelectedClients.map((client) => (
               <tr key={client.id}>
                 <td className="px-3 py-2">
                   <div className="font-medium text-gray-900">{client.name}</div>
@@ -1051,6 +1216,18 @@ export function LegalEntityModal({
           </tbody>
         </table>
       </div>
+      <TablePagination
+        page={selectedClientsPage}
+        totalPages={selectedClientsTotalPages}
+        totalItems={selectedClients.length}
+        pageSize={selectedClientsPageSize}
+        pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
+        onPageChange={setSelectedClientsPage}
+        onPageSizeChange={(value) => {
+          setSelectedClientsPageSize(value);
+          setSelectedClientsPage(1);
+        }}
+      />
     </div>
   );
 
@@ -1165,12 +1342,6 @@ export function LegalEntityModal({
         {error && (
           <div className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
-          </div>
-        )}
-
-        {saveToast && (
-          <div className="fixed right-6 top-6 z-[1200] rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">
-            {saveToast}
           </div>
         )}
 
@@ -1620,8 +1791,19 @@ export function LegalEntityModal({
                   />
                 </div>
 
+                {pickerError ? (
+                  <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {pickerError}
+                  </div>
+                ) : null}
+
                 <div className="max-h-80 overflow-auto rounded border">
-                  <table className="min-w-full divide-y text-sm">
+                  <table className="min-w-full table-fixed divide-y text-sm">
+                    <colgroup>
+                      <col style={{ width: '44%' }} />
+                      <col style={{ width: '36%' }} />
+                      <col style={{ width: '20%' }} />
+                    </colgroup>
                     <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                       <tr>
                         <th className="px-3 py-2 text-left">ФИО</th>
@@ -1630,7 +1812,13 @@ export function LegalEntityModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {availableClients.map((client) => (
+                      {pickerLoading ? (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-8 text-center text-slate-500">
+                            Загрузка...
+                          </td>
+                        </tr>
+                      ) : availableClients.map((client) => (
                         <tr key={client.id}>
                           <td className="px-3 py-2">{client.name}</td>
                           <td className="px-3 py-2">{client.company || '—'}</td>
@@ -1644,7 +1832,7 @@ export function LegalEntityModal({
                           </td>
                         </tr>
                       ))}
-                      {availableClients.length === 0 && (
+                      {!pickerLoading && availableClients.length === 0 && (
                         <tr>
                           <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
                             Нет доступных клиентов
@@ -1654,6 +1842,15 @@ export function LegalEntityModal({
                     </tbody>
                   </table>
                 </div>
+                <TablePagination
+                  page={pickerPage}
+                  totalPages={pickerTotalPages}
+                  totalItems={pickerTotal}
+                  pageSize={pickerPageSize}
+                  pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
+                  onPageChange={setPickerPage}
+                  onPageSizeChange={setPickerPageSize}
+                />
               </div>
             </div>
           </div>

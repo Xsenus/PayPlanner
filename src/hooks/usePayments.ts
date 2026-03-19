@@ -14,7 +14,7 @@ function signature(arr: Payment[]): string {
   if (!arr?.length) return 'empty';
   return arr
     .map((p) =>
-      `${p.id}:${p.amount}:${p.paidAmount}:${p.outstandingAmount}:${p.status}:${p.type}:${p.date}:${p.plannedDate}`,
+      `${p.id}:${p.amount}:${p.paidAmount}:${p.outstandingAmount}:${p.status}:${p.type}:${p.date}:${p.plannedDate}:${p.invoiceId ?? 'none'}:${p.account ?? ''}:${p.accountDate ?? ''}:${p.documentKind ?? ''}`,
     )
     .sort()
     .join('|');

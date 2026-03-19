@@ -14,6 +14,8 @@ function normalizeClient(client: Client): Client {
     ...client,
     legalEntityId: client.legalEntityId ?? null,
     legalEntity: (client.legalEntity as LegalEntitySummary | null) ?? null,
+    responsibleUserId: client.responsibleUserId ?? null,
+    responsibleUserName: client.responsibleUserName ?? null,
     clientStatusId: client.clientStatusId ?? null,
     clientStatus: (client.clientStatus as ClientStatus | null) ?? null,
     cases: Array.isArray(client.cases) ? (client.cases as ClientCase[]) : [],

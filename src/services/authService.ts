@@ -1,5 +1,7 @@
 // src/services/authService.ts
 
+import type { PagedResult } from './api';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
 
 // ==== storage helpers (bkwd-compat) ====
@@ -42,6 +44,7 @@ export interface Role {
   id: number;
   name: string;
   description?: string | null;
+  createdAt?: string | null;
 }
 
 export interface User {
@@ -110,6 +113,16 @@ function makeError(message: string, code?: ApiErrorCode): ApiError {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue;
+    q.append(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : '';
 }
 
 type LoginResponse = { token: string; user?: User };
@@ -223,6 +236,15 @@ class AuthApiService {
     return this.request<User[]>(`/users${q}`);
   }
 
+  public async getUsersPaged(params?: { status?: string; page?: number; pageSize?: number }) {
+    const q = buildQuery({
+      status: params?.status,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<User>>(`/users/paged${q}`);
+  }
+
   public async getUser(id: number) {
     return this.request<User>(`/users/${id}`);
   }
@@ -253,6 +275,14 @@ class AuthApiService {
   // ==== roles (admin) ====
   public async getRoles() {
     return this.request<Role[]>('/roles');
+  }
+
+  public async getRolesPaged(params?: { page?: number; pageSize?: number }) {
+    const q = buildQuery({
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<Role>>(`/roles/paged${q}`);
   }
 
   public async createRole(data: { name: string; description: string }) {

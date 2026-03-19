@@ -1,15 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Calculator as CalcIcon, Save, Loader2, Info, AlertTriangle, X } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useClients } from '../../hooks/useClients';
+import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { InstallmentRequest, InstallmentResponse, ClientCase } from '../../types';
-import { toDateInputValue, fromInputToApiDate } from '../../utils/dateUtils';
+import { toDateInputValue } from '../../utils/dateUtils';
 import { consumeInstallmentDraft } from '../../utils/installmentBridge';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { useDialog } from '../../hooks/useDialog';
-
-type AccountOption = { account: string; accountDate?: string | null };
+import { useToast } from '../../hooks/useToast';
+import { TablePagination } from '../ui/TablePagination';
 
 type PaymentCreate = {
   date: string;
@@ -21,42 +22,15 @@ type PaymentCreate = {
   notes?: string;
   clientId: number;
   clientCaseId?: number;
-  account?: string;
-  accountDate?: string | null;
 };
 
-type AccountApiItem = string | { account?: unknown; accountDate?: unknown };
-
-function toAccountOption(x: unknown): AccountOption | null {
-  if (typeof x === 'string') {
-    const acc = x.trim();
-    return acc ? { account: acc } : null;
-  }
-  if (x && typeof x === 'object') {
-    const obj = x as { account?: unknown; accountDate?: unknown };
-    const acc = typeof obj.account === 'string' ? obj.account.trim() : '';
-    if (!acc) return null;
-    const accDate = typeof obj.accountDate === 'string' && obj.accountDate ? obj.accountDate : null;
-    return { account: acc, accountDate: accDate };
-  }
-  return null;
-}
-
-function isAccountWithDate(x: unknown, acc: string): x is { account: string; accountDate: string } {
-  if (typeof x !== 'object' || x === null) return false;
-  const obj = x as { account?: unknown; accountDate?: unknown };
-  return (
-    typeof obj.account === 'string' &&
-    obj.account === acc &&
-    typeof obj.accountDate === 'string' &&
-    !!obj.accountDate
-  );
-}
-
 export function Calculator() {
+  const { user } = useAuth();
   const { t, formatCurrency } = useTranslation();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
+  const toast = useToast();
   const { clients } = useClients();
+  const schedulePageSizeStorageKey = `pp.calculator_schedule_page_size.${user?.id ?? 'guest'}.v1`;
 
   const [formData, setFormData] = useState<InstallmentRequest>({
     total: 100000,
@@ -72,6 +46,16 @@ export function Calculator() {
   const [loading, setLoading] = useState(false);
   const [savingPayments, setSavingPayments] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [schedulePage, setSchedulePage] = useState(1);
+  const [schedulePageSize, setSchedulePageSize] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(schedulePageSizeStorageKey);
+      const parsed = raw ? Number(raw) : NaN;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 24;
+    } catch {
+      return 24;
+    }
+  });
 
   const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
 
@@ -81,19 +65,13 @@ export function Calculator() {
 
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [selectedAccountDate, setSelectedAccountDate] = useState<string>('');
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
-  const [accountLoading, setAccountLoading] = useState(false);
-  const accountInputRef = useRef<HTMLInputElement>(null);
 
-  function suppressBrowserAutocomplete() {
-    const el = accountInputRef.current;
-    if (!el) return;
-    el.readOnly = true;
-    requestAnimationFrame(() => {
-      el.readOnly = false;
-    });
-  }
+  const scheduleItems = editableResults?.items ?? [];
+  const scheduleTotalPages = Math.max(1, Math.ceil(scheduleItems.length / schedulePageSize));
+  const pagedScheduleItems = useMemo(() => {
+    const start = (schedulePage - 1) * schedulePageSize;
+    return scheduleItems.slice(start, start + schedulePageSize);
+  }, [scheduleItems, schedulePage, schedulePageSize]);
 
   useEffect(() => {
     const draft = consumeInstallmentDraft();
@@ -136,6 +114,24 @@ export function Calculator() {
   }, [t]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(schedulePageSizeStorageKey, String(schedulePageSize));
+    } catch {
+      /** */
+    }
+  }, [schedulePageSize, schedulePageSizeStorageKey]);
+
+  useEffect(() => {
+    setSchedulePage(1);
+  }, [editableResults, schedulePageSize]);
+
+  useEffect(() => {
+    if (schedulePage > scheduleTotalPages) {
+      setSchedulePage(scheduleTotalPages);
+    }
+  }, [schedulePage, scheduleTotalPages]);
+
+  useEffect(() => {
     let ignore = false;
     setCases([]);
 
@@ -164,49 +160,6 @@ export function Calculator() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClientId]);
-
-  useEffect(() => {
-    let stop = false;
-    const timer = setTimeout(async () => {
-      try {
-        setAccountLoading(true);
-        const cid = selectedClientId ? parseInt(selectedClientId, 10) : undefined;
-        const caseId = selectedCaseId ? parseInt(selectedCaseId, 10) : undefined;
-
-        const params: Parameters<typeof apiService.getAccounts>[0] = {
-          clientId: cid,
-          caseId,
-          q: selectedAccount,
-          take: 20,
-          withDate: true,
-          dedupe: true,
-        };
-
-        const dataRaw = await apiService.getAccounts(params);
-        let normalized: AccountOption[] = [];
-
-        if (Array.isArray(dataRaw)) {
-          const arr: AccountApiItem[] = dataRaw as AccountApiItem[];
-          normalized = arr.map(toAccountOption).filter((v): v is AccountOption => v !== null);
-        }
-
-        const uniq = new Map<string, AccountOption>();
-        for (const it of normalized) {
-          const key = `${it.account}__${it.accountDate ?? ''}`;
-          if (!uniq.has(key)) uniq.set(key, it);
-        }
-
-        if (!stop) setAccountOpts(Array.from(uniq.values()));
-      } finally {
-        if (!stop) setAccountLoading(false);
-      }
-    }, 250);
-
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [selectedAccount, selectedClientId, selectedCaseId]);
 
   const handleNumber = (v: string) => (v === '' ? '' : Number.isNaN(Number(v)) ? 0 : parseFloat(v));
 
@@ -315,18 +268,16 @@ export function Calculator() {
           )}`,
           clientId: parseInt(selectedClientId, 10),
           clientCaseId: selectedCaseId ? parseInt(selectedCaseId, 10) : undefined,
-          account: selectedAccount || undefined,
-          accountDate: selectedAccountDate ? fromInputToApiDate(selectedAccountDate) : undefined,
         };
 
         await apiService.createPayment(
           payload as unknown as Parameters<typeof apiService.createPayment>[0],
         );
       }
-      await alert(t('paymentsSaved'));
+      toast.success(t('paymentsSaved') ?? 'Платежи сохранены');
     } catch (err) {
       console.error('Failed to save payments:', err);
-      await alert(t('saveError') ?? 'Ошибка сохранения платежей');
+      toast.error(t('saveError') ?? 'Ошибка сохранения платежей');
     } finally {
       setSavingPayments(false);
     }
@@ -685,124 +636,32 @@ export function Calculator() {
 
                   <div className="relative md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('account') ?? 'Счёт'}
+                      {(t('account') ?? 'Счёт') + ' (legacy, только чтение)'}
                     </label>
+                    <p className="mb-2 text-xs text-gray-500">
+                      Поле больше не редактируется и не участвует в сохранении новых платежей.
+                    </p>
 
                     <input
-                      ref={accountInputRef}
                       value={selectedAccount}
-                      onChange={(e) => {
-                        setSelectedAccount(e.target.value);
-                        setAccountOpen(true);
-                      }}
-                      onFocus={() => setAccountOpen(true)}
-                      onMouseDown={suppressBrowserAutocomplete}
-                      onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                      readOnly
+                      tabIndex={-1}
                       placeholder={t('enterAccount') ?? 'Введите счёт'}
                       maxLength={120}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-600"
                     />
-
-                    {accountOpen &&
-                      (accountOpts.length > 0 ||
-                        (selectedAccount ?? '').toString().trim() !== '') && (
-                        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border bg-white shadow">
-                          {accountLoading && (
-                            <div className="px-3 py-2 text-sm text-gray-500">
-                              {t('loading') ?? 'Загрузка…'}
-                            </div>
-                          )}
-
-                          {(() => {
-                            const sel = (selectedAccount ?? '').toString();
-                            const selTrim = sel.trim();
-                            const selLower = selTrim.toLowerCase();
-                            return selTrim !== '' &&
-                              !accountOpts.some((x) => x.account.toLowerCase() === selLower) ? (
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setAccountOpen(false)}>
-                                {(t('create') ?? 'Создать') + ` «${selTrim}»`}
-                              </button>
-                            ) : null;
-                          })()}
-
-                          {accountOpts.map((opt) => {
-                            const key = `${opt.account}__${opt.accountDate ?? ''}`;
-                            const human =
-                              opt.account +
-                              (opt.accountDate
-                                ? ` (${new Date(opt.accountDate).toLocaleDateString()})`
-                                : '');
-
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={async () => {
-                                  setSelectedAccount(opt.account);
-                                  setAccountOpen(false);
-
-                                  if (opt.accountDate) {
-                                    setSelectedAccountDate(toDateInputValue(opt.accountDate));
-                                    return;
-                                  }
-
-                                  try {
-                                    const cid = selectedClientId
-                                      ? parseInt(selectedClientId, 10)
-                                      : undefined;
-                                    const caseId = selectedCaseId
-                                      ? parseInt(selectedCaseId, 10)
-                                      : undefined;
-
-                                    const resp = await apiService.getAccounts({
-                                      clientId: cid,
-                                      caseId,
-                                      q: opt.account,
-                                      take: 50,
-                                      withDate: true as const,
-                                      dedupe: false,
-                                    } as Parameters<typeof apiService.getAccounts>[0]);
-
-                                    const arr = Array.isArray(resp)
-                                      ? (resp as AccountApiItem[])
-                                      : [];
-                                    const found = arr.find((x) =>
-                                      isAccountWithDate(x, opt.account),
-                                    );
-                                    if (found) {
-                                      setSelectedAccountDate(toDateInputValue(found.accountDate));
-                                    }
-                                  } catch {
-                                    /*  */
-                                  }
-                                }}>
-                                {human}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {t('accountDate') ?? 'Дата счёта'}
+                      {(t('accountDate') ?? 'Дата счёта') + ' (legacy, только чтение)'}
                     </label>
                     <input
                       type="date"
                       value={selectedAccountDate}
-                      onChange={(e) => setSelectedAccountDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center"
+                      readOnly
+                      disabled
+                      className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-center text-gray-600"
                     />
                   </div>
 
@@ -822,12 +681,19 @@ export function Calculator() {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
-                    {t('paymentSchedule')}
-                  </h3>
+                  <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {t('paymentSchedule')}
+                    </h3>
+                    {scheduleItems.length > 0 ? (
+                      <div className="text-sm text-gray-500">
+                        {(t('recordsFound') ?? 'Найдено записей:')} {scheduleItems.length}
+                      </div>
+                    ) : null}
+                  </div>
 
                   <div className="overflow-x-auto border border-gray-200 rounded-xl">
-                    <table className="min-w-[760px] w-full text-sm">
+                    <table className="min-w-[760px] w-full table-fixed text-sm">
                       <colgroup>
                         <col style={{ width: 56 }} />
                         <col style={{ width: 160 }} />
@@ -859,15 +725,17 @@ export function Calculator() {
                       </thead>
 
                       <tbody className="divide-y divide-gray-100">
-                        {editableResults.items.map((item, index) => (
-                          <tr key={index} className={index % 2 ? 'bg-white' : 'bg-gray-50'}>
-                            <td className="px-2 py-2 text-center text-gray-900">{index + 1}</td>
+                        {pagedScheduleItems.map((item, index) => {
+                          const absoluteIndex = (schedulePage - 1) * schedulePageSize + index;
+                          return (
+                          <tr key={absoluteIndex} className={absoluteIndex % 2 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="px-2 py-2 text-center text-gray-900">{absoluteIndex + 1}</td>
 
                             <td className="px-2 py-2 text-center">
                               <input
                                 type="date"
                                 value={toDateInputValue(item.date as unknown as string)}
-                                onChange={(e) => handleResultChange(index, 'date', e.target.value)}
+                                onChange={(e) => handleResultChange(absoluteIndex, 'date', e.target.value)}
                                 className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center"
                               />
                             </td>
@@ -878,7 +746,7 @@ export function Calculator() {
                                 inputMode="decimal"
                                 value={item.payment}
                                 onChange={(e) =>
-                                  handleResultChange(index, 'payment', e.target.value)
+                                  handleResultChange(absoluteIndex, 'payment', e.target.value)
                                 }
                                 className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 step="0.01"
@@ -890,7 +758,7 @@ export function Calculator() {
                                 inputMode="decimal"
                                 value={item.principal}
                                 onChange={(e) =>
-                                  handleResultChange(index, 'principal', e.target.value)
+                                  handleResultChange(absoluteIndex, 'principal', e.target.value)
                                 }
                                 className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                 step="0.01"
@@ -902,7 +770,7 @@ export function Calculator() {
                                 inputMode="decimal"
                                 value={item.interest}
                                 onChange={(e) =>
-                                  handleResultChange(index, 'interest', e.target.value)
+                                  handleResultChange(absoluteIndex, 'interest', e.target.value)
                                 }
                                 className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right text-red-600 focus:ring-2 focus:ring-red-500 focus:border-red-500"
                                 step="0.01"
@@ -914,14 +782,14 @@ export function Calculator() {
                                 inputMode="decimal"
                                 value={item.balance}
                                 onChange={(e) =>
-                                  handleResultChange(index, 'balance', e.target.value)
+                                  handleResultChange(absoluteIndex, 'balance', e.target.value)
                                 }
                                 className="w-full min-w-[110px] text-xs border border-gray-200 rounded px-2 py-1 text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 step="0.01"
                               />
                             </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
 
                       <tfoot>
@@ -958,6 +826,18 @@ export function Calculator() {
                       </tfoot>
                     </table>
                   </div>
+                  {scheduleItems.length > 0 ? (
+                    <TablePagination
+                      page={schedulePage}
+                      totalPages={scheduleTotalPages}
+                      totalItems={scheduleItems.length}
+                      pageSize={schedulePageSize}
+                      pageSizeOptions={CALCULATOR_PAGE_SIZE_OPTIONS}
+                      onPageChange={setSchedulePage}
+                      onPageSizeChange={setSchedulePageSize}
+                      pageSizeLabel="Строк на странице"
+                    />
+                  ) : null}
                 </div>
               </div>
             )}

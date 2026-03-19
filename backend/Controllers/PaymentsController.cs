@@ -60,7 +60,7 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model)
+    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
     {
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
@@ -75,7 +75,7 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         if (model.DocumentKind == default)
         {
-            model.DocumentKind = string.IsNullOrWhiteSpace(model.Account) ? DocumentKind.Accrual : DocumentKind.Invoice;
+            model.DocumentKind = DocumentKind.Payment;
         }
         model.SystemNotes = model.SystemNotes ?? string.Empty;
         model.RescheduleCount = Math.Max(0, model.RescheduleCount);
@@ -84,6 +84,7 @@ public class PaymentsController : ControllerBase
             model.LastPaymentDate = model.PaidDate.Value.Date;
         }
 
+        await SyncInvoiceLinkAsync(model, ct);
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
 
@@ -93,7 +94,7 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model)
+    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
@@ -140,16 +141,16 @@ public class PaymentsController : ControllerBase
         e.IncomeTypeId = model.IncomeTypeId;
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
+        e.InvoiceId = model.InvoiceId;
         e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
-        e.DocumentKind = model.DocumentKind == default
-            ? (string.IsNullOrWhiteSpace(e.Account) ? DocumentKind.Accrual : DocumentKind.Invoice)
-            : model.DocumentKind;
+        e.DocumentKind = model.DocumentKind == default ? DocumentKind.Payment : model.DocumentKind;
         e.AccountDate = model.AccountDate;
         e.PaidDate = model.PaidDate;
         e.PaidAmount = model.PaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
+        await SyncInvoiceLinkAsync(e, ct);
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -211,6 +212,231 @@ public class PaymentsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(e);
+    }
+
+    [HttpPost("repair-invoice-links")]
+    public async Task<IActionResult> RepairInvoiceLinks(CancellationToken ct)
+    {
+        var payments = await _db.Payments
+            .Where(p => (p.Account != null && p.Account != "") || p.InvoiceId != null)
+            .OrderBy(p => p.Id)
+            .ToListAsync(ct);
+
+        var originalInvoiceIds = payments.ToDictionary(p => p.Id, p => p.InvoiceId);
+        var originalKinds = payments.ToDictionary(p => p.Id, p => p.DocumentKind);
+        var repairedLinks = 0;
+        var clearedLinks = 0;
+        var correctedKinds = 0;
+
+        foreach (var payment in payments)
+        {
+            await SyncInvoiceLinkAsync(payment, ct);
+        }
+
+        var invoiceDocumentKeeperIds = payments
+            .Where(p => p.DocumentKind == DocumentKind.Invoice && p.InvoiceId.HasValue)
+            .GroupBy(p => p.InvoiceId!.Value)
+            .Select(group => group.OrderBy(p => p.CreatedAt).ThenBy(p => p.Id).First().Id)
+            .ToHashSet();
+
+        foreach (var payment in payments)
+        {
+            if (payment.DocumentKind == DocumentKind.Invoice
+                && payment.InvoiceId.HasValue
+                && !invoiceDocumentKeeperIds.Contains(payment.Id))
+            {
+                payment.DocumentKind = DocumentKind.Payment;
+            }
+
+            if (payment.InvoiceId != originalInvoiceIds[payment.Id])
+            {
+                if (payment.InvoiceId.HasValue)
+                {
+                    repairedLinks++;
+                }
+                else
+                {
+                    clearedLinks++;
+                }
+            }
+
+            if (payment.DocumentKind != originalKinds[payment.Id])
+            {
+                correctedKinds++;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            scanned = payments.Count,
+            repairedLinks,
+            clearedLinks,
+            correctedKinds,
+        });
+    }
+
+    private async Task SyncInvoiceLinkAsync(Payment payment, CancellationToken ct)
+    {
+        var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
+        var originalAccountDate = (payment.AccountDate ?? payment.Date).Date;
+        var invoice = await ResolveInvoiceAsync(payment, ct);
+        if (invoice is null)
+        {
+            payment.InvoiceId = null;
+
+            payment.Account = normalizedAccount;
+            payment.AccountDate = normalizedAccount is null
+                ? null
+                : originalAccountDate;
+            if (normalizedAccount is null)
+            {
+                payment.LegacyAccountNumber = null;
+                payment.LegacyAccountDate = null;
+            }
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(payment.LegacyAccountNumber) && normalizedAccount is not null)
+        {
+            var normalizedInvoiceNumber = NormalizeInvoiceNumber(invoice.Number);
+            if (!string.Equals(normalizedAccount, normalizedInvoiceNumber, StringComparison.OrdinalIgnoreCase)
+                || originalAccountDate != invoice.Date.Date)
+            {
+                payment.LegacyAccountNumber = normalizedAccount;
+                payment.LegacyAccountDate = originalAccountDate;
+            }
+        }
+
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date.Date;
+    }
+
+    private async Task<Invoice?> ResolveInvoiceAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.InvoiceId.HasValue && payment.InvoiceId.Value > 0)
+        {
+            var linked = await _db.Invoices.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == payment.InvoiceId.Value, ct);
+            if (linked is not null)
+            {
+                return linked;
+            }
+        }
+
+        var lookupCandidates = BuildLookupCandidates(payment);
+        if (lookupCandidates.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var candidate in lookupCandidates)
+        {
+            var resolved = await ResolveInvoiceByPaymentHistoryAsync(payment, candidate.Number, candidate.Date, ct);
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeInvoiceNumber(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<Invoice?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct)
+    {
+        if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0)
+        {
+            return null;
+        }
+
+        var normalizedLookup = lookupNumber.ToLowerInvariant();
+        var caseId = payment.ClientCaseId is > 0 ? payment.ClientCaseId : null;
+        var lookupYear = lookupDate.Year;
+
+        var candidates = await _db.Payments
+            .AsNoTracking()
+            .Where(x => x.InvoiceId.HasValue && x.ClientId == payment.ClientId.Value && x.Type == payment.Type)
+            .Where(x => caseId.HasValue
+                ? x.ClientCaseId == caseId.Value || x.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value)
+                : x.ClientCaseId == null && !x.InvoiceClientCases.Any())
+            .Where(x =>
+                (x.LegacyAccountNumber != null
+                    && x.LegacyAccountNumber.ToLower() == normalizedLookup
+                    && (x.LegacyAccountDate ?? x.AccountDate ?? x.Date).Year == lookupYear)
+                || (x.Account != null
+                    && x.Account.ToLower() == normalizedLookup
+                    && (x.AccountDate ?? x.Date).Year == lookupYear))
+            .Select(x => new
+            {
+                InvoiceId = x.InvoiceId!.Value,
+                ExactLegacyDate = x.LegacyAccountNumber != null
+                    && x.LegacyAccountNumber.ToLower() == normalizedLookup
+                    && x.LegacyAccountDate.HasValue
+                    && x.LegacyAccountDate.Value.Date == lookupDate.Date,
+                ExactAccountDate = x.Account != null
+                    && x.Account.ToLower() == normalizedLookup
+                    && x.AccountDate.HasValue
+                    && x.AccountDate.Value.Date == lookupDate.Date,
+                IsInvoiceDocument = x.DocumentKind == DocumentKind.Invoice,
+                x.CreatedAt,
+                x.Id,
+            })
+            .ToListAsync(ct);
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var invoiceId = candidates
+            .GroupBy(x => x.InvoiceId)
+            .OrderByDescending(group => group.Max(item => item.ExactLegacyDate ? 3 : item.ExactAccountDate ? 2 : item.IsInvoiceDocument ? 1 : 0))
+            .ThenByDescending(group => group.Count())
+            .ThenByDescending(group => group.Max(item => item.CreatedAt))
+            .ThenByDescending(group => group.Max(item => item.Id))
+            .Select(group => group.Key)
+            .FirstOrDefault();
+
+        if (invoiceId <= 0)
+        {
+            return null;
+        }
+
+        return await _db.Invoices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == invoiceId, ct);
+    }
+
+    private static List<(string Number, DateTime Date)> BuildLookupCandidates(Payment payment)
+    {
+        var candidates = new List<(string Number, DateTime Date)>();
+
+        void Add(string? number, DateTime? date)
+        {
+            var normalized = NormalizeInvoiceNumber(number);
+            if (normalized is null)
+            {
+                return;
+            }
+
+            var effectiveDate = (date ?? payment.Date).Date;
+            if (candidates.Any(item => string.Equals(item.Number, normalized, StringComparison.OrdinalIgnoreCase) && item.Date == effectiveDate))
+            {
+                return;
+            }
+
+            candidates.Add((normalized, effectiveDate));
+        }
+
+        Add(payment.LegacyAccountNumber, payment.LegacyAccountDate);
+        Add(payment.Account, payment.AccountDate);
+
+        return candidates;
     }
 
     private static string MergeSystemNotes(string original, string? incoming)

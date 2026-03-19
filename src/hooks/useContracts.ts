@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Contract, ContractInput } from '../types';
+import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type ContractsSortKey = 'date' | 'number' | 'amount' | 'createdAt';
 
@@ -75,7 +76,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Не удалось загрузить договоры';
+        const message = extractDisplayErrorMessage(err, 'Не удалось загрузить договоры');
         setError(message);
         if (!hasLoadedRef.current) {
           setContracts([]);

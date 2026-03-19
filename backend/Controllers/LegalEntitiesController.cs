@@ -601,6 +601,53 @@ public class LegalEntitiesController : ControllerBase
         return Ok(items.Select(MapDetail));
     }
 
+    [HttpGet("paged")]
+    public async Task<ActionResult<PagedResponse<LegalEntityListItemDto>>> GetPaged(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var baseQuery = _db.LegalEntities
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = $"%{search.Trim()}%";
+            baseQuery = baseQuery.Where(le =>
+                EF.Functions.Like(le.ShortName, term) ||
+                EF.Functions.Like(le.FullName ?? string.Empty, term) ||
+                EF.Functions.Like(le.Inn ?? string.Empty, term) ||
+                EF.Functions.Like(le.Kpp ?? string.Empty, term) ||
+                EF.Functions.Like(le.Ogrn ?? string.Empty, term) ||
+                EF.Functions.Like(le.Director ?? string.Empty, term) ||
+                EF.Functions.Like(le.Address ?? string.Empty, term));
+        }
+
+        var total = await baseQuery.CountAsync(ct);
+
+        var items = await baseQuery
+            .Include(le => le.Clients)
+            .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
+            .OrderBy(le => le.ShortName)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return Ok(new PagedResponse<LegalEntityListItemDto>
+        {
+            Items = items.Select(MapDetail).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        });
+    }
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<LegalEntityDetailDto>> GetById(int id, CancellationToken ct)
     {

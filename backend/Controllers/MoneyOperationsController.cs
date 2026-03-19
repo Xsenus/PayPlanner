@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -12,6 +13,9 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class MoneyOperationsController : ControllerBase
 {
+    private const string CashSourceToken = "\u043A\u0430\u0441";
+    private const string CardSourceToken = "\u043A\u0430\u0440\u0442";
+
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
 
@@ -31,49 +35,227 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search,
         CancellationToken ct)
     {
-        var list = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        var list = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken => await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, search)
+                .OrderByDescending(item => item.Date)
+                .ThenByDescending(item => item.Id)
+                .ToListAsync(cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(list);
+    }
+
+    [HttpGet("paged")]
+    public async Task<ActionResult<MoneyOperationsPageResponse>> GetPaged(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] MoneyOperationDirection? direction,
+        [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 200);
+
+        var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var customQuery = ApplyMoneyOperationFilters(
-                _db.MoneyOperations.AsNoTracking().AsQueryable(),
+            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, search);
+            var total = await query.CountAsync(cancellationToken);
+            var items = await query
+                .OrderByDescending(item => item.Date)
+                .ThenByDescending(item => item.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            var factSummary = await query
+                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact)
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    Income = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Amount),
+                    Expense = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Amount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var sourceRows = await query
+                .GroupBy(item => item.Source)
+                .Select(group => new MoneyOperationSourceSummaryDto
+                {
+                    Source = group.Key,
+                    StartBalance = 0m,
+                    Income = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Amount),
+                    Expense = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Amount),
+                    EndBalance =
+                        group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
+                        group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                })
+                .ToListAsync(cancellationToken);
+
+            var orderedSources = new[]
+            {
+                MoneyOperationSource.Cash,
+                MoneyOperationSource.Bank,
+                MoneyOperationSource.Card,
+            };
+
+            var orderedSourceRows = orderedSources
+                .Select(sourceKey => sourceRows.FirstOrDefault(row => row.Source == sourceKey) ?? new MoneyOperationSourceSummaryDto
+                {
+                    Source = sourceKey,
+                    StartBalance = 0m,
+                    Income = 0m,
+                    Expense = 0m,
+                    EndBalance = 0m,
+                })
+                .ToList();
+
+            var income = factSummary?.Income ?? 0m;
+            var expense = factSummary?.Expense ?? 0m;
+
+            return new MoneyOperationsPageResponse
+            {
+                Items = items,
+                Total = total,
+                Page = page,
+                PageSize = pageSize,
+                Summary = new MoneyOperationsSummaryDto
+                {
+                    StartBalance = 0m,
+                    Income = income,
+                    Expense = expense,
+                    EndBalance = income - expense,
+                    IncomeCount = factSummary?.IncomeCount ?? 0,
+                    ExpenseCount = factSummary?.ExpenseCount ?? 0,
+                    BySource = orderedSourceRows,
+                },
+            };
+        }, _logger, ct);
+
+        return Ok(response);
+    }
+
+    private IQueryable<MoneyOperationListItemDto> BuildMoneyOperationsQuery(
+        DateTime? from,
+        DateTime? to,
+        MoneyOperationSource? source,
+        MoneyOperationDirection? direction,
+        MoneyOperationAccountingType? accountingType,
+        string? search)
+    {
+        var customOperations = ApplyMoneyOperationFilters(
+                _db.MoneyOperations.AsNoTracking(),
                 from,
                 to,
                 source,
                 direction,
                 accountingType,
-                search);
+                search)
+            .Select(operation => new MoneyOperationListItemDto
+            {
+                Id = operation.Id,
+                Source = operation.Source,
+                Direction = operation.Direction,
+                AccountingType = operation.AccountingType,
+                AccountName = operation.AccountName,
+                CounterpartyName = operation.CounterpartyName,
+                CategoryName = operation.CategoryName,
+                Amount = operation.Amount,
+                Currency = operation.Currency,
+                PaymentOrderNumber = operation.PaymentOrderNumber,
+                Date = operation.Date,
+                RecognitionDate = operation.RecognitionDate,
+                IsAdvancePayment = operation.IsAdvancePayment,
+                Purpose = operation.Purpose,
+                PaidInvoiceNumber = operation.PaidInvoiceNumber,
+                PaidAmount = operation.PaidAmount,
+                ProjectName = operation.ProjectName,
+                DirectionName = operation.DirectionName,
+                SalesPointName = operation.SalesPointName,
+                PaymentPriority = operation.PaymentPriority,
+                PaidAccountName = operation.PaidAccountName,
+                CreatedAt = operation.CreatedAt,
+                UpdatedAt = operation.UpdatedAt,
+                IsReadonly = false,
+                RelatedPaymentId = null,
+            });
 
-            var customOperations = (await customQuery
-                .OrderByDescending(o => o.Date)
-                .ThenByDescending(o => o.Id)
-                .ToListAsync(cancellationToken))
-                .Select(MapManualOperationToListItem)
-                .ToList();
-
-            var paymentsQuery = ApplyPaymentFilters(
-                _db.Payments
-                    .AsNoTracking()
-                    .Include(p => p.PaymentSource)
-                    .Include(p => p.ClientCase)
-                    .AsQueryable(),
+        var paymentOperations = ApplyPaymentFilters(
+                _db.Payments.AsNoTracking(),
                 from,
                 to,
                 direction,
                 accountingType,
-                search);
+                search)
+            .Select(payment => new MoneyOperationListItemDto
+            {
+                Id = -payment.Id,
+                Source =
+                    payment.PaymentSource != null &&
+                    payment.PaymentSource.Name != null &&
+                    payment.PaymentSource.Name.ToLower().Contains(CashSourceToken)
+                        ? MoneyOperationSource.Cash
+                        : payment.PaymentSource != null &&
+                          payment.PaymentSource.Name != null &&
+                          payment.PaymentSource.Name.ToLower().Contains(CardSourceToken)
+                            ? MoneyOperationSource.Card
+                            : MoneyOperationSource.Bank,
+                Direction = payment.Type == PaymentType.Income
+                    ? MoneyOperationDirection.Income
+                    : MoneyOperationDirection.Expense,
+                AccountingType = payment.Status == PaymentStatus.Completed
+                    ? MoneyOperationAccountingType.Fact
+                    : MoneyOperationAccountingType.Plan,
+                AccountName = payment.Account,
+                CounterpartyName = payment.CounterpartyName,
+                CategoryName = payment.ClientCase != null ? payment.ClientCase.Title : null,
+                Amount =
+                    payment.Status == PaymentStatus.Completed && payment.PaidAmount > 0m
+                        ? payment.PaidAmount
+                        : payment.Amount,
+                Currency = "RUB",
+                PaymentOrderNumber = null,
+                Date = payment.Status == PaymentStatus.Completed
+                    ? (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date)
+                    : payment.Date,
+                RecognitionDate = payment.Date,
+                IsAdvancePayment = false,
+                Purpose = payment.Description,
+                PaidInvoiceNumber = payment.Account,
+                PaidAmount = payment.PaidAmount,
+                ProjectName = payment.ClientCase != null ? payment.ClientCase.Title : null,
+                DirectionName = payment.PaymentSource != null ? payment.PaymentSource.Name : null,
+                SalesPointName = null,
+                PaymentPriority = null,
+                PaidAccountName = payment.Account,
+                CreatedAt = payment.CreatedAt,
+                UpdatedAt = null,
+                IsReadonly = true,
+                RelatedPaymentId = payment.Id,
+            });
 
-            var paymentOperations = (await paymentsQuery.ToListAsync(cancellationToken))
-                .Select(MapPaymentToListItem)
-                .Where(o => !source.HasValue || o.Source == source.Value)
-                .ToList();
+        var combinedQuery = customOperations.Concat(paymentOperations);
 
-            return customOperations
-                .Concat(paymentOperations)
-                .OrderByDescending(o => o.Date)
-                .ThenByDescending(o => o.Id)
-                .ToList();
-        }, _logger, ct);
+        if (source.HasValue)
+        {
+            combinedQuery = combinedQuery.Where(item => item.Source == source.Value);
+        }
 
-        return Ok(list);
+        return combinedQuery;
     }
 
     private static IQueryable<MoneyOperation> ApplyMoneyOperationFilters(
@@ -88,37 +270,37 @@ public class MoneyOperationsController : ControllerBase
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            query = query.Where(o => o.Date >= fromDate);
+            query = query.Where(operation => operation.Date >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            query = query.Where(o => o.Date <= toDate);
+            query = query.Where(operation => operation.Date <= toDate);
         }
 
         if (source.HasValue)
         {
-            query = query.Where(o => o.Source == source.Value);
+            query = query.Where(operation => operation.Source == source.Value);
         }
 
         if (direction.HasValue)
         {
-            query = query.Where(o => o.Direction == direction.Value);
+            query = query.Where(operation => operation.Direction == direction.Value);
         }
 
         if (accountingType.HasValue)
         {
-            query = query.Where(o => o.AccountingType == accountingType.Value);
+            query = query.Where(operation => operation.AccountingType == accountingType.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
-            query = query.Where(o =>
-                (o.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
-                (o.Purpose ?? string.Empty).ToLower().Contains(term) ||
-                (o.CategoryName ?? string.Empty).ToLower().Contains(term));
+            query = query.Where(operation =>
+                (operation.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
+                (operation.Purpose ?? string.Empty).ToLower().Contains(term) ||
+                (operation.CategoryName ?? string.Empty).ToLower().Contains(term));
         }
 
         return query;
@@ -135,13 +317,13 @@ public class MoneyOperationsController : ControllerBase
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            query = query.Where(p => p.Date >= fromDate);
+            query = query.Where(payment => payment.Date >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            query = query.Where(p => p.Date <= toDate);
+            query = query.Where(payment => payment.Date <= toDate);
         }
 
         if (direction.HasValue)
@@ -151,9 +333,10 @@ public class MoneyOperationsController : ControllerBase
                 : direction.Value == MoneyOperationDirection.Expense
                     ? PaymentType.Expense
                     : (PaymentType?)null;
+
             if (mappedType.HasValue)
             {
-                query = query.Where(p => p.Type == mappedType.Value);
+                query = query.Where(payment => payment.Type == mappedType.Value);
             }
             else
             {
@@ -163,117 +346,27 @@ public class MoneyOperationsController : ControllerBase
 
         if (accountingType.HasValue)
         {
-            if (accountingType.Value == MoneyOperationAccountingType.Fact)
-            {
-                query = query.Where(p => p.Status == PaymentStatus.Completed);
-            }
-            else
-            {
-                query = query.Where(p => p.Status != PaymentStatus.Completed);
-            }
+            query = accountingType.Value == MoneyOperationAccountingType.Fact
+                ? query.Where(payment => payment.Status == PaymentStatus.Completed)
+                : query.Where(payment => payment.Status != PaymentStatus.Completed);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
-            query = query.Where(p =>
-                (p.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
-                (p.Description ?? string.Empty).ToLower().Contains(term) ||
-                (p.Account ?? string.Empty).ToLower().Contains(term));
+            query = query.Where(payment =>
+                (payment.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
+                (payment.Description ?? string.Empty).ToLower().Contains(term) ||
+                (payment.Account ?? string.Empty).ToLower().Contains(term));
         }
 
         return query;
     }
 
-    private static MoneyOperationListItem MapManualOperationToListItem(MoneyOperation operation) => new()
-    {
-        Id = operation.Id,
-        Source = operation.Source,
-        Direction = operation.Direction,
-        AccountingType = operation.AccountingType,
-        AccountName = operation.AccountName,
-        CounterpartyName = operation.CounterpartyName,
-        CategoryName = operation.CategoryName,
-        Amount = operation.Amount,
-        Currency = operation.Currency,
-        PaymentOrderNumber = operation.PaymentOrderNumber,
-        Date = operation.Date,
-        RecognitionDate = operation.RecognitionDate,
-        IsAdvancePayment = operation.IsAdvancePayment,
-        Purpose = operation.Purpose,
-        PaidInvoiceNumber = operation.PaidInvoiceNumber,
-        PaidAmount = operation.PaidAmount,
-        ProjectName = operation.ProjectName,
-        DirectionName = operation.DirectionName,
-        SalesPointName = operation.SalesPointName,
-        PaymentPriority = operation.PaymentPriority,
-        PaidAccountName = operation.PaidAccountName,
-        CreatedAt = operation.CreatedAt,
-        UpdatedAt = operation.UpdatedAt,
-        IsReadonly = false,
-        RelatedPaymentId = null,
-    };
-
-    private static MoneyOperationListItem MapPaymentToListItem(Payment payment)
-    {
-        var paymentSource = (payment.PaymentSource?.Name ?? string.Empty).Trim().ToLowerInvariant();
-        var source = paymentSource.Contains("кас")
-            ? MoneyOperationSource.Cash
-            : paymentSource.Contains("карт")
-                ? MoneyOperationSource.Card
-                : MoneyOperationSource.Bank;
-
-        var accountingType = payment.Status == PaymentStatus.Completed
-            ? MoneyOperationAccountingType.Fact
-            : MoneyOperationAccountingType.Plan;
-
-        var operationDate = payment.Status == PaymentStatus.Completed
-            ? (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date)
-            : payment.Date;
-
-        var amount = accountingType == MoneyOperationAccountingType.Fact && payment.PaidAmount > 0m
-            ? payment.PaidAmount
-            : payment.Amount;
-
-        return new MoneyOperationListItem
-        {
-            Id = -payment.Id,
-            Source = source,
-            Direction = payment.Type == PaymentType.Income ? MoneyOperationDirection.Income : MoneyOperationDirection.Expense,
-            AccountingType = accountingType,
-            AccountName = payment.Account,
-            CounterpartyName = payment.CounterpartyName,
-            CategoryName = payment.ClientCase?.Title,
-            Amount = amount,
-            Currency = "RUB",
-            Date = operationDate,
-            RecognitionDate = payment.Date,
-            IsAdvancePayment = false,
-            Purpose = payment.Description,
-            PaidInvoiceNumber = payment.Account,
-            PaidAmount = payment.PaidAmount,
-            ProjectName = payment.ClientCase?.Title,
-            DirectionName = payment.PaymentSource?.Name,
-            SalesPointName = null,
-            PaymentPriority = null,
-            PaidAccountName = payment.Account,
-            CreatedAt = payment.CreatedAt,
-            UpdatedAt = null,
-            IsReadonly = true,
-            RelatedPaymentId = payment.Id,
-        };
-    }
-
-    private sealed class MoneyOperationListItem : MoneyOperation
-    {
-        public bool IsReadonly { get; init; }
-        public int? RelatedPaymentId { get; init; }
-    }
-
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var item = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id, ct);
+        var item = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(operation => operation.Id == id, ct);
         return item is null ? NotFound() : Ok(item);
     }
 
@@ -307,7 +400,10 @@ public class MoneyOperationsController : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model)
     {
         var entity = await _db.MoneyOperations.FindAsync(id);
-        if (entity is null) return NotFound();
+        if (entity is null)
+        {
+            return NotFound();
+        }
 
         if (model.Amount < 0)
         {
@@ -344,7 +440,11 @@ public class MoneyOperationsController : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         var entity = await _db.MoneyOperations.FindAsync(id);
-        if (entity is null) return NotFound();
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
         _db.MoneyOperations.Remove(entity);
         await _db.SaveChangesAsync();
         return NoContent();

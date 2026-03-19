@@ -14,12 +14,14 @@ import {
   RotateCcw,
   Search,
   Send,
-  Settings2,
+  SlidersHorizontal,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
@@ -27,6 +29,9 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 import { ActModal } from './ActModal';
 
 const STATUS_ORDER: ActStatus[] = ['Terminated', 'Transferred', 'Signed'];
@@ -50,19 +55,22 @@ function formatDate(value?: string | null): string {
 
 type ActColumnKey = ActsSortKey | 'actions';
 
-const DEFAULT_VISIBLE_COLUMNS: ActColumnKey[] = [
-  'date',
-  'number',
-  'amount',
-  'invoiceNumber',
-  'client',
-  'counterpartyInn',
-  'status',
-  'responsible',
-  'actions',
-];
-
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const ACT_COLUMN_CONFIGS = [
+  { key: 'date', defaultVisible: true, defaultWidth: 140 },
+  { key: 'number', defaultVisible: true, defaultWidth: 140 },
+  { key: 'amount', defaultVisible: true, defaultWidth: 150 },
+  { key: 'invoiceNumber', defaultVisible: true, defaultWidth: 150 },
+  { key: 'client', defaultVisible: true, defaultWidth: 250 },
+  { key: 'counterpartyInn', defaultVisible: true, defaultWidth: 150 },
+  { key: 'status', defaultVisible: true, defaultWidth: 150 },
+  { key: 'responsible', defaultVisible: true, defaultWidth: 180 },
+  { key: 'actions', defaultVisible: true, defaultWidth: 130 },
+] as const satisfies ReadonlyArray<{
+  key: ActColumnKey;
+  defaultVisible?: boolean;
+  defaultWidth?: number;
+}>;
 
 function safeRead<T>(key: string, fallback: T): T {
   try {
@@ -96,7 +104,8 @@ interface ActsProps {
 
 export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
   const { user } = useAuth();
-  const { confirm, alert } = useDialog();
+  const { confirm } = useDialog();
+  const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const actsPermissions = permissions.acts;
   const canCreate = actsPermissions.canCreate;
@@ -110,11 +119,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     () => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}),
     [storagePrefix],
   );
-  const savedColumns = useMemo(
-    () => safeRead<ActColumnKey[]>(`${storagePrefix}.columns`, DEFAULT_VISIBLE_COLUMNS),
-    [storagePrefix],
-  );
-  const savedPageSize = useMemo(() => safeRead<number>(`${storagePrefix}.pageSize`, 20), [storagePrefix]);
 
   const [from, setFrom] = useState<string>(savedPeriod.from || '');
   const [to, setTo] = useState<string>(savedPeriod.to || '');
@@ -123,10 +127,40 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(Math.max(10, Math.min(savedPageSize, 100)));
-  const [visibleColumns, setVisibleColumns] = useState<ActColumnKey[]>(savedColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [draggingColumnId, setDraggingColumnId] = useState<ActColumnKey | null>(null);
+
+  const tableColumnConfigs = useMemo(
+    () => ACT_COLUMN_CONFIGS.filter((column) => (column.key === 'actions' ? canEdit || canDelete : true)),
+    [canDelete, canEdit],
+  );
+
+  const {
+    columnOrder,
+    reorderColumns,
+    orderedVisibleColumns: orderedVisibleColumnKeys,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ActColumnKey>({
+    storageKey: `${storagePrefix}.tableSettings.v1`,
+    settingsKey: 'acts_table_settings',
+    columns: tableColumnConfigs,
+    defaultPageSize: 20,
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 110,
+  });
+  const draggingColumnId = draggingColumn;
 
   const {
     acts,
@@ -138,7 +172,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     pagination,
     refresh,
     createAct,
-    deleteAct,
   } = useActs({
     from: from || undefined,
     to: to || undefined,
@@ -232,20 +265,13 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     () => columns.filter((column) => (column.key === 'actions' ? canEdit || canDelete : true)),
     [canDelete, canEdit, columns],
   );
-
-  useEffect(() => {
-    setVisibleColumns((prev) => {
-      const allowed = prev.filter((key) => columnsForSettings.some((column) => column.key === key));
-      if (allowed.length === 0) {
-        return [columnsForSettings[0]?.key ?? 'date'];
-      }
-      return allowed;
-    });
-  }, [columnsForSettings]);
-
+  const columnsByKey = useMemo(
+    () => Object.fromEntries(columnsForSettings.map((column) => [column.key, column])) as Record<ActColumnKey, (typeof columnsForSettings)[number]>,
+    [columnsForSettings],
+  );
   const visibleOrderedColumns = useMemo(
-    () => columnsForSettings.filter((column) => visibleColumns.includes(column.key)),
-    [columnsForSettings, visibleColumns],
+    () => orderedVisibleColumnKeys.map((key) => columnsByKey[key]).filter(Boolean),
+    [columnsByKey, orderedVisibleColumnKeys],
   );
 
   const effectivePageSize = pagination.pageSize || pageSize;
@@ -263,16 +289,13 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   }, [totalPages]);
 
   useEffect(() => {
+    if (!error) return;
+    toast.error(error);
+  }, [error, toast]);
+
+  useEffect(() => {
     safeWrite(`${storagePrefix}.period`, { from, to });
   }, [from, to, storagePrefix]);
-
-  useEffect(() => {
-    safeWrite(`${storagePrefix}.columns`, visibleColumns);
-  }, [storagePrefix, visibleColumns]);
-
-  useEffect(() => {
-    safeWrite(`${storagePrefix}.pageSize`, pageSize);
-  }, [pageSize, storagePrefix]);
 
   const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;
@@ -287,7 +310,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
       setResponsibles(responsibleResponse ?? []);
       setLookupsError(null);
     } catch (err) {
-      setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить справочники');
+      setLookupsError(extractDisplayErrorMessage(err, 'Не удалось загрузить справочники'));
     } finally {
       setLookupsLoading(false);
     }
@@ -317,10 +340,13 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     setModalError(null);
     try {
       await createAct(payload);
+      toast.success(selectedAct ? 'Акт обновлен.' : 'Акт создан.');
       setModalOpen(false);
       setSelectedAct(null);
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : 'Не удалось сохранить акт');
+      const message = extractDisplayErrorMessage(err, 'Не удалось сохранить акт');
+      setModalError(message);
+      toast.error(message);
       throw err;
     } finally {
       setSubmitting(false);
@@ -337,20 +363,26 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
       if (invoice) {
         onOpenInvoiceEditor(invoice.id);
       } else {
-        await alert('Счёт не найден');
+        toast.error('Счет не найден.');
       }
     } catch (err) {
-      await alert(err instanceof Error ? err.message : 'Не удалось открыть счёт');
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось открыть счет.'));
     }
-  }, [alert, onOpenInvoiceEditor]);
+  }, [onOpenInvoiceEditor, toast]);
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
     if (!(await confirm({ title: 'Подтверждение удаления', description: confirmText, confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
-      await deleteAct(act.id);
+      await apiService.deleteAct(act.id);
+      toast.success('Акт удален.');
+      if (acts.length === 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1));
+      } else {
+        await refresh();
+      }
     } catch (err) {
-      await alert(err instanceof Error ? err.message : 'Не удалось удалить акт');
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить акт.'));
     }
   };
 
@@ -370,47 +402,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     setSearch('');
     setSortState({ key: 'date', direction: 'desc' });
     setPage(1);
-  };
-
-  const toggleColumn = (key: ActColumnKey) => {
-    setVisibleColumns((prev) => {
-      if (prev.includes(key)) {
-        if (prev.length <= 1) return prev;
-        return prev.filter((columnKey) => columnKey !== key);
-      }
-      const next = [...prev, key];
-      next.sort((a, b) => {
-        const ia = columnsForSettings.findIndex((column) => column.key === a);
-        const ib = columnsForSettings.findIndex((column) => column.key === b);
-        return ia - ib;
-      });
-      return next;
-    });
-  };
-
-  const reorderColumns = (sourceId: ActColumnKey, targetId: ActColumnKey) => {
-    if (sourceId === targetId) return;
-    setVisibleColumns((prev) => {
-      const sourceIndex = prev.indexOf(sourceId);
-      const targetIndex = prev.indexOf(targetId);
-      if (sourceIndex === -1 || targetIndex === -1) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(sourceIndex, 1);
-      next.splice(targetIndex, 0, moved);
-      return next;
-    });
-  };
-
-  const moveColumn = (columnId: ActColumnKey, direction: 'up' | 'down') => {
-    setVisibleColumns((prev) => {
-      const idx = prev.indexOf(columnId);
-      if (idx < 0) return prev;
-      const swapWith = direction === 'up' ? idx - 1 : idx + 1;
-      if (swapWith < 0 || swapWith >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
-      return next;
-    });
   };
 
   const pageNumbers = useMemo(() => {
@@ -619,10 +610,10 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                 type="button"
                 onClick={() => setColumnsOpen((prev) => !prev)}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
-                <Settings2 className="h-4 w-4" />
+                <SlidersHorizontal className="h-4 w-4" />
                 {t('visibleColumns') ?? 'Колонки'}
               </button>
-              {columnsOpen && (
+              {false && columnsOpen && (
                 <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     {t('visibleColumns') ?? 'Отображаемые столбцы'}
@@ -708,6 +699,42 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
           </div>
         </div>
 
+        {columnsOpen ? (
+          <div className="mb-6">
+            <TableColumnSettings
+              columns={columnsForSettings.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          </div>
+        ) : null}
+
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {error && (
             <div className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -715,7 +742,12 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
+            <table className="min-w-full table-fixed divide-y divide-slate-200">
+              <colgroup>
+                {orderedVisibleColumnKeys.map((columnKey) => (
+                  <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
+                ))}
+              </colgroup>
               <thead className="bg-slate-50">
                 <tr>
                   {visibleOrderedColumns.map((column) => {
@@ -726,18 +758,41 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                       <th
                         key={column.key}
                         scope="col"
-                        className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        style={{ width: getColumnWidth(column.key) }}
+                        onDragOver={handleColumnDragOver}
+                        onDrop={(event) => handleColumnDrop(column.key, event)}
+                        className={`relative px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${
+                          draggingColumn === column.key ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600'
+                        }`}>
+                        <button
+                          type="button"
+                          draggable={column.key !== 'actions'}
+                          onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                          onDragEnd={handleColumnDragEnd}
+                          className="absolute left-2 top-1/2 z-10 inline-flex -translate-y-1/2 cursor-grab rounded p-1 text-slate-400 active:cursor-grabbing disabled:cursor-default"
+                          title="Перетащите, чтобы изменить порядок"
+                          aria-label={`Перетащите колонку ${column.label}, чтобы изменить порядок`}
+                          disabled={column.key === 'actions'}>
+                          <GripVertical className="h-4 w-4" />
+                        </button>
                         {isSortable ? (
                           <button
                             type="button"
                             onClick={() => changeSort(column.key as ActsSortKey)}
-                            className="inline-flex items-center gap-1 text-slate-700">
+                            className="inline-flex min-w-0 items-center gap-2 pl-8 text-slate-700">
                             <span>{column.label}</span>
                             {isActive && <span className="text-xs">{direction === 'asc' ? '▲' : '▼'}</span>}
                           </button>
                         ) : (
-                          <span>{column.label}</span>
+                          <span className="pl-8">{column.label}</span>
                         )}
+                        <div
+                          role="separator"
+                          aria-label={`Изменить ширину колонки ${column.label}`}
+                          className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                          onMouseDown={(event) => handleResizeStart(column.key, event)}
+                          onDragStart={(event) => event.preventDefault()}
+                        />
                       </th>
                     );
                   })}
@@ -788,7 +843,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
               </tbody>
             </table>
           </div>
-          {acts.length > 0 && (
+          {false && acts.length > 0 && (
             <div className="flex flex-col justify-between gap-4 border-t border-slate-200 px-4 py-4 text-sm text-slate-600 lg:flex-row lg:items-center">
               <div className="flex items-center gap-3">
                 <span>{t('recordsFound') ?? 'Найдено записей:'} {pagination.total}</span>
@@ -837,6 +892,20 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
             </div>
           )}
         </div>
+
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          totalItems={pagination.total ?? 0}
+          pageSize={pageSize}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          recordsLabel={t('recordsFound') ?? 'Найдено записей'}
+          pageSizeLabel={t('rowsPerPage') ?? 'Строк на странице'}
+          previousLabel={t('previous') ?? 'Назад'}
+          nextLabel={t('next') ?? 'Вперед'}
+        />
       </div>
 
       <ActModal

@@ -41,6 +41,7 @@ public class FormRequirementsController : ControllerBase
                 new("Notes", "Комментарий", "Основные"),
                 new("IsActive", "Активный клиент", "Основные"),
                 new("LegalEntityId", "Юридическое лицо", "Основные"),
+                new("ResponsibleUserId", "Ответственный", "Основные"),
                 new("ClientStatusId", "Статус клиента", "Основные"),
 
                 new("LastName", "Фамилия", "Персональные данные"),
@@ -166,7 +167,6 @@ public class FormRequirementsController : ControllerBase
                 new("Amount", "Сумма"),
                 new("Description", "Основание"),
                 new("ActReference", "Ссылка на акт"),
-                new("CounterpartyName", "Контрагент"),
             }),
         new(
             "acts",

@@ -285,6 +285,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientStatusId")
@@ -304,6 +307,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Name")
                         .HasDatabaseName("IX_Clients_Name");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_Clients_ResponsibleUserId");
 
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_Clients_IsActive_Name");
@@ -788,6 +794,113 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_Invoices_Number_Date");
 
                     b.ToTable("Invoices");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PaymentId", "ClientCaseId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
+
+                    b.ToTable("InvoiceClientCases", (string)null);
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceItemNameDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DefaultPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_IsActive_Name");
+
+                    b.ToTable("InvoiceItemNames");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceUnitDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_InvoiceUnitDictionaryItems_IsActive_Name");
+
+                    b.ToTable("InvoiceUnits");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
@@ -1298,6 +1411,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ClientCaseId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ClientCaseReference")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
@@ -1337,6 +1454,13 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<DateTime?>("LastPaymentDate")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("LegacyAccountDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("LegacyAccountNumber")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Notes")
                         .IsRequired()
@@ -1411,6 +1535,12 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("LastPaymentDate")
                         .HasDatabaseName("IX_Payments_LastPaymentDate");
 
+                    b.HasIndex("LegacyAccountDate")
+                        .HasDatabaseName("IX_Payments_LegacyAccountDate");
+
+                    b.HasIndex("LegacyAccountNumber")
+                        .HasDatabaseName("IX_Payments_LegacyAccountNumber");
+
                     b.HasIndex("PaymentSourceId")
                         .HasDatabaseName("IX_Payments_PaymentSourceId");
 
@@ -1437,6 +1567,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsPaid", "Status")
                         .HasDatabaseName("IX_Payments_IsPaid_Status");
+
+                    b.HasIndex("LegacyAccountNumber", "LegacyAccountDate")
+                        .HasDatabaseName("IX_Payments_LegacyAccount_LegacyAccountDate");
 
                     b.HasIndex("Type", "Status", "Date")
                         .HasDatabaseName("IX_Payments_Type_Status_Date");
@@ -1759,6 +1892,40 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_ServiceLanguageDictionaryItems_IsActive_Name");
 
                     b.ToTable("ServiceLanguages");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SystemSettings_Key");
+
+                    b.ToTable("SystemSettings");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
@@ -2169,7 +2336,7 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.Payment", "Invoice")
-                        .WithMany()
+                        .WithMany("Acts")
                         .HasForeignKey("InvoiceId")
                         .OnDelete(DeleteBehavior.SetNull);
 
@@ -2214,9 +2381,16 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("ClientStatus");
 
                     b.Navigation("LegalEntity");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
@@ -2313,6 +2487,25 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Contract");
+
+                    b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("InvoiceClientCases")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany("InvoiceClientCases")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
 
                     b.Navigation("Payment");
                 });
@@ -2492,6 +2685,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("InvoiceClientCases");
+
                     b.Navigation("Payments");
                 });
 
@@ -2535,6 +2730,10 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
                 {
+                    b.Navigation("Acts");
+
+                    b.Navigation("InvoiceClientCases");
+
                     b.Navigation("Responsibles");
                 });
 

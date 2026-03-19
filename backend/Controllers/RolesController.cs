@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -18,12 +19,64 @@ public class RolesController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> GetRoles()
-        => Ok(await _db.Roles.OrderBy(r => r.Name).ToListAsync());
+        => Ok(await _db.Roles
+            .AsNoTracking()
+            .OrderBy(r => r.Name)
+            .Select(r => new RoleDto
+            {
+                Id = r.Id,
+                Name = r.Name,
+                Description = r.Description,
+                CreatedAt = r.CreatedAt
+            })
+            .ToListAsync());
+
+    [HttpGet("paged")]
+    public async Task<IActionResult> GetRolesPaged([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var query = _db.Roles
+            .AsNoTracking()
+            .OrderBy(r => r.Name)
+            .Select(r => new RoleDto
+            {
+                Id = r.Id,
+                Name = r.Name,
+                Description = r.Description,
+                CreatedAt = r.CreatedAt
+            });
+
+        var total = await query.CountAsync();
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return Ok(new PagedResponse<RoleDto>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        });
+    }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetRole(int id)
     {
-        var role = await _db.Roles.FindAsync(id);
+        var role = await _db.Roles
+            .AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => new RoleDto
+            {
+                Id = r.Id,
+                Name = r.Name,
+                Description = r.Description,
+                CreatedAt = r.CreatedAt
+            })
+            .FirstOrDefaultAsync();
         return role is not null ? Ok(role) : NotFound();
     }
 

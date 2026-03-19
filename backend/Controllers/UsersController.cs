@@ -59,6 +59,13 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> GetUsers([FromQuery] string? status)
         => Ok(await _svc.GetAllUsersAsync(status));
 
+    [HttpGet("paged")]
+    public async Task<IActionResult> GetUsersPaged(
+        [FromQuery] string? status,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+        => Ok(await _svc.GetUsersPagedAsync(status, page, pageSize));
+
     [HttpPost("{id:int}/reject")]
     public async Task<IActionResult> RejectUser(int id, [FromBody] RejectUserRequest? request)
         => await _svc.RejectUserAsync(id, request?.Reason) ? Ok(new { rejected = true }) : NotFound();

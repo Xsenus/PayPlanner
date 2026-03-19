@@ -27,9 +27,12 @@ import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
-import { useDialog } from '../../hooks/useDialog';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useToast } from '../../hooks/useToast';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { TablePagination } from '../ui/TablePagination';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
@@ -171,6 +174,7 @@ function highlightPhone(phone: string, q: string): ReactNode {
 type ColumnId =
   | 'id'
   | 'name'
+  | 'responsible'
   | 'status'
   | 'company'
   | 'email'
@@ -199,6 +203,7 @@ type ColumnDefinition = {
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { id: 'id', label: 'ID', defaultWidth: 80, defaultVisible: false },
   { id: 'name', label: 'Клиент', defaultWidth: 220, defaultVisible: true, filterable: true },
+  { id: 'responsible', label: 'Ответственный', defaultWidth: 180, defaultVisible: true },
   { id: 'status', label: 'Статус', defaultWidth: 160, defaultVisible: true, filterable: true },
   { id: 'company', label: 'Компания', defaultWidth: 180, defaultVisible: true, filterable: true },
   { id: 'email', label: 'Email', defaultWidth: 200, defaultVisible: true, filterable: true },
@@ -225,75 +230,73 @@ const COLUMN_META = COLUMN_DEFINITIONS.reduce(
   {} as Record<ColumnId, ColumnDefinition>,
 );
 
-const TABLE_SETTINGS_KEY = 'pp.clients_table_settings.v1';
+const TABLE_SETTINGS_STORAGE_PREFIX = 'pp.clients_table_settings';
 const TABLE_SETTINGS_DB_KEY = 'clients_table_settings';
+const FILTER_SETTINGS_STORAGE_PREFIX = 'pp.clients_table_filters';
+const FILTER_SETTINGS_DB_KEY = 'clients_table_filters';
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 
-type TableSettings = {
-  order: ColumnId[];
-  visible: Record<ColumnId, boolean>;
-  widths: Record<ColumnId, number>;
+const TABLE_LAYOUT_COLUMNS = COLUMN_DEFINITIONS.map((column) => ({
+  key: column.id,
+  defaultVisible: column.defaultVisible,
+  defaultWidth: column.defaultWidth,
+})) satisfies ReadonlyArray<{
+  key: ColumnId;
+  defaultVisible?: boolean;
+  defaultWidth?: number;
+}>;
+
+type ClientTableFilterSettings = {
   filters: Record<ColumnId, string>;
   filterColumns: ColumnId[];
-  pageSize: number;
 };
 
-const DEFAULT_TABLE_SETTINGS: TableSettings = {
-  order: COLUMN_DEFINITIONS.map((col) => col.id),
-  visible: COLUMN_DEFINITIONS.reduce(
-    (acc, col) => ({ ...acc, [col.id]: col.defaultVisible }),
-    {} as Record<ColumnId, boolean>,
-  ),
-  widths: COLUMN_DEFINITIONS.reduce(
-    (acc, col) => ({ ...acc, [col.id]: col.defaultWidth }),
-    {} as Record<ColumnId, number>,
-  ),
+type LegacyClientTableSettings = {
+  filters?: Partial<Record<ColumnId, string>>;
+  filterColumns?: ColumnId[];
+};
+
+const DEFAULT_FILTER_SETTINGS: ClientTableFilterSettings = {
   filters: COLUMN_DEFINITIONS.reduce(
     (acc, col) => ({ ...acc, [col.id]: '' }),
     {} as Record<ColumnId, string>,
   ),
   filterColumns: [],
-  pageSize: 25,
 };
 
-function normalizeTableSettings(parsed?: Partial<TableSettings> | null): TableSettings {
-  const order = Array.isArray(parsed?.order)
-    ? parsed?.order.filter((id): id is ColumnId =>
-        COLUMN_DEFINITIONS.some((col) => col.id === id),
-      )
-    : [];
-  const fallbackOrder = DEFAULT_TABLE_SETTINGS.order;
-  const finalOrder = order.length
-    ? [...order, ...fallbackOrder.filter((id) => !order.includes(id))]
-    : fallbackOrder;
-  const visible = { ...DEFAULT_TABLE_SETTINGS.visible, ...(parsed?.visible ?? {}) };
-  const widths = { ...DEFAULT_TABLE_SETTINGS.widths, ...(parsed?.widths ?? {}) };
-  const filters = { ...DEFAULT_TABLE_SETTINGS.filters, ...(parsed?.filters ?? {}) };
+function normalizeFilterSettings(
+  parsed?: Partial<ClientTableFilterSettings> | LegacyClientTableSettings | null,
+): ClientTableFilterSettings {
+  const filters = { ...DEFAULT_FILTER_SETTINGS.filters, ...(parsed?.filters ?? {}) };
   const filterColumns = Array.isArray(parsed?.filterColumns)
     ? parsed?.filterColumns.filter((id): id is ColumnId =>
         COLUMN_DEFINITIONS.some((col) => col.id === id),
       )
-    : DEFAULT_TABLE_SETTINGS.filterColumns;
-  const pageSize =
-    typeof parsed?.pageSize === 'number'
-      ? Math.max(1, parsed.pageSize)
-      : DEFAULT_TABLE_SETTINGS.pageSize;
-  return { order: finalOrder, visible, widths, filters, filterColumns, pageSize };
+    : DEFAULT_FILTER_SETTINGS.filterColumns;
+  return { filters, filterColumns };
 }
 
-function loadTableSettings(): TableSettings {
+function loadFilterSettings(storageKey: string, legacyStorageKey: string): ClientTableFilterSettings {
   try {
-    const raw = localStorage.getItem(TABLE_SETTINGS_KEY);
-    if (!raw) return DEFAULT_TABLE_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<TableSettings>;
-    return normalizeTableSettings(parsed);
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      return normalizeFilterSettings(JSON.parse(raw) as Partial<ClientTableFilterSettings>);
+    }
+
+    const legacyRaw = localStorage.getItem(legacyStorageKey);
+    if (legacyRaw) {
+      return normalizeFilterSettings(JSON.parse(legacyRaw) as LegacyClientTableSettings);
+    }
+
+    return DEFAULT_FILTER_SETTINGS;
   } catch {
-    return DEFAULT_TABLE_SETTINGS;
+    return DEFAULT_FILTER_SETTINGS;
   }
 }
 
-function saveTableSettings(settings: TableSettings) {
+function saveFilterSettings(storageKey: string, settings: ClientTableFilterSettings) {
   try {
-    localStorage.setItem(TABLE_SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(storageKey, JSON.stringify(settings));
   } catch {
     /** */
   }
@@ -303,8 +306,10 @@ export function Clients() {
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
+  const tableLayoutStorageKey = `${TABLE_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
+  const filterSettingsStorageKey = `${FILTER_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
   const permissions = useRolePermissions(user?.role?.id);
-  const { alert } = useDialog();
+  const toast = useToast();
   const clientPermissions = permissions.clients;
   const canViewClients = clientPermissions.canView;
   const canCreateClients = clientPermissions.canCreate;
@@ -333,28 +338,48 @@ export function Clients() {
   });
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [tableSettings, setTableSettings] = useState<TableSettings>(() => {
-    try {
-      return loadTableSettings();
-    } catch {
-      return DEFAULT_TABLE_SETTINGS;
-    }
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ColumnId>({
+    storageKey: tableLayoutStorageKey,
+    settingsKey: TABLE_SETTINGS_DB_KEY,
+    columns: TABLE_LAYOUT_COLUMNS,
+    defaultPageSize: 25,
+    minPageSize: 5,
+    maxPageSize: 100,
+    minColumnWidth: 80,
   });
+  const [filterSettings, setFilterSettings] = useState<ClientTableFilterSettings>(() =>
+    loadFilterSettings(filterSettingsStorageKey, tableLayoutStorageKey),
+  );
   const [page, setPage] = useState(1);
-  const pageSize = tableSettings.pageSize;
 
   const filterableColumns = useMemo(
     () => COLUMN_DEFINITIONS.filter((col) => col.filterable),
     [],
   );
 
-  const activeFilterColumns = tableSettings.filterColumns;
+  const activeFilterColumns = filterSettings.filterColumns;
 
   const filterParamMap = useMemo(
     () =>
       ({
         id: 'id',
         name: 'name',
+        responsible: 'responsibleUserName',
         status: 'clientStatus',
         company: 'company',
         email: 'email',
@@ -378,14 +403,14 @@ export function Clients() {
   const activeFilters = useMemo(() => {
     const filters: Record<string, string> = {};
     activeFilterColumns.forEach((columnId) => {
-      const raw = tableSettings.filters[columnId]?.trim();
+      const raw = filterSettings.filters[columnId]?.trim();
       if (raw) {
         const paramKey = filterParamMap[columnId] ?? columnId;
         filters[paramKey] = raw;
       }
     });
     return filters;
-  }, [activeFilterColumns, tableSettings.filters, filterParamMap]);
+  }, [activeFilterColumns, filterSettings.filters, filterParamMap]);
 
   const clientsQueryOptions = useMemo(
     () => ({
@@ -412,14 +437,8 @@ export function Clients() {
     useClients(clientsQueryOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [draggingColumnId, setDraggingColumnId] = useState<ColumnId | null>(null);
-  const resizingRef = useRef<{
-    columnId: ColumnId;
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-  const saveTimerRef = useRef<number | null>(null);
+  const [filterSettingsLoaded, setFilterSettingsLoaded] = useState(false);
+  const filterSaveTimerRef = useRef<number | null>(null);
   const sortedClients = clients;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -452,7 +471,7 @@ export function Clients() {
     });
 
   const showPermissionWarning = (message: string) => {
-    void alert({ title: 'Недостаточно прав', description: message || 'Недостаточно прав для выполнения действия.', variant: 'error' });
+    toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
   };
 
   const handleAddClient = () => {
@@ -614,41 +633,54 @@ export function Clients() {
 
   useEffect(() => {
     let active = true;
-    const loadFromServer = async () => {
+    const loadFilterSettingsFromServer = async () => {
       try {
-        const response = await apiService.getUserSetting(TABLE_SETTINGS_DB_KEY);
-        if (!active || !response?.value) return;
-        const parsed = JSON.parse(response.value) as Partial<TableSettings>;
-        const normalized = normalizeTableSettings(parsed);
-        setTableSettings(normalized);
-        saveTableSettings(normalized);
+        const response = await apiService.getUserSetting(FILTER_SETTINGS_DB_KEY);
+        if (active && response?.value) {
+          const parsed = JSON.parse(response.value) as Partial<ClientTableFilterSettings>;
+          const normalized = normalizeFilterSettings(parsed);
+          setFilterSettings(normalized);
+          saveFilterSettings(filterSettingsStorageKey, normalized);
+          return;
+        }
+
+        const legacyResponse = await apiService.getUserSetting(TABLE_SETTINGS_DB_KEY);
+        if (active && legacyResponse?.value) {
+          const parsed = JSON.parse(legacyResponse.value) as LegacyClientTableSettings;
+          const normalized = normalizeFilterSettings(parsed);
+          setFilterSettings(normalized);
+          saveFilterSettings(filterSettingsStorageKey, normalized);
+        }
       } catch {
         /** */
       } finally {
-        if (active) setSettingsLoaded(true);
+        if (active) setFilterSettingsLoaded(true);
       }
     };
-    void loadFromServer();
+
+    void loadFilterSettingsFromServer();
     return () => {
       active = false;
     };
-  }, []);
+  }, [filterSettingsStorageKey]);
 
   useEffect(() => {
-    saveTableSettings(tableSettings);
-    if (!settingsLoaded) return;
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
+    saveFilterSettings(filterSettingsStorageKey, filterSettings);
+    if (!filterSettingsLoaded) return;
+    if (filterSaveTimerRef.current) {
+      window.clearTimeout(filterSaveTimerRef.current);
     }
-    saveTimerRef.current = window.setTimeout(() => {
-      void apiService.upsertUserSetting(TABLE_SETTINGS_DB_KEY, JSON.stringify(tableSettings));
+
+    filterSaveTimerRef.current = window.setTimeout(() => {
+      void apiService.upsertUserSetting(FILTER_SETTINGS_DB_KEY, JSON.stringify(filterSettings));
     }, 600);
+
     return () => {
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
+      if (filterSaveTimerRef.current) {
+        window.clearTimeout(filterSaveTimerRef.current);
       }
     };
-  }, [settingsLoaded, tableSettings]);
+  }, [filterSettings, filterSettingsLoaded, filterSettingsStorageKey]);
 
   useEffect(() => {
     if (viewMode !== 'table') {
@@ -667,135 +699,28 @@ export function Clients() {
     }
   }, [page, totalPages]);
 
-  const visibleColumnIds = useMemo(
-    () => tableSettings.order.filter((id) => tableSettings.visible[id]),
-    [tableSettings],
-  );
-
-  const resetTableSettings = () => {
-    setTableSettings(DEFAULT_TABLE_SETTINGS);
-    setPage(1);
-  };
+  const visibleColumnIds = orderedVisibleColumns;
 
   const handleFilterColumnsChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = Array.from(event.target.selectedOptions).map((option) => option.value as ColumnId);
-    setTableSettings((prev) => ({ ...prev, filterColumns: selected }));
+    setFilterSettings((prev) => ({ ...prev, filterColumns: selected }));
   };
 
   const handleFilterValueChange = (columnId: ColumnId, value: string) => {
-    setTableSettings((prev) => ({
+    setFilterSettings((prev) => ({
       ...prev,
       filters: { ...prev.filters, [columnId]: value },
     }));
   };
 
   const resetFilters = () => {
-    setTableSettings((prev) => ({
-      ...prev,
-      filters: { ...DEFAULT_TABLE_SETTINGS.filters },
-      filterColumns: [],
-    }));
+    setFilterSettings(DEFAULT_FILTER_SETTINGS);
     setPage(1);
   };
 
-  const handlePageSizeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = Number(event.target.value);
-    setTableSettings((prev) => ({
-      ...prev,
-      pageSize: Number.isFinite(next) && next > 0 ? next : prev.pageSize,
-    }));
+  const setPageSizeValue = (next: number) => {
+    setPageSize(Number.isFinite(next) && next > 0 ? next : pageSize);
     setPage(1);
-  };
-
-  const toggleColumn = (columnId: ColumnId) => {
-    setTableSettings((prev) => ({
-      ...prev,
-      visible: { ...prev.visible, [columnId]: !prev.visible[columnId] },
-    }));
-  };
-
-  const moveColumn = (columnId: ColumnId, direction: 'up' | 'down') => {
-    setTableSettings((prev) => {
-      const order = [...prev.order];
-      const idx = order.indexOf(columnId);
-      if (idx === -1) return prev;
-      const target = direction === 'up' ? idx - 1 : idx + 1;
-      if (target < 0 || target >= order.length) return prev;
-      [order[idx], order[target]] = [order[target], order[idx]];
-      return { ...prev, order };
-    });
-  };
-
-  const reorderColumns = (sourceId: ColumnId, targetId: ColumnId) => {
-    if (sourceId === targetId) return;
-    setTableSettings((prev) => {
-      const order = [...prev.order];
-      const fromIndex = order.indexOf(sourceId);
-      const toIndex = order.indexOf(targetId);
-      if (fromIndex === -1 || toIndex === -1) return prev;
-      order.splice(fromIndex, 1);
-      order.splice(toIndex, 0, sourceId);
-      return { ...prev, order };
-    });
-  };
-
-  const handleColumnDragStart = (columnId: ColumnId, event: React.DragEvent<HTMLElement>) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', columnId);
-    setDraggingColumnId(columnId);
-  };
-
-  const handleColumnDragOver = (event: React.DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleColumnDrop = (targetId: ColumnId, event: React.DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    const sourceId = event.dataTransfer.getData('text/plain') as ColumnId;
-    if (!sourceId) return;
-    reorderColumns(sourceId, targetId);
-    setDraggingColumnId(null);
-  };
-
-  const handleColumnDragEnd = () => {
-    setDraggingColumnId(null);
-  };
-
-  const handleResizeStart = (columnId: ColumnId, e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startWidth = tableSettings.widths[columnId] ?? 120;
-    const previousCursor = document.body.style.cursor;
-    const previousSelect = document.body.style.userSelect;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    resizingRef.current = {
-      columnId,
-      startX: e.clientX,
-      startWidth,
-    };
-
-    const handleMouseMove = (event: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const delta = event.clientX - resizingRef.current.startX;
-      const nextWidth = Math.max(80, resizingRef.current.startWidth + delta);
-      setTableSettings((prev) => ({
-        ...prev,
-        widths: { ...prev.widths, [columnId]: nextWidth },
-      }));
-    };
-
-    const handleMouseUp = () => {
-      resizingRef.current = null;
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousSelect;
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
   };
 
   if (!canViewClients) {
@@ -816,6 +741,22 @@ export function Clients() {
     return (
       <ClientDetail
         clientId={selectedClientId}
+        onClientUpdated={(updatedClient) => {
+          setClients((prev) =>
+            prev.map((client) =>
+              client.id === updatedClient.id
+                ? {
+                    ...client,
+                    ...updatedClient,
+                    legalEntity: updatedClient.legalEntity ?? client.legalEntity ?? null,
+                    clientStatus: updatedClient.clientStatus ?? client.clientStatus ?? null,
+                    cases: Array.isArray(updatedClient.cases) ? updatedClient.cases : client.cases,
+                    contracts: Array.isArray(updatedClient.contracts) ? updatedClient.contracts : client.contracts,
+                  }
+                : client,
+            ),
+          );
+        }}
         onBack={() => setSelectedClientId(null)}
         initialCaseId={initialCaseId}
       />
@@ -834,9 +775,6 @@ export function Clients() {
     setSelectedClientId(clientId);
     setInitialCaseId('all');
   };
-
-  const getColumnWidth = (columnId: ColumnId) =>
-    tableSettings.widths[columnId] ?? COLUMN_META[columnId].defaultWidth;
 
   const renderCell = (client: Client, columnId: ColumnId) => {
     switch (columnId) {
@@ -864,6 +802,12 @@ export function Clients() {
               </button>
             </div>
           </div>
+        );
+      case 'responsible':
+        return client.responsibleUserName ? (
+          <span className="text-sm text-gray-700 block truncate">{client.responsibleUserName}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
         );
       case 'status':
         return <ClientStatusBadge status={client.clientStatus} />;
@@ -1094,76 +1038,39 @@ export function Clients() {
         </div>
 
         {viewMode === 'table' && settingsOpen && (
-          <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">Настройка таблицы</h2>
-                <p className="text-xs text-gray-500">
-                  Меняйте порядок кнопками, включайте нужные поля и меняйте ширину.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={resetTableSettings}
-                className="text-sm text-blue-600 hover:underline"
-              >
-                Сбросить настройки
-              </button>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {tableSettings.order.map((columnId, index) => {
-                const meta = COLUMN_META[columnId];
-                return (
-                  <div
-                    key={columnId}
-                    className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
-                      draggingColumnId === columnId
-                        ? 'border-blue-200 bg-blue-50'
-                        : 'border-gray-100 bg-gray-50'
-                    }`}
-                    draggable
-                    onDragStart={(event) => handleColumnDragStart(columnId, event)}
-                    onDragOver={handleColumnDragOver}
-                    onDrop={(event) => handleColumnDrop(columnId, event)}
-                    onDragEnd={handleColumnDragEnd}
+          <div className="mb-6">
+            <TableColumnSettings
+              columns={COLUMN_DEFINITIONS.map((column) => ({
+                key: column.id,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumnIds}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Строк на странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSizeValue(Number(event.target.value))}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
                   >
-                    <span
-                      className="cursor-grab text-gray-400 active:cursor-grabbing"
-                      aria-hidden="true"
-                    >
-                      <GripVertical size={16} />
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={tableSettings.visible[columnId]}
-                      onChange={() => toggleColumn(columnId)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                    />
-                    <span className="text-sm text-gray-700 flex-1">{meta.label}</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveColumn(columnId, 'up')}
-                        disabled={index === 0}
-                        className="h-6 w-6 rounded border border-gray-200 bg-white text-xs text-gray-500 disabled:opacity-40"
-                        aria-label="Переместить вверх"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveColumn(columnId, 'down')}
-                        disabled={index === tableSettings.order.length - 1}
-                        className="h-6 w-6 rounded border border-gray-200 bg-white text-xs text-gray-500 disabled:opacity-40"
-                        aria-label="Переместить вниз"
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
           </div>
         )}
 
@@ -1215,7 +1122,7 @@ export function Clients() {
                       </label>
                       <input
                         type="text"
-                        value={tableSettings.filters[columnId] ?? ''}
+                        value={filterSettings.filters[columnId] ?? ''}
                         onChange={(event) => handleFilterValueChange(columnId, event.target.value)}
                         className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder="Введите значение"
@@ -1285,7 +1192,7 @@ export function Clients() {
                           key={columnId}
                           style={{ width }}
                           className={`relative px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${
-                            draggingColumnId === columnId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                            draggingColumn === columnId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
                           }`}
                           onDragOver={handleColumnDragOver}
                           onDrop={(event) => handleColumnDrop(columnId, event)}
@@ -1417,6 +1324,11 @@ export function Clients() {
                           >
                             {highlight(client.name ?? '', query)}
                           </button>
+                          {client.responsibleUserName && (
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                              Ответственный: {client.responsibleUserName}
+                            </span>
+                          )}
                           <ClientStatusBadge status={client.clientStatus} />
                         </div>
                         {client.company && (
@@ -1576,48 +1488,20 @@ export function Clients() {
         )}
 
         {total > 0 && (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span>Страница</span>
-              <span className="font-semibold text-gray-900">
-                {page} из {totalPages}
-              </span>
-              <span className="text-gray-400">·</span>
-              <span>Всего: {total}</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
-              >
-                Назад
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
-              >
-                Вперёд
-              </button>
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span>Показывать</span>
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {[5, 10, 25, 50, 100].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-                <span>записей</span>
-              </div>
-            </div>
+          <div className="mt-6">
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSizeValue}
+              recordsLabel="Найдено записей"
+              pageSizeLabel="Строк на странице"
+              previousLabel="Назад"
+              nextLabel="Вперед"
+            />
           </div>
         )}
 

@@ -275,6 +275,8 @@ export interface Client {
   isActive: boolean;
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
+  responsibleUserId?: number | null;
+  responsibleUserName?: string | null;
   clientStatusId?: number | null;
   clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
@@ -291,6 +293,7 @@ export interface ClientInput {
   notes: string;
   isActive: boolean;
   legalEntityId?: number | null;
+  responsibleUserId?: number | null;
   clientStatusId?: number | null;
 }
 
@@ -351,6 +354,14 @@ export interface ClientCase {
   createdAt: string;
 }
 
+export interface InvoiceClientCaseLink {
+  id: number;
+  clientId: number;
+  title: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface DealType {
   id: number;
   name: string;
@@ -392,6 +403,33 @@ export interface MoneyOperation {
   updatedAt?: string | null;
   isReadonly?: boolean;
   relatedPaymentId?: number | null;
+}
+
+export interface MoneyOperationSourceSummary {
+  source: MoneyOperationSource;
+  startBalance: number;
+  income: number;
+  expense: number;
+  endBalance: number;
+}
+
+export interface MoneyOperationsSummary {
+  startBalance: number;
+  income: number;
+  expense: number;
+  endBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+  bySource: MoneyOperationSourceSummary[];
+}
+
+export interface PaymentsListSummary {
+  income: number;
+  expense: number;
+  balance: number;
+  incomeCount: number;
+  expenseCount: number;
+  total: number;
 }
 export interface IncomeType {
   id: number;
@@ -573,6 +611,7 @@ export interface Payment {
   incomeType?: IncomeType | null;
   paymentSource?: PaymentSource | null;
   paymentStatusEntity?: PaymentStatusEntity;
+  invoiceId?: number | null;
   account?: string | null;
   accountDate?: string | null;
 }
@@ -597,8 +636,23 @@ export interface InvoiceResponsible {
   fullName: string;
 }
 
+export interface InvoiceActLink {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  amount: number;
+  status: ActStatus;
+  clientId?: number | null;
+  clientName?: string | null;
+  responsibleId?: number | null;
+  responsibleName?: string | null;
+  comment?: string | null;
+}
+
 export interface Invoice {
   id: number;
+  invoiceEntityId?: number | null;
   number: string;
   date: string;
   dueDate?: string | null;
@@ -616,12 +670,17 @@ export interface Invoice {
   clientStatus?: ClientStatus | null;
   clientCaseId?: number | null;
   clientCaseTitle?: string | null;
+  clientCaseIds?: number[];
+  clientCases?: InvoiceClientCaseLink[];
+  clientCaseReference?: string | null;
   description?: string | null;
   actReference?: string | null;
   actId?: number | null;
   actNumber?: string | null;
   actTitle?: string | null;
   actStatus?: ActStatus | null;
+  actIds?: number[];
+  acts?: InvoiceActLink[];
   responsibleId?: number | null;
   responsibleName?: string | null;
   responsibles?: InvoiceResponsible[];
@@ -652,9 +711,12 @@ export interface InvoiceInput {
   clientId: number;
   contractId?: number | null;
   clientCaseId?: number | null;
+  clientCaseIds?: number[];
+  clientCaseReference?: string | null;
   description?: string | null;
   actReference?: string | null;
   actId?: number | null;
+  actIds?: number[];
   counterpartyName?: string | null;
   serviceId?: number | null;
   paymentSourceId?: number | null;
@@ -684,6 +746,33 @@ export interface InvoiceSummary {
     day91Plus: number;
     total: number;
   };
+}
+
+export interface AccountsSummaryBucket {
+  amount: number;
+  count: number;
+}
+
+export interface AccountsSummary {
+  total: AccountsSummaryBucket;
+  pending: AccountsSummaryBucket;
+  paid: AccountsSummaryBucket;
+  overdue: AccountsSummaryBucket;
+  cancelled: AccountsSummaryBucket;
+}
+
+export interface AccountRegistryRow {
+  groupKey: string;
+  accountNumber: string;
+  invoice?: Invoice | null;
+  payments: Payment[];
+  acts: Act[];
+  totalAmount: number;
+  dueDate?: string | null;
+  paidDate?: string | null;
+  status: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+  type: 'Income' | 'Expense';
+  isOverdue: boolean;
 }
 
 export type AccountSuggestion = {
