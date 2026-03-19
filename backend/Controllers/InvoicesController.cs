@@ -23,6 +23,8 @@ public class InvoicesController : ControllerBase
 {
     private const string InvoiceNumberStartSettingKey = "invoices.numbering.startNumber";
     private const string InvoiceNumberStrategySettingKey = "invoices.numbering.strategy";
+    private const string InvoiceMaxClientCasesSettingKey = "invoices.rules.maxClientCasesPerInvoice";
+    private const string InvoiceMaxActsSettingKey = "invoices.rules.maxActsPerInvoice";
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
@@ -400,6 +402,9 @@ public class InvoicesController : ControllerBase
         }
 
         var previousInvoiceNumber = payment.Account;
+        var originalStatus = payment.Status;
+        var actor = User.GetDisplayName();
+        var now = DateTime.UtcNow;
 
         payment.Account = number;
         payment.DocumentKind = DocumentKind.Invoice;
@@ -408,11 +413,11 @@ public class InvoicesController : ControllerBase
         {
             Number = number,
             Date = request.Date.Date,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = now,
         };
         payment.Invoice.Number = number;
         payment.Invoice.Date = request.Date.Date;
-        payment.Invoice.UpdatedAt = DateTime.UtcNow;
+        payment.Invoice.UpdatedAt = now;
         payment.InvoiceId = payment.Invoice.Id == 0 ? null : payment.Invoice.Id;
         payment.Date = (request.DueDate ?? request.Date).Date;
         payment.Amount = request.Amount;
@@ -460,6 +465,15 @@ public class InvoicesController : ControllerBase
         }
 
         ApplyPaidFlags(payment, request.PaidDate);
+
+        if (originalStatus != payment.Status)
+        {
+            PaymentDomainService.AppendSystemNote(
+                payment,
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {payment.Status.ToDisplayString()}",
+                now,
+                actor);
+        }
 
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
@@ -547,16 +561,51 @@ public class InvoicesController : ControllerBase
         });
     }
 
+    [HttpGet("rules-settings")]
+    public async Task<ActionResult<InvoiceRulesSettingsDto>> GetRulesSettings(CancellationToken ct)
+    {
+        return Ok(await GetInvoiceRulesSettingsAsync(ct));
+    }
+
+    [HttpPut("rules-settings")]
+    public async Task<ActionResult<InvoiceRulesSettingsDto>> UpsertRulesSettings([FromBody] InvoiceRulesSettingsRequest request, CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Forbid();
+        }
+
+        if (request.MaxClientCasesPerInvoice < 1 || request.MaxActsPerInvoice < 1)
+        {
+            return BadRequest("Лимиты счёта должны быть больше 0.");
+        }
+
+        var now = DateTime.UtcNow;
+        await UpsertSystemSettingAsync(InvoiceMaxClientCasesSettingKey, request.MaxClientCasesPerInvoice.ToString(), now, ct);
+        await UpsertSystemSettingAsync(InvoiceMaxActsSettingKey, request.MaxActsPerInvoice.ToString(), now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(await GetInvoiceRulesSettingsAsync(ct));
+    }
+
 
     [HttpPost("migrate-legacy-links")]
     public async Task<ActionResult<InvoiceLegacyMigrationSummaryDto>> MigrateLegacyInvoiceLinks(CancellationToken ct)
     {
+        var currentUserId = GetUserId(User);
         var payments = await _db.Payments
             .Include(p => p.Invoice)
             .Include(p => p.InvoiceClientCases)
             .Where(p => p.Account != null && p.Account != "")
             .OrderBy(p => p.Id)
             .ToListAsync(ct);
+        var numberingSettings = await GetInvoiceNumberingSettingsAsync(currentUserId, ct);
+        var reservedInvoiceNumbers = (await _db.Invoices
+                .AsNoTracking()
+                .Select(x => new { x.Number, x.Date })
+                .ToListAsync(ct))
+            .Select(x => BuildReservedInvoiceNumberKey(x.Number, x.Date))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var summary = new InvoiceLegacyMigrationSummaryDto
         {
@@ -666,13 +715,22 @@ public class InvoicesController : ControllerBase
 
             if (!reusedExistingInvoice)
             {
+                var resolvedNumber = await ResolveMigrationInvoiceNumberAsync(
+                    first.Number,
+                    first.InvoiceDate,
+                    numberingSettings.StartNumber,
+                    numberingSettings.AllocationStrategy,
+                    reservedInvoiceNumbers,
+                    ct);
+
                 targetInvoice = new Invoice
                 {
-                    Number = first.Number,
+                    Number = resolvedNumber,
                     Date = first.InvoiceDate,
                     CreatedAt = DateTime.UtcNow,
                 };
                 _db.Invoices.Add(targetInvoice);
+                reservedInvoiceNumbers.Add(BuildReservedInvoiceNumberKey(targetInvoice.Number, targetInvoice.Date));
                 invoiceByKey[group.Key] = targetInvoice;
                 summary.CreatedInvoices++;
 
@@ -695,6 +753,7 @@ public class InvoicesController : ControllerBase
             foreach (var binding in orderedBindings)
             {
                 var payment = binding.Payment;
+                AssignLegacyAccountSource(payment, binding.Number, binding.InvoiceDate);
                 var alreadyLinkedToTarget = reusedExistingInvoice
                     && resolvedInvoice.Id > 0
                     && payment.InvoiceId == resolvedInvoice.Id;
@@ -1058,37 +1117,39 @@ public class InvoicesController : ControllerBase
 
     private static void ApplyPaidFlags(Payment payment, DateTime? paidDate)
     {
-        var now = DateTime.UtcNow;
         var effectiveDate = (paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
 
-        if (payment.Status == PaymentStatus.Completed || paidDate.HasValue)
+        if (payment.Status == PaymentStatus.Completed)
         {
             payment.PaidAmount = payment.Amount;
             payment.LastPaymentDate = effectiveDate;
             payment.PaidDate = effectiveDate;
+            payment.IsPaid = true;
         }
-        else
+        else if (payment.Status == PaymentStatus.Processing)
         {
-            if (payment.Status is PaymentStatus.Pending or PaymentStatus.Overdue)
-            {
-                payment.PaidAmount = 0m;
-                payment.LastPaymentDate = null;
-                payment.PaidDate = null;
-            }
-            else
-            {
-                payment.PaidAmount = Math.Min(payment.PaidAmount, payment.Amount);
-            }
-
+            payment.PaidAmount = Math.Max(0m, Math.Min(payment.PaidAmount, payment.Amount));
+            payment.IsPaid = false;
             if (payment.PaidAmount <= 0m)
             {
                 payment.LastPaymentDate = null;
                 payment.PaidDate = null;
             }
+            else
+            {
+                payment.LastPaymentDate ??= effectiveDate;
+                payment.PaidDate ??= effectiveDate;
+            }
+        }
+        else
+        {
+            payment.PaidAmount = 0m;
+            payment.LastPaymentDate = null;
+            payment.PaidDate = null;
+            payment.IsPaid = false;
         }
 
         PaymentDomainService.Normalize(payment);
-        PaymentDomainService.ApplyStatusRules(payment, now);
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -1106,7 +1167,7 @@ public class InvoicesController : ControllerBase
 
         var rawNumber = preferCanonicalInvoice && payment.Invoice != null
             ? payment.Invoice.Number
-            : payment.Account;
+            : (payment.LegacyAccountNumber ?? payment.Account);
         var number = Normalize(rawNumber);
         if (string.IsNullOrWhiteSpace(number))
         {
@@ -1115,7 +1176,7 @@ public class InvoicesController : ControllerBase
 
         var rawDate = preferCanonicalInvoice && payment.Invoice != null
             ? payment.Invoice.Date
-            : (payment.AccountDate ?? payment.Date);
+            : (payment.LegacyAccountDate ?? payment.AccountDate ?? payment.Date);
         var invoiceDate = rawDate.Date;
         var clientCaseId = payment.ClientCaseId is > 0 ? payment.ClientCaseId : null;
 
@@ -1247,6 +1308,12 @@ public class InvoicesController : ControllerBase
             return (null, clientCaseIds);
         }
 
+        var rules = await GetInvoiceRulesSettingsAsync(ct);
+        if (clientCaseIds.Count > rules.MaxClientCasesPerInvoice)
+        {
+            return (BadRequest($"В счёте можно указать не более {rules.MaxClientCasesPerInvoice} дела(дел)."), new List<int>());
+        }
+
         var cases = await _db.ClientCases
             .AsNoTracking()
             .Where(x => clientCaseIds.Contains(x.Id))
@@ -1280,6 +1347,12 @@ public class InvoicesController : ControllerBase
         if (actIds.Count == 0)
         {
             return (null, actIds);
+        }
+
+        var rules = await GetInvoiceRulesSettingsAsync(ct);
+        if (actIds.Count > rules.MaxActsPerInvoice)
+        {
+            return (BadRequest($"В счёте можно указать не более {rules.MaxActsPerInvoice} акта(ов)."), new List<int>());
         }
 
         var acts = await _db.Acts
@@ -1963,6 +2036,138 @@ public class InvoicesController : ControllerBase
         return BadRequest($"Номер счета '{number}' уже занят в {accountDate.Year} году.");
     }
 
+    private async Task<InvoiceRulesSettingsDto> GetInvoiceRulesSettingsAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(x => x.Key == InvoiceMaxClientCasesSettingKey || x.Key == InvoiceMaxActsSettingKey)
+            .ToListAsync(ct);
+
+        return new InvoiceRulesSettingsDto
+        {
+            MaxClientCasesPerInvoice = ParsePositiveSetting(settings.FirstOrDefault(x => x.Key == InvoiceMaxClientCasesSettingKey)?.Value, 1),
+            MaxActsPerInvoice = ParsePositiveSetting(settings.FirstOrDefault(x => x.Key == InvoiceMaxActsSettingKey)?.Value, 1),
+        };
+    }
+
+    private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)
+    {
+        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == key, ct);
+        if (setting is null)
+        {
+            _db.SystemSettings.Add(new SystemSetting
+            {
+                Key = key,
+                Value = value,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            });
+            return;
+        }
+
+        setting.Value = value;
+        setting.UpdatedAt = nowUtc;
+    }
+
+    private async Task<(int StartNumber, string AllocationStrategy)> GetInvoiceNumberingSettingsAsync(int? userId, CancellationToken ct)
+    {
+        if (!userId.HasValue || userId.Value <= 0)
+        {
+            return (1, "max-plus-one");
+        }
+
+        var settings = await _db.UserSettings
+            .AsNoTracking()
+            .Where(x => x.UserId == userId.Value && (x.Key == InvoiceNumberStartSettingKey || x.Key == InvoiceNumberStrategySettingKey))
+            .ToListAsync(ct);
+
+        return (
+            ParseStartNumber(settings.FirstOrDefault(x => x.Key == InvoiceNumberStartSettingKey)?.Value),
+            ParseAllocationStrategy(settings.FirstOrDefault(x => x.Key == InvoiceNumberStrategySettingKey)?.Value)
+        );
+    }
+
+    private async Task<string> ResolveMigrationInvoiceNumberAsync(
+        string originalNumber,
+        DateTime invoiceDate,
+        int startNumber,
+        string allocationStrategy,
+        ISet<string> reservedInvoiceNumbers,
+        CancellationToken ct)
+    {
+        var normalized = Normalize(originalNumber) ?? string.Empty;
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return await GetNextAvailableMigrationInvoiceNumberAsync(invoiceDate, startNumber, allocationStrategy, reservedInvoiceNumbers, ct);
+        }
+
+        var reservedKey = BuildReservedInvoiceNumberKey(normalized, invoiceDate);
+        if (!reservedInvoiceNumbers.Contains(reservedKey)
+            && await EnsureInvoiceNumberIsUniqueAsync(normalized, invoiceDate, null, ct) is null)
+        {
+            return normalized;
+        }
+
+        if (int.TryParse(normalized, out _))
+        {
+            return await GetNextAvailableMigrationInvoiceNumberAsync(invoiceDate, startNumber, allocationStrategy, reservedInvoiceNumbers, ct);
+        }
+
+        for (var i = 1; i <= 9999; i++)
+        {
+            var suffix = $"-IMP{i}";
+            var maxBaseLength = Math.Max(1, 120 - suffix.Length);
+            var truncatedBase = normalized.Length > maxBaseLength
+                ? normalized[..maxBaseLength]
+                : normalized;
+            var candidate = $"{truncatedBase}{suffix}";
+            if (reservedInvoiceNumbers.Contains(BuildReservedInvoiceNumberKey(candidate, invoiceDate)))
+            {
+                continue;
+            }
+
+            if (await EnsureInvoiceNumberIsUniqueAsync(candidate, invoiceDate, null, ct) is null)
+            {
+                return candidate;
+            }
+        }
+
+        return await GetNextAvailableMigrationInvoiceNumberAsync(invoiceDate, startNumber, allocationStrategy, reservedInvoiceNumbers, ct);
+    }
+
+    private async Task<string> GetNextAvailableMigrationInvoiceNumberAsync(
+        DateTime invoiceDate,
+        int startNumber,
+        string allocationStrategy,
+        ISet<string> reservedInvoiceNumbers,
+        CancellationToken ct)
+    {
+        var next = await GetNextInvoiceNumberAsync(invoiceDate, startNumber, allocationStrategy, ct);
+        while (reservedInvoiceNumbers.Contains(BuildReservedInvoiceNumberKey(next.ToString(), invoiceDate)))
+        {
+            next++;
+        }
+
+        return next.ToString();
+    }
+
+    private static string BuildReservedInvoiceNumberKey(string number, DateTime invoiceDate)
+    {
+        return $"{invoiceDate.Year}::{Normalize(number) ?? string.Empty}";
+    }
+
+    private static void AssignLegacyAccountSource(Payment payment, string number, DateTime invoiceDate)
+    {
+        var normalizedNumber = Normalize(number);
+        if (normalizedNumber is null)
+        {
+            return;
+        }
+
+        payment.LegacyAccountNumber = normalizedNumber;
+        payment.LegacyAccountDate = invoiceDate.Date;
+    }
+
     private async Task UpsertUserSettingAsync(int userId, string key, string value, DateTime nowUtc, CancellationToken ct)
     {
         var setting = await _db.UserSettings
@@ -1988,6 +2193,11 @@ public class InvoicesController : ControllerBase
     private static int ParseStartNumber(string? value)
     {
         return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : 1;
+    }
+
+    private static int ParsePositiveSetting(string? value, int fallback)
+    {
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
     }
 
     private static string ParseAllocationStrategy(string? value)

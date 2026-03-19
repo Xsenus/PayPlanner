@@ -270,7 +270,9 @@ public class PaymentContext : DbContext
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);
             entity.Property(p => p.Account).HasMaxLength(120);
+            entity.Property(p => p.LegacyAccountNumber).HasMaxLength(120);
             entity.Property(p => p.AccountDate).HasColumnType("date");
+            entity.Property(p => p.LegacyAccountDate).HasColumnType("date");
             entity.Property(p => p.Date).HasColumnType("date");
             entity.Property(p => p.PlannedDate).HasColumnType("date");
             entity.Property(p => p.LastPaymentDate).HasColumnType("date");
@@ -341,8 +343,11 @@ public class PaymentContext : DbContext
 
             // ---- Индексы Account
             entity.HasIndex(e => e.Account).HasDatabaseName("IX_Payments_Account");
+            entity.HasIndex(e => e.LegacyAccountNumber).HasDatabaseName("IX_Payments_LegacyAccountNumber");
             entity.HasIndex(e => e.AccountDate).HasDatabaseName("IX_Payments_AccountDate");
+            entity.HasIndex(e => e.LegacyAccountDate).HasDatabaseName("IX_Payments_LegacyAccountDate");
             entity.HasIndex(e => new { e.Account, e.AccountDate }).HasDatabaseName("IX_Payments_Account_AccountDate");
+            entity.HasIndex(e => new { e.LegacyAccountNumber, e.LegacyAccountDate }).HasDatabaseName("IX_Payments_LegacyAccount_LegacyAccountDate");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Payments_Date");
             entity.HasIndex(e => e.PlannedDate).HasDatabaseName("IX_Payments_PlannedDate");
             entity.HasIndex(e => e.LastPaymentDate).HasDatabaseName("IX_Payments_LastPaymentDate");
@@ -829,6 +834,16 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Value).HasColumnType("text").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => e.Key).IsUnique().HasDatabaseName("IX_SystemSettings_Key");
+        });
+
         // ------------------ FormFieldRequirements ------------------
         modelBuilder.Entity<FormFieldRequirement>(entity =>
         {
@@ -962,7 +977,7 @@ public class PaymentContext : DbContext
     /// Пользовательские настройки.
     /// </summary>
     public DbSet<UserSetting> UserSettings { get; set; }
-
+    public DbSet<SystemSetting> SystemSettings { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
 
     /// <summary>

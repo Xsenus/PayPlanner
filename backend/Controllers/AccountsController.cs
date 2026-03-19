@@ -95,7 +95,7 @@ public class AccountsController : ControllerBase
         }
 
         var groups = candidateItems
-            .GroupBy(item => BuildGroupKey(item.InvoiceEntityId, item.Number, item.Date, item.Id))
+            .GroupBy(item => BuildGroupKey(item.InvoiceEntityId, item.Number, item.Date, item.ClientId, item.ClientCaseId, item.Type, item.Id))
             .Select(group =>
             {
                 var orderedGroup = group
@@ -114,7 +114,7 @@ public class AccountsController : ControllerBase
                     GroupKey = group.Key,
                     Representative = representative,
                     InvoiceEntityId = invoiceEntityId,
-                    LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date),
+                    LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.ClientCaseId, representative.Type),
                     FallbackAmount = orderedGroup.Sum(item => item.Amount),
                     InvoicePaymentIds = orderedGroup.Select(item => item.Id).ToHashSet(),
                     Type = representative.Type,
@@ -153,6 +153,9 @@ public class AccountsController : ControllerBase
                 Amount = payment.Amount,
                 Status = payment.Status,
                 DocumentKind = payment.DocumentKind,
+                ClientId = payment.ClientId,
+                ClientCaseId = payment.ClientCaseId,
+                Type = payment.Type,
             })
             .ToListAsync(ct);
 
@@ -163,7 +166,7 @@ public class AccountsController : ControllerBase
 
         var paymentsByLegacyKey = paymentAggregateItems
             .Where(item => item.DocumentKind != DocumentKind.Invoice && !item.InvoiceId.HasValue)
-            .Select(item => new { Item = item, LegacyKey = BuildLegacyGroupKey(item.Account, item.AccountDate ?? item.Date) })
+            .Select(item => new { Item = item, LegacyKey = BuildLegacyGroupKey(item.Account, item.AccountDate ?? item.Date, item.ClientId, item.ClientCaseId, item.Type) })
             .Where(entry => entry.LegacyKey is not null && legacyGroupKeys.Contains(entry.LegacyKey))
             .GroupBy(entry => entry.LegacyKey!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
@@ -192,10 +195,9 @@ public class AccountsController : ControllerBase
                 .Select(grouped => grouped.First())
                 .ToList();
 
-            group.RelatedPaymentIds = groupPayments
-                .OrderBy(item => EffectivePlannedDate(item))
-                .ThenBy(item => item.Id)
-                .Select(item => item.Id)
+            group.RelatedPaymentIds = group.InvoicePaymentIds
+                .Concat(groupPayments.Select(item => item.Id))
+                .Distinct()
                 .ToList();
 
             group.DueDate = groupPayments
@@ -771,6 +773,7 @@ public class AccountsController : ControllerBase
                 PaymentStatus.Completed => "paid",
                 PaymentStatus.Cancelled => "cancelled",
                 PaymentStatus.Processing => "partial",
+                PaymentStatus.Overdue => "overdue",
                 _ => "created",
             };
         }
@@ -785,10 +788,14 @@ public class AccountsController : ControllerBase
             return "paid";
         }
 
+        if (paymentList.Any(payment => payment.Status == PaymentStatus.Overdue))
+        {
+            return "overdue";
+        }
+
         if (paymentList.Any(payment =>
                 payment.Status == PaymentStatus.Completed
-                || payment.Status == PaymentStatus.Processing
-                || payment.Status == PaymentStatus.Overdue))
+                || payment.Status == PaymentStatus.Processing))
         {
             return "partial";
         }
@@ -802,27 +809,39 @@ public class AccountsController : ControllerBase
     private static bool AreAccountsEqual(string? left, string? right)
         => string.Equals(NormalizeAccount(left), NormalizeAccount(right), StringComparison.OrdinalIgnoreCase);
 
-    private static string BuildGroupKey(int? invoiceEntityId, string? accountNumber, DateTime accountDate, int fallbackId)
+    private static string BuildGroupKey(
+        int? invoiceEntityId,
+        string? accountNumber,
+        DateTime accountDate,
+        int? clientId,
+        int? clientCaseId,
+        PaymentType type,
+        int fallbackId)
     {
         if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
         {
             return $"entity:{invoiceEntityId.Value}";
         }
 
-        var legacyKey = BuildLegacyGroupKey(accountNumber, accountDate);
+        var legacyKey = BuildLegacyGroupKey(accountNumber, accountDate, clientId, clientCaseId, type);
         return legacyKey is not null ? $"legacy:{legacyKey}" : $"legacy:id:{fallbackId}";
     }
 
-    private static string? BuildLegacyGroupKey(string? accountNumber, DateTime? accountDate)
+    private static string? BuildLegacyGroupKey(
+        string? accountNumber,
+        DateTime? accountDate,
+        int? clientId,
+        int? clientCaseId,
+        PaymentType type)
     {
         var normalizedAccount = NormalizeAccount(accountNumber);
-        if (normalizedAccount is null)
+        if (normalizedAccount is null || !clientId.HasValue || clientId.Value <= 0)
         {
             return null;
         }
 
         var year = (accountDate ?? DateTime.MinValue).Year;
-        return $"{normalizedAccount}::{year}";
+        return $"{normalizedAccount}::{year}::client:{clientId.Value}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
     }
 
     private static string? NormalizeAccount(string? value)
@@ -835,6 +854,7 @@ public class AccountsController : ControllerBase
         {
             "created" => "created",
             "partial" => "partial",
+            "overdue" => "overdue",
             "paid" => "paid",
             "cancelled" => "cancelled",
             _ => null,
@@ -885,6 +905,9 @@ public class AccountsController : ControllerBase
         public decimal Amount { get; init; }
         public PaymentStatus Status { get; init; }
         public DocumentKind DocumentKind { get; init; }
+        public int? ClientId { get; init; }
+        public int? ClientCaseId { get; init; }
+        public PaymentType Type { get; init; }
     }
 
     private sealed class WorkingAccountGroup

@@ -78,6 +78,11 @@ export interface InvoiceNumberingSettingsDto {
   allocationStrategy: 'max-plus-one' | 'first-free';
 }
 
+export interface InvoiceRulesSettingsDto {
+  maxClientCasesPerInvoice: number;
+  maxActsPerInvoice: number;
+}
+
 export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
   year: number;
   nextNumber: string;
@@ -430,6 +435,17 @@ export class ApiService {
     });
   }
 
+  async getInvoiceRulesSettings() {
+    return this.request<InvoiceRulesSettingsDto>('/invoices/rules-settings');
+  }
+
+  async updateInvoiceRulesSettings(payload: InvoiceRulesSettingsDto) {
+    return this.request<InvoiceRulesSettingsDto>('/invoices/rules-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getNextInvoiceNumber(date?: string) {
     const q = buildQuery({ date });
     return this.request<NextInvoiceNumberDto>(`/invoices/next-number${q}`);
@@ -465,7 +481,7 @@ export class ApiService {
   async getAccountsRegistry(params?: {
     from?: string;
     to?: string;
-    status?: 'created' | 'paid' | 'partial' | 'cancelled';
+    status?: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
     search?: string;
     type?: 'Income' | 'Expense';
     sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';

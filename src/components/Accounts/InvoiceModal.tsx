@@ -169,6 +169,7 @@ interface InvoiceModalProps {
   presentation?: 'modal' | 'page';
   relatedPayments?: Payment[];
   paymentsLoading?: boolean;
+  onRefreshRequested?: () => Promise<void> | void;
   onAddRelatedPayment?: () => void;
   onEditRelatedPayment?: (payment: Payment) => void;
   onDeleteRelatedPayment?: (payment: Payment) => Promise<void> | void;
@@ -328,6 +329,234 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+type StatusTimelineEntry = {
+  key: string;
+  title: string;
+  description: string;
+  sourceLabel: string;
+  timestampLabel: string;
+  sortValue: number;
+  isCurrent: boolean;
+};
+
+type InvoiceStatusSnapshot = {
+  status: PaymentStatus;
+  reason: string;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  sourcePayments: Payment[];
+  timeline: StatusTimelineEntry[];
+};
+
+function getStatusSourcePayments(payments: Payment[]): Payment[] {
+  const linkedPayments = payments.filter((payment) => payment.documentKind !== 'Invoice');
+  return linkedPayments.length > 0 ? linkedPayments : payments;
+}
+
+function resolvePaidAmount(payment: Payment): number {
+  if (Number.isFinite(payment.paidAmount) && payment.paidAmount > 0) {
+    return payment.paidAmount;
+  }
+
+  return payment.status === 'Completed' ? Math.max(payment.amount ?? 0, 0) : 0;
+}
+
+function resolveOutstandingAmount(payment: Payment): number {
+  if (payment.status === 'Completed' || payment.status === 'Cancelled') {
+    return 0;
+  }
+
+  if (Number.isFinite(payment.outstandingAmount) && payment.outstandingAmount > 0) {
+    return payment.outstandingAmount;
+  }
+
+  return Math.max((payment.amount ?? 0) - resolvePaidAmount(payment), 0);
+}
+
+function paymentSourceLabel(payment: Payment): string {
+  const description = payment.description?.trim();
+  if (description) return description;
+  if (payment.documentKind === 'Invoice' && payment.account) return `Счет №${payment.account}`;
+  if (payment.account) return `Платеж по счету №${payment.account}`;
+  return `Платеж #${payment.id}`;
+}
+
+function deriveInvoiceStatusFromPayments(
+  payments: Payment[],
+  fallbackStatus: PaymentStatus,
+  fallbackDueDate?: string | null,
+): PaymentStatus {
+  const sourcePayments = getStatusSourcePayments(payments);
+
+  if (sourcePayments.length === 0) {
+    if (fallbackStatus === 'Completed' || fallbackStatus === 'Cancelled' || fallbackStatus === 'Processing' || fallbackStatus === 'Overdue') {
+      return fallbackStatus;
+    }
+
+    const normalizedDueDate = toDateInputValue(fallbackDueDate ?? null);
+    if (normalizedDueDate && normalizedDueDate < formatLocalYMD(new Date())) {
+      return 'Overdue';
+    }
+
+    return 'Pending';
+  }
+
+  if (sourcePayments.every((payment) => payment.status === 'Cancelled')) {
+    return 'Cancelled';
+  }
+
+  if (sourcePayments.every((payment) => payment.status === 'Completed')) {
+    return 'Completed';
+  }
+
+  if (sourcePayments.some((payment) => payment.status === 'Overdue')) {
+    return 'Overdue';
+  }
+
+  const hasProgress = sourcePayments.some(
+    (payment) =>
+      payment.status === 'Completed'
+      || payment.status === 'Processing'
+      || payment.hasPartialPayment
+      || resolvePaidAmount(payment) > 0,
+  );
+
+  return hasProgress ? 'Processing' : 'Pending';
+}
+
+function invoiceStatusLabel(status: PaymentStatus): string {
+  switch (status) {
+    case 'Completed':
+      return 'Оплачен';
+    case 'Processing':
+      return 'Частично оплачен';
+    case 'Overdue':
+      return 'Просрочен';
+    case 'Cancelled':
+      return 'Отменен';
+    case 'Pending':
+    default:
+      return 'Не оплачен';
+  }
+}
+
+function parseStatusTimelineEntry(note: string, payment: Payment, index: number): StatusTimelineEntry | null {
+  const trimmed = note.trim().replace(/^[•*-]\s*/u, '');
+  if (!trimmed) return null;
+
+  if (!/статус|оплач|остаток|срок|планов|дата платежа|перенес|перенос|частич/iu.test(trimmed)) {
+    return null;
+  }
+
+  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4}) \((\d{2}):(\d{2}):(\d{2})\)\s*[—-]\s*(.+?):\s*(.+)$/u);
+  if (match) {
+    const [, day, month, year, hour, minute, second, author, message] = match;
+    const sortValue = Date.UTC(
+      Number.parseInt(year, 10),
+      Number.parseInt(month, 10) - 1,
+      Number.parseInt(day, 10),
+      Number.parseInt(hour, 10),
+      Number.parseInt(minute, 10),
+      Number.parseInt(second, 10),
+    );
+
+    return {
+      key: `${payment.id}-${index}-${sortValue}`,
+      title: message,
+      description: author,
+      sourceLabel: paymentSourceLabel(payment),
+      timestampLabel: `${day}.${month}.${year} ${hour}:${minute}`,
+      sortValue,
+      isCurrent: false,
+    };
+  }
+
+  const fallbackTimestamp = Date.parse(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt ?? '') || 0;
+  return {
+    key: `${payment.id}-${index}-${trimmed}`,
+    title: trimmed,
+    description: 'Системное изменение по связанному платежу',
+    sourceLabel: paymentSourceLabel(payment),
+    timestampLabel: formatDate(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt) || 'Без даты',
+    sortValue: fallbackTimestamp,
+    isCurrent: false,
+  };
+}
+
+function buildInvoiceStatusSnapshot(
+  payments: Payment[],
+  fallbackStatus: PaymentStatus,
+  fallbackDueDate?: string | null,
+  fallbackAmount?: string | number | null,
+): InvoiceStatusSnapshot {
+  const sourcePayments = getStatusSourcePayments(payments);
+  const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate);
+  const fallbackAmountValue = parseMoneyInput(fallbackAmount);
+  const aggregatedTotalFromPayments = sourcePayments.reduce((sum, payment) => {
+    const paymentAmount = Math.max(payment.amount ?? 0, 0);
+    const resolvedAmount = Math.max(paymentAmount, resolvePaidAmount(payment) + resolveOutstandingAmount(payment));
+    return sum + resolvedAmount;
+  }, 0);
+
+  const totalAmount = fallbackAmountValue > 0 ? fallbackAmountValue : aggregatedTotalFromPayments;
+  const paidAmount = sourcePayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0);
+  const rawOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
+  const outstandingAmount = rawOutstandingAmount > 0
+    ? rawOutstandingAmount
+    : Math.max(totalAmount - paidAmount, 0);
+
+  let reason = 'Связанные платежи по счету еще не созданы.';
+  if (status === 'Completed') {
+    reason = 'Все связанные платежи проведены, остатка к оплате нет.';
+  } else if (status === 'Cancelled') {
+    reason = 'Все связанные платежи по счету отменены.';
+  } else if (status === 'Overdue') {
+    reason = paidAmount > 0 && totalAmount > 0
+      ? `По счету есть оплаты на ${formatCurrencySmart(paidAmount).short}, но остаток ${formatCurrencySmart(outstandingAmount).short} уже просрочен.`
+      : 'Срок оплаты истек, а связанные платежи по счету еще не закрыты.';
+  } else if (status === 'Processing') {
+    reason = totalAmount > 0
+      ? `По счету оплачено ${formatCurrencySmart(paidAmount).short} из ${formatCurrencySmart(totalAmount).short}. Остаток ${formatCurrencySmart(outstandingAmount).short} еще не закрыт.`
+      : 'По счету есть частичная оплата, но он еще не закрыт полностью.';
+  } else if (sourcePayments.length > 0) {
+    reason = 'Связанные платежи созданы, но оплаты по счету пока не поступили.';
+  }
+
+  const historyEntries = payments
+    .flatMap((payment) =>
+      (payment.systemNotes ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, index) => parseStatusTimelineEntry(line, payment, index))
+        .filter((entry): entry is StatusTimelineEntry => entry !== null),
+    )
+    .sort((left, right) => right.sortValue - left.sortValue);
+
+  const currentEntry: StatusTimelineEntry = {
+    key: `current-${fallbackStatus}-${paidAmount}-${outstandingAmount}`,
+    title: `Текущий статус: ${invoiceStatusLabel(fallbackStatus)}`,
+    description: reason,
+    sourceLabel: sourcePayments.length > 0
+      ? `Связанных платежей: ${sourcePayments.length}`
+      : 'Статус пока определяется по самому счету',
+    timestampLabel: historyEntries[0]?.timestampLabel ?? 'Сейчас',
+    sortValue: historyEntries[0]?.sortValue ?? Date.now(),
+    isCurrent: true,
+  };
+
+  return {
+    status,
+    reason,
+    totalAmount,
+    paidAmount,
+    outstandingAmount,
+    sourcePayments,
+    timeline: [currentEntry, ...historyEntries],
+  };
+}
+
 
 export function InvoiceModal({
   open,
@@ -351,6 +580,7 @@ export function InvoiceModal({
   presentation = 'modal',
   relatedPayments = [],
   paymentsLoading = false,
+  onRefreshRequested,
   onAddRelatedPayment,
   onEditRelatedPayment,
   onDeleteRelatedPayment,
@@ -396,7 +626,9 @@ export function InvoiceModal({
   const [clientCasesError, setClientCasesError] = useState<string | null>(null);
   const [actsLoading, setActsLoading] = useState(false);
   const [actsError, setActsError] = useState<string | null>(null);
+  const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [numberEditedManually, setNumberEditedManually] = useState(false);
+  const [displayPayments, setDisplayPayments] = useState<Payment[]>(relatedPayments);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
@@ -496,6 +728,35 @@ export function InvoiceModal({
 
   const isIncome = form.type === 'Income';
   const isPageMode = presentation === 'page';
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadInvoiceRules() {
+      try {
+        const response = await apiService.getInvoiceRulesSettings();
+        if (!cancelled) {
+          setInvoiceRules({
+            maxClientCasesPerInvoice: Math.max(1, response.maxClientCasesPerInvoice || 1),
+            maxActsPerInvoice: Math.max(1, response.maxActsPerInvoice || 1),
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setInvoiceRules({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
+        }
+      }
+    }
+
+    void loadInvoiceRules();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     let cancelled = false;
@@ -630,13 +891,17 @@ export function InvoiceModal({
       setClientCasesError(null);
       setCreateActError(null);
       setLocalError(null);
-      setNumberEditedManually(Boolean(resumeDraft?.form.number));
+      setNumberEditedManually(Boolean(resumeDraft?.form?.number));
       if (presentation === 'page') {
         setPageViewMode(resumeDraft?.pageViewMode ?? true);
       }
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
   }, [open, invoice, resumeDraft, defaultClientId, defaultResponsibleId, defaultType, presentation]);
+
+  useEffect(() => {
+    setDisplayPayments(relatedPayments);
+  }, [relatedPayments]);
 
   useEffect(() => {
     if (!open || mode !== 'create') return;
@@ -823,6 +1088,11 @@ export function InvoiceModal({
   }, [form.clientId, open]);
 
   const handleActSelect = (act: ActOption) => {
+    if (!selectedActs.some((item) => item.id === act.id) && selectedActs.length >= invoiceRules.maxActsPerInvoice) {
+      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+      return;
+    }
+
     setSelectedActs((prev) => (prev.some((item) => item.id === act.id) ? prev : [...prev, act]));
   };
 
@@ -873,6 +1143,11 @@ export function InvoiceModal({
   };
 
   const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
+    if (!selectedClientCaseIds.includes(clientCase.id) && selectedClientCaseIds.length >= invoiceRules.maxClientCasesPerInvoice) {
+      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+      return;
+    }
+
     setSelectedClientCaseIds((prev) => (prev.includes(clientCase.id) ? prev : [...prev, clientCase.id]));
   };
 
@@ -908,7 +1183,15 @@ export function InvoiceModal({
       const next = [created, ...prev.filter((item) => item.id !== created.id)];
       return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
     });
-    setSelectedClientCaseIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
+    setSelectedClientCaseIds((prev) => {
+      if (prev.includes(created.id)) return prev;
+      if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
+        toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+        return prev;
+      }
+
+      return [...prev, created.id];
+    });
     setCaseDropdownOpen(false);
     setCreateCaseOpen(false);
   };
@@ -953,7 +1236,15 @@ export function InvoiceModal({
       };
 
       setActOptions((prev) => [option, ...prev.filter((item) => item.id !== option.id)]);
-      setSelectedActs((prev) => (prev.some((item) => item.id === option.id) ? prev : [...prev, option]));
+      setSelectedActs((prev) => {
+        if (prev.some((item) => item.id === option.id)) return prev;
+        if (prev.length >= invoiceRules.maxActsPerInvoice) {
+          toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+          return prev;
+        }
+
+        return [...prev, option];
+      });
       setActDropdownOpen(false);
       setCreateActOpen(false);
       setDraftAct({
@@ -979,6 +1270,13 @@ export function InvoiceModal({
     }
     setForm((prev) => ({ ...prev, [field]: value }));
   };
+
+  const statusSnapshot = useMemo(
+    () => buildInvoiceStatusSnapshot(displayPayments, form.status, form.dueDate, form.amount),
+    [displayPayments, form.amount, form.dueDate, form.status],
+  );
+
+  const effectiveInvoiceStatus = form.status;
 
 
   const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
@@ -1055,6 +1353,16 @@ export function InvoiceModal({
       return;
     }
 
+    if (selectedClientCaseIds.length > invoiceRules.maxClientCasesPerInvoice) {
+      setLocalError(`В счёте можно указать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`);
+      return;
+    }
+
+    if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
+      setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
+      return;
+    }
+
     const payload = buildInvoicePayload();
     payload.number = number;
 
@@ -1122,6 +1430,10 @@ export function InvoiceModal({
     });
   };
 
+  const deferClose = useCallback((callback: () => void) => {
+    window.setTimeout(callback, 160);
+  }, []);
+
 
   const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
@@ -1180,6 +1492,7 @@ export function InvoiceModal({
         const payload = buildInvoicePayload();
         payload.number = `${form.number || 'Счёт'} (копия)`;
         await apiService.createInvoice(payload);
+        await onRefreshRequested?.();
         toast.success('Создана копия текущего счета.', 'Копия создана');
         return;
       }
@@ -1189,6 +1502,18 @@ export function InvoiceModal({
         const payload = buildInvoicePayload(nextStatus);
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
+        setDisplayPayments((prev) => prev.map((payment) => (
+          payment.documentKind === 'Invoice'
+            ? {
+                ...payment,
+                status: nextStatus,
+                paidDate: nextStatus === 'Completed'
+                  ? (form.paidDate || payment.paidDate || formatLocalYMD(new Date()))
+                  : undefined,
+              }
+            : payment
+        )));
+        await onRefreshRequested?.();
         toast.success(
           action === 'paid' ? 'Статус счета обновлен: оплачен.' : 'Статус счета обновлен: отменен.',
           'Счет обновлен',
@@ -1198,8 +1523,9 @@ export function InvoiceModal({
 
       if (action === 'delete' && invoice?.id) {
         await apiService.deleteInvoice(invoice.id);
+        await onRefreshRequested?.();
         toast.success('Счет удален.');
-        onClose();
+        deferClose(onClose);
         return;
       }
     } catch (err) {
@@ -1218,7 +1544,6 @@ export function InvoiceModal({
     Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
     Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
   };
-  const currentStatusMeta = statusMeta[form.status] ?? statusMeta.Pending;
   const relatedPaymentStatusMeta: Record<PaymentStatus, string> = {
     Pending: 'bg-slate-100 text-slate-700',
     Processing: 'bg-blue-100 text-blue-700',
@@ -1233,6 +1558,23 @@ export function InvoiceModal({
     Cancelled: t('cancelledStatus') ?? 'Отменён',
     Overdue: t('overdue') ?? 'Просрочен',
   };
+  const invoiceStatusMeta: Record<PaymentStatus, { label: string; className: string }> = {
+    Pending: { label: 'Не оплачен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'Частично оплачен', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'Отменен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Overdue: { label: 'Просрочен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+  };
+  const invoicePaymentStatusLabel: Record<PaymentStatus, string> = {
+    Pending: 'Не оплачен',
+    Processing: 'Частично оплачен',
+    Completed: 'Оплачен',
+    Cancelled: t('cancelledStatus') ?? 'Отменён',
+    Overdue: t('overdue') ?? 'Просрочен',
+  };
+  const currentStatusMeta = invoiceStatusMeta[effectiveInvoiceStatus] ?? invoiceStatusMeta.Pending;
+  void statusMeta;
+  void relatedPaymentStatusLabel;
   const canManageRelatedPayments = mode === 'edit' && !!invoice?.invoiceEntityId;
   const canShowRelatedPaymentActions = mode === 'edit' && !!onAddRelatedPayment;
   const createCaseStub = useMemo<ClientCase>(() => ({
@@ -1243,6 +1585,74 @@ export function InvoiceModal({
     status: 'Open',
     createdAt: new Date().toISOString(),
   }), [form.clientId]);
+  const statusHistorySection = (
+    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Статус счета</p>
+          <span
+            className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
+            title="Количество связанных платежей"
+          >
+            {statusSnapshot.sourcePayments.length}
+          </span>
+        </div>
+        <div className="flex justify-center">
+          <span className={`inline-flex min-w-[180px] items-center justify-center rounded-full px-4 py-2 text-sm font-semibold ${currentStatusMeta.className}`}>
+            {currentStatusMeta.label}
+          </span>
+        </div>
+        <p className="text-center text-sm text-slate-600">{statusSnapshot.reason}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Оплачено</div>
+            <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.paidAmount).full}</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Остаток</div>
+            <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.outstandingAmount).full}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-slate-200 pt-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Хроника статуса</p>
+            <p className="mt-1 text-xs text-slate-500">Изменения собираются по связанным платежам и самому счету.</p>
+          </div>
+          <span
+            className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
+            title="Количество записей в хронике"
+          >
+            {statusSnapshot.timeline.length}
+          </span>
+        </div>
+
+        <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+          {statusSnapshot.timeline.map((entry) => (
+            <div
+              key={entry.key}
+              className={`rounded-xl border px-3 py-3 ${
+                entry.isCurrent
+                  ? 'border-blue-200 bg-blue-50/80'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900">{entry.title}</p>
+                  <p className="mt-1 text-sm text-slate-600">{entry.description}</p>
+                </div>
+                <span className="whitespace-nowrap text-xs text-slate-400">{entry.timestampLabel}</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">{entry.sourceLabel}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
   const documentsSection = (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
       <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
@@ -1922,13 +2332,13 @@ export function InvoiceModal({
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('loading') ?? 'Загрузка...'}
                   </div>
-                ) : relatedPayments.length === 0 ? (
+                ) : displayPayments.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                     Связанные платежи пока не добавлены.
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {relatedPayments.map((payment) => (
+                    {displayPayments.map((payment) => (
                       <div
                         key={payment.id}
                         className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
@@ -1943,7 +2353,7 @@ export function InvoiceModal({
                                 relatedPaymentStatusMeta[payment.status] ?? relatedPaymentStatusMeta.Pending
                               }`}
                             >
-                              {relatedPaymentStatusLabel[payment.status] ?? relatedPaymentStatusLabel.Pending}
+                              {invoicePaymentStatusLabel[payment.status] ?? invoicePaymentStatusLabel.Pending}
                             </span>
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
@@ -2110,6 +2520,7 @@ export function InvoiceModal({
                               />
                             </label>
                           </div>
+                          {statusHistorySection}
                         </section>
 
             </div>

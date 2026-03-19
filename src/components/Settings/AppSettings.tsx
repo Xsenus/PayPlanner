@@ -9,6 +9,7 @@ import type {
   InvoiceCounterpartyCleanupResultDto,
   InvoiceLegacyMigrationSummaryDto,
   InvoiceNumberingSettingsDto,
+  InvoiceRulesSettingsDto,
   LegacyAddressMigrationResult,
 } from '../../services/api';
 
@@ -49,6 +50,9 @@ export function AppSettings() {
   const [invoiceNumbering, setInvoiceNumbering] = useState<InvoiceNumberingSettingsDto>({ startNumber: 1, allocationStrategy: 'max-plus-one' });
   const [invoiceNumberingLoading, setInvoiceNumberingLoading] = useState(false);
   const [invoiceNumberingMessage, setInvoiceNumberingMessage] = useState<string | null>(null);
+  const [invoiceRules, setInvoiceRules] = useState<InvoiceRulesSettingsDto>({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
+  const [invoiceRulesLoading, setInvoiceRulesLoading] = useState(false);
+  const [invoiceRulesMessage, setInvoiceRulesMessage] = useState<string | null>(null);
   const [invoiceCounterpartyCleanupLoading, setInvoiceCounterpartyCleanupLoading] = useState(false);
   const [invoiceCounterpartyCleanupMessage, setInvoiceCounterpartyCleanupMessage] = useState<string | null>(null);
   const [invoiceCounterpartyCleanupResult, setInvoiceCounterpartyCleanupResult] = useState<InvoiceCounterpartyCleanupResultDto | null>(null);
@@ -302,6 +306,48 @@ export function AppSettings() {
     }
   };
 
+  const loadInvoiceRules = async () => {
+    setInvoiceRulesLoading(true);
+    setInvoiceRulesMessage(null);
+    try {
+      const response = await apiService.getInvoiceRulesSettings();
+      setInvoiceRules(response);
+    } catch (e) {
+      setInvoiceRulesMessage(e instanceof Error ? e.message : 'Не удалось загрузить ограничения счёта');
+    } finally {
+      setInvoiceRulesLoading(false);
+    }
+  };
+
+  const saveInvoiceRules = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить ограничения по количеству дел и актов в счёте',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setInvoiceRulesLoading(true);
+    setInvoiceRulesMessage(null);
+    try {
+      const response = await apiService.updateInvoiceRulesSettings({
+        maxClientCasesPerInvoice: Math.max(1, Number(invoiceRules.maxClientCasesPerInvoice) || 1),
+        maxActsPerInvoice: Math.max(1, Number(invoiceRules.maxActsPerInvoice) || 1),
+      });
+      setInvoiceRules(response);
+      const message = 'Ограничения счёта сохранены';
+      setInvoiceRulesMessage(message);
+      toast.success(message, 'Настройки');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить ограничения счёта');
+      setInvoiceRulesMessage(message);
+      toast.error(message, 'Настройки');
+    } finally {
+      setInvoiceRulesLoading(false);
+    }
+  };
+
   const runInvoiceCounterpartyCleanup = async () => {
     const approved = await confirm({
       title: 'Подтверждение очистки',
@@ -392,6 +438,7 @@ export function AppSettings() {
     }
     if (activeSection === 'general') {
       void loadInvoiceNumbering();
+      void loadInvoiceRules();
     }
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
@@ -546,6 +593,49 @@ export function AppSettings() {
                     {invoiceNumberingLoading ? 'Сохранение…' : 'Сохранить'}
                   </button>
                   {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
+                </div>
+
+                <div className="border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-900">Ограничения счёта</h4>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Временно можно ограничить количество связанных дел и актов в одном счёте. Ограничение действует и в форме, и на сервере.
+                  </p>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700">Максимум дел в счёте</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={invoiceRules.maxClientCasesPerInvoice}
+                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxClientCasesPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700">Максимум актов в счёте</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={invoiceRules.maxActsPerInvoice}
+                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxActsPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveInvoiceRules}
+                      disabled={invoiceRulesLoading}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {invoiceRulesLoading ? 'Сохранение…' : 'Сохранить ограничения'}
+                    </button>
+                    {invoiceRulesMessage && <span className="text-sm text-gray-600">{invoiceRulesMessage}</span>}
+                  </div>
                 </div>
 
                 <div className="border-t border-gray-200 pt-4">

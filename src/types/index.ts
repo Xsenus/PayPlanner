@@ -770,7 +770,7 @@ export interface AccountRegistryRow {
   totalAmount: number;
   dueDate?: string | null;
   paidDate?: string | null;
-  status: 'created' | 'paid' | 'partial' | 'cancelled';
+  status: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
   type: 'Income' | 'Expense';
   isOverdue: boolean;
 }

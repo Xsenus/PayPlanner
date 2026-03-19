@@ -1455,6 +1455,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("LastPaymentDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("LegacyAccountDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("LegacyAccountNumber")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -1528,6 +1535,12 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("LastPaymentDate")
                         .HasDatabaseName("IX_Payments_LastPaymentDate");
 
+                    b.HasIndex("LegacyAccountDate")
+                        .HasDatabaseName("IX_Payments_LegacyAccountDate");
+
+                    b.HasIndex("LegacyAccountNumber")
+                        .HasDatabaseName("IX_Payments_LegacyAccountNumber");
+
                     b.HasIndex("PaymentSourceId")
                         .HasDatabaseName("IX_Payments_PaymentSourceId");
 
@@ -1554,6 +1567,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsPaid", "Status")
                         .HasDatabaseName("IX_Payments_IsPaid_Status");
+
+                    b.HasIndex("LegacyAccountNumber", "LegacyAccountDate")
+                        .HasDatabaseName("IX_Payments_LegacyAccount_LegacyAccountDate");
 
                     b.HasIndex("Type", "Status", "Date")
                         .HasDatabaseName("IX_Payments_Type_Status_Date");
@@ -1876,6 +1892,40 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_ServiceLanguageDictionaryItems_IsActive_Name");
 
                     b.ToTable("ServiceLanguages");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SystemSettings_Key");
+
+                    b.ToTable("SystemSettings");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>

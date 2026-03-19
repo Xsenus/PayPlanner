@@ -239,7 +239,23 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     switch (columnKey) {
       case 'date': return <span className="font-medium text-slate-900">{formatDate(invoice.date)}</span>;
       case 'number': return <span className="font-medium text-slate-900">{invoice.number}</span>;
-      case 'counterparty': return <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><span className="font-medium text-slate-900">{primaryName}</span><ClientStatusBadge status={invoice.clientStatus} /><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClasses[type]}`}>{typeLabels[type]}</span></div>{extraLines.map((line, index) => <div key={`${line}-${index}`} className="text-xs text-slate-500">{line}</div>)}</div>;
+      case 'counterparty':
+        return (
+          <div className="flex min-w-0 flex-col items-start gap-1 text-left">
+            <div className="w-full truncate font-medium text-slate-900" title={primaryName}>
+              {primaryName}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ClientStatusBadge status={invoice.clientStatus} />
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClasses[type]}`}>{typeLabels[type]}</span>
+            </div>
+            {extraLines.map((line, index) => (
+              <div key={`${line}-${index}`} className="w-full truncate text-xs text-slate-500" title={line}>
+                {line}
+              </div>
+            ))}
+          </div>
+        );
       case 'amount': return <span className="font-semibold text-slate-900">{formatCurrencySmart(invoice.amount).full}</span>;
       case 'status': return <div className="space-y-1"><span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[status]}`}>{statusLabels[status]}</span>{invoice.paymentStatusName ? <div className="text-xs text-slate-500">{invoice.paymentStatusName}</div> : null}</div>;
       case 'responsible': return invoice.responsibles?.length ? invoice.responsibles.map((item) => item.fullName).join(', ') : invoice.responsibleName || '—';

@@ -59,7 +59,7 @@ interface AccountsProps {
 }
 
 type FilterType = PaymentKind | 'All';
-type AccountStatus = 'created' | 'paid' | 'partial' | 'cancelled';
+type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
 type ColumnKey =
   | 'date'
   | 'number'
@@ -142,6 +142,7 @@ const ACCOUNT_COLUMNS = [
 function deriveAccountStatus(invoice: Invoice): AccountStatus {
   if (invoice.status === 'Completed') return 'paid';
   if (invoice.status === 'Cancelled') return 'cancelled';
+  if (invoice.status === 'Overdue') return 'overdue';
   if (invoice.status === 'Pending') return 'created';
   return 'partial';
 }
@@ -157,8 +158,11 @@ function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null
   const allPaid = payments.every((payment) => payment.status === 'Completed');
   if (allPaid) return 'paid';
 
+  const anyOverdue = payments.some((payment) => payment.status === 'Overdue');
+  if (anyOverdue) return 'overdue';
+
   const anyProgress = payments.some(
-    (payment) => payment.status === 'Completed' || payment.status === 'Processing' || payment.status === 'Overdue',
+    (payment) => payment.status === 'Completed' || payment.status === 'Processing' || payment.hasPartialPayment || payment.paidAmount > 0,
   );
 
   return anyProgress ? 'partial' : 'created';
@@ -363,7 +367,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
   }, [page, totalPages]);
 
-  const statusLabels: Record<AccountStatus, string> = {
+  const deferEditorClose = useCallback((callback: () => void) => {
+    window.setTimeout(callback, 160);
+  }, []);
+
+  const statusLabels: Partial<Record<AccountStatus, string>> = {
     created: 'Создан',
     paid: 'Оплачен',
     partial: 'Оплачен частично',
@@ -377,12 +385,30 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
   };
 
-  const statusClasses: Record<AccountStatus, string> = {
+  const statusClasses: Partial<Record<AccountStatus, string>> = {
     created: 'bg-amber-100 text-amber-700 border border-amber-200',
     paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     partial: 'bg-blue-100 text-blue-700 border border-blue-200',
     cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
   };
+
+  const accountStatusLabels: Record<AccountStatus, string> = {
+    created: 'Не оплачен',
+    paid: 'Оплачен',
+    partial: 'Частично оплачен',
+    overdue: 'Просрочен',
+    cancelled: t('cancelledStatus') ?? 'Отменён',
+  };
+
+  const accountStatusClasses: Record<AccountStatus, string> = {
+    created: 'bg-amber-100 text-amber-700 border border-amber-200',
+    paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    partial: 'bg-blue-100 text-blue-700 border border-blue-200',
+    overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
+    cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
+  };
+  void statusLabels;
+  void statusClasses;
 
   const typeLabels: Record<PaymentKind, string> = {
     Income: t('invoiceTypeIncome') ?? 'Доходные счета',
@@ -544,7 +570,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
 
     if (draft.mode === 'create') {
       openCreateModal(draft);
-      toast.error(extractDisplayErrorMessage(err, 'Не удалось сохранить счет.'));
+      return;
     }
 
     if (!draft.invoiceId) {
@@ -603,7 +629,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
         await apiService.updateInvoice(pageEditingInvoiceId, payload);
         toast.success('Изменения по счету сохранены.', 'Счет обновлен');
         await refreshAccounts();
-        closeEditPage();
+        deferEditorClose(closeEditPage);
       } else {
         await apiService.createInvoice(payload);
         if (page !== 1) {
@@ -612,7 +638,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           await refreshAccounts();
         }
         toast.success('Счет успешно создан.', 'Счет сохранен');
-        closeModal();
+        deferEditorClose(closeModal);
       }
     } catch (err) {
       const message = extractDisplayErrorMessage(err, 'Не удалось сохранить счет.');
@@ -1260,6 +1286,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           lockType={lockType}
           relatedPayments={currentPageAccountRow?.payments ?? []}
           paymentsLoading={isLoading || isRefreshing}
+          onRefreshRequested={refreshAccounts}
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
           onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
@@ -1380,10 +1407,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   >
                     <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-                    <option value="created">{statusLabels.created}</option>
-                    <option value="partial">{statusLabels.partial}</option>
-                    <option value="paid">{statusLabels.paid}</option>
-                    <option value="cancelled">{statusLabels.cancelled}</option>
+                    <option value="created">{accountStatusLabels.created}</option>
+                    <option value="partial">{accountStatusLabels.partial}</option>
+                    <option value="overdue">{accountStatusLabels.overdue}</option>
+                    <option value="paid">{accountStatusLabels.paid}</option>
+                    <option value="cancelled">{accountStatusLabels.cancelled}</option>
                   </select>
                 </label>
               </div>
@@ -1643,20 +1671,22 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                               case 'counterparty':
                                 return (
                                   <td key={column.key} className="px-4 py-3">
-                                    <div className="flex flex-col gap-1">
-                                      <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex min-w-0 flex-col items-start gap-1 text-left">
+                                      <div className="w-full min-w-0">
                                         {clientId && canOpenClientFromAccounts ? (
                                           <button
                                             type="button"
                                             onClick={(event) => { event.stopPropagation(); onOpenClient?.(clientId); }}
-                                            className="font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
-                                            title="Открыть карточку клиента"
+                                            className="block w-full truncate text-left font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
+                                            title={primaryName}
                                           >
                                             {primaryName}
                                           </button>
                                         ) : (
-                                          <span className="font-medium text-gray-900">{primaryName}</span>
+                                          <span className="block w-full truncate font-medium text-gray-900" title={primaryName}>{primaryName}</span>
                                         )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2">
                                         <ClientStatusBadge status={invoice?.clientStatus} />
                                         <span
                                           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
@@ -1664,9 +1694,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                           {typeLabel}
                                         </span>
                                       </div>
-                                      {invoice?.clientCompany && <div className="text-xs text-gray-500">{invoice.clientCompany}</div>}
+                                      {invoice?.clientCompany && <div className="w-full truncate text-xs text-gray-500" title={invoice.clientCompany}>{invoice.clientCompany}</div>}
                                       {caseLines.length > 0 && (
-                                        <div className="text-xs text-gray-500">
+                                        <div className="w-full truncate text-xs text-gray-500" title={`${(t('cases') ?? 'Дела')}: ${caseLines.join(', ')}`}>
                                           {(t('cases') ?? 'Дела')}: {caseLines.join(', ')}
                                         </div>
                                       )}
@@ -1677,9 +1707,9 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                 return (
                                   <td key={column.key} className="px-4 py-3">
                                     <span
-                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClasses[accountStatus]}`}
+                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${accountStatusClasses[accountStatus]}`}
                                     >
-                                      {statusLabels[accountStatus]}
+                                      {accountStatusLabels[accountStatus]}
                                     </span>
                                     {invoice?.paymentStatusName && <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>}
                                   </td>
@@ -1841,8 +1871,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                                             {formatCurrencySmart(payment.amount).full}
                                           </td>
                                           <td className="px-4 py-2">
-                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                                              {statusLabels[deriveStatusFromPayments([payment], invoice)]}
+                                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusClasses[deriveStatusFromPayments([payment], invoice)]}`}>
+                                              {accountStatusLabels[deriveStatusFromPayments([payment], invoice)]}
                                             </span>
                                           </td>
                                           <td className="px-4 py-2 text-gray-600">{payment.description || '—'}</td>
@@ -1974,6 +2004,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
+          onRefreshRequested={refreshAccounts}
         />
 
         <ActModal

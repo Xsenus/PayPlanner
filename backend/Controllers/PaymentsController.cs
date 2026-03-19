@@ -279,17 +279,34 @@ public class PaymentsController : ControllerBase
 
     private async Task SyncInvoiceLinkAsync(Payment payment, CancellationToken ct)
     {
+        var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
+        var originalAccountDate = (payment.AccountDate ?? payment.Date).Date;
         var invoice = await ResolveInvoiceAsync(payment, ct);
         if (invoice is null)
         {
             payment.InvoiceId = null;
 
-            var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
             payment.Account = normalizedAccount;
             payment.AccountDate = normalizedAccount is null
                 ? null
-                : (payment.AccountDate ?? payment.Date).Date;
+                : originalAccountDate;
+            if (normalizedAccount is null)
+            {
+                payment.LegacyAccountNumber = null;
+                payment.LegacyAccountDate = null;
+            }
             return;
+        }
+
+        if (string.IsNullOrWhiteSpace(payment.LegacyAccountNumber) && normalizedAccount is not null)
+        {
+            var normalizedInvoiceNumber = NormalizeInvoiceNumber(invoice.Number);
+            if (!string.Equals(normalizedAccount, normalizedInvoiceNumber, StringComparison.OrdinalIgnoreCase)
+                || originalAccountDate != invoice.Date.Date)
+            {
+                payment.LegacyAccountNumber = normalizedAccount;
+                payment.LegacyAccountDate = originalAccountDate;
+            }
         }
 
         payment.InvoiceId = invoice.Id;
@@ -309,24 +326,118 @@ public class PaymentsController : ControllerBase
             }
         }
 
-        var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
-        if (normalizedAccount is null)
+        var lookupCandidates = BuildLookupCandidates(payment);
+        if (lookupCandidates.Count == 0)
         {
             return null;
         }
 
-        var invoiceYear = (payment.AccountDate ?? payment.Date).Date.Year;
-        var lookup = normalizedAccount.ToLowerInvariant();
+        foreach (var candidate in lookupCandidates)
+        {
+            var resolved = await ResolveInvoiceByPaymentHistoryAsync(payment, candidate.Number, candidate.Date, ct);
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
 
-        return await _db.Invoices.AsNoTracking()
-            .Where(x => x.Number.ToLower() == lookup && x.Date.Year == invoiceYear)
-            .OrderByDescending(x => x.Date)
-            .ThenByDescending(x => x.Id)
-            .FirstOrDefaultAsync(ct);
+        return null;
     }
 
     private static string? NormalizeInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<Invoice?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct)
+    {
+        if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0)
+        {
+            return null;
+        }
+
+        var normalizedLookup = lookupNumber.ToLowerInvariant();
+        var caseId = payment.ClientCaseId is > 0 ? payment.ClientCaseId : null;
+        var lookupYear = lookupDate.Year;
+
+        var candidates = await _db.Payments
+            .AsNoTracking()
+            .Where(x => x.InvoiceId.HasValue && x.ClientId == payment.ClientId.Value && x.Type == payment.Type)
+            .Where(x => caseId.HasValue
+                ? x.ClientCaseId == caseId.Value || x.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value)
+                : x.ClientCaseId == null && !x.InvoiceClientCases.Any())
+            .Where(x =>
+                (x.LegacyAccountNumber != null
+                    && x.LegacyAccountNumber.ToLower() == normalizedLookup
+                    && (x.LegacyAccountDate ?? x.AccountDate ?? x.Date).Year == lookupYear)
+                || (x.Account != null
+                    && x.Account.ToLower() == normalizedLookup
+                    && (x.AccountDate ?? x.Date).Year == lookupYear))
+            .Select(x => new
+            {
+                InvoiceId = x.InvoiceId!.Value,
+                ExactLegacyDate = x.LegacyAccountNumber != null
+                    && x.LegacyAccountNumber.ToLower() == normalizedLookup
+                    && x.LegacyAccountDate.HasValue
+                    && x.LegacyAccountDate.Value.Date == lookupDate.Date,
+                ExactAccountDate = x.Account != null
+                    && x.Account.ToLower() == normalizedLookup
+                    && x.AccountDate.HasValue
+                    && x.AccountDate.Value.Date == lookupDate.Date,
+                IsInvoiceDocument = x.DocumentKind == DocumentKind.Invoice,
+                x.CreatedAt,
+                x.Id,
+            })
+            .ToListAsync(ct);
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var invoiceId = candidates
+            .GroupBy(x => x.InvoiceId)
+            .OrderByDescending(group => group.Max(item => item.ExactLegacyDate ? 3 : item.ExactAccountDate ? 2 : item.IsInvoiceDocument ? 1 : 0))
+            .ThenByDescending(group => group.Count())
+            .ThenByDescending(group => group.Max(item => item.CreatedAt))
+            .ThenByDescending(group => group.Max(item => item.Id))
+            .Select(group => group.Key)
+            .FirstOrDefault();
+
+        if (invoiceId <= 0)
+        {
+            return null;
+        }
+
+        return await _db.Invoices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == invoiceId, ct);
+    }
+
+    private static List<(string Number, DateTime Date)> BuildLookupCandidates(Payment payment)
+    {
+        var candidates = new List<(string Number, DateTime Date)>();
+
+        void Add(string? number, DateTime? date)
+        {
+            var normalized = NormalizeInvoiceNumber(number);
+            if (normalized is null)
+            {
+                return;
+            }
+
+            var effectiveDate = (date ?? payment.Date).Date;
+            if (candidates.Any(item => string.Equals(item.Number, normalized, StringComparison.OrdinalIgnoreCase) && item.Date == effectiveDate))
+            {
+                return;
+            }
+
+            candidates.Add((normalized, effectiveDate));
+        }
+
+        Add(payment.LegacyAccountNumber, payment.LegacyAccountDate);
+        Add(payment.Account, payment.AccountDate);
+
+        return candidates;
+    }
 
     private static string MergeSystemNotes(string original, string? incoming)
     {

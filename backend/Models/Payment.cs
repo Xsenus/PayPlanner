@@ -22,6 +22,8 @@ namespace PayPlanner.Api.Models
         /// Внешний ключ на счёт.
         /// </summary>
         public int? InvoiceId { get; set; }
+        public string? LegacyAccountNumber { get; set; }
+        public DateTime? LegacyAccountDate { get; set; }
 
         /// <summary>
         /// Навигация на счёт.
