@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Payment, PaymentStatus, ClientCase, PaymentPayload, Invoice, InvoiceInput, ActResponsible } from '../../types';
+import type { Payment, PaymentStatus, Client, ClientCase, PaymentPayload, Invoice, InvoiceInput, ActResponsible } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
@@ -134,6 +134,20 @@ export function PaymentModal({
     () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
     [clients, formData.clientId],
   );
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientPickerSearch, setClientPickerSearch] = useState('');
+  const filteredClients = useMemo(() => {
+    const query = clientPickerSearch.trim().toLowerCase();
+    if (!query) {
+      return clients;
+    }
+
+    return clients.filter((client) =>
+      [client.name, client.company, client.email, client.phone]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [clientPickerSearch, clients]);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -252,7 +266,9 @@ export function PaymentModal({
           clientId,
           caseId,
           type: formData.type,
-          search: invoiceSearch.trim() || formData.account.trim() || undefined,
+          search:
+            invoiceSearch.trim() ||
+            (!formData.invoiceId && formData.account.trim() ? formData.account.trim() : undefined),
           page: 1,
           pageSize: 20,
         });
@@ -335,6 +351,11 @@ export function PaymentModal({
       prevOpenRef.current = false;
       setSyncDateWithPayment(false);
       setDetailsTab('details');
+      setClientPickerOpen(false);
+      setClientPickerSearch('');
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -368,6 +389,8 @@ export function PaymentModal({
           rescheduleCount: p.rescheduleCount ?? 0,
         });
         setSyncDateWithPayment(Boolean(p.hasPartialPayment && p.lastPaymentDate));
+        setClientPickerOpen(false);
+        setClientPickerSearch('');
         setInvoicePickerOpen(false);
         setInvoiceSearch('');
         setInvoicePickerError(null);
@@ -397,6 +420,8 @@ export function PaymentModal({
           rescheduleCount: 0,
         });
         setSyncDateWithPayment(false);
+        setClientPickerOpen(false);
+        setClientPickerSearch('');
         setInvoicePickerOpen(false);
         setInvoiceSearch('');
         setInvoicePickerError(null);
@@ -414,14 +439,24 @@ export function PaymentModal({
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (clientPickerOpen) {
+          setClientPickerOpen(false);
+          return;
+        }
+        if (invoicePickerOpen) {
+          setInvoicePickerOpen(false);
+          return;
+        }
+        onClose();
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
         formRef.current?.requestSubmit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  }, [clientPickerOpen, invoicePickerOpen, isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -806,6 +841,40 @@ export function PaymentModal({
     }
   };
 
+  const openClientPicker = () => {
+    if (hasLockedInvoice) {
+      return;
+    }
+
+    setClientPickerSearch('');
+    setClientPickerOpen(true);
+  };
+
+  const handleClientPick = (client: Client) => {
+    setFormData((prev) => ({
+      ...prev,
+      clientId: String(client.id),
+      clientCaseId: '',
+      invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+      account: hasLockedInvoice ? prev.account : '',
+      accountDate: hasLockedInvoice ? prev.accountDate : '',
+    }));
+    setClientPickerOpen(false);
+    setInvoicePickerOpen(false);
+    setInvoiceSearch('');
+    setInvoicePickerError(null);
+  };
+
+  const openInvoicePicker = () => {
+    if (hasLockedInvoice || !formData.clientId) {
+      return;
+    }
+
+    setInvoiceSearch('');
+    setInvoicePickerError(null);
+    setInvoicePickerOpen(true);
+  };
+
   const applyInvoiceSelection = (invoice: Invoice) => {
     const canonicalId = invoice.invoiceEntityId;
     if (!canonicalId || canonicalId <= 0) {
@@ -922,6 +991,10 @@ export function PaymentModal({
         account: hasLockedInvoice ? prev.account : '',
         accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
+      setClientPickerOpen(false);
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -934,6 +1007,9 @@ export function PaymentModal({
         account: hasLockedInvoice ? prev.account : '',
         accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -945,6 +1021,9 @@ export function PaymentModal({
         account: hasLockedInvoice ? prev.account : '',
         accountDate: hasLockedInvoice ? prev.accountDate : '',
       }));
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
       return;
     }
 
@@ -1009,7 +1088,7 @@ export function PaymentModal({
 
   const modal = (
     <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-xl max-w-6xl w-full max-h-[92vh] shadow-2xl flex flex-col">
+      <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/95 px-6 py-4 backdrop-blur">
           <div>
             <p className="text-xs uppercase tracking-[0.08em] text-gray-500">
@@ -1342,12 +1421,44 @@ export function PaymentModal({
                         <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
                       ) : null}
                     </div>
+                    <div className="mb-2 flex gap-2">
+                      <input
+                        type="text"
+                        value={selectedClient?.name ?? ''}
+                        readOnly
+                        placeholder={t('selectClient')}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={openClientPicker}
+                        disabled={hasLockedInvoice || clientsLoading}
+                        className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={t('selectClient') ?? 'Выбрать клиента'}>
+                        <UserRoundSearch className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {clientsLoading ? (
+                      <div className="mb-2 text-xs text-gray-500">{t('loading') ?? 'Загрузка...'}</div>
+                    ) : null}
+                    {(selectedClient?.company || selectedClient?.responsibleUserName) ? (
+                      <div className="mb-2 space-y-1 rounded-xl border border-gray-100 bg-gray-50 p-2">
+                        {selectedClient?.company ? (
+                          <div className="text-xs text-gray-600">{selectedClient.company}</div>
+                        ) : null}
+                        {selectedClient?.responsibleUserName ? (
+                          <div className="text-xs text-gray-500">Ответственный: {selectedClient.responsibleUserName}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <select
                       name="clientId"
                       value={formData.clientId}
                       onChange={handleChange}
                       disabled={hasLockedInvoice}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="hidden">
                       <option value="">{t('selectClient')}</option>
                       {clients.map((client) => (
                         <option key={client.id} value={client.id}>
@@ -1465,10 +1576,10 @@ export function PaymentModal({
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                onClick={() => setInvoicePickerOpen((prev) => !prev)}
+                                onClick={openInvoicePicker}
                                 disabled={!formData.clientId}
                                 className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
-                                {invoicePickerOpen ? '\u0421\u043a\u0440\u044b\u0442\u044c \u0441\u043f\u0438\u0441\u043e\u043a' : '\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0441\u0447\u0451\u0442'}
+                                {selectedInvoiceSummary ? 'Сменить счёт' : 'Выбрать счёт'}
                               </button>
                               <button
                                 type="button"
@@ -1500,7 +1611,7 @@ export function PaymentModal({
                           </div>
                         )}
 
-                        {!hasLockedInvoice && invoicePickerOpen && (
+                        {false && !hasLockedInvoice && invoicePickerOpen && (
                           <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3">
                             <input
                               type="text"
@@ -1678,6 +1789,154 @@ export function PaymentModal({
               </div>
             </div>
           </form>
+
+          {clientPickerOpen && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
+              <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-base font-semibold text-slate-900">Выбор клиента</h3>
+                  <button
+                    type="button"
+                    onClick={() => setClientPickerOpen(false)}
+                    className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={clientPickerSearch}
+                    onChange={(event) => setClientPickerSearch(event.target.value)}
+                    placeholder={t('search') ?? 'Поиск'}
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+
+                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                  {clientsLoading ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">{t('loading') ?? 'Загрузка...'}</div>
+                  ) : filteredClients.length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">Подходящие клиенты не найдены.</div>
+                  ) : (
+                    filteredClients.map((client) => (
+                      <button
+                        key={client.id}
+                        type="button"
+                        onClick={() => handleClientPick(client)}
+                        className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{client.name}</div>
+                          {client.company ? (
+                            <div className="mt-1 truncate text-xs text-slate-500">{client.company}</div>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {client.clientStatus?.name ? (
+                            <div className="text-xs text-slate-500">{client.clientStatus.name}</div>
+                          ) : (
+                            <div className="text-xs text-slate-400">Клиент</div>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {invoicePickerOpen && !hasLockedInvoice && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
+              <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-base font-semibold text-slate-900">Выбор счёта</h3>
+                  <button
+                    type="button"
+                    onClick={() => setInvoicePickerOpen(false)}
+                    className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={invoiceSearch}
+                    onChange={(event) => setInvoiceSearch(event.target.value)}
+                    placeholder="Поиск счёта по номеру, описанию или делу"
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+
+                {invoicePickerLoading ? (
+                  <div className="rounded-lg border border-slate-200 px-3 py-4 text-sm text-slate-500">Загрузка счетов...</div>
+                ) : invoicePickerError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-4 text-sm text-rose-700">
+                    {invoicePickerError}
+                  </div>
+                ) : invoiceOptions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                    Подходящие счета не найдены. Можно создать новый счёт из текущего платежа.
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                    {invoiceOptions.map((invoiceOption) => {
+                      const canonicalId = invoiceOption.invoiceEntityId;
+                      const selected = canonicalId && String(canonicalId) === formData.invoiceId;
+                      const caseLabel = invoiceOption.clientCases?.length
+                        ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
+                        : invoiceOption.clientCaseTitle;
+
+                      return (
+                        <button
+                          key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
+                          type="button"
+                          onClick={() => applyInvoiceSelection(invoiceOption)}
+                          className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 ${
+                            selected ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                          }`}>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">Счёт № {invoiceOption.number}</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {toRuDate(invoiceOption.date) || invoiceOption.date}
+                              {caseLabel ? ` • ${caseLabel}` : ''}
+                            </div>
+                            {invoiceOption.description ? (
+                              <div className="mt-1 truncate text-xs text-slate-400">{invoiceOption.description}</div>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-right">
+                            {invoiceOption.clientName ? (
+                              <div className="max-w-44 truncate text-xs text-slate-500">{invoiceOption.clientName}</div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setInvoicePickerOpen(false)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                    Закрыть
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateInvoiceFromPayment()}
+                    disabled={invoiceCreateSubmitting || !formData.clientId}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
+                    {invoiceCreateSubmitting ? 'Открываем...' : 'Создать счёт'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

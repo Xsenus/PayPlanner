@@ -3266,6 +3266,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               to={toDateStr}
               statusFilter={toStatsStatusFilter(statusFilter)}
               reloadToken={statsReloadToken}
+              storageKey={`pp.client-detail.stats_panels.${user?.id ?? 'guest'}`}
               className="mb-6"
             />
 

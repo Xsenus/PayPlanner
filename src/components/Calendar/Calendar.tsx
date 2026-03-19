@@ -578,6 +578,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             search={deferredSearch}
             reloadToken={statsReloadKey}
             rawPayments={payments}
+            storageKey={`pp.calendar.stats_panels.${user?.id ?? 'guest'}`}
             onCardSelect={handleStatCardSelect}
           />
         ) : (
