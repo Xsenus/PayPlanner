@@ -1,11 +1,9 @@
 import {
   ArrowDown,
   ArrowUp,
-  FileSignature,
   GripVertical,
   Loader2,
   Pencil,
-  RefreshCcw,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -285,108 +283,109 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
-      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 pt-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-              <FileSignature className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">{t('contracts') ?? 'Договоры'}</h1>
-              <p className="text-sm text-slate-500">
-                {t('contractsDescription') ?? 'Реестр договоров с общими настройками колонок и серверной пагинацией.'}
-              </p>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-slate-900">{t('contracts') ?? 'Договоры'}</h1>
+            <p className="max-w-2xl text-sm text-slate-600">
+              {t('contractsSubtitle') ?? 'Управляйте договорами и привязывайте их к клиентам.'}
+            </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setSettingsOpen((prev) => !prev)}
-              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
                 settingsOpen
                   ? 'border-blue-200 bg-blue-50 text-blue-700'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               <SlidersHorizontal className="h-4 w-4" />
-              {t('tableSettings') ?? 'Колонки'}
+              {t('tableSettings') ?? 'Таблица'}
             </button>
             <button
               type="button"
               onClick={() => void refresh()}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+              disabled={refreshing}
+              className={`inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 ${
+                refreshing ? 'cursor-wait opacity-70' : ''
+              }`}
             >
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              {t('refresh') ?? 'Обновить'}
+              <RotateCcw className={refreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+              {t('update') ?? 'Обновить'}
             </button>
             {permissions.canCreate ? (
               <button
                 type="button"
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
                 onClick={() => setActiveTab('contractCreate')}
               >
-                {t('create') ?? 'Создать'}
+                {t('contractsCreate') ?? t('create') ?? 'Новый договор'}
               </button>
             ) : null}
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
-          <label className="text-sm text-slate-700">
-            {t('fromDate') ?? 'С даты'}
-            <input
-              type="date"
-              value={toDateInputValue(from)}
-              onChange={(event) => setFrom(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-slate-700">
-            {t('toDate') ?? 'По дату'}
-            <input
-              type="date"
-              value={toDateInputValue(to)}
-              onChange={(event) => setTo(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-slate-700">
-            {t('client') ?? 'Клиент'}
-            <select
-              value={clientFilter}
-              onChange={(event) => setClientFilter(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-            >
-              <option value="all">{t('allClients') ?? 'Все клиенты'}</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-slate-700">
-            {t('search') ?? 'Поиск'}
-            <div className="relative mt-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsFrom') ?? 'С даты'}
               <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3"
-                placeholder={t('contractsSearchPlaceholder') ?? 'Номер, описание или участник договора'}
+                type="date"
+                value={toDateInputValue(from)}
+                onChange={(event) => setFrom(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
-            </div>
-          </label>
-          <div className="md:col-span-4 flex justify-end">
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsTo') ?? 'По дату'}
+              <input
+                type="date"
+                value={toDateInputValue(to)}
+                onChange={(event) => setTo(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
+              <select
+                value={clientFilter}
+                onChange={(event) => setClientFilter(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="all">{t('allClients') ?? 'Все клиенты'}</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              {t('search') ?? 'Поиск'}
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder={t('contractsSearchPlaceholder') ?? 'Поиск по номеру, названию или описанию договора'}
+                />
+              </div>
+            </label>
+          </div>
+          <div className="mt-4 flex justify-end">
             <button
               type="button"
               onClick={handleResetFilters}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-50"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
             >
               <RotateCcw className="h-4 w-4" />
-              {t('resetFilters') ?? 'Сбросить фильтры'}
+              {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
             </button>
           </div>
         </div>
@@ -428,7 +427,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
           </div>
         ) : null}
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1180px] table-fixed">
               <colgroup>
@@ -455,8 +454,8 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                         onDragStart={(event) => handleColumnDragStart(column.key, event)}
                         onDragEnd={handleColumnDragEnd}
                         className="absolute left-2 top-1/2 z-10 inline-flex -translate-y-1/2 cursor-grab rounded p-1 text-slate-400 active:cursor-grabbing"
-                        title="����������, ����� �������� �������"
-                        aria-label={`���������� ������� ${CONTRACT_COLUMN_LABELS[column.key]}, ����� �������� �������`}
+                        title="Перетащите, чтобы изменить порядок"
+                        aria-label={`Перетащите колонку ${CONTRACT_COLUMN_LABELS[column.key]}, чтобы изменить порядок`}
                       >
                         <GripVertical className="h-4 w-4" />
                       </button>
@@ -523,7 +522,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 ) : contracts.length === 0 ? (
                   <tr>
                     <td colSpan={visibleColumnsOrdered.length + 1} className="px-4 py-12 text-center text-slate-500">
-                      {t('contractsNotFound') ?? 'Договоры не найдены'}
+                      {t('contractsEmptyTitle') ?? 'Договоры отсутствуют'}
                     </td>
                   </tr>
                 ) : (
