@@ -1,5 +1,5 @@
 import { ArrowLeft, Loader2, Plus, Save, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
@@ -46,6 +46,8 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
   const toast = useToast();
   const [form, setForm] = useState<FormState>(createInitialForm);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [numberManuallyEdited, setNumberManuallyEdited] = useState(false);
+  const numberManuallyEditedRef = useRef(false);
   const [selectedClients, setSelectedClients] = useState<ContractClient[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [selectedPageSize, setSelectedPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
@@ -59,6 +61,37 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
   const [clientOptionsPageSize, setClientOptionsPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
   const [clientOptionsTotal, setClientOptionsTotal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    numberManuallyEditedRef.current = numberManuallyEdited;
+  }, [numberManuallyEdited]);
+
+  useEffect(() => {
+    if (!form.date || numberManuallyEdited) return;
+
+    let cancelled = false;
+    const requestDate = form.date;
+
+    const loadNextNumber = async () => {
+      try {
+        const nextNumber = await apiService.getNextContractNumber(fromInputToApiDate(requestDate) ?? requestDate);
+        if (cancelled) return;
+
+        setForm((prev) => {
+          if (prev.date !== requestDate || numberManuallyEditedRef.current) {
+            return prev;
+          }
+
+          return { ...prev, number: nextNumber };
+        });
+      } catch {}
+    };
+
+    void loadNextNumber();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.date, numberManuallyEdited]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -208,7 +241,17 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Номер договора</span>
-              <input type="text" value={form.number} onChange={(e) => setForm((prev) => ({ ...prev, number: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" required />
+              <input
+                type="text"
+                value={form.number}
+                onChange={(e) => {
+                  numberManuallyEditedRef.current = true;
+                  setNumberManuallyEdited(true);
+                  setForm((prev) => ({ ...prev, number: e.target.value }));
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Дата договора</span>

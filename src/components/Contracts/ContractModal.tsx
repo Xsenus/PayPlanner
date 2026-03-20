@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
 import type { Contract, ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
@@ -64,8 +64,11 @@ export function ContractModal({
   defaultClients,
 }: ContractModalProps) {
   const { t } = useTranslation();
+  const isEdit = mode === 'edit';
   const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract));
   const [localError, setLocalError] = useState<string | null>(null);
+  const [numberManuallyEdited, setNumberManuallyEdited] = useState(isEdit);
+  const numberManuallyEditedRef = useRef(isEdit);
   const [selectedClients, setSelectedClients] = useState<ContractClient[]>(
     () => contract?.clients ?? defaultClients ?? [],
   );
@@ -82,10 +85,42 @@ export function ContractModal({
       setSelectedClients(contract?.clients ?? defaultClients ?? []);
       setClientSearch('');
       setClientOptionsError(null);
+      setNumberManuallyEdited(isEdit);
+      numberManuallyEditedRef.current = isEdit;
     }
-  }, [open, contract, defaultClients]);
+  }, [open, contract, defaultClients, isEdit]);
 
-  const isEdit = mode === 'edit';
+  useEffect(() => {
+    numberManuallyEditedRef.current = numberManuallyEdited;
+  }, [numberManuallyEdited]);
+
+  useEffect(() => {
+    if (!open || isEdit || !form.date || numberManuallyEdited) return;
+
+    let cancelled = false;
+    const requestDate = form.date;
+
+    const loadNextNumber = async () => {
+      try {
+        const nextNumber = await apiService.getNextContractNumber(fromInputToApiDate(requestDate) ?? requestDate);
+        if (cancelled) return;
+
+        setForm((prev) => {
+          if (prev.date !== requestDate || numberManuallyEditedRef.current) {
+            return prev;
+          }
+
+          return { ...prev, number: nextNumber };
+        });
+      } catch {}
+    };
+
+    void loadNextNumber();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.date, isEdit, numberManuallyEdited, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -234,7 +269,14 @@ export function ContractModal({
               <input
                 type="text"
                 value={form.number}
-                onChange={(event) => setForm((prev) => ({ ...prev, number: event.target.value }))}
+                onChange={(event) => {
+                  if (!isEdit) {
+                    numberManuallyEditedRef.current = true;
+                    setNumberManuallyEdited(true);
+                  }
+
+                  setForm((prev) => ({ ...prev, number: event.target.value }));
+                }}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 required
               />

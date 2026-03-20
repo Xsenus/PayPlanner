@@ -556,6 +556,9 @@ export interface Contract {
   terminationDate?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  invoiceAmountTotal: number;
+  actAmountTotal: number;
+  paymentAmountTotal: number;
   clients: ContractClient[];
   actIds?: number[];
   invoiceIds?: number[];

@@ -107,6 +107,18 @@ const formatDate = (value?: string | null) => (value ? (toRuDate(value) || value
 const formatAmount = (value?: number | null) =>
   typeof value === 'number' ? value.toLocaleString('ru-RU') : '—';
 
+const formatAmountInput = (value?: number | null) => (typeof value === 'number' ? String(value) : '');
+
+function parseAmountInput(value: string): number | null | undefined {
+  const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  if (Number.isNaN(parsed) || parsed < 0) return undefined;
+
+  return parsed;
+}
+
 export function ContractDetailPage({
   contractId,
   onBack,
@@ -118,6 +130,7 @@ export function ContractDetailPage({
   const { user } = useAuth();
   const toast = useToast();
   const [contract, setContract] = useState<Contract | null>(null);
+  const [amountInput, setAmountInput] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('clients');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -264,6 +277,7 @@ export function ContractDetailPage({
         if (cancel) return;
 
         setContract(nextContract);
+        setAmountInput(formatAmountInput(nextContract.amount));
       } finally {
         if (!cancel) {
           setLoading(false);
@@ -530,13 +544,19 @@ export function ContractDetailPage({
   const save = async () => {
     if (!contract) return;
 
+    const parsedAmount = parseAmountInput(amountInput);
+    if (parsedAmount === undefined) {
+      toast.error('Введите корректную сумму договора', 'Договоры');
+      return;
+    }
+
     const payload: ContractInput = {
       number: contract.number,
       date: contract.date,
       startDate: contract.startDate,
       title: contract.title,
       description: contract.description,
-      amount: contract.amount,
+      amount: parsedAmount ?? undefined,
       validUntil: contract.validUntil,
       terminationDate: contract.terminationDate,
       clients: (contract.clients ?? []).map((client) => ({
@@ -550,7 +570,9 @@ export function ContractDetailPage({
 
     setSaving(true);
     try {
-      setContract(await apiService.updateContract(contract.id, payload));
+      const updatedContract = await apiService.updateContract(contract.id, payload);
+      setContract(updatedContract);
+      setAmountInput(formatAmountInput(updatedContract.amount));
       setEditMode(false);
       toast.success('Договор сохранён.', 'Договоры');
     } catch (error) {
@@ -709,6 +731,25 @@ export function ContractDetailPage({
           />
         </label>
 
+        <label className="text-sm">
+          Сумма договора
+          <input
+            value={amountInput}
+            disabled={!editMode}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setAmountInput(nextValue);
+
+              const parsedAmount = parseAmountInput(nextValue);
+              if (parsedAmount !== undefined) {
+                setContract((prev) => (prev ? { ...prev, amount: parsedAmount } : prev));
+              }
+            }}
+            className="mt-1 w-full rounded border px-2 py-1"
+            placeholder="0,00"
+          />
+        </label>
+
         <label className="text-sm md:col-span-2 lg:col-span-3">
           Описание
           <input
@@ -720,6 +761,25 @@ export function ContractDetailPage({
             className="mt-1 w-full rounded border px-2 py-1"
           />
         </label>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма договора</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.amount)}</div>
+        </div>
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма счетов</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.invoiceAmountTotal)}</div>
+        </div>
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма актов</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.actAmountTotal)}</div>
+        </div>
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма платежей</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.paymentAmountTotal)}</div>
+        </div>
       </div>
 
       <div className="mb-3 flex gap-2">

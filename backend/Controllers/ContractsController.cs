@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using Microsoft.AspNetCore.Authorization;
@@ -47,6 +48,18 @@ public class ContractsController : ControllerBase
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    [HttpGet("next-number")]
+    public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime date, [FromQuery] int? excludeId, CancellationToken ct)
+    {
+        if (date == default)
+        {
+            return ValidationError("date", "Дата договора обязательна.");
+        }
+
+        var number = await GenerateNextContractNumberAsync(date.Date, excludeId, ct);
+        return Ok(new { number });
+    }
+
     [HttpPost]
     public async Task<ActionResult<ContractDto>> Create([FromBody] UpsertContractRequest request, CancellationToken ct)
     {
@@ -54,7 +67,7 @@ public class ContractsController : ControllerBase
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
-        var normalized = await ValidateAndNormalizePayload(request, ct);
+        var normalized = await ValidateAndNormalizePayload(request, null, ct);
         if (normalized.Error is not null) return normalized.Error;
 
         var contract = new Contract
@@ -97,7 +110,7 @@ public class ContractsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
 
-        var normalized = await ValidateAndNormalizePayload(request, ct);
+        var normalized = await ValidateAndNormalizePayload(request, id, ct);
         if (normalized.Error is not null) return normalized.Error;
 
         contract.Number = normalized.Number!;
@@ -151,6 +164,9 @@ public class ContractsController : ControllerBase
         TerminationDate = contract.TerminationDate,
         CreatedAt = contract.CreatedAt,
         UpdatedAt = contract.UpdatedAt,
+        InvoiceAmountTotal = contract.ContractInvoices.Sum(x => (decimal?)x.Invoice.Amount) ?? 0m,
+        ActAmountTotal = contract.ContractActs.Sum(x => (decimal?)x.Act.Amount) ?? 0m,
+        PaymentAmountTotal = contract.ContractPayments.Sum(x => (decimal?)x.Payment.Amount) ?? 0m,
         Clients = contract.ClientContracts.Where(link => link.Client != null).Select(link => new ContractClientDto
         {
             Id = link.ClientId,
@@ -163,10 +179,17 @@ public class ContractsController : ControllerBase
         PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
     };
 
-    private async Task<(ActionResult? Error, string? Number, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)> ValidateAndNormalizePayload(UpsertContractRequest request, CancellationToken ct)
+    private async Task<(ActionResult? Error, string? Number, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)> ValidateAndNormalizePayload(UpsertContractRequest request, int? contractId, CancellationToken ct)
     {
         if (request.Date == default) return (ValidationError(nameof(request.Date), "Дата договора обязательна."), null, [], [], [], []);
         var number = Normalize(request.Number);
+        if (string.IsNullOrEmpty(number))
+        {
+            number = await GenerateNextContractNumberAsync(request.Date.Date, contractId, ct);
+        }
+
+        var duplicateNumberError = await EnsureContractNumberIsUniqueAsync(number!, contractId, ct);
+        if (duplicateNumberError is not null) return (duplicateNumberError, null, [], [], [], []);
         if (string.IsNullOrEmpty(number)) return (ValidationError(nameof(request.Number), "Номер договора обязателен."), null, [], [], [], []);
 
         var clients = request.Clients?.Where(x => x.ClientId > 0).GroupBy(x => x.ClientId)
@@ -199,6 +222,59 @@ public class ContractsController : ControllerBase
         }
 
         return (null, number, clients, actIds, invoiceIds, paymentIds);
+    }
+
+    private async Task<ActionResult?> EnsureContractNumberIsUniqueAsync(string number, int? excludeId, CancellationToken ct)
+    {
+        var exists = await _db.Contracts.AsNoTracking()
+            .AnyAsync(c => c.Number == number && (!excludeId.HasValue || c.Id != excludeId.Value), ct);
+
+        return exists
+            ? ValidationError(nameof(UpsertContractRequest.Number), "Договор с таким номером уже существует.")
+            : null;
+    }
+
+    private async Task<string> GenerateNextContractNumberAsync(DateTime date, int? excludeId, CancellationToken ct)
+    {
+        var existingNumbers = await _db.Contracts.AsNoTracking()
+            .Where(c => c.Date == date.Date && (!excludeId.HasValue || c.Id != excludeId.Value))
+            .Select(c => c.Number)
+            .ToListAsync(ct);
+
+        var nextSequence = existingNumbers
+            .Select(number => TryParseGeneratedContractNumber(number, date, out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+
+        return FormatGeneratedContractNumber(nextSequence, date);
+    }
+
+    private static string FormatGeneratedContractNumber(int sequence, DateTime date)
+        => $"{sequence}-{date.ToString("dd/MM-yy", CultureInfo.InvariantCulture)}";
+
+    private static bool TryParseGeneratedContractNumber(string? number, DateTime date, out int sequence)
+    {
+        sequence = 0;
+
+        if (string.IsNullOrWhiteSpace(number))
+        {
+            return false;
+        }
+
+        var separatorIndex = number.IndexOf('-', StringComparison.Ordinal);
+        if (separatorIndex <= 0 || separatorIndex >= number.Length - 1)
+        {
+            return false;
+        }
+
+        var suffix = date.ToString("dd/MM-yy", CultureInfo.InvariantCulture);
+        if (!string.Equals(number[(separatorIndex + 1)..], suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return int.TryParse(number[..separatorIndex], NumberStyles.None, CultureInfo.InvariantCulture, out sequence)
+            && sequence > 0;
     }
 
     private static void ApplyLinks(Contract contract, List<(int ClientId, string? Comment)> clients, List<int> actIds, List<int> invoiceIds, List<int> paymentIds)

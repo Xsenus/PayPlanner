@@ -16,6 +16,9 @@ public class ContractDto
     public DateTime? TerminationDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public decimal InvoiceAmountTotal { get; set; }
+    public decimal ActAmountTotal { get; set; }
+    public decimal PaymentAmountTotal { get; set; }
     public IReadOnlyCollection<ContractClientDto> Clients { get; set; } = Array.Empty<ContractClientDto>();
     public IReadOnlyCollection<int> ActIds { get; set; } = Array.Empty<int>();
     public IReadOnlyCollection<int> InvoiceIds { get; set; } = Array.Empty<int>();

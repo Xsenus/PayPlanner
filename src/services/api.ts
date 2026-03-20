@@ -336,6 +336,12 @@ export class ApiService {
     return this.request<Contract>(`/contracts/${id}`);
   }
 
+  async getNextContractNumber(date: string, excludeId?: number) {
+    const q = buildQuery({ date, excludeId });
+    const response = await this.request<{ number: string }>(`/contracts/next-number${q}`);
+    return response.number;
+  }
+
   async createContract(payload: ContractInput) {
     return this.request<Contract>('/contracts', {
       method: 'POST',
