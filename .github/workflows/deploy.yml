@@ -101,37 +101,41 @@ jobs:
             STAGE="/tmp/payplanner-${{ github.sha }}"
             BE_DIR="/var/www/payplanner-be"
             FE_DIR="/var/www/payplanner-fe"
+            HEALTH_URL="http://127.0.0.1:5080/api/health"
 
-            echo "[1/7] Prepare staging"
+            echo "[1/8] Prepare staging"
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
 
-            echo "[2/7] Ensure target dirs"
+            echo "[2/8] Stop service"
+            sudo systemctl stop payplanner.service || true
+
+            echo "[3/8] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_DIR" "$BE_DIR/backups"
             sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
 
-            echo "[3/7] Rsync backend -> $BE_DIR (keep DB & backups)"
+            echo "[4/8] Rsync backend -> $BE_DIR (keep DB & backups)"
             sudo rsync -a --delete \
               --exclude "payplanner.db*" \
               --exclude "backups/" \
               "$STAGE/be/" "$BE_DIR/"
 
-            echo "[4/7] Rsync frontend -> $FE_DIR"
+            echo "[5/8] Rsync frontend -> $FE_DIR"
             sudo rsync -a --delete "$STAGE/fe/" "$FE_DIR/"
 
-            echo "[5/7] Permissions"
+            echo "[6/8] Permissions"
             sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
 
-            echo "[6/7] Restart service"
+            echo "[7/8] Restart service"
             sudo systemctl daemon-reload || true
             sudo systemctl restart payplanner.service
 
-            echo "[7/7] Wait for health"
+            echo "[8/8] Wait for health"
             # ждём, пока сервис реально начнёт слушать и /api/health отдаст 200
             ok=0
             for i in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:5000/api/health >/dev/null; then
+              if curl -fsS "$HEALTH_URL" >/dev/null; then
                 ok=1
                 echo "Health OK on attempt $i"
                 break
@@ -139,8 +143,10 @@ jobs:
               sleep 2
             done
             if [ "$ok" -ne 1 ]; then
-              echo "Health check to Kestrel failed after retries"
+              echo "Health check to $HEALTH_URL failed after retries"
               sudo systemctl status payplanner.service --no-pager || true
+              sudo ls -lah "$BE_DIR"/payplanner.db* || true
+              sudo df -h "$BE_DIR" || true
               sudo journalctl -u payplanner.service --no-pager -n 200 || true
               exit 1
             fi
