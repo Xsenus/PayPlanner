@@ -872,6 +872,150 @@ public class InvoicesController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("bulk-delete")]
+    public async Task<IActionResult> BulkDelete([FromBody] BulkIdsRequest request, CancellationToken ct)
+    {
+        var ids = NormalizeIds(request.Ids.Select(id => (int?)id));
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Не выбраны счета для удаления." });
+        }
+
+        var paymentsQuery = BuildEditableInvoicePaymentsQuery();
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(null);
+        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (effectiveResponsibleId.HasValue)
+        {
+            paymentsQuery = paymentsQuery.Where(payment => payment.Responsibles.Any(row => row.UserId == effectiveResponsibleId.Value));
+        }
+
+        var payments = await paymentsQuery
+            .Include(payment => payment.Invoice)
+            .Where(payment => ids.Contains(payment.Id))
+            .ToListAsync(ct);
+
+        var foundIds = payments.Select(payment => payment.Id).ToHashSet();
+        var missingIds = ids.Where(id => !foundIds.Contains(id)).ToList();
+        if (missingIds.Count > 0)
+        {
+            return NotFound(new
+            {
+                message = "Не удалось найти часть счетов для удаления.",
+                missingIds,
+            });
+        }
+
+        var deletedPaymentIds = payments.Select(payment => payment.Id).ToHashSet();
+        var orphanedInvoiceIds = new List<int>();
+        foreach (var invoiceId in payments
+                     .Where(payment => payment.InvoiceId.HasValue)
+                     .Select(payment => payment.InvoiceId!.Value)
+                     .Distinct())
+        {
+            var hasOtherPayments = await _db.Payments
+                .AsNoTracking()
+                .AnyAsync(payment => !deletedPaymentIds.Contains(payment.Id) && payment.InvoiceId == invoiceId, ct);
+
+            if (!hasOtherPayments)
+            {
+                orphanedInvoiceIds.Add(invoiceId);
+            }
+        }
+
+        _db.Payments.RemoveRange(payments);
+
+        if (orphanedInvoiceIds.Count > 0)
+        {
+            var invoices = await _db.Invoices
+                .Where(invoice => orphanedInvoiceIds.Contains(invoice.Id))
+                .ToListAsync(ct);
+
+            _db.Invoices.RemoveRange(invoices);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { deleted = payments.Count });
+    }
+
+    [HttpPost("change-responsible")]
+    public async Task<IActionResult> ChangeResponsible([FromBody] BulkAssignResponsibleRequest request, CancellationToken ct)
+    {
+        var ids = NormalizeIds(request.Ids.Select(id => (int?)id));
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Не выбраны счета для смены ответственного." });
+        }
+
+        var responsibleIds = new HashSet<int> { request.ResponsibleUserId };
+        if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
+        {
+            return BadRequest(new { message = "Указанный ответственный не найден." });
+        }
+
+        var paymentsQuery = BuildEditableInvoicePaymentsQuery();
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(null);
+        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (effectiveResponsibleId.HasValue)
+        {
+            paymentsQuery = paymentsQuery.Where(payment => payment.Responsibles.Any(row => row.UserId == effectiveResponsibleId.Value));
+        }
+
+        var payments = await paymentsQuery
+            .Include(payment => payment.Invoice)
+            .Include(payment => payment.Responsibles)
+            .Where(payment => ids.Contains(payment.Id))
+            .ToListAsync(ct);
+
+        var foundIds = payments.Select(payment => payment.Id).ToHashSet();
+        var missingIds = ids.Where(id => !foundIds.Contains(id)).ToList();
+        if (missingIds.Count > 0)
+        {
+            return NotFound(new
+            {
+                message = "Не удалось найти часть счетов для смены ответственного.",
+                missingIds,
+            });
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var payment in payments)
+        {
+            var forRemoval = payment.Responsibles.ToList();
+            foreach (var row in forRemoval)
+            {
+                payment.Responsibles.Remove(row);
+            }
+
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                PaymentId = payment.Id,
+                UserId = request.ResponsibleUserId,
+            });
+
+            if (payment.Invoice is not null)
+            {
+                payment.Invoice.UpdatedAt = now;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            updated = payments.Count,
+            responsibleUserId = request.ResponsibleUserId,
+        });
+    }
+
 
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
@@ -974,6 +1118,13 @@ public class InvoicesController : ControllerBase
                 .ThenByDescending(a => a.Id)
                 .FirstOrDefault(),
         });
+    }
+
+    private IQueryable<Payment> BuildEditableInvoicePaymentsQuery()
+    {
+        return _db.Payments
+            .Where(payment => (payment.InvoiceId != null && payment.Invoice != null)
+                || (payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != ""));
     }
 
     private static IQueryable<InvoiceQueryItem> ApplyFilters(

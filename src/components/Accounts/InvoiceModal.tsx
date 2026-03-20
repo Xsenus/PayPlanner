@@ -28,6 +28,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { CaseModal } from '../Clients/CaseModal';
+import { LookupSelect } from '../ui/LookupSelect';
 
 type FormState = {
   number: string;
@@ -682,10 +683,46 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
   );
+  const selectedResponsibleId = form.responsibleIds[0] ?? '';
   const selectedContract = useMemo(
     () => contractOptions.find((contract) => String(contract.id) === form.contractId) ?? null,
     [contractOptions, form.contractId],
   );
+  const responsibleOptions = useMemo(() => {
+    const options = [...responsibles];
+    const hasSelectedResponsible = options.some(
+      (responsible) => String(responsible.id) === selectedResponsibleId,
+    );
+
+    if (!hasSelectedResponsible && selectedResponsibleId) {
+      const fallbackLabel =
+        invoice?.responsibles?.find((responsible) => String(responsible.id) === selectedResponsibleId)
+          ?.fullName
+        ?? (selectedClient?.responsibleUserId
+          && String(selectedClient.responsibleUserId) === selectedResponsibleId
+            ? selectedClient.responsibleUserName
+            : null)
+        ?? `#${selectedResponsibleId}`;
+
+      options.push({
+        id: Number(selectedResponsibleId),
+        fullName: fallbackLabel,
+      });
+    }
+
+    return options
+      .sort((left, right) => left.fullName.localeCompare(right.fullName, 'ru', { sensitivity: 'base' }))
+      .map((responsible) => ({
+        value: String(responsible.id),
+        label: responsible.fullName,
+      }));
+  }, [
+    invoice?.responsibles,
+    responsibles,
+    selectedClient?.responsibleUserId,
+    selectedClient?.responsibleUserName,
+    selectedResponsibleId,
+  ]);
   const selectedClientCasesSummary = useMemo(() => {
     if (!selectedClientCaseIds.length) return '';
     return selectedClientCaseIds
@@ -1269,6 +1306,13 @@ export function InvoiceModal({
       setNumberEditedManually(true);
     }
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleResponsibleChange = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      responsibleIds: value ? [value] : [],
+    }));
   };
 
   const statusSnapshot = useMemo(
@@ -2166,39 +2210,61 @@ export function InvoiceModal({
                                   </span>
                                 )}
                               </div>
-                              {isTypeLocked ? (
-                                <span
-                                  className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
-                                    typeBadgeClasses[form.type]
-                                  }`}
-                                >
-                                  {form.type === 'Income'
-                                    ? t('invoiceTypeIncome') ?? 'Доходные счета'
-                                    : t('invoiceTypeExpense') ?? 'Расходные счета'}
-                                </span>
-                              ) : (
-                                <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
-                                  {typeOptions.map((option) => {
-                                    const active = option === form.type;
-                                    return (
-                                      <button
-                                        key={option}
-                                        type="button"
-                                        onClick={() => handleTypeSelect(option)}
-                                        className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                                          active
-                                            ? 'bg-blue-600 text-white shadow'
-                                            : 'bg-transparent text-slate-600 hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        {option === 'Income'
-                                          ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                                          : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
-                                      </button>
-                                    );
-                                  })}
+                              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+                                <div>
+                                  {isTypeLocked ? (
+                                    <span
+                                      className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                                        typeBadgeClasses[form.type]
+                                      }`}
+                                    >
+                                      {form.type === 'Income'
+                                        ? t('invoiceTypeIncome') ?? 'Доходные счета'
+                                        : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                                    </span>
+                                  ) : (
+                                    <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
+                                      {typeOptions.map((option) => {
+                                        const active = option === form.type;
+                                        return (
+                                          <button
+                                            key={option}
+                                            type="button"
+                                            onClick={() => handleTypeSelect(option)}
+                                            className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                                              active
+                                                ? 'bg-blue-600 text-white shadow'
+                                                : 'bg-transparent text-slate-600 hover:bg-slate-100'
+                                            }`}
+                                          >
+                                            {option === 'Income'
+                                              ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
+                                              : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+
+                                <LookupSelect
+                                  label={t('invoiceResponsible') ?? 'Ответственный'}
+                                  value={selectedResponsibleId}
+                                  onChange={handleResponsibleChange}
+                                  options={responsibleOptions}
+                                  placeholder={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                  title="Выбор ответственного"
+                                  searchPlaceholder="Поиск ответственного"
+                                  emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                  helperText={
+                                    selectedClient?.responsibleUserName
+                                      ? `По клиенту: ${selectedClient.responsibleUserName}`
+                                      : undefined
+                                  }
+                                  disabled={lookupsLoading}
+                                  buttonClassName="bg-white"
+                                />
+                              </div>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

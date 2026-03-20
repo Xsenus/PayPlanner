@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   Users,
   Plus,
@@ -22,17 +22,23 @@ import { useClients } from '../../hooks/useClients';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
-import type { Client, ClientCase, ClientInput } from '../../types';
+import type { ActResponsible, Client, ClientCase, ClientInput } from '../../types';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
+import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useTableSelection } from '../../hooks/useTableSelection';
 import { useToast } from '../../hooks/useToast';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { FormPromptModal } from '../ui/FormPromptModal';
+import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
@@ -306,6 +312,7 @@ export function Clients() {
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
+  const { confirm } = useDialog();
   const tableLayoutStorageKey = `${TABLE_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
   const filterSettingsStorageKey = `${FILTER_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
   const permissions = useRolePermissions(user?.role?.id);
@@ -320,6 +327,13 @@ export function Clients() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [tableMenuPosition, setTableMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
+  const [responsiblesLoading, setResponsiblesLoading] = useState(false);
+  const [changeResponsibleOpen, setChangeResponsibleOpen] = useState(false);
+  const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
+  const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
+  const [nextResponsibleId, setNextResponsibleId] = useState('');
 
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [caseClientId, setCaseClientId] = useState<number | null>(null);
@@ -433,13 +447,33 @@ export function Clients() {
     [query, activityFilter, page, pageSize, statusFilter, activeFilters],
   );
 
-  const { clients, loading, total, createClient, updateClient, deleteClient, setClients, refresh } =
+  const { clients, loading, total, createClient, updateClient, setClients, refresh } =
     useClients(clientsQueryOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterSettingsLoaded, setFilterSettingsLoaded] = useState(false);
   const filterSaveTimerRef = useRef<number | null>(null);
   const sortedClients = clients;
+  const visibleTableClientIds = useMemo(() => sortedClients.map((client) => client.id), [sortedClients]);
+  const {
+    selectedIds: selectedTableClientIds,
+    selectedIdSet: selectedTableClientIdSet,
+    selectedCount: selectedTableClientCount,
+    allVisibleSelected,
+    someVisibleSelected,
+    isSelected: isTableClientSelected,
+    clearSelection: clearTableClientSelection,
+    selectOnly: selectOnlyTableClient,
+    toggleSelection: toggleTableClientSelection,
+    toggleAllVisible: toggleAllTableClients,
+  } = useTableSelection(visibleTableClientIds);
+
+  const selectedTableClients = useMemo(
+    () => sortedClients.filter((client) => selectedTableClientIdSet.has(client.id)),
+    [selectedTableClientIdSet, sortedClients],
+  );
+  const singleSelectedTableClient =
+    selectedTableClients.length === 1 ? selectedTableClients[0] : null;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -472,6 +506,181 @@ export function Clients() {
 
   const showPermissionWarning = (message: string) => {
     toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
+  };
+
+  const handleOpenClient = (clientId: number) => {
+    clearTableClientSelection();
+    setSelectedClientId(clientId);
+    setInitialCaseId('all');
+  };
+
+  const ensureResponsiblesLoaded = async () => {
+    if (responsibles.length > 0) {
+      return responsibles;
+    }
+
+    try {
+      setResponsiblesLoading(true);
+      const response = await apiService.getActResponsibles();
+      setResponsibles(response ?? []);
+      return response ?? [];
+    } catch (error) {
+      const message = extractDisplayErrorMessage(
+        error,
+        'Не удалось загрузить список ответственных.',
+      );
+      toast.error(message, 'Ошибка');
+      throw error;
+    } finally {
+      setResponsiblesLoading(false);
+    }
+  };
+
+  const handleRefreshClients = async () => {
+    await refresh();
+    toast.success('Список клиентов обновлен.', 'Обновление выполнено');
+  };
+
+  const handleDeleteSelectedClients = async (ids: number[]) => {
+    if (!canDeleteClients) {
+      showPermissionWarning('Недостаточно прав для удаления клиентов.');
+      return;
+    }
+
+    const normalizedIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!normalizedIds.length) return;
+
+    const targetClients = sortedClients.filter((client) => normalizedIds.includes(client.id));
+    const description =
+      normalizedIds.length === 1
+        ? `Удалить клиента "${targetClients[0]?.name ?? `#${normalizedIds[0]}`}"?`
+        : `Удалить выбранные записи (${normalizedIds.length})?`;
+
+    const approved = await confirm({
+      title: normalizedIds.length === 1 ? 'Удаление клиента' : 'Массовое удаление клиентов',
+      description,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!approved) return;
+
+    try {
+      await apiService.deleteClients(normalizedIds);
+      clearTableClientSelection();
+      await refresh();
+      toast.success(
+        normalizedIds.length === 1
+          ? 'Клиент удален.'
+          : `Удалено записей: ${normalizedIds.length}.`,
+        'Удаление выполнено',
+      );
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось удалить клиентов.');
+      toast.error(message, 'Ошибка');
+      await refresh();
+    }
+  };
+
+  const openChangeResponsiblePrompt = async () => {
+    if (!canEditClients) {
+      showPermissionWarning('Недостаточно прав для смены ответственного.');
+      return;
+    }
+
+    if (!selectedTableClientCount) return;
+
+    try {
+      const availableResponsibles = await ensureResponsiblesLoaded();
+      if (!availableResponsibles.length) {
+        setChangeResponsibleError('Список ответственных пуст.');
+        return;
+      }
+
+      const defaultResponsibleId =
+        selectedTableClients.length === 1 && selectedTableClients[0].responsibleUserId
+          ? String(selectedTableClients[0].responsibleUserId)
+          : String(availableResponsibles[0].id);
+
+      setNextResponsibleId(defaultResponsibleId);
+      setChangeResponsibleError(null);
+      setChangeResponsibleOpen(true);
+    } catch {
+      /** */
+    }
+  };
+
+  const submitResponsibleChange = async () => {
+    if (!canEditClients) {
+      showPermissionWarning('Недостаточно прав для смены ответственного.');
+      return;
+    }
+
+    const responsibleUserId = Number(nextResponsibleId);
+    if (!Number.isFinite(responsibleUserId) || responsibleUserId <= 0) {
+      setChangeResponsibleError('Выберите ответственного.');
+      return;
+    }
+
+    const selectedResponsibleLabel =
+      responsibles.find((responsible) => String(responsible.id) === nextResponsibleId)?.fullName
+      ?? (
+        singleSelectedTableClient?.responsibleUserId
+        && String(singleSelectedTableClient.responsibleUserId) === nextResponsibleId
+          ? singleSelectedTableClient.responsibleUserName
+          : null
+      )
+      ?? 'выбранного ответственного';
+    const approved = await confirm({
+      title: 'Подтверждение сохранения',
+      description:
+        selectedTableClientIds.length === 1
+          ? `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранного клиента?`
+          : `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранных клиентов: ${selectedTableClientIds.length}?`,
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+
+    if (!approved) {
+      return;
+    }
+
+    try {
+      setChangeResponsibleSubmitting(true);
+      setChangeResponsibleError(null);
+      await apiService.changeClientsResponsible(selectedTableClientIds, responsibleUserId);
+      setChangeResponsibleOpen(false);
+      await refresh();
+      toast.success('Ответственный обновлен.', 'Изменения сохранены');
+    } catch (error) {
+      setChangeResponsibleError(
+        extractDisplayErrorMessage(error, 'Не удалось сменить ответственного.'),
+      );
+    } finally {
+      setChangeResponsibleSubmitting(false);
+    }
+  };
+
+  const closeTableMenu = () => {
+    setTableMenuPosition(null);
+  };
+
+  const openTableMenu = (
+    event: ReactMouseEvent<HTMLTableRowElement>,
+    client: Client,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!isTableClientSelected(client.id)) {
+      selectOnlyTableClient(client.id);
+    }
+
+    setTableMenuPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
   const handleAddClient = () => {
@@ -520,12 +729,15 @@ export function Clients() {
     setEditingClient(null);
     setIsModalOpen(false);
 
-    setClients((prev: Client[]) => prev.filter((c: Client) => c.id !== id));
-
     try {
-      await deleteClient(id);
-    } catch (err) {
-      console.error(err);
+      await apiService.deleteClients([id]);
+      clearTableClientSelection();
+      await refresh();
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось удалить клиента.'),
+        'Ошибка',
+      );
       await refresh();
     }
   };
@@ -771,11 +983,6 @@ export function Clients() {
     );
   }
 
-  const handleOpenClient = (clientId: number) => {
-    setSelectedClientId(clientId);
-    setInitialCaseId('all');
-  };
-
   const renderCell = (client: Client, columnId: ColumnId) => {
     switch (columnId) {
       case 'id':
@@ -913,6 +1120,79 @@ export function Clients() {
         return null;
     }
   };
+
+  const dictionaryResponsibles = [...responsibles];
+  const knownResponsibleIds = new Set(
+    dictionaryResponsibles.map((responsible) => responsible.id),
+  );
+
+  selectedTableClients.forEach((client) => {
+    if (
+      client.responsibleUserId
+      && client.responsibleUserName
+      && !knownResponsibleIds.has(client.responsibleUserId)
+    ) {
+      dictionaryResponsibles.push({
+        id: client.responsibleUserId,
+        fullName: client.responsibleUserName,
+      });
+      knownResponsibleIds.add(client.responsibleUserId);
+    }
+  });
+
+  const responsibleOptions = [
+    { value: '', label: 'Выберите ответственного' },
+    ...dictionaryResponsibles.map((responsible) => ({
+      value: String(responsible.id),
+      label: responsible.fullName,
+    })),
+  ];
+
+  const tableMenuTitle =
+    selectedTableClientCount === 1
+      ? singleSelectedTableClient?.name ?? 'Клиент'
+      : `Выбрано: ${selectedTableClientCount}`;
+
+  const tableMenuActions: TableContextMenuAction[] = [
+    {
+      key: 'add',
+      label: 'Добавить',
+      onSelect: handleAddClient,
+      disabled: !canCreateClients,
+    },
+    {
+      key: 'edit',
+      label: 'Редактировать',
+      onSelect: () => {
+        if (singleSelectedTableClient) {
+          handleEditClient(singleSelectedTableClient);
+        }
+      },
+      disabled: !canEditClients || selectedTableClientCount !== 1 || !singleSelectedTableClient,
+    },
+    {
+      key: 'refresh',
+      label: 'Обновить',
+      onSelect: async () => {
+        await handleRefreshClients();
+      },
+    },
+    {
+      key: 'changeResponsible',
+      label: 'Смена ответственного',
+      onSelect: openChangeResponsiblePrompt,
+      disabled: !canEditClients || selectedTableClientCount === 0,
+      separatorBefore: true,
+    },
+    {
+      key: 'delete',
+      label: 'Удалить',
+      onSelect: () => void handleDeleteSelectedClients(selectedTableClientIds),
+      disabled: !canDeleteClients || selectedTableClientCount === 0,
+      variant: 'danger',
+      separatorBefore: true,
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1177,6 +1457,7 @@ export function Clients() {
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed">
                 <colgroup>
+                  <col style={{ width: 52 }} />
                   {visibleColumnIds.map((columnId) => (
                     <col key={columnId} style={{ width: getColumnWidth(columnId) }} />
                   ))}
@@ -1184,6 +1465,14 @@ export function Clients() {
                 </colgroup>
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
+                    <th className="px-4 py-3 text-center">
+                      <TableSelectCheckbox
+                        checked={allVisibleSelected}
+                        indeterminate={someVisibleSelected}
+                        onChange={(event) => toggleAllTableClients(event.target.checked)}
+                        aria-label="Выбрать все строки"
+                      />
+                    </th>
                     {visibleColumnIds.map((columnId) => {
                       const meta = COLUMN_META[columnId];
                       const width = getColumnWidth(columnId);
@@ -1226,10 +1515,22 @@ export function Clients() {
                   {sortedClients.map((client) => (
                     <tr
                       key={client.id}
-                      className={`hover:bg-gray-50 transition-colors ${
-                        client.isActive ? '' : 'bg-gray-50 opacity-70'
-                      }`}
+                      onContextMenu={(event) => openTableMenu(event, client)}
+                      className={`transition-colors ${
+                        isTableClientSelected(client.id)
+                          ? 'bg-blue-50/70 hover:bg-blue-50'
+                          : 'hover:bg-gray-50'
+                      } ${client.isActive ? '' : 'bg-gray-50 opacity-70'}`}
+                      title="ПКМ для действий"
                     >
+                      <td className="px-4 py-3 text-center align-top">
+                        <TableSelectCheckbox
+                          checked={isTableClientSelected(client.id)}
+                          onChange={(event) => toggleTableClientSelection(client.id, event.target.checked)}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={`Выбрать клиента ${client.name}`}
+                        />
+                      </td>
                       {visibleColumnIds.map((columnId) => (
                         <td
                           key={columnId}
@@ -1504,6 +1805,55 @@ export function Clients() {
             />
           </div>
         )}
+
+        <TableContextMenu
+          open={tableMenuPosition !== null}
+          position={tableMenuPosition}
+          title={tableMenuTitle}
+          actions={tableMenuActions}
+          onClose={closeTableMenu}
+        />
+
+        <FormPromptModal
+          open={changeResponsibleOpen}
+          title="Смена ответственного"
+          description={
+            selectedTableClientCount === 1
+              ? 'Назначьте нового ответственного для выбранного клиента.'
+              : `Назначьте нового ответственного для записей: ${selectedTableClientCount}.`
+          }
+          fields={[
+            {
+              key: 'responsibleUserId',
+              label: 'Ответственный',
+              value: nextResponsibleId,
+              onChange: (value) => {
+                setNextResponsibleId(value);
+                if (changeResponsibleError) {
+                  setChangeResponsibleError(null);
+                }
+              },
+              type: 'lookup',
+              options: responsibleOptions,
+              required: true,
+              lookupTitle: 'Выбор ответственного',
+              searchPlaceholder: 'Найти ответственного',
+              placeholder: 'Не выбрано',
+              dictionaryLabel: 'Справочник',
+              noOptionsText: responsiblesLoading ? 'Загрузка списка...' : 'Ответственные не найдены',
+              disabled: responsiblesLoading,
+            },
+          ]}
+          onCancel={() => {
+            setChangeResponsibleOpen(false);
+            setChangeResponsibleError(null);
+          }}
+          onConfirm={submitResponsibleChange}
+          confirmLabel="Сохранить"
+          cancelLabel="Отмена"
+          error={changeResponsibleError ?? undefined}
+          loading={changeResponsibleSubmitting || responsiblesLoading}
+        />
 
         <ClientModal
           isOpen={isModalOpen}

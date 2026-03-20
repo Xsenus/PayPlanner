@@ -59,7 +59,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       {children}
       {confirmRequest
         ? createPortal(
-            <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
                 <div className="border-b border-slate-200 px-6 py-4">
                   <h2 className="text-lg font-semibold text-slate-900">{confirmRequest.title}</h2>
@@ -92,7 +92,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         : null}
       {alertRequest
         ? createPortal(
-            <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
                 <div className="border-b border-slate-200 px-6 py-4">
                   <h2 className="text-lg font-semibold text-slate-900">{alertRequest.title ?? 'Уведомление'}</h2>

@@ -73,6 +73,7 @@ import { ActModal } from '../Acts/ActModal';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import { ContractModal } from '../Contracts/ContractModal';
 import { FormPromptModal } from '../ui/FormPromptModal';
+import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
@@ -1987,6 +1988,14 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     );
   }, [actResponsibles, clientData?.responsibleUserName, clientFormState.responsibleUserId]);
 
+  const clientResponsibleLookupOptions = useMemo(
+    () => clientResponsibleOptions.map((responsible) => ({
+      value: String(responsible.id),
+      label: responsible.fullName,
+    })),
+    [clientResponsibleOptions],
+  );
+
   const ensureActLookups = useCallback(async () => {
     if (actLookupsLoading) return;
     if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError) return;
@@ -2825,28 +2834,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               </div>
               <div className="w-full max-w-2xl grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {'Ответственный' + requiredMark('ResponsibleUserId')}
-                  </label>
-                  <select
-                    name="responsibleUserId"
+                  <LookupSelect
+                    label={'Ответственный' + requiredMark('ResponsibleUserId')}
                     value={clientFormState.responsibleUserId}
-                    onChange={handleClientFormChange}
+                    onChange={(value) => {
+                      setClientFormState((prev) => ({ ...prev, responsibleUserId: value }));
+                    }}
+                    options={clientResponsibleLookupOptions}
+                    placeholder="Не указан"
+                    title="Выбор ответственного"
+                    searchPlaceholder="Поиск ответственного"
+                    emptyOptionLabel="Не указан"
                     disabled={!canManageClientResponsible}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass('ResponsibleUserId', clientFormState.responsibleUserId)}`}
-                  >
-                    <option value="">Не указан</option>
-                    {clientResponsibleOptions.map((responsible) => (
-                      <option key={responsible.id} value={responsible.id}>
-                        {responsible.fullName}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-2 text-xs text-gray-500">
-                    {canManageClientResponsible
+                    buttonClassName={`disabled:bg-gray-100 ${requiredInputClass('ResponsibleUserId', clientFormState.responsibleUserId)}`}
+                    helperText={canManageClientResponsible
                       ? 'По умолчанию подставляется пользователь, который создал клиента.'
                       : 'Назначается автоматически при создании клиента. Изменение доступно администратору.'}
-                  </p>
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">{(t('clientStatus') || 'Статус клиента') + requiredMark('ClientStatusId')}</label>

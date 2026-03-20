@@ -14,7 +14,7 @@ import {
   Trash2,
   WalletCards,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -23,6 +23,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useAccountsRegistry } from '../../hooks/useAccountsRegistry';
+import { useTableSelection } from '../../hooks/useTableSelection';
 import type {
   AccountRegistryRow,
   Act,
@@ -49,8 +50,11 @@ import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { FormPromptModal } from '../ui/FormPromptModal';
+import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 
 interface AccountsProps {
   defaultType?: PaymentKind;
@@ -289,6 +293,11 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   const [resumeInvoiceDraft, setResumeInvoiceDraft] = useState<InvoiceEditorDraftState | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [tableMenuPosition, setTableMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [changeResponsibleOpen, setChangeResponsibleOpen] = useState(false);
+  const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
+  const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
+  const [nextResponsibleId, setNextResponsibleId] = useState('');
 
   const {
     columnOrder,
@@ -649,20 +658,191 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     }
   };
 
-  const removeInvoice = async (invoice: Invoice) => {
+  const summaryBuckets = summary;
+  const mergedTotal = accountsTotal;
+  const pagedAccounts = accountRows;
+  const visibleInvoiceIds = useMemo(
+    () =>
+      pagedAccounts
+        .map((row) => row.invoice?.id ?? null)
+        .filter((id): id is number => typeof id === 'number' && id > 0),
+    [pagedAccounts],
+  );
+  const {
+    selectedIds: selectedInvoiceIds,
+    selectedIdSet: selectedInvoiceIdSet,
+    selectedCount: selectedInvoiceCount,
+    allVisibleSelected,
+    someVisibleSelected,
+    isSelected: isInvoiceSelected,
+    clearSelection: clearInvoiceSelection,
+    selectOnly: selectOnlyInvoice,
+    toggleSelection: toggleInvoiceSelection,
+    toggleAllVisible: toggleAllInvoices,
+  } = useTableSelection(visibleInvoiceIds);
+  const selectedInvoiceRows = useMemo(
+    () =>
+      pagedAccounts.filter(
+        (row) => typeof row.invoice?.id === 'number' && selectedInvoiceIdSet.has(row.invoice.id),
+      ),
+    [pagedAccounts, selectedInvoiceIdSet],
+  );
+  const singleSelectedInvoice =
+    selectedInvoiceRows.length === 1 ? selectedInvoiceRows[0].invoice ?? null : null;
+
+  const ensureResponsiblesLoaded = useCallback(async () => {
+    if (actResponsibles.length > 0) {
+      return actResponsibles;
+    }
+
+    const responsibles = await apiService.getActResponsibles();
+    setActResponsibles(responsibles ?? []);
+    return responsibles ?? [];
+  }, [actResponsibles]);
+
+  const handleRefreshAccounts = useCallback(async () => {
+    await refreshAccounts();
+    toast.success('Список счетов обновлен.');
+  }, [refreshAccounts, toast]);
+
+  const handleDeleteSelectedInvoices = useCallback(async (ids: number[]) => {
     if (!canDelete) return;
-    if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
+
+    const normalizedIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!normalizedIds.length) return;
+
+    const targetInvoices = pagedAccounts.filter(
+      (row) => typeof row.invoice?.id === 'number' && normalizedIds.includes(row.invoice.id),
+    );
+    const description =
+      normalizedIds.length === 1
+        ? `Удалить счет "${targetInvoices[0]?.accountNumber ?? `#${normalizedIds[0]}`}"?`
+        : `Удалить выбранные счета (${normalizedIds.length})?`;
+
+    if (
+      !(await confirm({
+        title: normalizedIds.length === 1 ? 'Удаление счета' : 'Массовое удаление счетов',
+        description,
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      }))
+    ) {
+      return;
+    }
+
     try {
-      await apiService.deleteInvoice(invoice.id);
-      toast.success('Счет удален.');
-      if (accountRows.length === 1 && page > 1) {
+      await apiService.deleteInvoices(normalizedIds);
+      clearInvoiceSelection();
+      if (pagedAccounts.length === normalizedIds.length && page > 1) {
         setPage((current) => Math.max(1, current - 1));
       } else {
         await refreshAccounts();
       }
+      toast.success(
+        normalizedIds.length === 1
+          ? 'Счет удален.'
+          : `Удалено счетов: ${normalizedIds.length}.`,
+      );
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить счет.'));
     }
+  }, [canDelete, clearInvoiceSelection, confirm, page, pagedAccounts, refreshAccounts, toast]);
+
+  const openChangeResponsiblePrompt = useCallback(async () => {
+    if (!canEdit || selectedInvoiceCount === 0) return;
+
+    try {
+      const responsibles = await ensureResponsiblesLoaded();
+      if (!responsibles.length) {
+        setChangeResponsibleError('Список ответственных пуст.');
+        return;
+      }
+
+      const defaultResponsibleId =
+        singleSelectedInvoice?.responsibleId
+          ? String(singleSelectedInvoice.responsibleId)
+          : String(responsibles[0].id);
+
+      setNextResponsibleId(defaultResponsibleId);
+      setChangeResponsibleError(null);
+      setChangeResponsibleOpen(true);
+    } catch (err) {
+      setChangeResponsibleError(
+        extractDisplayErrorMessage(err, 'Не удалось загрузить список ответственных.'),
+      );
+    }
+  }, [canEdit, ensureResponsiblesLoaded, selectedInvoiceCount, singleSelectedInvoice]);
+
+  const submitResponsibleChange = useCallback(async () => {
+    if (!canEdit) return;
+
+    const responsibleUserId = Number(nextResponsibleId);
+    if (!Number.isFinite(responsibleUserId) || responsibleUserId <= 0) {
+      setChangeResponsibleError('Выберите ответственного.');
+      return;
+    }
+
+    const selectedResponsibleLabel =
+      actResponsibles.find((responsible) => String(responsible.id) === nextResponsibleId)?.fullName
+      ?? (
+        singleSelectedInvoice?.responsibleId
+        && String(singleSelectedInvoice.responsibleId) === nextResponsibleId
+          ? singleSelectedInvoice.responsibleName
+          : null
+      )
+      ?? 'выбранного ответственного';
+    const approved = await confirm({
+      title: 'Подтверждение сохранения',
+      description:
+        selectedInvoiceIds.length === 1
+          ? `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранного счета?`
+          : `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранных счетов: ${selectedInvoiceIds.length}?`,
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+
+    if (!approved) {
+      return;
+    }
+
+    try {
+      setChangeResponsibleSubmitting(true);
+      setChangeResponsibleError(null);
+      await apiService.changeInvoicesResponsible(selectedInvoiceIds, responsibleUserId);
+      setChangeResponsibleOpen(false);
+      await refreshAccounts();
+      toast.success('Ответственный обновлен.');
+    } catch (err) {
+      setChangeResponsibleError(
+        extractDisplayErrorMessage(err, 'Не удалось сменить ответственного.'),
+      );
+    } finally {
+      setChangeResponsibleSubmitting(false);
+    }
+  }, [actResponsibles, canEdit, confirm, nextResponsibleId, refreshAccounts, selectedInvoiceIds, singleSelectedInvoice, toast]);
+
+  const closeTableMenu = useCallback(() => {
+    setTableMenuPosition(null);
+  }, []);
+
+  const openTableMenu = useCallback(
+    (event: ReactMouseEvent<HTMLTableRowElement>, invoiceId: number | null) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (invoiceId && !isInvoiceSelected(invoiceId)) {
+        selectOnlyInvoice(invoiceId);
+      }
+
+      setTableMenuPosition({ x: event.clientX, y: event.clientY });
+    },
+    [isInvoiceSelected, selectOnlyInvoice],
+  );
+
+  const removeInvoice = async (invoice: Invoice) => {
+    if (!canDelete) return;
+    await handleDeleteSelectedInvoices([invoice.id]);
   };
 
   const handleResetFilters = () => {
@@ -673,10 +853,6 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
   };
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
-
-  const summaryBuckets = summary;
-  const mergedTotal = accountsTotal;
-  const pagedAccounts = accountRows;
 
   const columns: TableColumn[] = useMemo(
     () => [
@@ -1221,6 +1397,75 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
       }) ?? null
     : null;
 
+  const responsibleOptions = useMemo(() => {
+    const dictionaryItems = [...actResponsibles];
+    const currentResponsibleId = singleSelectedInvoice?.responsibleId ?? null;
+    const currentResponsibleName = singleSelectedInvoice?.responsibleName ?? null;
+
+    if (
+      currentResponsibleId
+      && currentResponsibleName
+      && !dictionaryItems.some((responsible) => responsible.id === currentResponsibleId)
+    ) {
+      dictionaryItems.push({
+        id: currentResponsibleId,
+        fullName: currentResponsibleName,
+      });
+    }
+
+    return [
+      { value: '', label: 'Выберите ответственного' },
+      ...dictionaryItems.map((responsible) => ({
+        value: String(responsible.id),
+        label: responsible.fullName,
+      })),
+    ];
+  }, [actResponsibles, singleSelectedInvoice?.responsibleId, singleSelectedInvoice?.responsibleName]);
+
+  const tableMenuTitle =
+    selectedInvoiceCount === 1
+      ? singleSelectedInvoice?.number ?? 'Счет'
+      : `Выбрано: ${selectedInvoiceCount}`;
+
+  const tableMenuActions: TableContextMenuAction[] = [
+    {
+      key: 'add',
+      label: 'Добавить',
+      onSelect: openCreateModal,
+      disabled: !canCreate,
+    },
+    {
+      key: 'edit',
+      label: 'Редактировать',
+      onSelect: () => {
+        if (singleSelectedInvoice) {
+          openEditPage(singleSelectedInvoice.id);
+        }
+      },
+      disabled: !canEdit || selectedInvoiceCount !== 1 || !singleSelectedInvoice,
+    },
+    {
+      key: 'refresh',
+      label: 'Обновить',
+      onSelect: handleRefreshAccounts,
+    },
+    {
+      key: 'changeResponsible',
+      label: 'Смена ответственного',
+      onSelect: openChangeResponsiblePrompt,
+      disabled: !canEdit || selectedInvoiceCount === 0,
+      separatorBefore: true,
+    },
+    {
+      key: 'delete',
+      label: 'Удалить',
+      onSelect: () => void handleDeleteSelectedInvoices(selectedInvoiceIds),
+      disabled: !canDelete || selectedInvoiceCount === 0,
+      variant: 'danger',
+      separatorBefore: true,
+    },
+  ];
+
   const paymentModalElement = (
     <PaymentModal
       isOpen={paymentModalOpen}
@@ -1533,6 +1778,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
           <div className="overflow-x-auto">
             <table className="min-w-full table-fixed divide-y divide-gray-200">
               <colgroup>
+                <col style={{ width: 52 }} />
                 {orderedVisibleColumns
                   .map((column) => (
                     <col key={column.key} style={{ width: getColumnWidth(column.key) }} />
@@ -1541,6 +1787,14 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               </colgroup>
               <thead className="bg-gray-50">
                 <tr className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-3 text-center align-middle">
+                    <TableSelectCheckbox
+                      checked={allVisibleSelected}
+                      indeterminate={someVisibleSelected}
+                      onChange={(event) => toggleAllInvoices(event.target.checked)}
+                      aria-label="Выбрать все счета"
+                    />
+                  </th>
                   {orderedVisibleColumns
                     .map((column) => {
                       const isSortable = column.sortable !== false && column.key !== 'status';
@@ -1602,7 +1856,7 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
               <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
+                    <td colSpan={orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         {t('loading') ?? 'Загрузка...'}
@@ -1611,13 +1865,14 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                   </tr>
                 ) : pagedAccounts.length === 0 ? (
                   <tr>
-                    <td colSpan={orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
+                    <td colSpan={orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0)} className="py-10 text-center text-gray-500">
                       {t('invoiceNoData') ?? 'Счета не найдены'}
                     </td>
                   </tr>
                 ) : (
                   pagedAccounts.map((row) => {
                     const invoice = row.invoice;
+                    const invoiceId = typeof invoice?.id === 'number' ? invoice.id : null;
                     const accountStatus = row.status;
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
@@ -1627,18 +1882,37 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
                     const caseLines = getInvoiceCaseSummary(invoice);
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
-                    const colSpan = orderedVisibleColumns.length + (canEdit || canDelete ? 1 : 0);
+                    const colSpan = orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0);
 
                     return (
                       <Fragment key={`${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`}>
                         <tr
-                          className={`hover:bg-gray-50/70 ${canEdit && invoice ? 'cursor-pointer' : ''}`}
+                          onContextMenu={(event) => openTableMenu(event, invoiceId)}
+                          className={`${
+                            invoiceId && isInvoiceSelected(invoiceId)
+                              ? 'bg-blue-50/70 hover:bg-blue-50'
+                              : 'hover:bg-gray-50/70'
+                          } ${canEdit && invoice ? 'cursor-pointer' : ''}`}
                           onClick={() => {
                             if (canEdit && invoice) {
                               openEditPage(invoice.id);
                             }
                           }}
+                          title="ПКМ для действий"
                         >
+                          <td className="px-4 py-3 text-center align-middle">
+                            <TableSelectCheckbox
+                              checked={invoiceId ? isInvoiceSelected(invoiceId) : false}
+                              disabled={!invoiceId}
+                              onChange={(event) => {
+                                event.stopPropagation();
+                                if (!invoiceId) return;
+                                toggleInvoiceSelection(invoiceId, event.target.checked);
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                              aria-label={invoice ? `Выбрать счет ${invoice.number}` : 'Выбрать счет'}
+                            />
+                          </td>
                           {orderedVisibleColumns.map((column) => {
                             switch (column.key) {
                               case 'date':
@@ -1985,6 +2259,55 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
             />
           )}
         </div>
+
+        <TableContextMenu
+          open={tableMenuPosition !== null}
+          position={tableMenuPosition}
+          title={tableMenuTitle}
+          actions={tableMenuActions}
+          onClose={closeTableMenu}
+        />
+
+        <FormPromptModal
+          open={changeResponsibleOpen}
+          title="Смена ответственного"
+          description={
+            selectedInvoiceCount === 1
+              ? 'Назначьте нового ответственного для выбранного счета.'
+              : `Назначьте нового ответственного для счетов: ${selectedInvoiceCount}.`
+          }
+          fields={[
+            {
+              key: 'responsibleUserId',
+              label: 'Ответственный',
+              value: nextResponsibleId,
+              onChange: (value) => {
+                setNextResponsibleId(value);
+                if (changeResponsibleError) {
+                  setChangeResponsibleError(null);
+                }
+              },
+              type: 'lookup',
+              options: responsibleOptions,
+              required: true,
+              lookupTitle: 'Выбор ответственного',
+              searchPlaceholder: 'Найти ответственного',
+              placeholder: 'Не выбрано',
+              dictionaryLabel: 'Справочник',
+              noOptionsText: changeResponsibleSubmitting ? 'Сохраняем...' : 'Ответственные не найдены',
+              disabled: changeResponsibleSubmitting,
+            },
+          ]}
+          onCancel={() => {
+            setChangeResponsibleOpen(false);
+            setChangeResponsibleError(null);
+          }}
+          onConfirm={submitResponsibleChange}
+          confirmLabel="Сохранить"
+          cancelLabel="Отмена"
+          error={changeResponsibleError ?? undefined}
+          loading={changeResponsibleSubmitting}
+        />
 
         <InvoiceModal
           open={modalOpen}

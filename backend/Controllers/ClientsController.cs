@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
@@ -64,6 +65,14 @@ public class ClientsController : ControllerBase
     {
         if (!responsibleUserId.HasValue) return true;
         return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == responsibleUserId.Value && u.IsActive, ct);
+    }
+
+    private static List<int> NormalizeIds(IEnumerable<int>? ids)
+    {
+        return ids?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? new List<int>();
     }
 
     [HttpGet]
@@ -591,6 +600,115 @@ public class ClientsController : ControllerBase
         _db.Clients.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpPost("bulk-delete")]
+    public async Task<IActionResult> BulkDelete([FromBody] BulkIdsRequest request, CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var ids = NormalizeIds(request.Ids);
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Не выбраны клиенты для удаления." });
+        }
+
+        var clients = await BuildVisibleClientsQuery(currentUserId)
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync(ct);
+
+        var foundIds = clients.Select(client => client.Id).ToHashSet();
+        var missingIds = ids.Where(id => !foundIds.Contains(id)).ToList();
+        if (missingIds.Count > 0)
+        {
+            return NotFound(new
+            {
+                message = "Не удалось найти часть клиентов для удаления.",
+                missingIds,
+            });
+        }
+
+        var blockedClients = new List<object>();
+        foreach (var client in clients)
+        {
+            var usage = await GetClientUsageSummary(client.Id);
+            if (usage.Count > 0)
+            {
+                blockedClients.Add(new
+                {
+                    id = client.Id,
+                    name = client.Name,
+                    usage,
+                });
+            }
+        }
+
+        if (blockedClients.Count > 0)
+        {
+            return Conflict(new
+            {
+                message = "Один или несколько клиентов используются в связанных данных и не могут быть удалены.",
+                blockedClients,
+            });
+        }
+
+        _db.Clients.RemoveRange(clients);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { deleted = clients.Count });
+    }
+
+    [HttpPost("change-responsible")]
+    public async Task<IActionResult> ChangeResponsible([FromBody] BulkAssignResponsibleRequest request, CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var ids = NormalizeIds(request.Ids);
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Не выбраны клиенты для смены ответственного." });
+        }
+
+        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        {
+            return BadRequest(new { message = $"Ответственный #{request.ResponsibleUserId} не найден." });
+        }
+
+        var clients = await BuildVisibleClientsQuery(currentUserId)
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync(ct);
+
+        var foundIds = clients.Select(client => client.Id).ToHashSet();
+        var missingIds = ids.Where(id => !foundIds.Contains(id)).ToList();
+        if (missingIds.Count > 0)
+        {
+            return NotFound(new
+            {
+                message = "Не удалось найти часть клиентов для смены ответственного.",
+                missingIds,
+            });
+        }
+
+        foreach (var client in clients)
+        {
+            client.ResponsibleUserId = request.ResponsibleUserId;
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            updated = clients.Count,
+            responsibleUserId = request.ResponsibleUserId,
+        });
     }
 
     private async Task<List<string>> GetClientUsageSummary(int clientId)

@@ -478,6 +478,26 @@ export class ApiService {
     return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
   }
 
+  async deleteInvoices(ids: number[]) {
+    const normalized = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    if (normalized.length === 1) {
+      await this.deleteInvoice(normalized[0]);
+      return { deleted: 1 };
+    }
+
+    return this.request<{ deleted: number }>('/invoices/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids: normalized }),
+    });
+  }
+
+  async changeInvoicesResponsible(ids: number[], responsibleUserId: number) {
+    return this.request<{ updated: number; responsibleUserId: number }>('/invoices/change-responsible', {
+      method: 'POST',
+      body: JSON.stringify({ ids, responsibleUserId }),
+    });
+  }
+
   async getAccountsRegistry(params?: {
     from?: string;
     to?: string;
@@ -657,6 +677,26 @@ export class ApiService {
 
   async deleteClient(id: number) {
     return this.request<void>(`/clients/${id}`, { method: 'DELETE' });
+  }
+
+  async deleteClients(ids: number[]) {
+    const normalized = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+    if (normalized.length === 1) {
+      await this.deleteClient(normalized[0]);
+      return { deleted: 1 };
+    }
+
+    return this.request<{ deleted: number }>('/clients/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids: normalized }),
+    });
+  }
+
+  async changeClientsResponsible(ids: number[], responsibleUserId: number) {
+    return this.request<{ updated: number; responsibleUserId: number }>('/clients/change-responsible', {
+      method: 'POST',
+      body: JSON.stringify({ ids, responsibleUserId }),
+    });
   }
 
   async getClientPassport(clientId: number) {

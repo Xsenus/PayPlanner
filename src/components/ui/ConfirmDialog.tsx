@@ -31,7 +31,7 @@ export function ConfirmDialog({
       : 'bg-blue-600 hover:bg-blue-700';
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
         <div className="border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>

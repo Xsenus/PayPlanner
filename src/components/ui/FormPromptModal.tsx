@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { LookupSelect, type LookupSelectOption } from './LookupSelect';
 
 export interface FormPromptField {
   key: string;
@@ -8,9 +9,17 @@ export interface FormPromptField {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  type?: 'text' | 'date';
+  type?: 'text' | 'date' | 'select' | 'lookup';
+  options?: LookupSelectOption[];
   required?: boolean;
   autoFocus?: boolean;
+  disabled?: boolean;
+  lookupTitle?: string;
+  searchPlaceholder?: string;
+  emptyOptionLabel?: string;
+  helperText?: string;
+  dictionaryLabel?: string;
+  noOptionsText?: string;
 }
 
 interface FormPromptModalProps {
@@ -64,23 +73,68 @@ export function FormPromptModal({
           {description ? <p className="text-sm text-slate-600">{description}</p> : null}
 
           <div className="grid gap-4 md:grid-cols-2">
-            {fields.map((field) => (
-              <label key={field.key} className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">
-                  {field.label}
-                  {field.required ? ' *' : ''}
-                </span>
-                <input
-                  type={field.type ?? 'text'}
-                  value={field.value}
-                  onChange={(event) => field.onChange(event.target.value)}
-                  placeholder={field.placeholder}
-                  required={field.required}
-                  autoFocus={field.autoFocus}
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </label>
-            ))}
+            {fields.map((field) => {
+              const fieldDisabled = loading || field.disabled;
+
+              if (field.type === 'lookup') {
+                return (
+                  <div key={field.key} className="md:col-span-2">
+                    <LookupSelect
+                      label={field.label}
+                      value={field.value}
+                      options={field.options ?? []}
+                      onChange={field.onChange}
+                      placeholder={field.placeholder}
+                      title={field.lookupTitle}
+                      searchPlaceholder={field.searchPlaceholder}
+                      emptyOptionLabel={field.emptyOptionLabel}
+                      helperText={field.helperText}
+                      required={field.required}
+                      disabled={fieldDisabled}
+                      dictionaryLabel={field.dictionaryLabel}
+                      noOptionsText={field.noOptionsText}
+                      buttonClassName="rounded-xl bg-slate-50"
+                    />
+                  </div>
+                );
+              }
+
+              return (
+                <label key={field.key} className="block">
+                  <span className="mb-2 block text-sm font-medium text-slate-700">
+                    {field.label}
+                    {field.required ? ' *' : ''}
+                  </span>
+                  {field.type === 'select' ? (
+                    <select
+                      value={field.value}
+                      onChange={(event) => field.onChange(event.target.value)}
+                      required={field.required}
+                      autoFocus={field.autoFocus}
+                      disabled={fieldDisabled}
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    >
+                      {(field.options ?? []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.type ?? 'text'}
+                      value={field.value}
+                      onChange={(event) => field.onChange(event.target.value)}
+                      placeholder={field.placeholder}
+                      required={field.required}
+                      autoFocus={field.autoFocus}
+                      disabled={fieldDisabled}
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    />
+                  )}
+                </label>
+              );
+            })}
           </div>
 
           {error ? (
