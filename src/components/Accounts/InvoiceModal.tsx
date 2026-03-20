@@ -2210,64 +2210,44 @@ export function InvoiceModal({
                                   </span>
                                 )}
                               </div>
-                              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-                                <div>
-                                  {isTypeLocked ? (
-                                    <span
-                                      className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
-                                        typeBadgeClasses[form.type]
-                                      }`}
-                                    >
-                                      {form.type === 'Income'
-                                        ? t('invoiceTypeIncome') ?? 'Доходные счета'
-                                        : t('invoiceTypeExpense') ?? 'Расходные счета'}
-                                    </span>
-                                  ) : (
-                                    <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
-                                      {typeOptions.map((option) => {
-                                        const active = option === form.type;
-                                        return (
-                                          <button
-                                            key={option}
-                                            type="button"
-                                            onClick={() => handleTypeSelect(option)}
-                                            className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
-                                              active
-                                                ? 'bg-blue-600 text-white shadow'
-                                                : 'bg-transparent text-slate-600 hover:bg-slate-100'
-                                            }`}
-                                          >
-                                            {option === 'Income'
-                                              ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                                              : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <LookupSelect
-                                  label={t('invoiceResponsible') ?? 'Ответственный'}
-                                  value={selectedResponsibleId}
-                                  onChange={handleResponsibleChange}
-                                  options={responsibleOptions}
-                                  placeholder={t('actResponsibleNotSelected') ?? 'Не указан'}
-                                  title="Выбор ответственного"
-                                  searchPlaceholder="Поиск ответственного"
-                                  emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Не указан'}
-                                  helperText={
-                                    selectedClient?.responsibleUserName
-                                      ? `По клиенту: ${selectedClient.responsibleUserName}`
-                                      : undefined
-                                  }
-                                  disabled={lookupsLoading}
-                                  buttonClassName="bg-white"
-                                />
+                              <div>
+                                {isTypeLocked ? (
+                                  <span
+                                    className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-1 text-sm font-semibold ${
+                                      typeBadgeClasses[form.type]
+                                    }`}
+                                  >
+                                    {form.type === 'Income'
+                                      ? t('invoiceTypeIncome') ?? 'Доходные счета'
+                                      : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                                  </span>
+                                ) : (
+                                  <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
+                                    {typeOptions.map((option) => {
+                                      const active = option === form.type;
+                                      return (
+                                        <button
+                                          key={option}
+                                          type="button"
+                                          onClick={() => handleTypeSelect(option)}
+                                          className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                                            active
+                                              ? 'bg-blue-600 text-white shadow'
+                                              : 'bg-transparent text-slate-600 hover:bg-slate-100'
+                                          }`}
+                                        >
+                                          {option === 'Income'
+                                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
+                                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
                                 <input
@@ -2300,7 +2280,9 @@ export function InvoiceModal({
                                   placeholder="0.00"
                                 />
                               </label>
+                            </div>
 
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
                                 <select
@@ -2315,6 +2297,24 @@ export function InvoiceModal({
                                   <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
                                 </select>
                               </label>
+
+                              <LookupSelect
+                                label={t('invoiceResponsible') ?? 'Ответственный'}
+                                value={selectedResponsibleId}
+                                onChange={handleResponsibleChange}
+                                options={responsibleOptions}
+                                placeholder={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                title="Выбор ответственного"
+                                searchPlaceholder="Поиск ответственного"
+                                emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                helperText={
+                                  selectedClient?.responsibleUserName
+                                    ? `По клиенту: ${selectedClient.responsibleUserName}`
+                                    : undefined
+                                }
+                                disabled={lookupsLoading}
+                                buttonClassName="bg-white"
+                              />
                             </div>
 
                             <label className="flex flex-col gap-1 text-sm">

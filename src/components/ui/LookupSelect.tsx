@@ -97,9 +97,9 @@ export function LookupSelect({
 
   return (
     <>
-      <div className="space-y-2">
+      <div className="space-y-1">
         {label ? (
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex min-h-7 items-center justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">
               {label}
               {required ? ' *' : ''}
@@ -108,7 +108,7 @@ export function LookupSelect({
               type="button"
               onClick={handleOpen}
               disabled={disabled}
-              className="text-xs font-medium text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-400"
+              className="text-xs font-medium leading-none text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-400"
             >
               {dictionaryLabel}
             </button>
@@ -119,9 +119,9 @@ export function LookupSelect({
           type="button"
           onClick={handleOpen}
           disabled={disabled}
-          className={`flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${buttonClassName}`}
+          className={`flex min-h-[42px] w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${buttonClassName}`}
         >
-          <span className={selectedOption ? 'text-slate-700' : 'text-slate-400'}>
+          <span className={`min-w-0 flex-1 truncate ${selectedOption ? 'text-slate-700' : 'text-slate-400'}`}>
             {triggerLabel}
           </span>
           <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
