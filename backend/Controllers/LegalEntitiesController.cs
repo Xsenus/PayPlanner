@@ -1081,7 +1081,11 @@ public class LegalEntitiesController : ControllerBase
 
         if (overwriteWithDadata)
         {
-            changed |= SetIfDifferent(target.Value, v => target.Value = v, normalizedAddress);
+            if (!AddressEquals(target.Value, normalizedAddress))
+            {
+                target.Value = normalizedAddress;
+                changed = true;
+            }
             changed |= SetIfDifferent(target.UnrestrictedValue, v => target.UnrestrictedValue = v, legacyAddress);
 
             changed |= SetIfDifferent(target.PostalCode, v => target.PostalCode = v, NormalizeOptional(cleaned?.PostalCode));

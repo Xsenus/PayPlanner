@@ -113,10 +113,15 @@ namespace PayPlanner.Api.Services.LegalEntities
         private static StringContent JsonContent(object payload) =>
             new(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
 
-        private static CleanedAddress? MapAddress(JsonElement e) =>
-            new(
+        private static CleanedAddress? MapAddress(JsonElement e)
+        {
+            var result = e.GetPropertyOrDefault("result");
+            if (string.IsNullOrWhiteSpace(result))
+                return null;
+
+            return new(
                 Source: e.GetPropertyOrDefault("source"),
-                Result: e.GetPropertyOrDefault("result"),
+                Result: result,
                 PostalCode: e.GetPropertyOrDefault("postal_code"),
                 Country: e.GetPropertyOrDefault("country"),
                 CountryIsoCode: e.GetPropertyOrDefault("country_iso_code"),
@@ -144,6 +149,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 UnparsedParts: e.GetPropertyOrDefault("unparsed_parts"),
                 Timezone: e.GetPropertyOrDefault("timezone")
             );
+        }
 
         private static CleanedEmail? MapEmail(JsonElement e)
         {

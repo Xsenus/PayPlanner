@@ -70,10 +70,10 @@ namespace PayPlanner.Api.Extensions
         // ---------- Payments ----------
         public static IQueryable<Payment> WithPaymentIncludes(this IQueryable<Payment> q) =>
             q.Include(p => p.Client)
-                 .ThenInclude(c => c.ClientStatus)
-             .Include(p => p.ClientCase)
-             .Include(p => p.DealType)
-             .Include(p => p.IncomeType)
+                 .ThenInclude(c => c!.ClientStatus)
+              .Include(p => p.ClientCase)
+              .Include(p => p.DealType)
+              .Include(p => p.IncomeType)
              .Include(p => p.PaymentSource)
              .Include(p => p.Service)
              .Include(p => p.PaymentStatusEntity);

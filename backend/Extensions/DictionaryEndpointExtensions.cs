@@ -17,10 +17,13 @@ namespace PayPlanner.Api.Extensions
             var group = parent.MapGroup(routeSegment);
 
             // CREATE
-            group.MapPost(string.Empty, async (PaymentContext db, T model) =>
+            group.MapPost(string.Empty, async (PaymentContext db, HttpContext httpContext) =>
             {
+                var model = await httpContext.Request.ReadFromJsonAsync<T>(cancellationToken: httpContext.RequestAborted);
+                if (model is null) return Results.BadRequest("Request body is required.");
+
                 db.Set<T>().Add(model);
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(httpContext.RequestAborted);
 
                 // Берём Id через reflection (Id int)
                 var id = model?.GetType().GetProperty("Id", BindingFlags.Public | BindingFlags.Instance)?.GetValue(model);
@@ -28,13 +31,16 @@ namespace PayPlanner.Api.Extensions
             });
 
             // UPDATE
-            group.MapPut("/{id:int}", async (PaymentContext db, int id, T model) =>
+            group.MapPut("/{id:int}", async (PaymentContext db, HttpContext httpContext, int id) =>
             {
+                var model = await httpContext.Request.ReadFromJsonAsync<T>(cancellationToken: httpContext.RequestAborted);
+                if (model is null) return Results.BadRequest("Request body is required.");
+
                 var entity = await db.Set<T>().FindAsync(id);
                 if (entity is null) return Results.NotFound();
 
                 applyUpdate(entity, model);
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(httpContext.RequestAborted);
                 return Results.Ok(entity);
             });
 

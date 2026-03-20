@@ -15,6 +15,26 @@ namespace PayPlanner.Api.Services
     /// </summary>
     public static class SeedDataService
     {
+        private sealed class PaymentSeedDefinition
+        {
+            public string Email { get; init; } = string.Empty;
+            public string CaseTitle { get; init; } = string.Empty;
+            public DateTime Date { get; init; }
+            public DateTime? AccountDate { get; init; }
+            public string? Account { get; init; }
+            public decimal Amount { get; init; }
+            public PaymentType Type { get; init; }
+            public PaymentStatus Status { get; init; }
+            public string Description { get; init; } = string.Empty;
+            public bool IsPaid { get; init; }
+            public DateTime? PaidDate { get; init; }
+            public string DealType { get; init; } = string.Empty;
+            public string IncomeType { get; init; } = string.Empty;
+            public string Source { get; init; } = string.Empty;
+            public string StatusName { get; init; } = string.Empty;
+            public string? ActReference { get; init; }
+        }
+
         /// <summary>
         /// Выполнить сиды.
         /// </summary>
@@ -712,9 +732,9 @@ namespace PayPlanner.Api.Services
             var allCases = await context.ClientCases.AsNoTracking().ToListAsync();
 
             var today = DateTime.UtcNow.Date;
-            var paymentsToEnsure = new[]
+            var paymentsToEnsure = new PaymentSeedDefinition[]
             {
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "ivan@example.com",
                     CaseTitle = "Подготовка договора консалтинга",
@@ -733,7 +753,7 @@ namespace PayPlanner.Api.Services
                     StatusName = "Выполнено",
                     ActReference = (string?)null
                 },
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "ivan@example.com",
                     CaseTitle = "Подготовка договора консалтинга",
@@ -754,7 +774,7 @@ namespace PayPlanner.Api.Services
                 },
 
                 // Мария Петрова — Редизайн сайта
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
                     CaseTitle = "Редизайн сайта",
@@ -773,7 +793,7 @@ namespace PayPlanner.Api.Services
                     StatusName = "Выполнено",
                     ActReference = (string?)null
                 },
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
                     CaseTitle = "Редизайн сайта",
@@ -792,7 +812,7 @@ namespace PayPlanner.Api.Services
                     StatusName = "Просрочено",
                     ActReference = "Акт ожидается"
                 },
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
                     CaseTitle = "Редизайн сайта",
@@ -813,7 +833,7 @@ namespace PayPlanner.Api.Services
                 },
 
                 // Алексей Смирнов — Поставка партии №101
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "alex@business.com",
                     CaseTitle = "Поставка партии №101",
@@ -834,7 +854,7 @@ namespace PayPlanner.Api.Services
                 },
 
                 // Екатерина Сидорова — Научный проект R&D
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "katya@startup.com",
                     CaseTitle = "Научный проект R&D",
@@ -855,7 +875,7 @@ namespace PayPlanner.Api.Services
                 },
 
                 // Дмитрий Кузнецов — Сопровождение 2025 (РАСХОД)
-                new
+                new PaymentSeedDefinition
                 {
                     Email = "dmitry@consulting.com",
                     CaseTitle = "Сопровождение 2025",

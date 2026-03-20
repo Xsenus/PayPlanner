@@ -42,14 +42,20 @@ namespace PayPlanner.Api.Services
             Action<MailMessage>? configureMessage = null)
         {
             if (!_isEnabled)
+            {
                 _logger.LogInformation(
                     "Email sending is disabled. Dry-run for {ToEmail}. Subject: {Subject}.",
                     toEmail,
                     subject);
-            return;
+                return;
+            }
+
             if (!TryBuildSmtpSettings(out var settings))
+            {
                 _logger.LogWarning("SMTP settings are not configured correctly. Skipping email to {ToEmail}.", toEmail);
-            return;
+                return;
+            }
+
             try
             {
                 _ = new MailAddress(toEmail);
