@@ -1,10 +1,10 @@
 import type { SummaryStats, MonthlyStats } from '../types';
 
 export function toMonthlyStats(s: SummaryStats): MonthlyStats {
-  const income = s.income.totalAmount;
-  const expense = s.expense.totalAmount;
+  const income = s.income.collectedAmount;
+  const expense = s.expense.collectedAmount;
 
-  const completedAmount = s.netCompleted;
+  const completedAmount = s.income.completedAmount + s.expense.completedAmount;
   const pendingAmount = s.income.pendingAmount + s.expense.pendingAmount;
   const overdueAmount = s.income.overdueAmount + s.expense.overdueAmount;
 
@@ -13,8 +13,8 @@ export function toMonthlyStats(s: SummaryStats): MonthlyStats {
   const overdueCount = s.income.overdueCount + s.expense.overdueCount;
   const totalCount = s.income.totalCount + s.expense.totalCount;
 
-  const completionRate = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
-  const profit = income - expense;
+  const completionRate = totalCount ? Math.round((completedCount / totalCount) * 1000) / 10 : 0;
+  const profit = s.netCollected;
 
   return {
     income,

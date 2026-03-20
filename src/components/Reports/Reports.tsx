@@ -145,16 +145,24 @@ function StatusPanel({
     amount: number;
   }>;
 }) {
+  const trackedAmount = byStatus.reduce((sum, row) => sum + row.amount, 0);
+  const hasOriginalVolume = Math.abs(totalAmount - trackedAmount) > 0.01;
+
   return (
     <section className="rounded-3xl border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
       <div className="flex flex-col gap-3 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
-          <p className="mt-1 text-sm text-slate-500">Распределение суммы и количества по статусам за выбранный период.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Распределение фактически оплаченной суммы и остатка по статусам за выбранный период.
+          </p>
         </div>
         <div className="text-right">
-          <div className="text-2xl font-semibold text-slate-950">{formatCurrency(totalAmount)}</div>
-          <div className="text-sm text-slate-500">{totalCount} операций</div>
+          <div className="text-2xl font-semibold text-slate-950">{formatCurrency(trackedAmount)}</div>
+          <div className="text-sm text-slate-500">
+            {totalCount} операций
+            {hasOriginalVolume ? ` · начислено ${formatCurrency(totalAmount)}` : ''}
+          </div>
         </div>
       </div>
 
@@ -365,25 +373,25 @@ export function Reports() {
           <>
             <section className="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-4">
               <MetricCard
-                title="Доходы"
+                title="Поступило"
                 value={formatCurrency(stats.income)}
                 icon={TrendingUp}
                 tone="income"
-                subtitle={`Доходных операций: ${types.income.totalCount}`}
+                subtitle={`Фактически получено за период · операций: ${types.income.totalCount}`}
               />
               <MetricCard
-                title="Расходы"
+                title="Списано"
                 value={formatCurrency(stats.expense)}
                 icon={TrendingDown}
                 tone="expense"
-                subtitle={`Расходных операций: ${types.expense.totalCount}`}
+                subtitle={`Фактически оплачено за период · операций: ${types.expense.totalCount}`}
               />
               <MetricCard
-                title="Результат"
+                title="Денежный результат"
                 value={formatCurrency(stats.profit)}
                 icon={ArrowUpRight}
                 tone="profit"
-                subtitle={stats.profit >= 0 ? 'Положительное сальдо периода' : 'Отрицательное сальдо периода'}
+                subtitle={stats.profit >= 0 ? 'Поступления превышают списания' : 'Списания превышают поступления'}
               />
               <MetricCard
                 title="Выполнение"
@@ -399,10 +407,10 @@ export function Reports() {
                 <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-slate-950">Статусы по сумме</h2>
-                    <p className="mt-1 text-sm text-slate-500">Кольцо показывает распределение общей суммы периода между выполненными, ожидаемыми и просроченными платежами.</p>
+                    <p className="mt-1 text-sm text-slate-500">Кольцо показывает распределение оплаченной суммы и остатка между выполненными, ожидаемыми и просроченными платежами.</p>
                   </div>
                   <div className="text-sm text-slate-500">
-                    Всего на период: <span className="font-semibold text-slate-900">{formatCurrency((stats.completedAmount ?? 0) + (stats.pendingAmount ?? 0) + (stats.overdueAmount ?? 0))}</span>
+                    Всего в разрезе статусов: <span className="font-semibold text-slate-900">{formatCurrency((stats.completedAmount ?? 0) + (stats.pendingAmount ?? 0) + (stats.overdueAmount ?? 0))}</span>
                   </div>
                 </div>
 
