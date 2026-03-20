@@ -13,3 +13,22 @@
     transform-origin: left;
   }
 }
+
+.pp-date-input {
+  color-scheme: light;
+}
+
+.pp-date-input::-webkit-datetime-edit,
+.pp-date-input::-webkit-date-and-time-value {
+  text-align: center;
+}
+
+.pp-date-input::-webkit-datetime-edit-fields-wrapper {
+  display: flex;
+  justify-content: center;
+}
+
+.pp-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+}

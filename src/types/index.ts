@@ -726,6 +726,7 @@ export interface InvoiceInput {
   paidDate?: string | null;
   lineItems?: InvoiceLineItem[];
   responsibleIds?: number[];
+  installmentPlan?: InstallmentPlanInput | null;
 }
 
 export interface InvoiceSummaryBucket {
@@ -823,6 +824,8 @@ export interface InstallmentRequest {
   roundingStep?: number | null;
 }
 
+export type InstallmentRoundingMode = 'none' | 'down' | 'up';
+
 export interface InstallmentResponse {
   overpay: number;
   toPay: number;
@@ -840,6 +843,31 @@ export interface InstallmentItem {
   interest: number;
   payment: number;
   balance: number;
+}
+
+export interface InstallmentPlanItemInput {
+  sequence: number;
+  date: string;
+  principal: number;
+  interest: number;
+  payment: number;
+  balance: number;
+}
+
+export interface InstallmentPlanInput {
+  total: number;
+  downPayment: number;
+  annualRate: number;
+  months: number;
+  startDate: string;
+  roundingMode?: InstallmentRoundingMode;
+  roundingStep?: number | null;
+  toPay: number;
+  overpay: number;
+  loanAmount?: number | null;
+  baseMonthlyPayment?: number | null;
+  roundedMonthlyPayment?: number | null;
+  items: InstallmentPlanItemInput[];
 }
 
 export type SummaryStatus = 'Pending' | 'Completed' | 'Overdue';

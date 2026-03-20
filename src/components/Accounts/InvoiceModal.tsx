@@ -9,6 +9,7 @@ import type {
   Contract,
   Invoice,
   InvoiceInput,
+  InstallmentPlanInput,
   InvoiceLineItem,
   Payment,
   PaymentKind,
@@ -20,8 +21,6 @@ import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
-import { useTabNavigation } from '../../contexts/TabContext';
-import { storeInstallmentDraft } from '../../utils/installmentBridge';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { useDialog } from '../../hooks/useDialog';
@@ -29,6 +28,8 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { CaseModal } from '../Clients/CaseModal';
 import { LookupSelect } from '../ui/LookupSelect';
+import { InstallmentPlanner } from './InstallmentPlanner';
+import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 
 type FormState = {
   number: string;
@@ -294,7 +295,7 @@ function actLabel(act: ActOption | null): string {
   const parts: string[] = [];
   if (act.number) parts.push(`№${act.number}`);
   if (act.title) parts.push(act.title);
-  return parts.join(' · ');
+  return parts.join(' В· ');
 }
 
 function clientCaseLabel(clientCase: ClientCaseOption | null): string {
@@ -500,7 +501,9 @@ function buildInvoiceStatusSnapshot(
     return sum + resolvedAmount;
   }, 0);
 
-  const totalAmount = fallbackAmountValue > 0 ? fallbackAmountValue : aggregatedTotalFromPayments;
+  const totalAmount = sourcePayments.length > 0
+    ? Math.max(fallbackAmountValue, aggregatedTotalFromPayments)
+    : (fallbackAmountValue > 0 ? fallbackAmountValue : aggregatedTotalFromPayments);
   const paidAmount = sourcePayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0);
   const rawOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
   const outstandingAmount = rawOutstandingAmount > 0
@@ -589,7 +592,6 @@ export function InvoiceModal({
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
-  const { setActiveTab } = useTabNavigation();
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
   const typeBadgeClasses: Record<PaymentKind, string> = {
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
@@ -630,6 +632,9 @@ export function InvoiceModal({
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [numberEditedManually, setNumberEditedManually] = useState(false);
   const [displayPayments, setDisplayPayments] = useState<Payment[]>(relatedPayments);
+  const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)));
+  const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
+  const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
@@ -682,6 +687,10 @@ export function InvoiceModal({
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
+  );
+  const relatedInstallmentPlan = useMemo(
+    () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)),
+    [relatedPayments],
   );
   const selectedResponsibleId = form.responsibleIds[0] ?? '';
   const selectedContract = useMemo(
@@ -928,6 +937,9 @@ export function InvoiceModal({
       setClientCasesError(null);
       setCreateActError(null);
       setLocalError(null);
+      setInstallmentPlan(cloneInstallmentPlan(resumeDraft?.installmentPlan ?? relatedInstallmentPlan));
+      setInstallmentModalOpen(false);
+      setInstallmentPlanTouched(Boolean(resumeDraft?.installmentPlan));
       setNumberEditedManually(Boolean(resumeDraft?.form?.number));
       if (presentation === 'page') {
         setPageViewMode(resumeDraft?.pageViewMode ?? true);
@@ -937,8 +949,24 @@ export function InvoiceModal({
   }, [open, invoice, resumeDraft, defaultClientId, defaultResponsibleId, defaultType, presentation]);
 
   useEffect(() => {
+    if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {
+      return;
+    }
+
+    setInstallmentPlan(cloneInstallmentPlan(relatedInstallmentPlan));
+  }, [open, relatedInstallmentPlan, installmentPlanTouched, resumeDraft?.installmentPlan]);
+
+  useEffect(() => {
     setDisplayPayments(relatedPayments);
   }, [relatedPayments]);
+
+  useEffect(() => {
+    if (form.type !== 'Income' && installmentPlan) {
+      setInstallmentPlan(null);
+      setInstallmentModalOpen(false);
+      setInstallmentPlanTouched(true);
+    }
+  }, [form.type, installmentPlan]);
 
   useEffect(() => {
     if (!open || mode !== 'create') return;
@@ -1321,12 +1349,21 @@ export function InvoiceModal({
   );
 
   const effectiveInvoiceStatus = form.status;
+  const installmentPlanAmountMismatch = useMemo(() => {
+    if (!installmentPlan) return false;
+    return Math.abs(parseMoneyInput(form.amount) - installmentPlan.total) > 0.009;
+  }, [form.amount, installmentPlan]);
 
 
-  const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus): InvoiceInput => {
+  const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus, planOverride?: InstallmentPlanInput | null): InvoiceInput => {
     const safeAmount = parseMoneyInput(form.amount);
     const clientCaseIds = selectedClientCaseIds.filter((id) => Number.isFinite(id) && id > 0);
     const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
+    const effectiveInstallmentPlan = planOverride === undefined ? installmentPlan : planOverride;
+    const shouldIncludeInstallmentPlan =
+      mode === 'create'
+        ? Boolean(effectiveInstallmentPlan)
+        : installmentPlanTouched || Boolean(relatedInstallmentPlan) || Boolean(effectiveInstallmentPlan);
 
     return {
       number: form.number.trim() || String(invoice?.number ?? ''),
@@ -1354,8 +1391,11 @@ export function InvoiceModal({
           price: parseMoneyInput(item.price),
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
+      installmentPlan: shouldIncludeInstallmentPlan
+        ? (effectiveInstallmentPlan ? cloneInstallmentPlan(effectiveInstallmentPlan) : null)
+        : undefined,
     };
-  }, [form, invoice?.number, lineItems, selectedActs, selectedClientCaseIds]);
+  }, [form, installmentPlan, installmentPlanTouched, invoice?.number, lineItems, mode, relatedInstallmentPlan, selectedActs, selectedClientCaseIds]);
 
   const buildInvoiceEditorDraft = useCallback((): InvoiceEditorDraftState => ({
     invoiceId: invoice?.id ?? null,
@@ -1366,7 +1406,8 @@ export function InvoiceModal({
     lineItems,
     selectedActs,
     selectedClientCaseIds,
-  }), [form, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds]);
+    installmentPlan,
+  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds]);
 
   const handleOpenClientCard = (clientId: number) => {
     storeInvoiceEditorDraft(buildInvoiceEditorDraft());
@@ -1394,6 +1435,11 @@ export function InvoiceModal({
     const parsedAmount = parseMoneyInput(form.amount);
     if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
       setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      return;
+    }
+
+    if (installmentPlanAmountMismatch) {
+      setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
       return;
     }
 
@@ -1426,20 +1472,46 @@ export function InvoiceModal({
 
   const handleOpenInstallmentCalculator = () => {
     if (form.type !== 'Income') return;
-    const parsedAmount = parseMoneyInput(form.amount);
-    const hasValidAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
-    const clientIdNumber = form.clientId ? Number.parseInt(form.clientId, 10) : undefined;
+    setInstallmentModalOpen(true);
+  };
 
-    storeInstallmentDraft({
-      total: hasValidAmount ? parsedAmount : undefined,
-      startDate: form.date || undefined,
-      clientId: Number.isFinite(clientIdNumber) ? clientIdNumber : undefined,
-      clientName: selectedClient?.name ?? undefined,
-      invoiceNumber: form.number.trim() ? form.number.trim() : undefined,
-    });
+  const handleApplyInstallmentPlan = async (plan: InstallmentPlanInput | null) => {
+    const nextPlan = cloneInstallmentPlan(plan);
 
-    setActiveTab('calculator');
-    onClose();
+    setInstallmentPlan(nextPlan);
+    setInstallmentPlanTouched(true);
+    setLocalError(null);
+
+    if (mode === 'edit' && invoice?.id) {
+      try {
+        const payload = buildInvoicePayload(undefined, nextPlan);
+        await apiService.updateInvoice(invoice.id, payload);
+        await onRefreshRequested?.();
+        setInstallmentModalOpen(false);
+        if (nextPlan) {
+          toast.success(`График рассрочки сохранен: ${nextPlan.items.length} платежей.`);
+        } else {
+          toast.success('График рассрочки удален.');
+        }
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, 'Не удалось сохранить график рассрочки.');
+        setLocalError(message);
+        toast.error(message);
+      }
+      return;
+    }
+
+    setInstallmentModalOpen(false);
+
+    if (nextPlan) {
+      toast.success(
+        mode === 'create'
+          ? `График сохранен в форме счета: ${nextPlan.items.length} платежей. Чтобы создать платежи, сохраните счет.`
+          : `График рассрочки сохранен в счете: ${nextPlan.items.length} платежей.`,
+      );
+    } else {
+      toast.success(mode === 'create' ? 'График удален из формы счета.' : 'График рассрочки обновлен.');
+    }
   };
 
   const invoiceLink = useMemo(() => {
@@ -1908,7 +1980,7 @@ export function InvoiceModal({
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{actLabel(act)}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                        {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
                       </div>
                     </div>
                     <button
@@ -1970,7 +2042,7 @@ export function InvoiceModal({
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-slate-900">{actLabel(act)}</span>
                             <span className="mt-1 block text-xs text-slate-500">
-                              {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                              {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
                             </span>
                           </span>
                         </button>
@@ -2267,7 +2339,7 @@ export function InvoiceModal({
                                       onClick={handleOpenInstallmentCalculator}
                                       className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
                                     >
-                                      {t('invoiceInstallmentButton') ?? 'Рассрочка'}
+                                      {installmentPlan ? 'Изменить рассрочку' : (t('invoiceInstallmentButton') ?? 'Рассрочка')}
                                     </button>
                                   )}
                                 </span>
@@ -2279,6 +2351,13 @@ export function InvoiceModal({
                                   className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-right text-sm tabular-nums text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   placeholder="0.00"
                                 />
+                                {isIncome && installmentPlan ? (
+                                  <span className={`text-xs ${installmentPlanAmountMismatch ? 'text-amber-600' : 'text-slate-500'}`}>
+                                    {installmentPlanAmountMismatch
+                                      ? 'Сумма изменилась, пересчитайте рассрочку.'
+                                      : `Настроено платежей: ${installmentPlan.items.length}, к оплате ${formatCurrencySmart(installmentPlan.toPay).short}.`}
+                                  </span>
+                                ) : null}
                               </label>
                             </div>
 
@@ -2404,11 +2483,17 @@ export function InvoiceModal({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {displayPayments.map((payment) => (
-                      <div
-                        key={payment.id}
-                        className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
-                      >
+                    {displayPayments.map((payment) => {
+                      const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                      const installmentSequenceLabel = installmentMeta
+                        ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
+                        : null;
+
+                      return (
+                        <div
+                          key={payment.id}
+                          className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
+                        >
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-semibold text-slate-900">
@@ -2421,6 +2506,11 @@ export function InvoiceModal({
                             >
                               {invoicePaymentStatusLabel[payment.status] ?? invoicePaymentStatusLabel.Pending}
                             </span>
+                            {installmentMeta ? (
+                              <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                                Рассрочка {installmentSequenceLabel}
+                              </span>
+                            ) : null}
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
                             {payment.description?.trim() || 'Без описания'}
@@ -2459,8 +2549,9 @@ export function InvoiceModal({
                             )}
                           </div>
                         )}
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </section>
@@ -2651,6 +2742,26 @@ export function InvoiceModal({
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {installmentModalOpen && (
+        <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="max-h-[calc(100vh-2rem)] w-full max-w-6xl overflow-y-auto rounded-3xl bg-slate-50 p-4 shadow-2xl sm:p-6">
+            <InstallmentPlanner
+              mode="invoice"
+              initialPlan={installmentPlan}
+              initialTotal={parseMoneyInput(form.amount)}
+              initialStartDate={form.date}
+              initialClientId={form.clientId ? Number(form.clientId) : undefined}
+              initialCaseId={selectedClientCaseIds[0]}
+              initialClientName={selectedClient?.name ?? undefined}
+              initialInvoiceNumber={form.number.trim() || invoice?.number || undefined}
+              initialCaseName={selectedClientCasesSummary || undefined}
+              onApplyPlan={handleApplyInstallmentPlan}
+              onCancel={() => setInstallmentModalOpen(false)}
+            />
           </div>
         </div>
       )}

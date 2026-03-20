@@ -1,4 +1,4 @@
-import type { ActStatus, PaymentKind, PaymentStatus } from '../types';
+import type { ActStatus, InstallmentPlanInput, PaymentKind, PaymentStatus } from '../types';
 
 export const INVOICE_EDITOR_STORAGE_KEY = 'pp.invoice-editor-draft';
 
@@ -51,6 +51,7 @@ export interface InvoiceEditorDraftState {
   lineItems: InvoiceEditorLineItemDraft[];
   selectedActs: InvoiceEditorActDraft[];
   selectedClientCaseIds: number[];
+  installmentPlan?: InstallmentPlanInput | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,6 +70,48 @@ function readNumberArray(value: unknown): number[] {
   return Array.isArray(value)
     ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item))
     : [];
+}
+
+function readInstallmentPlan(value: unknown): InstallmentPlanInput | null {
+  if (!isRecord(value)) return null;
+  if (!Array.isArray(value.items)) return null;
+
+  return {
+    total: typeof value.total === 'number' && Number.isFinite(value.total) ? value.total : 0,
+    downPayment: typeof value.downPayment === 'number' && Number.isFinite(value.downPayment) ? value.downPayment : 0,
+    annualRate: typeof value.annualRate === 'number' && Number.isFinite(value.annualRate) ? value.annualRate : 0,
+    months: typeof value.months === 'number' && Number.isFinite(value.months) ? value.months : 1,
+    startDate: readString(value.startDate),
+    roundingMode:
+      value.roundingMode === 'down' || value.roundingMode === 'up' || value.roundingMode === 'none'
+        ? value.roundingMode
+        : 'none',
+    roundingStep: typeof value.roundingStep === 'number' && Number.isFinite(value.roundingStep) ? value.roundingStep : null,
+    toPay: typeof value.toPay === 'number' && Number.isFinite(value.toPay) ? value.toPay : 0,
+    overpay: typeof value.overpay === 'number' && Number.isFinite(value.overpay) ? value.overpay : 0,
+    loanAmount: typeof value.loanAmount === 'number' && Number.isFinite(value.loanAmount) ? value.loanAmount : null,
+    baseMonthlyPayment:
+      typeof value.baseMonthlyPayment === 'number' && Number.isFinite(value.baseMonthlyPayment)
+        ? value.baseMonthlyPayment
+        : null,
+    roundedMonthlyPayment:
+      typeof value.roundedMonthlyPayment === 'number' && Number.isFinite(value.roundedMonthlyPayment)
+        ? value.roundedMonthlyPayment
+        : null,
+    items: value.items
+      .filter(isRecord)
+      .map((item, index) => ({
+        sequence:
+          typeof item.sequence === 'number' && Number.isFinite(item.sequence)
+            ? item.sequence
+            : index + 1,
+        date: readString(item.date),
+        principal: typeof item.principal === 'number' && Number.isFinite(item.principal) ? item.principal : 0,
+        interest: typeof item.interest === 'number' && Number.isFinite(item.interest) ? item.interest : 0,
+        payment: typeof item.payment === 'number' && Number.isFinite(item.payment) ? item.payment : 0,
+        balance: typeof item.balance === 'number' && Number.isFinite(item.balance) ? item.balance : 0,
+      })),
+  };
 }
 
 function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | null {
@@ -141,6 +184,7 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     lineItems,
     selectedActs,
     selectedClientCaseIds: readNumberArray(raw.selectedClientCaseIds),
+    installmentPlan: readInstallmentPlan(raw.installmentPlan),
   };
 }
 

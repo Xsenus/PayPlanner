@@ -69,6 +69,8 @@ public class UpsertInvoiceRequest
     public List<int>? ResponsibleIds { get; set; }
 
     public List<InvoiceLineItemRequest>? LineItems { get; set; }
+
+    public InvoiceInstallmentPlanRequest? InstallmentPlan { get; set; }
 }
 
 public class InvoiceLineItemRequest

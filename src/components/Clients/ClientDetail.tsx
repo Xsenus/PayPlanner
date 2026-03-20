@@ -64,7 +64,7 @@ import type {
   PowerOfAttorney,
 } from '../../types';
 import type { MenuSectionKey } from '../../types/permissions';
-import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
+import { toDateInputValue, toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';
@@ -78,6 +78,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { INSTALLMENT_PAYMENT_MARKER, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import {
   ClientAddressEntriesForm,
   type AddressTypeOption,
@@ -164,6 +165,59 @@ const SECTION_ORDER: ClientDetailSection[] = [
 
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = 'pp.client_detail_table';
+
+function accountKey(value?: string | null): string | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return null;
+
+  const numeric = normalized.replace(/\D+/g, '');
+  if (numeric) return numeric;
+
+  const stripped = normalized.replace(/[^a-z0-9а-яё]+/gi, '');
+  return stripped || normalized;
+}
+
+function invoiceEntityId(value?: Invoice | null): number | null {
+  return typeof value?.invoiceEntityId === 'number' && value.invoiceEntityId > 0
+    ? value.invoiceEntityId
+    : null;
+}
+
+function invoiceLegacyKey(number?: string | null, date?: string | null): string | null {
+  const normalizedNumber = accountKey(number);
+  if (!normalizedNumber) return null;
+
+  const normalizedDate = toDateInputValue(date ?? null);
+  const year = normalizedDate?.slice(0, 4) ?? 'na';
+  return `${normalizedNumber}::${year}`;
+}
+
+function paymentLegacyKey(payment: Payment): string | null {
+  return invoiceLegacyKey(payment.account, payment.accountDate ?? payment.date);
+}
+
+function isPaymentLinkedToInvoice(payment: Payment, invoice: Invoice): boolean {
+  if (payment.documentKind === 'Invoice') {
+    return false;
+  }
+
+  const canonicalInvoiceId = invoiceEntityId(invoice) ?? (invoice.id > 0 ? invoice.id : null);
+  if (canonicalInvoiceId && payment.invoiceId === canonicalInvoiceId) {
+    return true;
+  }
+
+  const invoiceKey = invoiceLegacyKey(invoice.number, invoice.date);
+  const paymentKey = paymentLegacyKey(payment);
+  return Boolean(invoiceKey && paymentKey && invoiceKey === paymentKey);
+}
+
+function cleanInstallmentSystemNotes(systemNotes?: string | null): string {
+  return (systemNotes ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(INSTALLMENT_PAYMENT_MARKER))
+    .join('\n');
+}
 
 const PAYMENT_TABLE_COLUMNS: Array<{
   key: PaymentTableColumnKey;
@@ -1196,6 +1250,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   const [invoiceClients, setInvoiceClients] = useState<Client[]>([]);
   const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
   const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(null);
+  const [invoiceModalRelatedPayments, setInvoiceModalRelatedPayments] = useState<Payment[]>([]);
 
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [contractModalMode, setContractModalMode] = useState<'create' | 'edit'>('create');
@@ -1733,6 +1788,58 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   });
 
   const visiblePayments = payments;
+  const selectedInvoiceRelatedPayments = useMemo(() => {
+    if (!selectedInvoice) {
+      return [];
+    }
+
+    return visiblePayments.filter((payment) => isPaymentLinkedToInvoice(payment, selectedInvoice));
+  }, [selectedInvoice, visiblePayments]);
+  const loadInvoiceRelatedPayments = useCallback(async (invoiceSnapshot: Invoice | null) => {
+    if (!invoiceSnapshot) {
+      setInvoiceModalRelatedPayments([]);
+      return;
+    }
+
+    try {
+      const paymentPool = await apiService.getPayments({
+        from: MIN_DATE,
+        to: MAX_DATE,
+        clientId,
+        caseId: invoiceSnapshot.clientCaseId ?? undefined,
+      });
+
+      setInvoiceModalRelatedPayments(paymentPool.filter((payment) => isPaymentLinkedToInvoice(payment, invoiceSnapshot)));
+    } catch {
+      setInvoiceModalRelatedPayments(
+        visiblePayments.filter((payment) => isPaymentLinkedToInvoice(payment, invoiceSnapshot)),
+      );
+    }
+  }, [clientId, visiblePayments]);
+  const refreshInvoiceModalData = useCallback(async () => {
+    await Promise.all([refreshInvoices(), refreshPayments()]);
+
+    if (!selectedInvoice?.id) {
+      setInvoiceModalRelatedPayments([]);
+      return;
+    }
+
+    try {
+      const freshInvoice = await apiService.getInvoice(selectedInvoice.id);
+      setSelectedInvoice(freshInvoice);
+      await loadInvoiceRelatedPayments(freshInvoice);
+    } catch {
+      await loadInvoiceRelatedPayments(selectedInvoice);
+    }
+  }, [loadInvoiceRelatedPayments, refreshInvoices, refreshPayments, selectedInvoice]);
+  useEffect(() => {
+    if (!invoiceModalOpen || invoiceModalMode !== 'edit') {
+      setInvoiceModalRelatedPayments([]);
+      return;
+    }
+
+    void loadInvoiceRelatedPayments(selectedInvoice);
+  }, [invoiceModalMode, invoiceModalOpen, loadInvoiceRelatedPayments, selectedInvoice]);
   const visiblePaymentTableColumns = useMemo(() => {
     const columnMap = new Map(PAYMENT_TABLE_COLUMNS.map((column) => [column.key, column]));
     return paymentOrderedVisibleColumns.flatMap((columnKey) => {
@@ -3598,6 +3705,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         const DirectionIcon = payment.type === 'Income' ? TrendingUp : TrendingDown;
                         const hasProgress = payment.hasPartialPayment && payment.paidAmount > 0;
                         const paidProgress = payment.amount > 0 ? Math.min(payment.paidAmount / payment.amount, 1) : 0;
+                        const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                        const visibleSystemNotes = cleanInstallmentSystemNotes(payment.systemNotes);
 
                         return (
                           <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">
@@ -3643,6 +3752,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                     <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                                       {payment.type === 'Income' ? 'Поступление' : 'Списание'}
                                     </div>
+                                    {installmentMeta ? (
+                                      <div className="mt-2 inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                                        Рассрочка {installmentMeta.sequence}/{Math.max(installmentMeta.months, installmentMeta.sequence)}
+                                      </div>
+                                    ) : null}
                                     {payment.outstandingAmount > 0 ? (
                                       <div className="mt-2 text-xs text-rose-600">
                                         Осталось оплатить: {formatCurrencySmart(payment.outstandingAmount).full}
@@ -3714,9 +3828,9 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                         <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
                                       </div>
                                     ) : null}
-                                    {payment.systemNotes ? (
-                                      <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={payment.systemNotes}>
-                                        <span className="font-medium text-slate-600">Системно:</span> {payment.systemNotes}
+                                    {visibleSystemNotes ? (
+                                      <div className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500" title={visibleSystemNotes}>
+                                        <span className="font-medium text-slate-600">Системно:</span> {visibleSystemNotes}
                                       </div>
                                     ) : null}
                                   </>
@@ -4667,6 +4781,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           lookupsError={invoiceLookupsError}
           defaultClientId={clientId}
           defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
+          relatedPayments={invoiceModalRelatedPayments}
+          onRefreshRequested={refreshInvoiceModalData}
         />
 
         <ActModal

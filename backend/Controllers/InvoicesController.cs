@@ -29,6 +29,7 @@ public class InvoicesController : ControllerBase
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
     private const string InvoiceItemsMarker = "[pp:invoice-items]";
+    private const string InstallmentPaymentMarker = "[pp:installment-payment]";
 
     public InvoicesController(PaymentContext db, IEmailService emailService, IFormRequirementsService formRequirements)
     {
@@ -328,6 +329,11 @@ public class InvoicesController : ControllerBase
 
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct);
+        var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
+        if (installmentSyncError is not null)
+        {
+            return installmentSyncError;
+        }
         await _db.SaveChangesAsync(ct);
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
@@ -477,6 +483,11 @@ public class InvoicesController : ControllerBase
 
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
+        var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
+        if (installmentSyncError is not null)
+        {
+            return installmentSyncError;
+        }
         await _db.SaveChangesAsync(ct);
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
@@ -1758,6 +1769,336 @@ public class InvoicesController : ControllerBase
         return string.Join("\n", baseLines);
     }
 
+    private async Task<ActionResult?> SyncInstallmentPaymentsAsync(
+        Payment invoicePayment,
+        UpsertInvoiceRequest request,
+        IReadOnlyCollection<int> responsibleIds,
+        CancellationToken ct)
+    {
+        var invoiceEntityId = invoicePayment.InvoiceId ?? invoicePayment.Invoice?.Id;
+        if (!invoiceEntityId.HasValue || invoiceEntityId.Value <= 0)
+        {
+            return null;
+        }
+
+        var existingGeneratedPayments = await _db.Payments
+            .Include(payment => payment.Responsibles)
+            .Where(payment =>
+                payment.InvoiceId == invoiceEntityId.Value
+                && payment.Id != invoicePayment.Id
+                && payment.DocumentKind != DocumentKind.Invoice)
+            .ToListAsync(ct);
+
+        var existingInstallmentPayments = existingGeneratedPayments
+            .Select(payment => new
+            {
+                Payment = payment,
+                Metadata = ExtractInstallmentPaymentMetadata(payment.SystemNotes),
+            })
+            .Where(item => item.Metadata is not null)
+            .ToList();
+
+        if (request.InstallmentPlan is null || request.InstallmentPlan.Items.Count == 0)
+        {
+            foreach (var existing in existingInstallmentPayments)
+            {
+                if (HasProtectedInstallmentActivity(existing.Payment))
+                {
+                    return BadRequest("Нельзя удалить график рассрочки: по одному из платежей уже есть движение.");
+                }
+            }
+
+            if (existingInstallmentPayments.Count > 0)
+            {
+                _db.Payments.RemoveRange(existingInstallmentPayments.Select(item => item.Payment));
+            }
+
+            return null;
+        }
+
+        var normalizedItems = request.InstallmentPlan.Items
+            .Where(item => item is not null)
+            .OrderBy(item => item.Sequence)
+            .ToList();
+
+        if (normalizedItems.Count == 0)
+        {
+            return BadRequest("График рассрочки пуст.");
+        }
+
+        if (normalizedItems.Any(item =>
+                item.Sequence <= 0
+                || item.Payment < 0
+                || item.Principal < 0
+                || item.Interest < 0
+                || item.Balance < 0))
+        {
+            return BadRequest("График рассрочки содержит некорректные значения.");
+        }
+
+        var duplicateSequence = normalizedItems
+            .GroupBy(item => item.Sequence)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateSequence is not null)
+        {
+            return BadRequest($"График рассрочки содержит дублирующийся номер платежа: {duplicateSequence.Key}.");
+        }
+
+        var existingBySequence = existingInstallmentPayments
+            .GroupBy(item => item.Metadata!.Sequence)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(item => item.Payment.Id).ToList());
+
+        var retainedPaymentIds = new HashSet<int>();
+        foreach (var item in normalizedItems)
+        {
+            existingBySequence.TryGetValue(item.Sequence, out var matches);
+            var existing = matches?.FirstOrDefault();
+
+            if (existing is not null)
+            {
+                retainedPaymentIds.Add(existing.Payment.Id);
+
+                if (HasProtectedInstallmentActivity(existing.Payment)
+                    && !InstallmentPaymentMatches(existing.Payment, item, request, invoicePayment))
+                {
+                    return BadRequest($"Нельзя изменить платеж рассрочки №{item.Sequence}: по нему уже есть движение.");
+                }
+
+                ApplyInstallmentPayment(
+                    existing.Payment,
+                    invoicePayment,
+                    request,
+                    request.InstallmentPlan,
+                    item,
+                    responsibleIds);
+                continue;
+            }
+
+            var generatedPayment = new Payment
+            {
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            ApplyInstallmentPayment(
+                generatedPayment,
+                invoicePayment,
+                request,
+                request.InstallmentPlan,
+                item,
+                responsibleIds);
+
+            _db.Payments.Add(generatedPayment);
+        }
+
+        foreach (var existing in existingInstallmentPayments)
+        {
+            if (retainedPaymentIds.Contains(existing.Payment.Id))
+            {
+                continue;
+            }
+
+            if (HasProtectedInstallmentActivity(existing.Payment))
+            {
+                return BadRequest($"Нельзя удалить платеж рассрочки №{existing.Metadata!.Sequence}: по нему уже есть движение.");
+            }
+
+            _db.Payments.Remove(existing.Payment);
+        }
+
+        return null;
+    }
+
+    private void ApplyInstallmentPayment(
+        Payment payment,
+        Payment invoicePayment,
+        UpsertInvoiceRequest request,
+        InvoiceInstallmentPlanRequest plan,
+        InvoiceInstallmentPlanItemRequest item,
+        IReadOnlyCollection<int> responsibleIds)
+    {
+        var invoiceEntityId = invoicePayment.InvoiceId ?? invoicePayment.Invoice?.Id;
+        payment.InvoiceId = invoiceEntityId;
+        payment.Account = invoicePayment.Account;
+        payment.AccountDate = invoicePayment.AccountDate;
+        payment.DocumentKind = DocumentKind.Payment;
+        payment.Date = item.Date.Date;
+        payment.PlannedDate = item.Date.Date;
+        payment.Amount = Math.Max(item.Payment, 0);
+        payment.Type = invoicePayment.Type;
+        payment.Status = PaymentStatus.Pending;
+        payment.Description = BuildInstallmentDescription(invoicePayment.Account, item.Sequence, plan.Items.Count);
+        payment.Notes = BuildInstallmentNotes(item);
+        payment.ClientId = request.ClientId;
+        payment.ContractId = request.ContractId;
+        payment.ClientCaseId = invoicePayment.ClientCaseId;
+        payment.ClientCaseReference = invoicePayment.ClientCaseReference;
+        payment.PaymentSourceId = request.PaymentSourceId;
+        payment.ServiceId = request.ServiceId;
+        payment.IncomeTypeId = request.IncomeTypeId;
+        payment.DealTypeId = request.DealTypeId;
+        payment.PaymentStatusId = request.PaymentStatusEntityId;
+        payment.CounterpartyName = null;
+        payment.SystemNotes = MergeInstallmentMetadataIntoSystemNotes(payment.SystemNotes, plan, item);
+
+        if (!HasProtectedInstallmentActivity(payment))
+        {
+            payment.PaidAmount = 0m;
+            payment.PaidDate = null;
+            payment.LastPaymentDate = null;
+            payment.IsPaid = false;
+        }
+
+        SyncPaymentResponsibles(payment, responsibleIds);
+        PaymentDomainService.Normalize(payment);
+        PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow);
+    }
+
+    private static void SyncPaymentResponsibles(Payment payment, IReadOnlyCollection<int> responsibleIds)
+    {
+        var toRemove = payment.Responsibles
+            .Where(item => !responsibleIds.Contains(item.UserId))
+            .ToList();
+
+        foreach (var row in toRemove)
+        {
+            payment.Responsibles.Remove(row);
+        }
+
+        var existingIds = payment.Responsibles.Select(item => item.UserId).ToHashSet();
+        foreach (var responsibleId in responsibleIds)
+        {
+            if (existingIds.Contains(responsibleId))
+            {
+                continue;
+            }
+
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                PaymentId = payment.Id,
+                UserId = responsibleId,
+            });
+        }
+    }
+
+    private static bool HasProtectedInstallmentActivity(Payment payment)
+    {
+        if (payment.PaidAmount > 0m || payment.IsPaid || payment.PaidDate.HasValue || payment.LastPaymentDate.HasValue)
+        {
+            return true;
+        }
+
+        return payment.Status is PaymentStatus.Completed or PaymentStatus.Processing or PaymentStatus.Cancelled;
+    }
+
+    private static bool InstallmentPaymentMatches(
+        Payment payment,
+        InvoiceInstallmentPlanItemRequest item,
+        UpsertInvoiceRequest request,
+        Payment invoicePayment)
+    {
+        var sameDate = payment.Date.Date == item.Date.Date;
+        var sameAmount = Math.Abs(payment.Amount - item.Payment) <= 0.01m;
+        var sameClient = payment.ClientId == request.ClientId;
+        var sameCase = payment.ClientCaseId == invoicePayment.ClientCaseId;
+        var sameContract = payment.ContractId == request.ContractId;
+        return sameDate && sameAmount && sameClient && sameCase && sameContract;
+    }
+
+    private static string BuildInstallmentDescription(string? invoiceNumber, int sequence, int totalCount)
+    {
+        if (!string.IsNullOrWhiteSpace(invoiceNumber))
+        {
+            return $"Рассрочка по счету №{invoiceNumber} · платеж {sequence}/{Math.Max(totalCount, sequence)}";
+        }
+
+        return $"Платеж по рассрочке {sequence}/{Math.Max(totalCount, sequence)}";
+    }
+
+    private static string BuildInstallmentNotes(InvoiceInstallmentPlanItemRequest item)
+    {
+        return string.Join(
+            "\n",
+            new[]
+            {
+                $"Основной долг: {item.Principal:0.00}",
+                $"Проценты: {item.Interest:0.00}",
+                $"Остаток: {item.Balance:0.00}",
+            });
+    }
+
+    private static string MergeInstallmentMetadataIntoSystemNotes(
+        string? existingSystemNotes,
+        InvoiceInstallmentPlanRequest plan,
+        InvoiceInstallmentPlanItemRequest item)
+    {
+        var baseLines = (existingSystemNotes ?? string.Empty)
+            .Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(InstallmentPaymentMarker, StringComparison.Ordinal))
+            .ToList();
+
+        var payload = new InstallmentPaymentMetadataDto
+        {
+            Sequence = item.Sequence,
+            Total = Math.Max(plan.Total, 0),
+            DownPayment = Math.Max(plan.DownPayment, 0),
+            AnnualRate = Math.Max(plan.AnnualRate, 0),
+            Months = Math.Max(plan.Months, 1),
+            StartDate = plan.StartDate.Date,
+            RoundingMode = plan.RoundingMode,
+            RoundingStep = plan.RoundingStep,
+            ToPay = Math.Max(plan.ToPay, 0),
+            Overpay = Math.Max(plan.Overpay, 0),
+            LoanAmount = plan.LoanAmount,
+            BaseMonthlyPayment = plan.BaseMonthlyPayment,
+            RoundedMonthlyPayment = plan.RoundedMonthlyPayment,
+            Item = new InstallmentPaymentMetadataItemDto
+            {
+                Sequence = item.Sequence,
+                Date = item.Date.Date,
+                Principal = Math.Max(item.Principal, 0),
+                Interest = Math.Max(item.Interest, 0),
+                Payment = Math.Max(item.Payment, 0),
+                Balance = Math.Max(item.Balance, 0),
+            },
+        };
+
+        baseLines.Insert(0, $"{InstallmentPaymentMarker} {JsonSerializer.Serialize(payload)}");
+        return string.Join("\n", baseLines);
+    }
+
+    private static InstallmentPaymentMetadataDto? ExtractInstallmentPaymentMetadata(string? systemNotes)
+    {
+        if (string.IsNullOrWhiteSpace(systemNotes))
+        {
+            return null;
+        }
+
+        var markerLine = systemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith(InstallmentPaymentMarker, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(markerLine))
+        {
+            return null;
+        }
+
+        var json = markerLine[InstallmentPaymentMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<InstallmentPaymentMetadataDto>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
 
     private async Task<Dictionary<int, List<InvoiceResponsibleDto>>> LoadResponsiblesMapAsync(IEnumerable<int> paymentIds, CancellationToken ct)
     {
@@ -2444,6 +2785,34 @@ public class InvoicesController : ControllerBase
         }
 
         return value.Trim();
+    }
+
+    private sealed class InstallmentPaymentMetadataDto
+    {
+        public int Sequence { get; init; }
+        public decimal Total { get; init; }
+        public decimal DownPayment { get; init; }
+        public decimal AnnualRate { get; init; }
+        public int Months { get; init; }
+        public DateTime StartDate { get; init; }
+        public InstallmentRoundingMode RoundingMode { get; init; }
+        public decimal? RoundingStep { get; init; }
+        public decimal ToPay { get; init; }
+        public decimal Overpay { get; init; }
+        public decimal? LoanAmount { get; init; }
+        public decimal? BaseMonthlyPayment { get; init; }
+        public decimal? RoundedMonthlyPayment { get; init; }
+        public InstallmentPaymentMetadataItemDto Item { get; init; } = new();
+    }
+
+    private sealed class InstallmentPaymentMetadataItemDto
+    {
+        public int Sequence { get; init; }
+        public DateTime Date { get; init; }
+        public decimal Principal { get; init; }
+        public decimal Interest { get; init; }
+        public decimal Payment { get; init; }
+        public decimal Balance { get; init; }
     }
 
     private sealed class InvoiceProjectionRaw
