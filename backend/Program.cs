@@ -159,10 +159,11 @@ var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
 // 3) дефолт — внутренний порт для проксирования через Nginx
 var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
     ? urlsEnv
-    : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5000");
+    : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5080");
 
 // Явно задаём адреса, чтобы переопределить возможные значения из appsettings
 builder.WebHost.UseUrls(effectiveUrls);
+Console.WriteLine($"[Startup] Effective URLs: {effectiveUrls} (ASPNETCORE_URLS={(string.IsNullOrWhiteSpace(urlsEnv) ? "<empty>" : urlsEnv)}, configUrls={(string.IsNullOrWhiteSpace(urlsCfg) ? "<empty>" : urlsCfg)})");
 
 var app = builder.Build();
 

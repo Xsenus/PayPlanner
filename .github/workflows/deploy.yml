@@ -23,11 +23,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ---------- Build backend (.NET 9) ----------
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
 
@@ -40,7 +40,7 @@ jobs:
       # ---------- Build frontend (Node 20 / Vite) ----------
       - name: Setup Node (with cache)
         if: ${{ hashFiles('package-lock.json') != '' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -48,7 +48,7 @@ jobs:
 
       - name: Setup Node (no cache)
         if: ${{ hashFiles('package-lock.json') == '' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -101,7 +101,8 @@ jobs:
             STAGE="/tmp/payplanner-${{ github.sha }}"
             BE_DIR="/var/www/payplanner-be"
             FE_DIR="/var/www/payplanner-fe"
-            HEALTH_URL="http://127.0.0.1:5080/api/health"
+            PRIMARY_HEALTH_URL="http://127.0.0.1:5080/api/health"
+            FALLBACK_HEALTH_URL="http://127.0.0.1:5000/api/health"
             MIN_FREE_KB=262144
 
             cleanup() {
@@ -160,20 +161,30 @@ jobs:
             echo "[10/10] Wait for health"
             # ждём, пока сервис реально начнёт слушать и /api/health отдаст 200
             ok=0
+            active_health_url=""
             for i in $(seq 1 30); do
-              if curl -fsS "$HEALTH_URL" >/dev/null; then
+              if curl -fsS "$PRIMARY_HEALTH_URL" >/dev/null; then
                 ok=1
-                echo "Health OK on attempt $i"
+                active_health_url="$PRIMARY_HEALTH_URL"
+                echo "Health OK on attempt $i via $active_health_url"
+                break
+              fi
+              if [ "$FALLBACK_HEALTH_URL" != "$PRIMARY_HEALTH_URL" ] && curl -fsS "$FALLBACK_HEALTH_URL" >/dev/null; then
+                ok=1
+                active_health_url="$FALLBACK_HEALTH_URL"
+                echo "Health OK on attempt $i via fallback $active_health_url"
                 break
               fi
               sleep 2
             done
             if [ "$ok" -ne 1 ]; then
-              echo "Health check to $HEALTH_URL failed after retries"
+              echo "Health checks failed after retries. Tried: $PRIMARY_HEALTH_URL and $FALLBACK_HEALTH_URL"
               sudo systemctl status payplanner.service --no-pager || true
+              sudo systemctl show payplanner.service -p Environment -p ExecStart || true
               sudo ls -lah "$BE_DIR"/payplanner.db* || true
               sudo df -h "$BE_DIR" || true
               sudo du -sh "$BE_DIR/backups" /tmp 2>/dev/null || true
+              sudo ss -ltnp | grep dotnet || true
               sudo journalctl -u payplanner.service --no-pager -n 200 || true
               exit 1
             fi
