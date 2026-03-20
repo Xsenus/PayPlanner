@@ -67,6 +67,7 @@ TestResult*/
 # Publish output
 **/Publish/
 **/publish/
+out/
 
 # Databases (на случай локальной SQLite)
 *.db
