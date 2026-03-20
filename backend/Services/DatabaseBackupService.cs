@@ -18,7 +18,7 @@ namespace PayPlanner.Api.Services
         {
             _logger = logger;
             _interval = TimeSpan.FromHours(cfg.GetValue<double?>("Backup:IntervalHours") ?? 6);
-            _maxFiles = cfg.GetValue<int?>("Backup:MaxFiles") ?? 50;
+            _maxFiles = cfg.GetValue<int?>("Backup:MaxFiles") ?? 30;
 
             var dirFromCfg = cfg.GetValue<string>("Backup:Directory");
             var baseDir = AppContext.BaseDirectory;
