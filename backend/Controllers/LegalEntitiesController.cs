@@ -15,6 +15,8 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class LegalEntitiesController : ControllerBase
 {
+    private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
+
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichmentService;
     private readonly IFormRequirementsService _formRequirements;
@@ -24,6 +26,72 @@ public class LegalEntitiesController : ControllerBase
         _db = db;
         _enrichmentService = enrichmentService;
         _formRequirements = formRequirements;
+    }
+
+    private bool IsAdmin()
+        => User.IsInRole("admin");
+
+    private async Task<int?> GetMainCompanyIdAsync(CancellationToken ct)
+    {
+        var rawValue = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == MainCompanySettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return int.TryParse(rawValue, out var id) ? id : (int?)null;
+    }
+
+    private async Task UpsertMainCompanyIdAsync(int legalEntityId, CancellationToken ct)
+    {
+        var nowUtc = DateTime.UtcNow;
+        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == MainCompanySettingKey, ct);
+
+        if (setting is null)
+        {
+            _db.SystemSettings.Add(new SystemSetting
+            {
+                Key = MainCompanySettingKey,
+                Value = legalEntityId.ToString(),
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            });
+        }
+        else
+        {
+            setting.Value = legalEntityId.ToString();
+            setting.UpdatedAt = nowUtc;
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task ClearMainCompanyIdIfMatchesAsync(int legalEntityId, CancellationToken ct)
+    {
+        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == MainCompanySettingKey, ct);
+        if (setting is null || !int.TryParse(setting.Value, out var currentId) || currentId != legalEntityId)
+        {
+            return;
+        }
+
+        _db.SystemSettings.Remove(setting);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task<IQueryable<LegalEntity>> ApplyCompanyVisibilityAsync(IQueryable<LegalEntity> query, CancellationToken ct)
+    {
+        if (IsAdmin())
+        {
+            return query;
+        }
+
+        var mainCompanyId = await GetMainCompanyIdAsync(ct);
+        if (mainCompanyId.HasValue)
+        {
+            query = query.Where(item => item.Id != mainCompanyId.Value);
+        }
+
+        return query;
     }
 
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
@@ -516,9 +584,54 @@ public class LegalEntitiesController : ControllerBase
             client.LegalEntityId = null;
         }
 
+        await ClearMainCompanyIdIfMatchesAsync(entity.Id, ct);
         _db.LegalEntities.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    [HttpGet("company-profile")]
+    public async Task<ActionResult<LegalEntityDetailDto>> GetCompanyProfile(CancellationToken ct)
+    {
+        var mainCompanyId = await GetMainCompanyIdAsync(ct);
+        if (!mainCompanyId.HasValue)
+        {
+            return NotFound("Головная организация не выбрана.");
+        }
+
+        var entity = await _db.LegalEntities
+            .Include(le => le.Clients)
+            .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(le => le.Id == mainCompanyId.Value, ct);
+
+        if (entity is null)
+        {
+            return NotFound("Головная организация не найдена.");
+        }
+
+        return Ok(MapDetail(entity));
+    }
+
+    [HttpPut("company-profile/main/{id:int}")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<LegalEntityDetailDto>> SetCompanyProfileMain(int id, CancellationToken ct)
+    {
+        var entity = await _db.LegalEntities
+            .Include(le => le.Clients)
+            .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(le => le.Id == id, ct);
+
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        await UpsertMainCompanyIdAsync(id, ct);
+        return Ok(MapDetail(entity));
     }
 
     /// <summary>
@@ -576,12 +689,12 @@ public class LegalEntitiesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<LegalEntityListItemDto>>> GetAll([FromQuery] string? search, CancellationToken ct)
     {
-        var query = _db.LegalEntities
+        var query = await ApplyCompanyVisibilityAsync(_db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .AsNoTracking()
-            .AsQueryable();
+            .AsQueryable(), ct);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -611,9 +724,9 @@ public class LegalEntitiesController : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var baseQuery = _db.LegalEntities
+        var baseQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities
             .AsNoTracking()
-            .AsQueryable();
+            .AsQueryable(), ct);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -651,6 +764,12 @@ public class LegalEntitiesController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<LegalEntityDetailDto>> GetById(int id, CancellationToken ct)
     {
+        var mainCompanyId = await GetMainCompanyIdAsync(ct);
+        if (!IsAdmin() && mainCompanyId == id)
+        {
+            return NotFound();
+        }
+
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)

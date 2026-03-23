@@ -20,9 +20,7 @@ import {
   ChevronDown,
   CalendarRange,
   Landmark,
-  CreditCard,
   CircleDollarSign,
-  Wallet,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -170,8 +168,6 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     if (permissions.payments.canView) {
       const moneyChildren: SidebarChild[] = [
         { id: 'moneyBank' as Tab, label: 'Банк', icon: Landmark },
-        { id: 'moneyCash' as Tab, label: 'Касса', icon: Wallet },
-        { id: 'moneyCards' as Tab, label: 'Карты', icon: CreditCard },
         { id: 'moneyTotal' as Tab, label: 'Итого', icon: CircleDollarSign },
       ];
 
@@ -199,13 +195,22 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         ]
       : [];
 
-    if (permissions.acts.canView || paymentsChildren.length > 0) {
+    if (permissions.payments.canView) {
+      items.push({
+        id: 'payments',
+        tab: 'payments' as Tab,
+        label: 'Платежи',
+        icon: Banknote,
+        children: paymentsChildren,
+      });
+    }
+
+    if (permissions.acts.canView) {
       items.push({
         id: 'acts',
-        tab: permissions.acts.canView ? ('acts' as Tab) : undefined,
+        tab: 'acts' as Tab,
         label: t('acts') ?? 'Акты',
         icon: FileCheck2,
-        children: paymentsChildren.length ? paymentsChildren : undefined,
       });
     }
 
@@ -278,7 +283,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           return;
         }
         const hasActiveChild = item.children.some((child) => child.id === activeTab);
-        const generalPaymentsActive = item.id === 'acts' && activeTab === 'payments';
+        const generalPaymentsActive = item.id === 'payments' && activeTab === 'payments';
         if ((hasActiveChild || generalPaymentsActive) && !next[item.id]) {
           next[item.id] = true;
           changed = true;

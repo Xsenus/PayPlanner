@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Check, X, Search } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
 import type {
   ClientStatus,
@@ -349,6 +349,7 @@ export default function DictionariesModal({
   const [confirmDelete, setConfirmDelete] = useState<{ kind: VisibleKind; id: number } | null>(
     null,
   );
+  const [searchQuery, setSearchQuery] = useState('');
 
   const visibleTabs = useMemo(
     () => (onlyTab ? TABS.filter((t) => t.value === onlyTab) : TABS),
@@ -385,10 +386,29 @@ export default function DictionariesModal({
   useEffect(() => {
     if (!open) return;
     setActiveTab(onlyTab ?? initialTab);
+    setSearchQuery('');
     (async () => {
       await Promise.all(visibleTabs.map((t) => loadKind(t.value)));
     })();
   }, [open, loadKind, initialTab, onlyTab, visibleTabs]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSearchQuery('');
+  }, [activeTab, open]);
+
+  const filteredRows = useMemo(() => {
+    const rows = (data[activeTab] ?? []).map((row, index) => ({ row, index }));
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase('ru');
+    if (!normalizedQuery) {
+      return rows;
+    }
+
+    return rows.filter(({ row }) => {
+      const haystack = `${row.item.name} ${row.item.description ?? ''}`.toLocaleLowerCase('ru');
+      return haystack.includes(normalizedQuery);
+    });
+  }, [activeTab, data, searchQuery]);
 
   const addNew = (kind: VisibleKind) => {
     setData((prev) => ({
@@ -766,6 +786,19 @@ export default function DictionariesModal({
           <Tabs tabs={visibleTabs} value={activeTab} onChange={(v) => setActiveTab(v)} />
         </div>
 
+        <div className="mb-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Поиск по названию и описанию"
+              className="w-full rounded-xl border border-gray-300 py-2 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
         {error && (
           <div className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
@@ -782,7 +815,11 @@ export default function DictionariesModal({
           </div>
 
           <div className="space-y-2">
-            {(data[activeTab] ?? []).map((row, idx) => {
+            {filteredRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500">
+                Ничего не найдено
+              </div>
+            ) : filteredRows.map(({ row, index }) => {
               const key = row._key;
               if (row.mode === 'view') {
                 return (
@@ -790,17 +827,17 @@ export default function DictionariesModal({
                     key={key}
                     item={row.item}
                     kind={activeTab}
-                    onEdit={() => setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))}
+                    onEdit={() => setRow(activeTab, index, (prev) => ({ ...prev, mode: 'edit' }))}
                     onDelete={() => setConfirmDelete({ kind: activeTab, id: row.item.id })}
                     onPick={onPickItem ? () => onPickItem(activeTab, row.item) : undefined}
                   />
                 );
               }
               if (row.mode === 'edit') {
-                return <EditRow key={key} idx={idx} kind={activeTab} item={row.item} />;
+                return <EditRow key={key} idx={index} kind={activeTab} item={row.item} />;
               }
               // new
-              return <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />;
+              return <NewRow key={key} idx={index} kind={activeTab} item={row.item} />;
             })}
           </div>
         </div>

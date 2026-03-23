@@ -103,7 +103,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
                   <div className="text-xs text-slate-500">{user?.email ?? '—'}</div>
                 </div>
                 <div className="py-2">
-                  <button
+                    <button
                     type="button"
                     onClick={() => {
                       setUserMenuOpen(false);
@@ -112,7 +112,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
                     className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
                     <Building2 className="h-4 w-4 text-slate-400" />
                     Профиль компании
-                  </button>
+                    </button>
                   <button
                     type="button"
                     onClick={() => setUserMenuOpen(false)}

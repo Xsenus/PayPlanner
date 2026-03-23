@@ -453,9 +453,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
 
     const rows = ([
-      { key: 'Cash', label: 'Касса' },
       { key: 'Bank', label: 'Банк' },
-      { key: 'Card', label: 'E-money' },
     ] as const).map((row) => {
       const data = bySource.get(row.key) ?? {
         startBalance: 0,

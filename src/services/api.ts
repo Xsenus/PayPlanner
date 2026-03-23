@@ -769,6 +769,16 @@ export class ApiService {
     return this.request<LegalEntityDetail>(`/legal-entities/${id}`);
   }
 
+  async getCompanyProfileLegalEntity() {
+    return this.request<LegalEntityDetail>('/legal-entities/company-profile');
+  }
+
+  async setCompanyProfileLegalEntity(id: number) {
+    return this.request<LegalEntityDetail>(`/legal-entities/company-profile/main/${id}`, {
+      method: 'PUT',
+    });
+  }
+
   async createLegalEntity(payload: LegalEntityInput) {
     return this.request<LegalEntityDetail>('/legal-entities', {
       method: 'POST',

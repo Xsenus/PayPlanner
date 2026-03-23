@@ -314,6 +314,8 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationAccountingType? accountingType,
         string? search)
     {
+        query = query.Where(payment => payment.Status == PaymentStatus.Completed);
+
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;

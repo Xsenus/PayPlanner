@@ -146,8 +146,6 @@ function AppContent() {
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
         { tab: 'payments' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyBank' as Tab, allowed: permissions.payments.canView },
-        { tab: 'moneyCash' as Tab, allowed: permissions.payments.canView },
-        { tab: 'moneyCards' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
@@ -187,10 +185,11 @@ function AppContent() {
         case 'payments':
           return permissions.payments.canView;
         case 'moneyBank':
-        case 'moneyCash':
-        case 'moneyCards':
         case 'moneyTotal':
           return permissions.payments.canView;
+        case 'moneyCash':
+        case 'moneyCards':
+          return false;
         case 'contracts':
           return permissions.contracts.canView;
         case 'contractCreate':
@@ -226,6 +225,12 @@ function AppContent() {
       status: 'Info',
     });
   }, [activeTab, logActivity, tabNames, user]);
+
+  useEffect(() => {
+    if (activeTab === 'moneyCash' || activeTab === 'moneyCards') {
+      setActiveTab('moneyBank');
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (canViewTab(activeTab)) {
@@ -482,7 +487,7 @@ function AppContent() {
             )
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
       case 'companyProfile':
-        return <CompanyProfile />;
+        return isAdminRole ? <CompanyProfile /> : renderNoAccess('Раздел доступен только администратору.');
       case 'roles':
         return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
       case 'userActivity':
