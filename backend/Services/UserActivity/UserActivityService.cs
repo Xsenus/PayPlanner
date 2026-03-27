@@ -12,6 +12,9 @@ namespace PayPlanner.Api.Services.UserActivity;
 
 public class UserActivityService : IUserActivityService
 {
+    private const string LoggingEnabledSettingKey = "user-activity.enabled";
+    private const string LoggingRetentionDaysSettingKey = "user-activity.retention-days";
+    private static readonly TimeSpan SettingsCacheLifetime = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
@@ -19,6 +22,11 @@ public class UserActivityService : IUserActivityService
     };
 
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
+    private static readonly SemaphoreSlim SettingsLock = new(1, 1);
+    private static bool? CachedIsEnabled;
+    private static int? CachedRetentionDays;
+    private static DateTime? CachedUpdatedAtUtc;
+    private static DateTimeOffset SettingsCacheExpiresAtUtc = DateTimeOffset.MinValue;
 
     private readonly IDbContextFactory<PaymentContext> _contextFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -34,10 +42,114 @@ public class UserActivityService : IUserActivityService
         _logger = logger;
     }
 
+    public async Task<UserActivitySettingsState> GetSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var cached = TryGetCachedSettings();
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        await SettingsLock.WaitAsync(cancellationToken);
+        try
+        {
+            cached = TryGetCachedSettings();
+            if (cached is not null)
+            {
+                return cached;
+            }
+
+            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var settings = await context.SystemSettings
+                .AsNoTracking()
+                .Where(x => x.Key == LoggingEnabledSettingKey || x.Key == LoggingRetentionDaysSettingKey)
+                .ToListAsync(cancellationToken);
+
+            var enabledSetting = settings.FirstOrDefault(x => x.Key == LoggingEnabledSettingKey);
+            var retentionSetting = settings.FirstOrDefault(x => x.Key == LoggingRetentionDaysSettingKey);
+
+            var state = new UserActivitySettingsState(
+                ParseEnabledValue(enabledSetting?.Value),
+                ParseRetentionDaysValue(retentionSetting?.Value),
+                new[] { enabledSetting?.UpdatedAt, retentionSetting?.UpdatedAt }.Where(x => x.HasValue).Max());
+            CacheSettings(state);
+            return state;
+        }
+        finally
+        {
+            SettingsLock.Release();
+        }
+    }
+
+    public async Task<UserActivitySettingsState> UpdateSettingsAsync(bool isEnabled, int? retentionDays, CancellationToken cancellationToken = default)
+    {
+        await SettingsLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var now = DateTime.UtcNow;
+            var normalizedValue = isEnabled ? "true" : "false";
+            var normalizedRetentionDays = retentionDays.GetValueOrDefault() > 0 ? retentionDays.GetValueOrDefault() : 0;
+
+            var settings = await context.SystemSettings
+                .Where(x => x.Key == LoggingEnabledSettingKey || x.Key == LoggingRetentionDaysSettingKey)
+                .ToListAsync(cancellationToken);
+
+            var enabledSetting = settings.FirstOrDefault(x => x.Key == LoggingEnabledSettingKey);
+            if (enabledSetting is null)
+            {
+                context.SystemSettings.Add(new SystemSetting
+                {
+                    Key = LoggingEnabledSettingKey,
+                    Value = normalizedValue,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+            }
+            else
+            {
+                enabledSetting.Value = normalizedValue;
+                enabledSetting.UpdatedAt = now;
+            }
+
+            var retentionSetting = settings.FirstOrDefault(x => x.Key == LoggingRetentionDaysSettingKey);
+            if (retentionSetting is null)
+            {
+                context.SystemSettings.Add(new SystemSetting
+                {
+                    Key = LoggingRetentionDaysSettingKey,
+                    Value = normalizedRetentionDays.ToString(),
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+            }
+            else
+            {
+                retentionSetting.Value = normalizedRetentionDays.ToString();
+                retentionSetting.UpdatedAt = now;
+            }
+
+            await context.SaveChangesAsync(cancellationToken);
+
+            var state = new UserActivitySettingsState(isEnabled, normalizedRetentionDays > 0 ? normalizedRetentionDays : null, now);
+            CacheSettings(state, TimeSpan.FromMinutes(10));
+            return state;
+        }
+        finally
+        {
+            SettingsLock.Release();
+        }
+    }
+
     public async Task<UserActivityLog?> TryWriteAsync(ActivityLogEntry entry, CancellationToken cancellationToken = default)
     {
         try
         {
+            if (!(await GetSettingsAsync(cancellationToken)).IsEnabled)
+            {
+                return null;
+            }
+
             var httpContext = _httpContextAccessor.HttpContext;
 
             var userId = entry.UserId;
@@ -128,5 +240,48 @@ public class UserActivityService : IUserActivityService
             _logger.LogError(ex, "Не удалось сохранить журнал активности пользователя");
             return null;
         }
+    }
+
+    private static UserActivitySettingsState? TryGetCachedSettings()
+    {
+        if (!CachedIsEnabled.HasValue || SettingsCacheExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            return null;
+        }
+
+        return new UserActivitySettingsState(CachedIsEnabled.Value, CachedRetentionDays, CachedUpdatedAtUtc);
+    }
+
+    private static void CacheSettings(UserActivitySettingsState state, TimeSpan? ttl = null)
+    {
+        CachedIsEnabled = state.IsEnabled;
+        CachedRetentionDays = state.RetentionDays;
+        CachedUpdatedAtUtc = state.UpdatedAt;
+        SettingsCacheExpiresAtUtc = DateTimeOffset.UtcNow.Add(ttl ?? SettingsCacheLifetime);
+    }
+
+    private static bool ParseEnabledValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "true" or "1" or "yes" or "on" => true,
+            "false" or "0" or "no" or "off" => false,
+            _ => true,
+        };
+    }
+
+    private static int? ParseRetentionDaysValue(string? value)
+    {
+        if (!int.TryParse(value, out var parsed) || parsed <= 0)
+        {
+            return null;
+        }
+
+        return parsed;
     }
 }

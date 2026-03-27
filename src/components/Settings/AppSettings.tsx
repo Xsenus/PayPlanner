@@ -11,11 +11,15 @@ import type {
   InvoiceNumberingSettingsDto,
   InvoiceRulesSettingsDto,
   LegacyAddressMigrationResult,
+  UserActivityCleanupResultDto,
+  UserActivityCompactionResultDto,
+  UserActivityMaintenanceDto,
 } from '../../services/api';
 
 type SettingsSection =
   | 'general'
   | 'integrations'
+  | 'db-maintenance'
   | 'db-invoices'
   | 'db-addresses'
   | 'dictionary-merge'
@@ -59,12 +63,24 @@ export function AppSettings() {
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
+  const [userActivityMaintenance, setUserActivityMaintenance] = useState<UserActivityMaintenanceDto | null>(null);
+  const [userActivityLoggingEnabled, setUserActivityLoggingEnabled] = useState(true);
+  const [userActivityRetentionDays, setUserActivityRetentionDays] = useState(0);
+  const [userActivityMaintenanceLoading, setUserActivityMaintenanceLoading] = useState(false);
+  const [userActivitySettingsSaving, setUserActivitySettingsSaving] = useState(false);
+  const [userActivityCleanupLoading, setUserActivityCleanupLoading] = useState(false);
+  const [userActivityCompactionLoading, setUserActivityCompactionLoading] = useState(false);
+  const [userActivityMaintenanceMessage, setUserActivityMaintenanceMessage] = useState<string | null>(null);
+  const [userActivityMaintenanceError, setUserActivityMaintenanceError] = useState<string | null>(null);
+  const [userActivityCleanupResult, setUserActivityCleanupResult] = useState<UserActivityCleanupResultDto | null>(null);
+  const [userActivityCompactionResult, setUserActivityCompactionResult] = useState<UserActivityCompactionResultDto | null>(null);
   const [detailsPage, setDetailsPage] = useState(1);
   const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
+    if (activeSection === 'db-maintenance') return 'Работа с базой · Обслуживание';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
     if (activeSection === 'form-requirements') return 'Обязательные поля форм';
     if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
@@ -83,6 +99,35 @@ export function AppSettings() {
 
   const getErrorMessage = (error: unknown, fallback: string) =>
     extractDisplayErrorMessage(error, fallback);
+
+  const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 Б';
+    }
+
+    const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+    let value = bytes;
+    let index = 0;
+
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+
+    return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+  };
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) {
+      return '—';
+    }
+
+    try {
+      return new Date(value).toLocaleString('ru-RU');
+    } catch {
+      return value;
+    }
+  };
 
   const handleReloadDuplicates = async () => {
     const approved = await confirm({
@@ -432,6 +477,144 @@ export function AppSettings() {
     }
   };
 
+  const loadUserActivityMaintenance = async (options?: { showSuccessToast?: boolean }) => {
+    setUserActivityMaintenanceLoading(true);
+    setUserActivityMaintenanceError(null);
+    try {
+      const response = await apiService.getUserActivityMaintenance();
+      setUserActivityMaintenance(response);
+      setUserActivityLoggingEnabled(response.isEnabled);
+      setUserActivityRetentionDays(Math.max(0, Number(response.retentionDays ?? 0) || 0));
+      if (options?.showSuccessToast) {
+        toast.success('Статистика журнала и базы обновлена', 'База данных');
+      }
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось загрузить состояние журнала и базы данных');
+      setUserActivityMaintenanceError(message);
+      if (options?.showSuccessToast) {
+        toast.error(message, 'База данных');
+      }
+    } finally {
+      setUserActivityMaintenanceLoading(false);
+    }
+  };
+
+  const saveUserActivitySettings = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: userActivityLoggingEnabled
+        ? 'Включить журналирование действий пользователей для всех пользователей системы.'
+        : 'Отключить журналирование действий пользователей для всех пользователей системы.',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setUserActivitySettingsSaving(true);
+    setUserActivityMaintenanceError(null);
+    setUserActivityMaintenanceMessage(null);
+    try {
+      const normalizedRetentionDays = Math.max(0, Math.floor(Number(userActivityRetentionDays) || 0));
+      const response = await apiService.updateUserActivitySettings({
+        isEnabled: userActivityLoggingEnabled,
+        retentionDays: normalizedRetentionDays > 0 ? normalizedRetentionDays : null,
+      });
+      setUserActivityMaintenance(response);
+      setUserActivityLoggingEnabled(response.isEnabled);
+      setUserActivityRetentionDays(Math.max(0, Number(response.retentionDays ?? 0) || 0));
+      const message = response.isEnabled
+        ? normalizedRetentionDays > 0
+          ? `Журналирование включено, автоочистка: ${normalizedRetentionDays} дн.`
+          : 'Журналирование включено, автоочистка выключена'
+        : normalizedRetentionDays > 0
+          ? `Журналирование отключено, автоочистка: ${normalizedRetentionDays} дн.`
+          : 'Журналирование отключено, автоочистка выключена';
+      setUserActivityMaintenanceMessage(message);
+      toast.success(message, 'База данных');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить настройку журналирования');
+      setUserActivityMaintenanceError(message);
+      toast.error(message, 'База данных');
+    } finally {
+      setUserActivitySettingsSaving(false);
+    }
+  };
+
+  const runUserActivityCleanup = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение очистки',
+      description: 'Удалить все записи журнала активности. Это очистит таблицу логов, но для уменьшения файла SQLite может понадобиться отдельное уплотнение базы.',
+      confirmLabel: 'Удалить записи',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setUserActivityCleanupLoading(true);
+    setUserActivityMaintenanceError(null);
+    setUserActivityMaintenanceMessage(null);
+    try {
+      const response = await apiService.deleteUserActivityLogs();
+      setUserActivityCleanupResult(response);
+      setUserActivityCompactionResult(null);
+      setUserActivityMaintenance(response.maintenance);
+      setUserActivityLoggingEnabled(response.maintenance.isEnabled);
+      setUserActivityRetentionDays(Math.max(0, Number(response.maintenance.retentionDays ?? 0) || 0));
+      const message = `Журнал активности очищен. Удалено записей: ${response.deletedLogs}`;
+      setUserActivityMaintenanceMessage(message);
+      toast.success(message, 'База данных');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось очистить журнал активности');
+      setUserActivityMaintenanceError(message);
+      toast.error(message, 'База данных');
+    } finally {
+      setUserActivityCleanupLoading(false);
+    }
+  };
+
+  const runUserActivityCompaction = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение уплотнения',
+      description: 'Выполнить `VACUUM` и очистить WAL-файл. Операция может занять время и временно увеличить нагрузку на SQLite.',
+      confirmLabel: 'Уплотнить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setUserActivityCompactionLoading(true);
+    setUserActivityMaintenanceError(null);
+    setUserActivityMaintenanceMessage(null);
+    try {
+      const response = await apiService.compactUserActivityDatabase();
+      setUserActivityCompactionResult(response);
+      setUserActivityCleanupResult(null);
+      setUserActivityMaintenance(response.maintenance);
+      setUserActivityLoggingEnabled(response.maintenance.isEnabled);
+      setUserActivityRetentionDays(Math.max(0, Number(response.maintenance.retentionDays ?? 0) || 0));
+      const savedBytes = Math.max(0, response.before.totalSizeBytes - response.after.totalSizeBytes);
+      const message = `Уплотнение базы завершено. Освобождено: ${formatBytes(savedBytes)}`;
+      setUserActivityMaintenanceMessage(message);
+      toast.success(message, 'База данных');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось уплотнить базу данных');
+      setUserActivityMaintenanceError(message);
+      toast.error(message, 'База данных');
+    } finally {
+      setUserActivityCompactionLoading(false);
+    }
+  };
+
+  const hasUserActivitySettingsChanges = useMemo(
+    () =>
+      userActivityMaintenance !== null
+      && (
+        userActivityLoggingEnabled !== userActivityMaintenance.isEnabled
+        || userActivityRetentionDays !== Math.max(0, Number(userActivityMaintenance.retentionDays ?? 0) || 0)
+      ),
+    [userActivityLoggingEnabled, userActivityMaintenance, userActivityRetentionDays],
+  );
+
   useEffect(() => {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
@@ -439,6 +622,9 @@ export function AppSettings() {
     if (activeSection === 'general') {
       void loadInvoiceNumbering();
       void loadInvoiceRules();
+    }
+    if (activeSection === 'db-maintenance') {
+      void loadUserActivityMaintenance();
     }
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
@@ -496,6 +682,17 @@ export function AppSettings() {
                 <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Работа с базой</div>
                 <button
                   type="button"
+                  onClick={() => setActiveSection('db-maintenance')}
+                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    activeSection === 'db-maintenance'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-white border border-transparent'
+                  }`}
+                >
+                  ↳ Обслуживание
+                </button>
+                <button
+                  type="button"
                   onClick={() => setActiveSection('db-invoices')}
                   className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
                     activeSection === 'db-invoices'
@@ -543,6 +740,8 @@ export function AppSettings() {
                   ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
                   : activeSection === 'integrations'
                     ? 'Хранение и управление ключами доступа к внешним сервисам.'
+                    : activeSection === 'db-maintenance'
+                      ? 'Управление журналом действий пользователей и обслуживающие операции для SQLite: очистка, checkpoint и уплотнение базы.'
                     : activeSection === 'form-requirements'
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
@@ -660,6 +859,189 @@ export function AppSettings() {
                     <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
                       <p>Очищено счетов: {invoiceCounterpartyCleanupResult.cleared}</p>
                       <p>Удалено legacy-требований: {invoiceCounterpartyCleanupResult.removedRequirements}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'db-maintenance' && (
+              <div className="space-y-6">
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h4 className="text-base font-semibold text-gray-900">Журнал действий пользователей</h4>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Глобальный переключатель для автоматического и ручного журналирования. При отключении новые записи в `UserActivityLogs` больше не создаются.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadUserActivityMaintenance({ showSuccessToast: true })}
+                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving || userActivityCleanupLoading || userActivityCompactionLoading}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {userActivityMaintenanceLoading ? 'Обновляем…' : 'Обновить статистику'}
+                    </button>
+                  </div>
+
+                  <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={userActivityLoggingEnabled}
+                      onChange={(event) => setUserActivityLoggingEnabled(event.target.checked)}
+                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      <span className="block font-medium text-gray-900">Включить журналирование действий пользователей</span>
+                      <span className="mt-1 block text-gray-600">
+                        Когда настройка выключена, система перестаёт писать автоматические API-логи и ручные события активности.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
+                    <span className="block font-medium text-gray-900">Автоочистка журнала по сроку хранения</span>
+                    <span className="mt-1 block text-gray-600">
+                      Сервер каждые 12 часов удаляет записи старше указанного срока. Значение `0` отключает автоочистку.
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={userActivityRetentionDays}
+                      onChange={(event) => setUserActivityRetentionDays(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
+                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving}
+                      className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveUserActivitySettings}
+                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving || !hasUserActivitySettingsChanges}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {userActivitySettingsSaving ? 'Сохраняем…' : 'Сохранить настройку'}
+                    </button>
+                    <span className="text-sm text-gray-500">
+                      Текущее состояние: {userActivityMaintenance?.isEnabled === false ? 'выключено' : 'включено'}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      Автоочистка: {(userActivityMaintenance?.retentionDays ?? 0) > 0 ? `${userActivityMaintenance?.retentionDays} дн.` : 'выключена'}
+                    </span>
+                    {userActivityMaintenance?.updatedAt ? (
+                      <span className="text-sm text-gray-500">
+                        Обновлено: {formatDateTime(userActivityMaintenance.updatedAt)}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {userActivityMaintenanceError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {userActivityMaintenanceError}
+                    </div>
+                  )}
+                  {userActivityMaintenanceMessage && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                      {userActivityMaintenanceMessage}
+                    </div>
+                  )}
+
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Записей в журнале</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">
+                        {userActivityMaintenanceLoading && !userActivityMaintenance ? '…' : userActivityMaintenance?.logEntries ?? 0}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Файл БД</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">
+                        {formatBytes(userActivityMaintenance?.storage.databaseFileSizeBytes ?? 0)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">WAL-файл</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">
+                        {formatBytes(userActivityMaintenance?.storage.walFileSizeBytes ?? 0)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Всего на диске</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">
+                        {formatBytes(userActivityMaintenance?.storage.totalSizeBytes ?? 0)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Можно освободить</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">
+                        {formatBytes(userActivityMaintenance?.storage.estimatedReclaimableBytes ?? 0)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Самая старая запись</div>
+                      <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.oldestLogAt)}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Последняя запись</div>
+                      <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.newestLogAt)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+                  <div>
+                    <h4 className="text-base font-semibold text-gray-900">Очистка и уплотнение базы</h4>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Очистка удаляет строки журнала. Уплотнение выполняет checkpoint и `VACUUM`, чтобы SQLite реально освободил место на диске.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={runUserActivityCleanup}
+                      disabled={userActivityCleanupLoading || userActivityCompactionLoading}
+                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {userActivityCleanupLoading ? 'Удаляем…' : 'Очистить журнал'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={runUserActivityCompaction}
+                      disabled={userActivityCleanupLoading || userActivityCompactionLoading}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {userActivityCompactionLoading ? 'Уплотняем…' : 'Уплотнить БД'}
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    После удаления логов размер файла может не уменьшиться сразу. Это нормально для SQLite в режиме `WAL`: сначала освобождаются страницы, а затем их нужно собрать через уплотнение.
+                  </div>
+
+                  {userActivityCleanupResult && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p className="font-medium">Журнал очищен</p>
+                      <p className="mt-1">Удалено записей: {userActivityCleanupResult.deletedLogs}</p>
+                      <p className="mt-1">Текущий размер на диске: {formatBytes(userActivityCleanupResult.maintenance.storage.totalSizeBytes)}</p>
+                    </div>
+                  )}
+
+                  {userActivityCompactionResult && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p className="font-medium">Уплотнение завершено</p>
+                      <p className="mt-1">До: {formatBytes(userActivityCompactionResult.before.totalSizeBytes)}</p>
+                      <p className="mt-1">После: {formatBytes(userActivityCompactionResult.after.totalSizeBytes)}</p>
+                      <p className="mt-1">
+                        Освобождено: {formatBytes(Math.max(0, userActivityCompactionResult.before.totalSizeBytes - userActivityCompactionResult.after.totalSizeBytes))}
+                      </p>
                     </div>
                   )}
                 </div>

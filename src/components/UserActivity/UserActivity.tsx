@@ -7,7 +7,6 @@ import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
-import { TextPromptModal } from '../ui/TextPromptModal';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type {
   UserActivityActor,
@@ -93,9 +92,6 @@ export const UserActivity = () => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [clearPromptOpen, setClearPromptOpen] = useState(false);
-  const [clearPassword, setClearPassword] = useState('');
-  const [clearPromptError, setClearPromptError] = useState<string | null>(null);
   const { confirm } = useDialog();
   const toast = useToast();
   const {
@@ -174,23 +170,10 @@ export const UserActivity = () => {
 
   const handleClearLogs = async () => {
     if (!isAdmin()) return;
-    setClearPassword('');
-    setClearPromptError(null);
-    setClearPromptOpen(true);
-  };
-
-  const submitClearLogs = async () => {
-    const password = clearPassword.trim();
-    if (password !== 'Qwerty!@#') {
-      const message = 'Неверный пароль, журнал не был очищен.';
-      setClearPromptError(message);
-      toast.error(message, 'Очистка журнала');
-      return;
-    }
 
     const confirmDelete = await confirm({
       title: 'Подтверждение удаления',
-      description: 'Вы уверены, что хотите безвозвратно удалить все записи пользовательского контроля?',
+      description: 'Удалить все записи пользовательского контроля? Для уменьшения файла SQLite после этого выполните уплотнение БД в настройках.',
       confirmLabel: 'Удалить',
       cancelLabel: 'Отмена',
       variant: 'danger',
@@ -199,19 +182,15 @@ export const UserActivity = () => {
 
     try {
       setClearing(true);
-      await apiService.deleteUserActivityLogs(password);
-      setClearPromptOpen(false);
-      setClearPassword('');
-      setClearPromptError(null);
+      const result = await apiService.deleteUserActivityLogs();
       setRefreshToken((token) => token + 1);
-      toast.success('История контроля успешно очищена.', 'Журнал активности');
+      toast.success(`История контроля очищена. Удалено записей: ${result.deletedLogs}.`, 'Журнал активности');
     } catch (error) {
       console.error('Не удалось очистить журнал контроля', error);
       const message = extractDisplayErrorMessage(
         error,
         'Не удалось очистить историю. Попробуйте позже или проверьте подключение.',
       );
-      setClearPromptError(message);
       toast.error(message, 'Журнал активности');
     } finally {
       setClearing(false);
@@ -784,30 +763,6 @@ export const UserActivity = () => {
         </div>
       </div>
 
-      <TextPromptModal
-        open={clearPromptOpen}
-        title="Очистить историю контроля"
-        description="Для удаления всей истории контроля введите пароль безопасности."
-        label="Пароль безопасности"
-        value={clearPassword}
-        onValueChange={(value) => {
-          setClearPassword(value);
-          if (clearPromptError) {
-            setClearPromptError(null);
-          }
-        }}
-        onCancel={() => {
-          if (clearing) return;
-          setClearPromptOpen(false);
-          setClearPassword('');
-          setClearPromptError(null);
-        }}
-        onConfirm={submitClearLogs}
-        confirmLabel="Продолжить"
-        cancelLabel="Отмена"
-        error={clearPromptError ?? undefined}
-        loading={clearing}
-      />
     </div>
   );
 };

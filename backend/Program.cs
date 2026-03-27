@@ -96,8 +96,10 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<IUserActivityService, UserActivityService>();
+builder.Services.AddSingleton<ISqliteMaintenanceService, SqliteMaintenanceService>();
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<UserActivityRetentionService>();
 builder.Services.AddHostedService<DatabaseBackupService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();

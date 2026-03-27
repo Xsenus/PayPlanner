@@ -2,6 +2,8 @@ using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.UserActivity;
 
+public sealed record UserActivitySettingsState(bool IsEnabled, int? RetentionDays, DateTime? UpdatedAt);
+
 public record ActivityLogEntry
 {
     public int? UserId { get; init; }
@@ -27,5 +29,7 @@ public record ActivityLogEntry
 
 public interface IUserActivityService
 {
+    Task<UserActivitySettingsState> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<UserActivitySettingsState> UpdateSettingsAsync(bool isEnabled, int? retentionDays, CancellationToken cancellationToken = default);
     Task<UserActivityLog?> TryWriteAsync(ActivityLogEntry entry, CancellationToken cancellationToken = default);
 }

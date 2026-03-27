@@ -7,6 +7,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.UserActivity;
 
 namespace PayPlanner.Api.Controllers;
@@ -18,15 +19,18 @@ public class UserActivityController : ControllerBase
 {
     private readonly PaymentContext _context;
     private readonly IUserActivityService _activityService;
+    private readonly ISqliteMaintenanceService _sqliteMaintenanceService;
     private readonly ILogger<UserActivityController> _logger;
 
     public UserActivityController(
         PaymentContext context,
         IUserActivityService activityService,
+        ISqliteMaintenanceService sqliteMaintenanceService,
         ILogger<UserActivityController> logger)
     {
         _context = context;
         _activityService = activityService;
+        _sqliteMaintenanceService = sqliteMaintenanceService;
         _logger = logger;
     }
 
@@ -183,6 +187,11 @@ public class UserActivityController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateAsync([FromBody] CreateUserActivityLogRequest request, CancellationToken cancellationToken)
     {
+        if (!(await _activityService.GetSettingsAsync(cancellationToken)).IsEnabled)
+        {
+            return NoContent();
+        }
+
         var entry = new ActivityLogEntry
         {
             Category = request.Category,
@@ -206,25 +215,48 @@ public class UserActivityController : ControllerBase
         return Created($"/api/user-activity/{dto.Id}", dto);
     }
 
+    [HttpGet("admin/maintenance")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserActivityMaintenanceDto>> GetMaintenanceAsync(CancellationToken cancellationToken)
+    {
+        return Ok(await BuildMaintenanceAsync(cancellationToken));
+    }
+
+    [HttpPut("admin/settings")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserActivityMaintenanceDto>> UpdateSettingsAsync(
+        [FromBody] UpdateUserActivitySettingsRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _activityService.UpdateSettingsAsync(request.IsEnabled, request.RetentionDays, cancellationToken);
+        return Ok(await BuildMaintenanceAsync(cancellationToken));
+    }
+
+    [HttpPost("admin/cleanup")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserActivityCleanupResultDto>> CleanupAsync(CancellationToken cancellationToken)
+    {
+        return Ok(await CleanupLogsInternalAsync(cancellationToken));
+    }
+
+    [HttpPost("admin/compact")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserActivityCompactionResultDto>> CompactAsync(CancellationToken cancellationToken)
+    {
+        var (before, after) = await _sqliteMaintenanceService.CompactAsync(cancellationToken);
+        return Ok(new UserActivityCompactionResultDto
+        {
+            Before = MapStorage(before),
+            After = MapStorage(after),
+            Maintenance = await BuildMaintenanceAsync(cancellationToken),
+        });
+    }
+
     [HttpDelete("cleanup")]
     [Authorize(Policy = "Admin")]
-    public async Task<IActionResult> DeleteAllAsync([FromBody] DeleteUserActivityRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteAllAsync([FromBody] DeleteUserActivityRequest? request, CancellationToken cancellationToken)
     {
-        if (!string.Equals(request?.Password, "Qwerty!@#", StringComparison.Ordinal))
-        {
-            _logger.LogWarning("Попытка очистки журнала активности с неверным паролем");
-            return Forbid();
-        }
-
-        var total = await _context.UserActivityLogs.CountAsync(cancellationToken);
-        if (total == 0)
-        {
-            return Ok(new { deleted = 0 });
-        }
-
-        var deleted = await _context.UserActivityLogs.ExecuteDeleteAsync(cancellationToken);
-        _logger.LogInformation("Журнал активности пользователей очищен. Удалено: {Deleted}", deleted);
-        return Ok(new { deleted });
+        return Ok(await CleanupLogsInternalAsync(cancellationToken));
     }
 
     private static UserActivityLogDto MapToDto(UserActivityLog log)
@@ -270,4 +302,55 @@ public class UserActivityController : ControllerBase
             return json;
         }
     }
+
+    private async Task<UserActivityCleanupResultDto> CleanupLogsInternalAsync(CancellationToken cancellationToken)
+    {
+        var deleted = await _context.UserActivityLogs.ExecuteDeleteAsync(cancellationToken);
+        await _sqliteMaintenanceService.CheckpointAsync(cancellationToken);
+
+        _logger.LogInformation("Журнал активности пользователей очищен. Удалено: {Deleted}", deleted);
+
+        return new UserActivityCleanupResultDto
+        {
+            DeletedLogs = deleted,
+            Maintenance = await BuildMaintenanceAsync(cancellationToken),
+        };
+    }
+
+    private async Task<UserActivityMaintenanceDto> BuildMaintenanceAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _activityService.GetSettingsAsync(cancellationToken);
+        var logEntries = await _context.UserActivityLogs.AsNoTracking().CountAsync(cancellationToken);
+
+        DateTime? oldestLogAt = null;
+        DateTime? newestLogAt = null;
+
+        if (logEntries > 0)
+        {
+            oldestLogAt = await _context.UserActivityLogs.AsNoTracking()
+                .MinAsync(x => (DateTime?)x.CreatedAt, cancellationToken);
+            newestLogAt = await _context.UserActivityLogs.AsNoTracking()
+                .MaxAsync(x => (DateTime?)x.CreatedAt, cancellationToken);
+        }
+
+        return new UserActivityMaintenanceDto
+        {
+            IsEnabled = settings.IsEnabled,
+            RetentionDays = settings.RetentionDays,
+            UpdatedAt = settings.UpdatedAt,
+            LogEntries = logEntries,
+            OldestLogAt = oldestLogAt,
+            NewestLogAt = newestLogAt,
+            Storage = MapStorage(await _sqliteMaintenanceService.GetStorageStatsAsync(cancellationToken)),
+        };
+    }
+
+    private static SqliteStorageStatsDto MapStorage(SqliteStorageStats storage) => new()
+    {
+        DatabaseFileSizeBytes = storage.DatabaseFileSizeBytes,
+        WalFileSizeBytes = storage.WalFileSizeBytes,
+        ShmFileSizeBytes = storage.ShmFileSizeBytes,
+        TotalSizeBytes = storage.TotalSizeBytes,
+        EstimatedReclaimableBytes = storage.EstimatedReclaimableBytes,
+    };
 }

@@ -73,6 +73,35 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface SqliteStorageStatsDto {
+  databaseFileSizeBytes: number;
+  walFileSizeBytes: number;
+  shmFileSizeBytes: number;
+  totalSizeBytes: number;
+  estimatedReclaimableBytes: number;
+}
+
+export interface UserActivityMaintenanceDto {
+  isEnabled: boolean;
+  retentionDays?: number | null;
+  updatedAt?: string | null;
+  logEntries: number;
+  oldestLogAt?: string | null;
+  newestLogAt?: string | null;
+  storage: SqliteStorageStatsDto;
+}
+
+export interface UserActivityCleanupResultDto {
+  deletedLogs: number;
+  maintenance: UserActivityMaintenanceDto;
+}
+
+export interface UserActivityCompactionResultDto {
+  before: SqliteStorageStatsDto;
+  after: SqliteStorageStatsDto;
+  maintenance: UserActivityMaintenanceDto;
+}
+
 export interface InvoiceNumberingSettingsDto {
   startNumber: number;
   allocationStrategy: 'max-plus-one' | 'first-free';
@@ -1302,6 +1331,17 @@ export class ApiService {
     return this.request<UserActivityFiltersResponse>('/user-activity/filters');
   }
 
+  async getUserActivityMaintenance() {
+    return this.request<UserActivityMaintenanceDto>('/user-activity/admin/maintenance');
+  }
+
+  async updateUserActivitySettings(payload: { isEnabled: boolean; retentionDays?: number | null }) {
+    return this.request<UserActivityMaintenanceDto>('/user-activity/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async logUserActivity(payload: CreateUserActivityInput) {
     return this.request<UserActivityLogItem>('/user-activity', {
       method: 'POST',
@@ -1309,10 +1349,15 @@ export class ApiService {
     });
   }
 
-  async deleteUserActivityLogs(password: string) {
-    return this.request<{ deleted: number }>('/user-activity/cleanup', {
-      method: 'DELETE',
-      body: JSON.stringify({ password }),
+  async deleteUserActivityLogs() {
+    return this.request<UserActivityCleanupResultDto>('/user-activity/admin/cleanup', {
+      method: 'POST',
+    });
+  }
+
+  async compactUserActivityDatabase() {
+    return this.request<UserActivityCompactionResultDto>('/user-activity/admin/compact', {
+      method: 'POST',
     });
   }
 }

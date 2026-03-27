@@ -41,6 +41,12 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
             return;
         }
 
+        if (!(await _activityService.GetSettingsAsync(httpContext.RequestAborted)).IsEnabled)
+        {
+            await next();
+            return;
+        }
+
         var descriptor = context.ActionDescriptor as ControllerActionDescriptor;
         var controllerName = descriptor?.ControllerName ?? "Unknown";
         var actionName = descriptor?.ActionName ?? httpContext.Request.Method;
