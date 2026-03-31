@@ -1,4 +1,5 @@
 // File: Program.cs
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -84,6 +85,7 @@ builder.Services.AddScoped<PaymentContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext());
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<IClaimsTransformation, CurrentUserClaimsTransformation>();
 
 // ================= Services & Backgrounds =================
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
