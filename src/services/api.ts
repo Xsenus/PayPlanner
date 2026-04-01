@@ -80,6 +80,33 @@ export interface DatabaseStatusDto {
   supportsSqliteFileImport: boolean;
 }
 
+export interface DatabaseBackupFileDto {
+  fileName: string;
+  relativePath: string;
+  sizeBytes: number;
+  createdAt: string;
+  trigger: string;
+}
+
+export interface DatabaseBackupOverviewDto {
+  provider: string;
+  providerDisplayName: string;
+  backupFormat: string;
+  fileExtension: string;
+  automaticEnabled: boolean;
+  scheduleLocal: string;
+  retentionDays: number;
+  rootDirectory: string;
+  timeZone: string;
+  toolCommand?: string | null;
+  items: DatabaseBackupFileDto[];
+}
+
+export interface DatabaseBackupCreateResultDto {
+  backup: DatabaseBackupFileDto;
+  downloadPath: string;
+}
+
 export interface DatabaseImportTableResultDto {
   table: string;
   displayName: string;
@@ -289,6 +316,24 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return s ? `?${s}` : '';
 }
 
+function parseContentDispositionFileName(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+
+  const utfMatch = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1].trim());
+    } catch {
+      return utfMatch[1].trim();
+    }
+  }
+
+  const plainMatch = header.match(/filename\s*=\s*"?([^\";]+)"?/i);
+  return plainMatch?.[1]?.trim() || null;
+}
+
 export class ApiService {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -436,6 +481,48 @@ export class ApiService {
 
   async getDatabaseStatus() {
     return this.request<DatabaseStatusDto>('/database/status');
+  }
+
+  async getDatabaseBackupOverview() {
+    return this.request<DatabaseBackupOverviewDto>('/database/backups');
+  }
+
+  async updateDatabaseBackupSettings(payload: {
+    automaticEnabled: boolean;
+    scheduleLocal: string;
+    retentionDays: number;
+  }) {
+    return this.request<DatabaseBackupOverviewDto>('/database/backups/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createDatabaseBackup() {
+    return this.request<DatabaseBackupCreateResultDto>('/database/backups', {
+      method: 'POST',
+    });
+  }
+
+  async downloadDatabaseBackup(relativePath: string) {
+    const token = getAuthToken();
+    const response = await fetch(
+      `${API_BASE_URL}/database/backups/download?relativePath=${encodeURIComponent(relativePath)}`,
+      {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      },
+    );
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
+    };
   }
 
   async importSqliteDatabase(file: File) {

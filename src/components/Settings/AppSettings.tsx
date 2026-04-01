@@ -6,6 +6,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import type {
+  DatabaseBackupOverviewDto,
   DatabaseImportResultDto,
   DatabaseStatusDto,
   FormRequirementSectionMetadataDto,
@@ -81,6 +82,15 @@ export function AppSettings() {
   const [userActivityCompactionResult, setUserActivityCompactionResult] = useState<UserActivityCompactionResultDto | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatusDto | null>(null);
   const [databaseStatusLoading, setDatabaseStatusLoading] = useState(false);
+  const [databaseBackupOverview, setDatabaseBackupOverview] = useState<DatabaseBackupOverviewDto | null>(null);
+  const [databaseBackupAutomaticEnabled, setDatabaseBackupAutomaticEnabled] = useState(true);
+  const [databaseBackupScheduleLocal, setDatabaseBackupScheduleLocal] = useState('00:00,06:00,12:00,18:00');
+  const [databaseBackupRetentionDays, setDatabaseBackupRetentionDays] = useState(8);
+  const [databaseBackupLoading, setDatabaseBackupLoading] = useState(false);
+  const [databaseBackupSaving, setDatabaseBackupSaving] = useState(false);
+  const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
+  const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
+  const [databaseBackupError, setDatabaseBackupError] = useState<string | null>(null);
   const [databaseImportFile, setDatabaseImportFile] = useState<File | null>(null);
   const [databaseImportLoading, setDatabaseImportLoading] = useState(false);
   const [databaseImportError, setDatabaseImportError] = useState<string | null>(null);
@@ -142,6 +152,13 @@ export function AppSettings() {
     }
   };
 
+  const applyDatabaseBackupOverview = (overview: DatabaseBackupOverviewDto | null) => {
+    setDatabaseBackupOverview(overview);
+    setDatabaseBackupAutomaticEnabled(overview?.automaticEnabled ?? true);
+    setDatabaseBackupScheduleLocal(overview?.scheduleLocal ?? '00:00,06:00,12:00,18:00');
+    setDatabaseBackupRetentionDays(Math.max(1, Number(overview?.retentionDays ?? 8) || 8));
+  };
+
   const loadDatabaseStatus = async () => {
     setDatabaseStatusLoading(true);
     try {
@@ -152,6 +169,90 @@ export function AppSettings() {
       setDatabaseImportError((prev) => prev ?? message);
     } finally {
       setDatabaseStatusLoading(false);
+    }
+  };
+
+  const loadDatabaseBackups = async (options?: { silent?: boolean; showSuccessToast?: boolean }) => {
+    if (!options?.silent) {
+      setDatabaseBackupLoading(true);
+    }
+
+    try {
+      const overview = await apiService.getDatabaseBackupOverview();
+      applyDatabaseBackupOverview(overview);
+      setDatabaseBackupError(null);
+      if (options?.showSuccessToast) {
+        toast.success('Список резервных копий обновлён', 'База данных');
+      }
+      return overview;
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось загрузить список резервных копий');
+      setDatabaseBackupError(message);
+      if (options?.showSuccessToast) {
+        toast.error(message, 'База данных');
+      }
+      return null;
+    } finally {
+      if (!options?.silent) {
+        setDatabaseBackupLoading(false);
+      }
+    }
+  };
+
+  const downloadDatabaseBackup = async (relativePath: string, fallbackFileName?: string) => {
+    const response = await apiService.downloadDatabaseBackup(relativePath);
+    const blobUrl = window.URL.createObjectURL(response.blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = response.fileName || fallbackFileName || `database-backup${databaseBackupOverview?.fileExtension ?? ''}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  };
+
+  const createAndDownloadDatabaseBackup = async () => {
+    setDatabaseBackupCreating(true);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+
+    try {
+      const result = await apiService.createDatabaseBackup();
+      await downloadDatabaseBackup(result.backup.relativePath, result.backup.fileName);
+      await loadDatabaseBackups({ silent: true });
+      const message = 'Резервная копия создана, скачивание началось';
+      setDatabaseBackupMessage(message);
+      toast.success(message, 'База данных');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось создать резервную копию');
+      setDatabaseBackupError(message);
+      toast.error(message, 'База данных');
+    } finally {
+      setDatabaseBackupCreating(false);
+    }
+  };
+
+  const saveDatabaseBackupSettings = async () => {
+    setDatabaseBackupSaving(true);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+
+    try {
+      const overview = await apiService.updateDatabaseBackupSettings({
+        automaticEnabled: databaseBackupAutomaticEnabled,
+        scheduleLocal: databaseBackupScheduleLocal.trim(),
+        retentionDays: Math.max(1, Math.floor(Number(databaseBackupRetentionDays) || 1)),
+      });
+      applyDatabaseBackupOverview(overview);
+      const message = 'Настройки резервного копирования сохранены';
+      setDatabaseBackupMessage(message);
+      toast.success(message, 'База данных');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить настройки резервного копирования');
+      setDatabaseBackupError(message);
+      toast.error(message, 'База данных');
+    } finally {
+      setDatabaseBackupSaving(false);
     }
   };
 
@@ -678,6 +779,22 @@ export function AppSettings() {
     [userActivityLoggingEnabled, userActivityMaintenance, userActivityRetentionDays],
   );
 
+  const hasDatabaseBackupSettingsChanges = useMemo(
+    () =>
+      databaseBackupOverview !== null
+      && (
+        databaseBackupAutomaticEnabled !== databaseBackupOverview.automaticEnabled
+        || databaseBackupScheduleLocal.trim() !== databaseBackupOverview.scheduleLocal.trim()
+        || databaseBackupRetentionDays !== Math.max(1, Number(databaseBackupOverview.retentionDays ?? 0) || 1)
+      ),
+    [
+      databaseBackupAutomaticEnabled,
+      databaseBackupOverview,
+      databaseBackupRetentionDays,
+      databaseBackupScheduleLocal,
+    ],
+  );
+
   useEffect(() => {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
@@ -688,6 +805,7 @@ export function AppSettings() {
     }
     if (activeSection === 'db-maintenance') {
       void loadDatabaseStatus();
+      void loadDatabaseBackups();
       void loadUserActivityMaintenance();
     }
     if (activeSection === 'db-import') {
@@ -1146,6 +1264,196 @@ export function AppSettings() {
                       </p>
                     </div>
                   )}
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h4 className="text-base font-semibold text-gray-900">Резервные копии базы</h4>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Для SQLite создаётся архив `.zip` с консистентной копией файла БД. Для PostgreSQL создаётся `.dump` через `pg_dump`, без дополнительной упаковки.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void loadDatabaseBackups({ showSuccessToast: true })}
+                        disabled={databaseBackupLoading || databaseBackupCreating || databaseBackupSaving}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {databaseBackupLoading ? 'Обновляем…' : 'Обновить список'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={createAndDownloadDatabaseBackup}
+                        disabled={databaseBackupLoading || databaseBackupCreating}
+                        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {databaseBackupCreating ? 'Создаём…' : 'Создать и скачать'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
+                      <span className="block font-medium text-gray-900">Автоматические бэкапы</span>
+                      <span className="mt-1 block text-gray-600">
+                        Сервис раз в минуту проверяет локальное расписание и создаёт пропущенные резервные копии.
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={databaseBackupAutomaticEnabled}
+                        onChange={(event) => setDatabaseBackupAutomaticEnabled(event.target.checked)}
+                        disabled={databaseBackupLoading || databaseBackupSaving}
+                        className="mt-4 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </label>
+
+                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
+                      <span className="block font-medium text-gray-900">Расписание</span>
+                      <span className="mt-1 block text-gray-600">
+                        Формат: `HH:mm,HH:mm`. Пример: `03:00,15:00`.
+                      </span>
+                      <input
+                        type="text"
+                        value={databaseBackupScheduleLocal}
+                        onChange={(event) => setDatabaseBackupScheduleLocal(event.target.value)}
+                        disabled={databaseBackupLoading || databaseBackupSaving}
+                        className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+
+                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
+                      <span className="block font-medium text-gray-900">Хранить дней</span>
+                      <span className="mt-1 block text-gray-600">
+                        Старые копии удаляются автоматически при следующей проверке расписания.
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        step={1}
+                        value={databaseBackupRetentionDays}
+                        onChange={(event) => setDatabaseBackupRetentionDays(Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                        disabled={databaseBackupLoading || databaseBackupSaving}
+                        className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveDatabaseBackupSettings}
+                      disabled={databaseBackupLoading || databaseBackupSaving || !hasDatabaseBackupSettingsChanges}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {databaseBackupSaving ? 'Сохраняем…' : 'Сохранить настройки'}
+                    </button>
+                    <span className="text-sm text-gray-500">
+                      Провайдер: {databaseBackupOverview?.providerDisplayName ?? databaseStatus?.displayName ?? '—'}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      Формат: {databaseBackupOverview?.backupFormat ?? '—'}
+                    </span>
+                  </div>
+
+                  {databaseBackupError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {databaseBackupError}
+                    </div>
+                  )}
+                  {databaseBackupMessage && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                      {databaseBackupMessage}
+                    </div>
+                  )}
+
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Папка на сервере</div>
+                      <div className="mt-2 break-all text-sm text-gray-700">{databaseBackupOverview?.rootDirectory ?? '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Часовой пояс</div>
+                      <div className="mt-2 text-sm text-gray-700">{databaseBackupOverview?.timeZone ?? '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Файлов в списке</div>
+                      <div className="mt-2 text-2xl font-semibold text-gray-900">{databaseBackupOverview?.items.length ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        {databaseBackupOverview?.provider === 'postgresql' ? 'Команда pg_dump' : 'Формат файла'}
+                      </div>
+                      <div className="mt-2 break-all text-sm text-gray-700">
+                        {databaseBackupOverview?.provider === 'postgresql'
+                          ? databaseBackupOverview?.toolCommand || 'pg_dump'
+                          : databaseBackupOverview?.fileExtension || '.zip'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h5 className="text-sm font-semibold text-gray-900">Последние резервные копии</h5>
+                        <p className="mt-1 text-sm text-gray-600">
+                          Показываем до 100 последних файлов текущего провайдера.
+                        </p>
+                      </div>
+                    </div>
+
+                    {databaseBackupOverview?.items.length ? (
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-gray-200 text-left text-gray-500">
+                              <th className="py-2 pr-4">Файл</th>
+                              <th className="py-2 pr-4">Создан</th>
+                              <th className="py-2 pr-4">Размер</th>
+                              <th className="py-2 pr-4">Источник</th>
+                              <th className="py-2 text-right">Действие</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {databaseBackupOverview.items.map((item) => (
+                              <tr key={item.relativePath} className="border-b border-gray-100 align-top">
+                                <td className="py-3 pr-4">
+                                  <div className="font-medium text-gray-900">{item.fileName}</div>
+                                  <div className="text-xs text-gray-500">{item.relativePath}</div>
+                                </td>
+                                <td className="py-3 pr-4 text-gray-700">{formatDateTime(item.createdAt)}</td>
+                                <td className="py-3 pr-4 text-gray-700">{formatBytes(item.sizeBytes)}</td>
+                                <td className="py-3 pr-4 text-gray-700">
+                                  {item.trigger === 'manual' ? 'Вручную' : item.trigger === 'auto' ? 'Автоматически' : item.trigger}
+                                </td>
+                                <td className="py-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void downloadDatabaseBackup(item.relativePath, item.fileName).catch((error) => {
+                                        const message = getErrorMessage(error, 'Не удалось скачать резервную копию');
+                                        setDatabaseBackupError(message);
+                                        toast.error(message, 'База данных');
+                                      });
+                                    }}
+                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                                  >
+                                    Скачать
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-600">
+                        Резервные копии пока не найдены. Можно создать первую копию вручную.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

@@ -91,19 +91,20 @@ builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
+builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 
 if (databaseProvider.IsSqlite)
 {
     builder.Services.AddSingleton<ISqliteMaintenanceService, SqliteMaintenanceService>();
-    builder.Services.AddHostedService<DatabaseBackupService>();
 }
 else
 {
     builder.Services.AddSingleton<ISqliteMaintenanceService, NoOpSqliteMaintenanceService>();
 }
 
+builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<UserActivityRetentionService>();
 
