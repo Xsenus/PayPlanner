@@ -4,6 +4,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
+import { AuthProviderSettings } from './AuthProviderSettings';
 import type {
   DatabaseImportResultDto,
   DatabaseStatusDto,
@@ -21,6 +22,7 @@ import type {
 type SettingsSection =
   | 'general'
   | 'integrations'
+  | 'auth-providers'
   | 'db-maintenance'
   | 'db-import'
   | 'db-invoices'
@@ -89,6 +91,7 @@ export function AppSettings() {
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
+    if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Работа с базой · Обслуживание';
     if (activeSection === 'db-import') return 'Работа с базой · Импорт SQLite';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
@@ -732,6 +735,18 @@ export function AppSettings() {
 
               <button
                 type="button"
+                onClick={() => setActiveSection('auth-providers')}
+                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  activeSection === 'auth-providers'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
+                }`}
+              >
+                Внешняя авторизация
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveSection('form-requirements')}
                 className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
                   activeSection === 'form-requirements'
@@ -815,6 +830,8 @@ export function AppSettings() {
                   ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
                   : activeSection === 'integrations'
                     ? 'Хранение и управление ключами доступа к внешним сервисам.'
+                    : activeSection === 'auth-providers'
+                      ? 'Настройка входа через Google, VK, Yandex, Telegram Bot и Telegram Widget.'
                     : activeSection === 'db-maintenance'
                       ? 'Управление журналом действий пользователей и обслуживающие операции для SQLite: очистка, checkpoint и уплотнение базы.'
                     : activeSection === 'form-requirements'
@@ -941,6 +958,8 @@ export function AppSettings() {
                 </div>
               </div>
             )}
+
+            {activeSection === 'auth-providers' && <AuthProviderSettings />}
 
             {activeSection === 'db-maintenance' && (
               <div className="space-y-6">

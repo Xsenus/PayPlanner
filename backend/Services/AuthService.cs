@@ -109,6 +109,77 @@ public class AuthService
         }
     };
 
+    public static string NormalizeEmailValue(string email)
+        => NormalizeEmail(email);
+
+    public UserDto MapUserToDto(User user)
+        => MapToDto(user);
+
+    public async Task<LoginResponse> BuildLoginResponseAsync(User user, CancellationToken cancellationToken = default)
+    {
+        if (user.Role is null)
+        {
+            await _context.Entry(user).Reference(x => x.Role).LoadAsync(cancellationToken);
+        }
+
+        return new LoginResponse
+        {
+            Token = GenerateJwtToken(user),
+            User = MapToDto(user)
+        };
+    }
+
+    public async Task<int> GetDefaultUserRoleIdAsync(CancellationToken cancellationToken = default)
+    {
+        var defaultRoleId = await _context.Roles
+            .Where(r => r.Name == "user")
+            .Select(r => r.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (defaultRoleId == 0)
+        {
+            throw new InvalidOperationException("Default user role not found");
+        }
+
+        return defaultRoleId;
+    }
+
+    public async Task NotifyPendingRegistrationAsync(User user, CancellationToken cancellationToken = default)
+    {
+        if (user.Role is null)
+        {
+            await _context.Entry(user).Reference(x => x.Role).LoadAsync(cancellationToken);
+        }
+
+        if (TechnicalEmailHelper.IsValidRealEmail(user.Email))
+        {
+            await _emailService.SendRegistrationPendingEmailAsync(user.Email, user.FullName);
+        }
+
+        var notifyAdmins = _configuration.GetValue<bool>("Features:NotifyAdminsOnRegistration", false);
+        if (!notifyAdmins)
+        {
+            return;
+        }
+
+        var adminEmails = await _context.Users
+            .Include(u => u.Role)
+            .Where(u => u.Role!.Name == "admin" && u.IsActive && u.IsApproved)
+            .Select(u => u.Email)
+            .ToListAsync(cancellationToken);
+
+        foreach (var adminEmail in adminEmails)
+        {
+            await _emailService.SendAdminNewRegistrationNotificationAsync(
+                adminEmail,
+                user.FullName,
+                user.Email);
+        }
+    }
+
+    public static string CreateGeneratedPassword()
+        => $"{Guid.NewGuid():N}!Aa9";
+
 
     // -------- Admin moderation --------
 
@@ -384,13 +455,7 @@ public class AuthService
         if (!registrationEnabled)
             throw new InvalidOperationException("Registration is currently disabled");
 
-        var defaultRoleId = await _context.Roles
-            .Where(r => r.Name == "user")
-            .Select(r => r.Id)
-            .FirstOrDefaultAsync();
-
-        if (defaultRoleId == 0)
-            throw new InvalidOperationException("Default user role not found");
+        var defaultRoleId = await GetDefaultUserRoleIdAsync();
 
         var user = new User
         {
@@ -411,23 +476,7 @@ public class AuthService
         user = await _context.Users.Include(u => u.Role)
             .FirstAsync(u => u.Id == user.Id);
 
-        await _emailService.SendRegistrationPendingEmailAsync(user.Email, user.FullName);
-
-        var notifyAdmins = _configuration.GetValue<bool>("Features:NotifyAdminsOnRegistration", false);
-        if (notifyAdmins)
-        {
-            var adminEmails = await _context.Users
-                .Include(u => u.Role)
-                .Where(u => u.Role!.Name == "admin" && u.IsActive && u.IsApproved)
-                .Select(u => u.Email)
-                .ToListAsync();
-
-            foreach (var adminEmail in adminEmails)
-            {
-                await _emailService.SendAdminNewRegistrationNotificationAsync(
-                    adminEmail, user.FullName, user.Email);
-            }
-        }
+        await NotifyPendingRegistrationAsync(user);
 
         return MapToDto(user);
     }

@@ -800,6 +800,77 @@ public class PaymentContext : DbContext
             });
         });
 
+        modelBuilder.Entity<UserExternalIdentity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ProviderUserId).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ProviderEmail).HasMaxLength(200);
+            entity.Property(e => e.ProviderUsername).HasMaxLength(200);
+            entity.Property(e => e.DisplayName).HasMaxLength(200);
+            entity.Property(e => e.AvatarUrl).HasMaxLength(1000);
+            entity.Property(e => e.TelegramUserId).HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.Provider, e.ProviderUserId })
+                .IsUnique()
+                .HasDatabaseName("IX_UserExternalIdentities_Provider_UserId");
+            entity.HasIndex(e => new { e.UserId, e.Provider })
+                .IsUnique()
+                .HasDatabaseName("IX_UserExternalIdentities_User_Provider");
+            entity.HasIndex(e => e.UserId)
+                .HasDatabaseName("IX_UserExternalIdentities_UserId");
+        });
+
+        modelBuilder.Entity<ExternalAuthRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.State).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.ReturnUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.State)
+                .IsUnique()
+                .HasDatabaseName("IX_ExternalAuthRequests_State");
+            entity.HasIndex(e => new { e.Provider, e.Status })
+                .HasDatabaseName("IX_ExternalAuthRequests_Provider_Status");
+        });
+
+        modelBuilder.Entity<TelegramAuthRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.State).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.TelegramUserId).HasMaxLength(100);
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.State)
+                .IsUnique()
+                .HasDatabaseName("IX_TelegramAuthRequests_State");
+            entity.HasIndex(e => new { e.Status, e.ExpiresAt })
+                .HasDatabaseName("IX_TelegramAuthRequests_Status_ExpiresAt");
+        });
+
         // ------------------ UserActivityLog ------------------
         modelBuilder.Entity<UserActivityLog>(entity =>
         {
@@ -1032,6 +1103,9 @@ public class PaymentContext : DbContext
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<SystemSetting> SystemSettings { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
+    public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
+    public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
+    public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }
 
     /// <summary>
     /// Пользователи системы.

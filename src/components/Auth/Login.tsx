@@ -1,15 +1,16 @@
 import { useState } from 'react';
+import { Eye, EyeOff, LogIn, UserPlus } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { LogIn, Eye, EyeOff, UserPlus } from 'lucide-react';
 import type { ApiError } from '../../services/authService';
+import { ExternalAuthPanel } from './ExternalAuthPanel';
 
 interface LoginProps {
   onShowRegister?: () => void;
   onPendingApproval?: () => void;
 }
 
-function hasCode(e: unknown): e is ApiError {
-  return e instanceof Error && 'code' in e;
+function hasCode(error: unknown): error is ApiError {
+  return error instanceof Error && 'code' in error;
 }
 
 export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
@@ -20,57 +21,30 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
 
     try {
       await signIn(email, password);
-    } catch (err: unknown) {
-      if (hasCode(err)) {
-        if (err.code === 'PendingApproval') {
+    } catch (nextError: unknown) {
+      if (hasCode(nextError)) {
+        if (nextError.code === 'PendingApproval') {
           onPendingApproval?.();
           setLoading(false);
           return;
         }
-        if (err.code === 'UserInactive') {
-          setError('Ваш аккаунт отключён. Обратитесь к администратору.');
+
+        if (nextError.code === 'UserInactive') {
+          setError('Ваш аккаунт отключен. Обратитесь к администратору.');
           setLoading(false);
           return;
         }
       }
 
-      if (err instanceof Error) {
-        const msg = err.message?.trim();
-
-        // fallback: if backend error accidentally passed as JSON string
-        if (msg && msg.startsWith('{')) {
-          try {
-            const p = JSON.parse(msg) as Record<string, unknown>;
-            const code =
-              (typeof p.code === 'string' ? p.code.trim() : undefined) ||
-              (typeof p.title === 'string' ? p.title.trim() : undefined);
-            const detail = typeof p.detail === 'string' ? p.detail.trim() : undefined;
-            if (code === 'PendingApproval') {
-              onPendingApproval?.();
-              setLoading(false);
-              return;
-            }
-            if (code === 'UserInactive') {
-              setError('Ваш аккаунт отключён. Обратитесь к администратору.');
-              setLoading(false);
-              return;
-            }
-            setError(detail || code || 'Не удалось войти. Проверьте email и пароль.');
-            setLoading(false);
-            return;
-          } catch {
-            // ignore and show plain message below
-          }
-        }
-
-        setError(msg || 'Не удалось войти. Проверьте email и пароль.');
+      if (nextError instanceof Error) {
+        setError(nextError.message?.trim() || 'Не удалось войти. Проверьте email и пароль.');
       } else {
         setError('Не удалось войти. Проверьте email и пароль.');
       }
@@ -107,7 +81,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                 placeholder="you@example.com"
                 required
@@ -124,7 +98,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(event) => setPassword(event.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all pr-12"
                   placeholder="Введите пароль"
                   required
@@ -132,8 +106,9 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
@@ -142,16 +117,25 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              className="w-full py-3 px-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               {loading ? 'Входим…' : 'Войти'}
             </button>
           </form>
+
+          <ExternalAuthPanel
+            disabled={loading}
+            onPendingApproval={onPendingApproval}
+            onInactive={(message) => setError(message)}
+            onError={(message) => setError(message)}
+          />
 
           {onShowRegister && (
             <div className="mt-6 text-center">
               <button
                 onClick={onShowRegister}
-                className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors">
+                className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+              >
                 <UserPlus className="w-4 h-4" />
                 <span>
                   Нет аккаунта? <span className="font-medium">Зарегистрироваться</span>
@@ -162,7 +146,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
-          <p>PayPlanner — система управления платежами</p>
+          <p>PayPlanner - система управления платежами</p>
         </div>
       </div>
     </div>

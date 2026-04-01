@@ -98,7 +98,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Acts_Status");
 
-                    b.ToTable("Acts", (string)null);
+                    b.ToTable("Acts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.AddressRecord", b =>
@@ -199,7 +199,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("LegalEntityId", "Type", "IsPrimary")
                         .HasDatabaseName("IX_AddressRecords_LegalEntityId_Type_IsPrimary");
 
-                    b.ToTable("AddressRecords", null, t =>
+                    b.ToTable("AddressRecords", t =>
                         {
                             t.HasCheckConstraint("CK_AddressRecords_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
                         });
@@ -245,7 +245,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_BaseCurrencyDictionaryItems_IsActive_Name");
 
-                    b.ToTable("BaseCurrencies", (string)null);
+                    b.ToTable("BaseCurrencies");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>
@@ -290,6 +290,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<string>("Notes")
                         .IsRequired()
+                        .HasMaxLength(2000)
                         .HasColumnType("text");
 
                     b.Property<string>("Phone")
@@ -326,7 +327,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_Clients_IsActive_Name");
 
-                    b.ToTable("Clients", (string)null);
+                    b.ToTable("Clients");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
@@ -370,7 +371,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId", "Status")
                         .HasDatabaseName("IX_ClientCases_ClientId_Status");
 
-                    b.ToTable("ClientCases", (string)null);
+                    b.ToTable("ClientCases");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
@@ -459,7 +460,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId", "Series", "Number")
                         .HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
 
-                    b.ToTable("ClientPassports", (string)null);
+                    b.ToTable("ClientPassports");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientStatusEntity", b =>
@@ -502,7 +503,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_ClientStatuses_IsActive_Name");
 
-                    b.ToTable("ClientStatuses", (string)null);
+                    b.ToTable("ClientStatuses");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
@@ -557,7 +558,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Contracts_Number");
 
-                    b.ToTable("Contracts", (string)null);
+                    b.ToTable("Contracts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ContractAct", b =>
@@ -648,7 +649,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_CountryDictionaryItems_IsActive_Name");
 
-                    b.ToTable("Countries", (string)null);
+                    b.ToTable("Countries");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
@@ -691,7 +692,70 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_DealTypes_IsActive_Name");
 
-                    b.ToTable("DealTypes", (string)null);
+                    b.ToTable("DealTypes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalAuthRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ReturnUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("State")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalAuthRequests_State");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("Provider", "Status")
+                        .HasDatabaseName("IX_ExternalAuthRequests_Provider_Status");
+
+                    b.ToTable("ExternalAuthRequests");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.FormFieldRequirement", b =>
@@ -731,7 +795,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
 
-                    b.ToTable("FormFieldRequirements", (string)null);
+                    b.ToTable("FormFieldRequirements");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
@@ -785,7 +849,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "PaymentType", "Name")
                         .HasDatabaseName("IX_IncomeTypes_IsActive_PaymentType_Name");
 
-                    b.ToTable("IncomeTypes", (string)null);
+                    b.ToTable("IncomeTypes");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>
@@ -823,7 +887,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Number", "Date")
                         .HasDatabaseName("IX_Invoices_Number_Date");
 
-                    b.ToTable("Invoices", (string)null);
+                    b.ToTable("Invoices");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
@@ -891,7 +955,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_InvoiceItemNameDictionaryItems_IsActive_Name");
 
-                    b.ToTable("InvoiceItemNames", (string)null);
+                    b.ToTable("InvoiceItemNames");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceUnitDictionaryItem", b =>
@@ -934,7 +998,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_InvoiceUnitDictionaryItems_IsActive_Name");
 
-                    b.ToTable("InvoiceUnits", (string)null);
+                    b.ToTable("InvoiceUnits");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
@@ -1186,7 +1250,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ShortName")
                         .HasDatabaseName("IX_LegalEntities_ShortName");
 
-                    b.ToTable("LegalEntities", (string)null);
+                    b.ToTable("LegalEntities");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
@@ -1293,7 +1357,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Source", "Date")
                         .HasDatabaseName("IX_MoneyOperations_Source_Date");
 
-                    b.ToTable("MoneyOperations", (string)null);
+                    b.ToTable("MoneyOperations");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.OkinDictionaryItem", b =>
@@ -1326,7 +1390,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_OkinDictionaryItems_IsActive_Name");
 
-                    b.ToTable("OkinDictionaryItems", (string)null);
+                    b.ToTable("OkinDictionaryItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.OkpdtrDictionaryItem", b =>
@@ -1359,7 +1423,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_OkpdtrDictionaryItems_IsActive_Name");
 
-                    b.ToTable("OkpdtrDictionaryItems", (string)null);
+                    b.ToTable("OkpdtrDictionaryItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.OksoDictionaryItem", b =>
@@ -1392,7 +1456,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_OksoDictionaryItems_IsActive_Name");
 
-                    b.ToTable("OksoDictionaryItems", (string)null);
+                    b.ToTable("OksoDictionaryItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.OrganizationFormDictionaryItem", b =>
@@ -1435,7 +1499,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_OrganizationFormDictionaryItems_IsActive_Name");
 
-                    b.ToTable("OrganizationForms", (string)null);
+                    b.ToTable("OrganizationForms");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
@@ -1628,7 +1692,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId", "Date", "Type", "Status")
                         .HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
 
-                    b.ToTable("Payments", (string)null);
+                    b.ToTable("Payments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentResponsible", b =>
@@ -1687,7 +1751,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_PaymentSources_IsActive_Name");
 
-                    b.ToTable("PaymentSources", (string)null);
+                    b.ToTable("PaymentSources");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentStatusEntity", b =>
@@ -1730,7 +1794,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_PaymentStatuses_IsActive_Name");
 
-                    b.ToTable("PaymentStatuses", (string)null);
+                    b.ToTable("PaymentStatuses");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PowerOfAttorney", b =>
@@ -1782,7 +1846,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId", "IsActive")
                         .HasDatabaseName("IX_PowersOfAttorney_ClientId_IsActive");
 
-                    b.ToTable("PowersOfAttorney", (string)null);
+                    b.ToTable("PowersOfAttorney");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Role", b =>
@@ -1812,7 +1876,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_Roles_Name");
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.RolePermission", b =>
@@ -1867,7 +1931,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_RolePermissions_Role_Section");
 
-                    b.ToTable("RolePermissions", (string)null);
+                    b.ToTable("RolePermissions");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
@@ -1910,7 +1974,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_ServiceDictionaryItems_IsActive_Name");
 
-                    b.ToTable("Services", (string)null);
+                    b.ToTable("Services");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceLanguageDictionaryItem", b =>
@@ -1953,7 +2017,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_ServiceLanguageDictionaryItems_IsActive_Name");
 
-                    b.ToTable("ServiceLanguages", (string)null);
+                    b.ToTable("ServiceLanguages");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
@@ -1989,7 +2053,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_SystemSettings_Key");
 
-                    b.ToTable("SystemSettings", (string)null);
+                    b.ToTable("SystemSettings");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
@@ -2032,7 +2096,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_TaxSystemDictionaryItems_IsActive_Name");
 
-                    b.ToTable("TaxSystems", (string)null);
+                    b.ToTable("TaxSystems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemModeDictionaryItem", b =>
@@ -2075,7 +2139,67 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_TaxSystemModeDictionaryItems_IsActive_Name");
 
-                    b.ToTable("TaxSystemModes", (string)null);
+                    b.ToTable("TaxSystemModes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long?>("ChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("TelegramUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("State")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TelegramAuthRequests_State");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("Status", "ExpiresAt")
+                        .HasDatabaseName("IX_TelegramAuthRequests_Status_ExpiresAt");
+
+                    b.ToTable("TelegramAuthRequests");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TimezoneDictionaryItem", b =>
@@ -2118,7 +2242,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_TimezoneDictionaryItems_IsActive_Name");
 
-                    b.ToTable("Timezones", (string)null);
+                    b.ToTable("Timezones");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
@@ -2254,7 +2378,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("EmploymentStartDate", "EmploymentEndDate")
                         .HasDatabaseName("idx_users_employment_range");
 
-                    b.ToTable("Users", null, t =>
+                    b.ToTable("Users", t =>
                         {
                             t.HasCheckConstraint("CK_Users_Employment_Range", "(\"EmploymentStartDate\" IS NULL OR \"EmploymentEndDate\" IS NULL OR \"EmploymentStartDate\" <= \"EmploymentEndDate\")");
                         });
@@ -2361,7 +2485,83 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("UserId")
                         .HasDatabaseName("IX_UserActivityLogs_UserId");
 
-                    b.ToTable("UserActivityLogs", (string)null);
+                    b.ToTable("UserActivityLogs");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserExternalIdentity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long?>("ChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProviderUserId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProviderUsername")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("TelegramUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_UserExternalIdentities_UserId");
+
+                    b.HasIndex("Provider", "ProviderUserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserExternalIdentities_Provider_UserId");
+
+                    b.HasIndex("UserId", "Provider")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserExternalIdentities_User_Provider");
+
+                    b.ToTable("UserExternalIdentities");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
@@ -2400,7 +2600,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_UserSettings_User_Key");
 
-                    b.ToTable("UserSettings", (string)null);
+                    b.ToTable("UserSettings");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
@@ -2566,6 +2766,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Payment");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalAuthRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -2702,6 +2912,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "ApprovedBy")
@@ -2726,6 +2946,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserExternalIdentity", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

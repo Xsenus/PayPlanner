@@ -85,6 +85,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<IUserActivityService, UserActivityService>();
 builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
 builder.Services.AddScoped<InstallmentService>();

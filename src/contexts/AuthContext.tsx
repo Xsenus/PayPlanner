@@ -7,6 +7,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithToken: (token: string, user?: User | null, provider?: string) => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: () => boolean;
   isManager: () => boolean;
@@ -15,10 +16,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+
   return context;
 };
 
@@ -48,6 +51,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
         return;
       }
+
       const me = await authService.getCurrentUser();
       setUser(me);
     } catch (error) {
@@ -67,32 +71,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (email: string, password: string) => {
     const resp = await authService.login(email, password);
-    if (resp.user) {
-      setUser(resp.user);
-    } else {
-      const me = await authService.getCurrentUser();
-      setUser(me);
-    }
+    const resolvedUser = resp.user ?? (await authService.getCurrentUser());
+    setUser(resolvedUser);
 
-    logAuthEvent('login', `Вход пользователя ${resp.user?.email ?? email}`, 'Success');
+    logAuthEvent('login', `Вход пользователя ${resolvedUser.email}`, 'Success');
+  };
+
+  const signInWithToken = async (token: string, nextUser?: User | null, provider?: string) => {
+    const resolvedUser = await authService.completeSignIn(token, nextUser);
+    setUser(resolvedUser);
+
+    logAuthEvent(
+      'login',
+      `Вход пользователя ${resolvedUser.email}${provider ? ` (${provider})` : ''}`,
+      'Success',
+    );
   };
 
   const signOut = async () => {
-    logAuthEvent('logout', `Выход пользователя ${user?.email ?? 'неизвестен'}`, 'Info');
+    logAuthEvent('logout', `Выход пользователя ${user?.email ?? 'unknown'}`, 'Info');
     authService.logout();
     setUser(null);
   };
 
   const isAdmin = () => (user?.role?.name ?? '').toLowerCase() === 'admin';
   const isManager = () => {
-    const r = (user?.role?.name ?? '').toLowerCase();
-    return r === 'manager' || r === 'admin';
+    const roleName = (user?.role?.name ?? '').toLowerCase();
+    return roleName === 'manager' || roleName === 'admin';
   };
 
   const value: AuthContextType = {
     user,
     loading,
     signIn,
+    signInWithToken,
     signOut,
     isAdmin,
     isManager,

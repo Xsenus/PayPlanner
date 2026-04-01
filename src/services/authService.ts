@@ -72,6 +72,69 @@ export interface User {
   approvedAt?: string | null;
 }
 
+export interface AuthProviderPublicSettings {
+  googleEnabled: boolean;
+  vkEnabled: boolean;
+  yandexEnabled: boolean;
+  telegramEnabled: boolean;
+  telegramWidgetEnabled: boolean;
+  telegramBotUsername?: string | null;
+}
+
+export interface AuthProviderSettings {
+  googleEnabled: boolean;
+  googleClientId: string;
+  googleClientSecret: string;
+  vkEnabled: boolean;
+  vkClientId: string;
+  vkClientSecret: string;
+  yandexEnabled: boolean;
+  yandexClientId: string;
+  yandexClientSecret: string;
+  telegramEnabled: boolean;
+  telegramWidgetEnabled: boolean;
+  telegramBotToken: string;
+  telegramBotUsername: string;
+  telegramWebhookSecret: string;
+  telegramWebhookUrl?: string | null;
+  telegramWebhookConfigured: boolean;
+  telegramBotInfoSyncedAt?: string | null;
+  telegramWebhookSyncedAt?: string | null;
+}
+
+export interface AuthProviderSettingsSaveResult {
+  settings: AuthProviderSettings;
+  message: string;
+}
+
+export interface TelegramWebhookSyncResult {
+  success: boolean;
+  message: string;
+  botUsername?: string | null;
+  webhookUrl?: string | null;
+}
+
+export interface ExternalAuthStartResponse {
+  provider: string;
+  state: string;
+  authUrl: string;
+  returnUrl: string;
+  expiresAt: string;
+  pollIntervalMs: number;
+}
+
+export interface ExternalAuthStatusResponse {
+  status: string;
+  completed: boolean;
+  provider?: string | null;
+  detail?: string | null;
+  returnUrl?: string | null;
+  requiresApproval: boolean;
+  isInactive: boolean;
+  token?: string | null;
+  user?: User | null;
+}
+
 export interface CreateUserDto {
   email: string;
   password: string;
@@ -194,6 +257,15 @@ class AuthApiService {
     clearToken();
   }
 
+  public async completeSignIn(token: string, user?: User | null): Promise<User> {
+    writeToken(token);
+    if (user) {
+      return user;
+    }
+
+    return this.getCurrentUser();
+  }
+
   public async getCurrentUser(): Promise<User> {
     return this.request<User>('/auth/me');
   }
@@ -227,6 +299,69 @@ class AuthApiService {
     return this.request<unknown>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  public async getAuthProviders() {
+    return this.request<AuthProviderPublicSettings>('/auth/providers');
+  }
+
+  public async startExternalAuth(provider: string, returnUrl = '/') {
+    return this.request<ExternalAuthStartResponse>('/auth/external/start', {
+      method: 'POST',
+      body: JSON.stringify({ provider, returnUrl }),
+    });
+  }
+
+  public async getExternalAuthStatus(state: string) {
+    return this.request<ExternalAuthStatusResponse>(`/auth/external/status/${encodeURIComponent(state)}`);
+  }
+
+  public async completeTelegramWidget(payload: Record<string, unknown>) {
+    return this.request<ExternalAuthStatusResponse>('/auth/telegram/widget', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async startTelegramBotAuth(returnUrl = '/') {
+    return this.request<ExternalAuthStartResponse>('/auth/telegram/bot/start', {
+      method: 'POST',
+      body: JSON.stringify({ returnUrl }),
+    });
+  }
+
+  public async getTelegramBotAuthStatus(state: string) {
+    return this.request<ExternalAuthStatusResponse>(`/auth/telegram/bot/status/${encodeURIComponent(state)}`);
+  }
+
+  public async getAuthProviderSettings() {
+    return this.request<AuthProviderSettings>('/auth/admin/providers');
+  }
+
+  public async updateAuthProviderSettings(data: {
+    googleEnabled: boolean;
+    googleClientId: string;
+    googleClientSecret: string;
+    vkEnabled: boolean;
+    vkClientId: string;
+    vkClientSecret: string;
+    yandexEnabled: boolean;
+    yandexClientId: string;
+    yandexClientSecret: string;
+    telegramEnabled: boolean;
+    telegramWidgetEnabled: boolean;
+    telegramBotToken: string;
+  }) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async syncTelegramWebhook() {
+    return this.request<TelegramWebhookSyncResult>('/auth/admin/providers/telegram/sync', {
+      method: 'POST',
     });
   }
 
