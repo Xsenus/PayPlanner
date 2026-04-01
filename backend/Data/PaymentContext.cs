@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Data;
@@ -9,10 +11,15 @@ namespace PayPlanner.Api.Data;
 /// </summary>
 public class PaymentContext : DbContext
 {
+    private static DateTime NormalizePostgreSqlTimestamp(DateTime value)
+        => value.Kind == DateTimeKind.Unspecified
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+
     /// <summary>
     /// Создает новый экземпляр контекста базы данных.
     /// </summary>
-    public PaymentContext(DbContextOptions<PaymentContext> options) : base(options) { }
+    public PaymentContext(DbContextOptions options) : base(options) { }
 
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
 
@@ -21,6 +28,13 @@ public class PaymentContext : DbContext
     /// </summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var postgresDateTimeConverter = new ValueConverter<DateTime, DateTime>(
+            value => NormalizePostgreSqlTimestamp(value),
+            value => NormalizePostgreSqlTimestamp(value));
+
+        var postgresNullableDateTimeConverter = new ValueConverter<DateTime?, DateTime?>(
+            value => value.HasValue ? NormalizePostgreSqlTimestamp(value.Value) : value,
+            value => value.HasValue ? NormalizePostgreSqlTimestamp(value.Value) : value);
 
         void ConfigureSimpleDictionary<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity, string baseIndexName)
             where TEntity : class
@@ -716,10 +730,14 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
 
-            entity.Property(e => e.Email)
-                  .HasMaxLength(200)
-                  .IsRequired()
-                  .UseCollation("NOCASE");
+            var emailProperty = entity.Property(e => e.Email)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            if (Database.IsSqlite())
+            {
+                emailProperty.UseCollation("NOCASE");
+            }
 
             entity.Property(e => e.PasswordHash).IsRequired();
             entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
@@ -778,7 +796,7 @@ public class PaymentContext : DbContext
             entity.ToTable(tb =>
             {
                 tb.HasCheckConstraint("CK_Users_Employment_Range",
-                    "(EmploymentStartDate IS NULL OR EmploymentEndDate IS NULL OR EmploymentStartDate <= EmploymentEndDate)");
+                    "(\"EmploymentStartDate\" IS NULL OR \"EmploymentEndDate\" IS NULL OR \"EmploymentStartDate\" <= \"EmploymentEndDate\")");
             });
         });
 
@@ -854,6 +872,41 @@ public class PaymentContext : DbContext
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasIndex(e => new { e.Section, e.FieldKey }).IsUnique().HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
         });
+
+        if (Database.IsNpgsql())
+        {
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var property in entityType.GetProperties())
+                {
+                    var clrType = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+                    if (clrType != typeof(DateTime))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(property.GetColumnType(), "date", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    property.SetColumnType("timestamp without time zone");
+
+                    if (property.ClrType == typeof(DateTime))
+                    {
+                        property.SetValueConverter(postgresDateTimeConverter);
+                    }
+                    else if (property.ClrType == typeof(DateTime?))
+                    {
+                        property.SetValueConverter(postgresNullableDateTimeConverter);
+                    }
+                }
+            }
+
+            modelBuilder.Entity<Client>()
+                .Property(e => e.Notes)
+                .HasColumnType("text");
+        }
     }
 
     /// <summary>

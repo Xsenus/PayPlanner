@@ -294,6 +294,11 @@ namespace PayPlanner.Api.Services
 
         private static async Task EnsureServiceDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
         {
+            if (!context.Database.IsSqlite())
+            {
+                return;
+            }
+
             var connection = context.Database.GetDbConnection();
             var shouldClose = connection.State != ConnectionState.Open;
 
@@ -343,6 +348,11 @@ namespace PayPlanner.Api.Services
 
         private static async Task EnsureLegalEntityProfileDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
         {
+            if (!context.Database.IsSqlite())
+            {
+                return;
+            }
+
             var connection = context.Database.GetDbConnection();
             var shouldClose = connection.State != ConnectionState.Open;
 
@@ -371,6 +381,11 @@ namespace PayPlanner.Api.Services
 
         private static async Task EnsureInvoiceLineDictionarySchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
         {
+            if (!context.Database.IsSqlite())
+            {
+                return;
+            }
+
             var connection = context.Database.GetDbConnection();
             var shouldClose = connection.State != ConnectionState.Open;
 
@@ -423,6 +438,11 @@ namespace PayPlanner.Api.Services
 
         private static async Task EnsureIncomeTypeSchemaAsync(PaymentContext context, CancellationToken cancellationToken = default)
         {
+            if (!context.Database.IsSqlite())
+            {
+                return;
+            }
+
             var connection = context.Database.GetDbConnection();
             var shouldClose = connection.State != ConnectionState.Open;
 

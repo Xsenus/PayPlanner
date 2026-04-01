@@ -1,23 +1,23 @@
-// File: Program.cs
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
-using PayPlanner.Api.Services.UserActivity;
 using PayPlanner.Api.Services.LegalEntities;
+using PayPlanner.Api.Services.UserActivity;
 using System.Text;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+var databaseProvider = DatabaseProviderResolver.Resolve(builder.Configuration);
 
-// ================= JSON + MVC =================
 builder.Services.AddControllers(options =>
 {
     options.Filters.Add<UserActivityLoggingFilter>();
@@ -28,40 +28,14 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-// ================= Swagger =================
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// ================= DbContext (SQLite) =================
-static string NormalizeSqliteConnection(string raw)
-{
-    var builder = new SqliteConnectionStringBuilder(raw)
-    {
-        // DefaultTimeout задаёт время ожидания завершения блокировок при выполнении команд (в секундах)
-        DefaultTimeout = 30,
-        // Разрешаем одновременный доступ нескольким подключениям (фронт + фоновые задачи)
-        Cache = SqliteCacheMode.Shared,
-        // Обязательно читаем/создаём БД в режиме R/W, чтобы не получать разрозненные режимы
-        Mode = SqliteOpenMode.ReadWriteCreate,
-        // Включаем пула подключений и внешние ключи, чтобы избежать "залипших" соединений
-        Pooling = true,
-        ForeignKeys = true
-    };
+void ConfigureSqlite(DbContextOptionsBuilder options) => options
+    .UseSqlite(databaseProvider.ConnectionString)
+    .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+void ConfigurePostgreSql(DbContextOptionsBuilder options) => options.UseNpgsql(databaseProvider.ConnectionString);
 
-    if (!Path.IsPathRooted(builder.DataSource))
-    {
-        builder.DataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, builder.DataSource));
-    }
-
-    return builder.ToString();
-}
-var rawCs = builder.Configuration.GetConnectionString("Default") ?? "Data Source=payplanner.db";
-var normalizedCs = NormalizeSqliteConnection(rawCs);
-void ConfigureSqlite(DbContextOptionsBuilder options) => options.UseSqlite(normalizedCs);
-
-// Переключаем SQLite в WAL отдельной командой, т.к. свойство JournalMode
-// отсутствует в текущей версии Microsoft.Data.Sqlite, а ключ в строке подключения
-// не поддерживается билдером.
 static void EnsureWalMode(string connectionString)
 {
     try
@@ -75,19 +49,33 @@ static void EnsureWalMode(string connectionString)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"[SQLite] Не удалось включить WAL: {ex.Message}");
+        Console.Error.WriteLine($"[SQLite] Failed to enable WAL: {ex.Message}");
     }
 }
-EnsureWalMode(normalizedCs);
 
-builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
+if (databaseProvider.IsSqlite)
+{
+    EnsureWalMode(databaseProvider.ConnectionString);
+}
+
+builder.Services.AddSingleton(databaseProvider);
+
+if (databaseProvider.IsSqlite)
+{
+    builder.Services.AddDbContextFactory<PaymentContext>(ConfigureSqlite);
+}
+else
+{
+    builder.Services.AddDbContextFactory<PostgreSqlPaymentContext>(ConfigurePostgreSql);
+    builder.Services.AddSingleton<IDbContextFactory<PaymentContext>, PaymentContextFactoryAdapter<PostgreSqlPaymentContext>>();
+}
+
 builder.Services.AddScoped<PaymentContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext());
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IClaimsTransformation, CurrentUserClaimsTransformation>();
 
-// ================= Services & Backgrounds =================
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.Configure<PasswordHasherOptions>(opt =>
 {
@@ -98,17 +86,26 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<IUserActivityService, UserActivityService>();
-builder.Services.AddSingleton<ISqliteMaintenanceService, SqliteMaintenanceService>();
+builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
 builder.Services.AddScoped<InstallmentService>();
-builder.Services.AddHostedService<PaymentStatusUpdater>();
-builder.Services.AddHostedService<UserActivityRetentionService>();
-builder.Services.AddHostedService<DatabaseBackupService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 
-// ================= CORS =================
+if (databaseProvider.IsSqlite)
+{
+    builder.Services.AddSingleton<ISqliteMaintenanceService, SqliteMaintenanceService>();
+    builder.Services.AddHostedService<DatabaseBackupService>();
+}
+else
+{
+    builder.Services.AddSingleton<ISqliteMaintenanceService, NoOpSqliteMaintenanceService>();
+}
+
+builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<UserActivityRetentionService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -117,14 +114,12 @@ builder.Services.AddCors(options =>
     });
 });
 
-// ================= Response compression =================
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/json" });
 });
 
-// ================= JWT Auth =================
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtSecret = jwtSection.GetValue<string>("Secret") ?? "your-secret-key-min-32-characters-long!";
 var jwtIssuer = jwtSection.GetValue<string>("Issuer") ?? "PayPlanner";
@@ -153,25 +148,20 @@ builder.Services.AddAuthorization(opts =>
     opts.AddPolicy("Admin", p => p.RequireRole("admin"));
 });
 
-// ================= Hosting URLs (ENV > config > default) =================
-// 1) ENV - самый высокий приоритет
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
-
-// 2) config ("urls"/"Urls") - берём, если ENV не задан
 var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
-
-// 3) дефолт — внутренний порт для проксирования через Nginx
 var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
     ? urlsEnv
     : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5080");
 
-// Явно задаём адреса, чтобы переопределить возможные значения из appsettings
 builder.WebHost.UseUrls(effectiveUrls);
-Console.WriteLine($"[Startup] Effective URLs: {effectiveUrls} (ASPNETCORE_URLS={(string.IsNullOrWhiteSpace(urlsEnv) ? "<empty>" : urlsEnv)}, configUrls={(string.IsNullOrWhiteSpace(urlsCfg) ? "<empty>" : urlsCfg)})");
+Console.WriteLine(
+    $"[Startup] Effective URLs: {effectiveUrls} " +
+    $"(ASPNETCORE_URLS={(string.IsNullOrWhiteSpace(urlsEnv) ? "<empty>" : urlsEnv)}, " +
+    $"configUrls={(string.IsNullOrWhiteSpace(urlsCfg) ? "<empty>" : urlsCfg)})");
 
 var app = builder.Build();
 
-// ================= Middleware =================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -186,18 +176,26 @@ app.UseAuthorization();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// ================= DB init & seed =================
 using (var scope = app.Services.CreateScope())
 {
-    var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-    await ctx.Database.MigrateAsync();
-
     var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     var seedClients = cfg.GetValue<bool>("Seed:ClientsAndPayments");
-    await SeedDataService.SeedAsync(ctx, seedClients);
+
+    if (databaseProvider.IsSqlite)
+    {
+        var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+        await ctx.Database.MigrateAsync();
+        await SeedDataService.SeedAsync(ctx, seedClients);
+    }
+    else
+    {
+        var pgFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PostgreSqlPaymentContext>>();
+        await using var pgContext = await pgFactory.CreateDbContextAsync();
+        await pgContext.Database.MigrateAsync();
+        await SeedDataService.SeedAsync(pgContext, seedClients);
+    }
 }
 
-// ================= MVC Controllers =================
 app.MapControllers();
 
 app.Run();
