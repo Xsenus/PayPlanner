@@ -5,6 +5,8 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import type {
+  DatabaseImportResultDto,
+  DatabaseStatusDto,
   FormRequirementSectionMetadataDto,
   InvoiceCounterpartyCleanupResultDto,
   InvoiceLegacyMigrationSummaryDto,
@@ -20,6 +22,7 @@ type SettingsSection =
   | 'general'
   | 'integrations'
   | 'db-maintenance'
+  | 'db-import'
   | 'db-invoices'
   | 'db-addresses'
   | 'dictionary-merge'
@@ -74,6 +77,12 @@ export function AppSettings() {
   const [userActivityMaintenanceError, setUserActivityMaintenanceError] = useState<string | null>(null);
   const [userActivityCleanupResult, setUserActivityCleanupResult] = useState<UserActivityCleanupResultDto | null>(null);
   const [userActivityCompactionResult, setUserActivityCompactionResult] = useState<UserActivityCompactionResultDto | null>(null);
+  const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatusDto | null>(null);
+  const [databaseStatusLoading, setDatabaseStatusLoading] = useState(false);
+  const [databaseImportFile, setDatabaseImportFile] = useState<File | null>(null);
+  const [databaseImportLoading, setDatabaseImportLoading] = useState(false);
+  const [databaseImportError, setDatabaseImportError] = useState<string | null>(null);
+  const [databaseImportResult, setDatabaseImportResult] = useState<DatabaseImportResultDto | null>(null);
   const [detailsPage, setDetailsPage] = useState(1);
   const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
 
@@ -81,6 +90,7 @@ export function AppSettings() {
     if (activeSection === 'general') return 'Основные';
     if (activeSection === 'integrations') return 'Ключи интеграций';
     if (activeSection === 'db-maintenance') return 'Работа с базой · Обслуживание';
+    if (activeSection === 'db-import') return 'Работа с базой · Импорт SQLite';
     if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
     if (activeSection === 'form-requirements') return 'Обязательные поля форм';
     if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
@@ -126,6 +136,56 @@ export function AppSettings() {
       return new Date(value).toLocaleString('ru-RU');
     } catch {
       return value;
+    }
+  };
+
+  const loadDatabaseStatus = async () => {
+    setDatabaseStatusLoading(true);
+    try {
+      const status = await apiService.getDatabaseStatus();
+      setDatabaseStatus(status);
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось определить текущий провайдер базы данных');
+      setDatabaseImportError((prev) => prev ?? message);
+    } finally {
+      setDatabaseStatusLoading(false);
+    }
+  };
+
+  const runDatabaseImport = async () => {
+    if (!databaseImportFile) {
+      const message = 'Сначала выберите SQLite-файл для импорта';
+      setDatabaseImportError(message);
+      toast.error(message, 'Импорт БД');
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Подтверждение импорта',
+      description: 'Импорт объединит данные из SQLite-файла с текущей базой и покажет отчёт по каждой таблице.',
+      confirmLabel: 'Запустить импорт',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setDatabaseImportLoading(true);
+    setDatabaseImportError(null);
+    setDatabaseImportResult(null);
+
+    try {
+      const result = await apiService.importSqliteDatabase(databaseImportFile);
+      setDatabaseImportResult(result);
+      const message = result.success
+        ? 'Импорт SQLite завершён'
+        : 'Импорт завершён с замечаниями, проверьте отчёт по таблицам';
+      toast.success(message, 'Импорт БД');
+      await loadDatabaseStatus();
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось выполнить импорт SQLite-базы');
+      setDatabaseImportError(message);
+      toast.error(message, 'Импорт БД');
+    } finally {
+      setDatabaseImportLoading(false);
     }
   };
 
@@ -624,7 +684,11 @@ export function AppSettings() {
       void loadInvoiceRules();
     }
     if (activeSection === 'db-maintenance') {
+      void loadDatabaseStatus();
       void loadUserActivityMaintenance();
+    }
+    if (activeSection === 'db-import') {
+      void loadDatabaseStatus();
     }
     if (activeSection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
@@ -713,6 +777,17 @@ export function AppSettings() {
                 >
                   ↳ Адреса
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('db-import')}
+                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    activeSection === 'db-import'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-white border border-transparent'
+                  }`}
+                >
+                  ↳ Импорт SQLite
+                </button>
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
@@ -746,6 +821,8 @@ export function AppSettings() {
                       ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
                     : activeSection === 'dictionary-merge'
                       ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
+                    : activeSection === 'db-import'
+                      ? 'Загрузка SQLite-файла в текущую базу с автоматическим объединением найденных записей и подробным отчётом по каждой таблице.'
                     : activeSection === 'db-invoices'
                       ? 'Операции по формированию канонических счетов и перепривязке платежей к актуальным сущностям счета.'
                       : 'Операции по переносу и выравниванию адресов. Позже здесь можно будет добавить другие сервисные процедуры.'}
@@ -1003,6 +1080,12 @@ export function AppSettings() {
                     </p>
                   </div>
 
+                  {databaseStatus && !databaseStatus.supportsSqliteMaintenance && (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                      Текущее хранилище работает на {databaseStatus.displayName}. Очистка журнала доступна, а файловые операции SQLite вроде `VACUUM` и управления WAL здесь не применяются.
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
@@ -1015,7 +1098,7 @@ export function AppSettings() {
                     <button
                       type="button"
                       onClick={runUserActivityCompaction}
-                      disabled={userActivityCleanupLoading || userActivityCompactionLoading}
+                      disabled={userActivityCleanupLoading || userActivityCompactionLoading || databaseStatus?.supportsSqliteMaintenance === false}
                       className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {userActivityCompactionLoading ? 'Уплотняем…' : 'Уплотнить БД'}
@@ -1045,6 +1128,147 @@ export function AppSettings() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {activeSection === 'db-import' && (
+              <div className="space-y-6">
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h4 className="text-base font-semibold text-gray-900">Импорт старой SQLite-базы</h4>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Раздел рассчитан на перенос данных из существующего SQLite-файла в новую базу. Импорт проходит по таблицам, пытается объединять совпадающие записи и возвращает отдельный статус по каждой сущности.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadDatabaseStatus()}
+                      disabled={databaseStatusLoading || databaseImportLoading}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {databaseStatusLoading ? 'Обновляем…' : 'Обновить статус'}
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Текущая база</div>
+                      <div className="mt-2 text-lg font-semibold text-gray-900">
+                        {databaseStatusLoading && !databaseStatus ? '…' : databaseStatus?.displayName ?? '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Импорт SQLite</div>
+                      <div className="mt-2 text-lg font-semibold text-gray-900">
+                        {databaseStatus?.supportsSqliteFileImport === false ? 'Недоступен' : 'Доступен'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Выбранный файл</div>
+                      <div className="mt-2 text-sm text-gray-700 break-all">
+                        {databaseImportFile?.name ?? 'Файл не выбран'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="block text-sm text-gray-700">
+                    <span className="mb-2 block font-medium text-gray-900">SQLite-файл</span>
+                    <input
+                      type="file"
+                      accept=".db,.sqlite,.sqlite3,application/octet-stream"
+                      onChange={(event) => {
+                        setDatabaseImportError(null);
+                        setDatabaseImportResult(null);
+                        setDatabaseImportFile(event.target.files?.[0] ?? null);
+                      }}
+                      className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700"
+                    />
+                  </label>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    Перед запуском импорта лучше использовать новую базу без рабочих данных. Если часть записей уже существует, система попытается объединить их по ключевым полям и покажет это в отчёте.
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={runDatabaseImport}
+                      disabled={databaseImportLoading || !databaseImportFile}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {databaseImportLoading ? 'Импортируем…' : 'Запустить импорт'}
+                    </button>
+                    <span className="text-sm text-gray-500">
+                      Источник: SQLite → приёмник: {databaseStatus?.displayName ?? 'текущая база'}
+                    </span>
+                  </div>
+
+                  {databaseImportError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {databaseImportError}
+                    </div>
+                  )}
+                </div>
+
+                {databaseImportResult && (
+                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p className="font-medium">
+                        {databaseImportResult.success ? 'Импорт завершён' : 'Импорт завершён с замечаниями'}
+                      </p>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                        <div>Таблиц обработано: <b>{databaseImportResult.sourceTablesProcessed}</b></div>
+                        <div>Таблиц с ошибками: <b>{databaseImportResult.tablesWithErrors}</b></div>
+                        <div>Старт: <b>{formatDateTime(databaseImportResult.startedAt)}</b></div>
+                        <div>Финиш: <b>{formatDateTime(databaseImportResult.finishedAt)}</b></div>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-200 text-left text-gray-500">
+                            <th className="py-2 pr-4">Таблица</th>
+                            <th className="py-2 pr-4">Источник</th>
+                            <th className="py-2 pr-4">Добавлено</th>
+                            <th className="py-2 pr-4">Обновлено</th>
+                            <th className="py-2 pr-4">Пропущено</th>
+                            <th className="py-2 pr-4">Конфликты</th>
+                            <th className="py-2 pr-4">Ошибки</th>
+                            <th className="py-2 pr-4">Статус</th>
+                            <th className="py-2">Комментарий</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {databaseImportResult.tables.map((item) => (
+                            <tr key={item.table} className="border-b border-gray-100 align-top">
+                              <td className="py-2 pr-4 font-medium text-gray-900">{item.displayName}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.sourceRows}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.inserted}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.updated}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.skipped}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.conflicts}</td>
+                              <td className="py-2 pr-4 text-gray-700">{item.errors}</td>
+                              <td className="py-2 pr-4">
+                                <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${
+                                  item.completed && item.errors === 0
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : item.errors > 0
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {item.completed && item.errors === 0 ? 'Готово' : item.errors > 0 ? 'Ошибка' : 'Проверить'}
+                                </span>
+                              </td>
+                              <td className="py-2 text-gray-700">{item.message || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

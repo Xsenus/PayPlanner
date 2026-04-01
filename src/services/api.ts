@@ -73,6 +73,38 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface DatabaseStatusDto {
+  provider: string;
+  displayName: string;
+  supportsSqliteMaintenance: boolean;
+  supportsSqliteFileImport: boolean;
+}
+
+export interface DatabaseImportTableResultDto {
+  table: string;
+  displayName: string;
+  sourceRows: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  conflicts: number;
+  errors: number;
+  completed: boolean;
+  message?: string | null;
+}
+
+export interface DatabaseImportResultDto {
+  sourceProvider: string;
+  targetProvider: string;
+  targetProviderDisplayName: string;
+  startedAt: string;
+  finishedAt: string;
+  success: boolean;
+  sourceTablesProcessed: number;
+  tablesWithErrors: number;
+  tables: DatabaseImportTableResultDto[];
+}
+
 export interface SqliteStorageStatsDto {
   databaseFileSizeBytes: number;
   walFileSizeBytes: number;
@@ -261,8 +293,9 @@ export class ApiService {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     const token = getAuthToken();
+    const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
     const headers: Record<string, string> = {
-      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(!isFormData && options?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options?.headers as Record<string, string> | undefined),
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -398,6 +431,19 @@ export class ApiService {
     return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+    });
+  }
+
+  async getDatabaseStatus() {
+    return this.request<DatabaseStatusDto>('/database/status');
+  }
+
+  async importSqliteDatabase(file: File) {
+    const payload = new FormData();
+    payload.append('file', file);
+    return this.request<DatabaseImportResultDto>('/database/import/sqlite', {
+      method: 'POST',
+      body: payload,
     });
   }
 
