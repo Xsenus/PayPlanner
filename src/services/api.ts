@@ -192,6 +192,23 @@ export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
   nextNumber: string;
 }
 
+export interface ContractNumberingSettingsDto {
+  startNumber: number;
+  allocationStrategy: 'max-plus-one' | 'first-free';
+  template: string;
+}
+
+export interface ContractRulesSettingsDto {
+  autoGenerateWhenEmpty: boolean;
+  allowManualNumberEdit: boolean;
+}
+
+export interface NextContractNumberDto extends ContractNumberingSettingsDto {
+  number: string;
+  autoGenerateWhenEmpty: boolean;
+  allowManualNumberEdit: boolean;
+}
+
 export interface FormFieldRequirementDto {
   section: string;
   fieldKey: string;
@@ -461,8 +478,29 @@ export class ApiService {
 
   async getNextContractNumber(date: string, excludeId?: number) {
     const q = buildQuery({ date, excludeId });
-    const response = await this.request<{ number: string }>(`/contracts/next-number${q}`);
-    return response.number;
+    return this.request<NextContractNumberDto>(`/contracts/next-number${q}`);
+  }
+
+  async getContractNumberingSettings() {
+    return this.request<ContractNumberingSettingsDto>('/contracts/numbering-settings');
+  }
+
+  async updateContractNumberingSettings(payload: ContractNumberingSettingsDto) {
+    return this.request<ContractNumberingSettingsDto>('/contracts/numbering-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getContractRulesSettings() {
+    return this.request<ContractRulesSettingsDto>('/contracts/rules-settings');
+  }
+
+  async updateContractRulesSettings(payload: ContractRulesSettingsDto) {
+    return this.request<ContractRulesSettingsDto>('/contracts/rules-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   async createContract(payload: ContractInput) {

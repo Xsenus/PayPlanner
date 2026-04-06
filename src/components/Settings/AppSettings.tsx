@@ -9,6 +9,8 @@ import { AuthProviderSettings } from './AuthProviderSettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
+  ContractNumberingSettingsDto,
+  ContractRulesSettingsDto,
   DatabaseImportResultDto,
   DatabaseStatusDto,
   FormRequirementSectionMetadataDto,
@@ -63,6 +65,19 @@ export function AppSettings() {
   const [invoiceRules, setInvoiceRules] = useState<InvoiceRulesSettingsDto>({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [invoiceRulesLoading, setInvoiceRulesLoading] = useState(false);
   const [invoiceRulesMessage, setInvoiceRulesMessage] = useState<string | null>(null);
+  const [contractNumbering, setContractNumbering] = useState<ContractNumberingSettingsDto>({
+    startNumber: 1,
+    allocationStrategy: 'max-plus-one',
+    template: '{N}-{DD}/{MM}-{YY}',
+  });
+  const [contractNumberingLoading, setContractNumberingLoading] = useState(false);
+  const [contractNumberingMessage, setContractNumberingMessage] = useState<string | null>(null);
+  const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
+    autoGenerateWhenEmpty: true,
+    allowManualNumberEdit: true,
+  });
+  const [contractRulesLoading, setContractRulesLoading] = useState(false);
+  const [contractRulesMessage, setContractRulesMessage] = useState<string | null>(null);
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
@@ -425,6 +440,88 @@ export function AppSettings() {
     }
   };
 
+  const loadContractNumbering = async () => {
+    setContractNumberingLoading(true);
+    setContractNumberingMessage(null);
+    try {
+      const response = await apiService.getContractNumberingSettings();
+      setContractNumbering(response);
+    } catch (e) {
+      setContractNumberingMessage(e instanceof Error ? e.message : 'Не удалось загрузить настройки нумерации договоров');
+    } finally {
+      setContractNumberingLoading(false);
+    }
+  };
+
+  const saveContractNumbering = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить настройки нумерации договоров',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setContractNumberingLoading(true);
+    setContractNumberingMessage(null);
+    try {
+      const response = await apiService.updateContractNumberingSettings({
+        startNumber: Math.max(1, Number(contractNumbering.startNumber) || 1),
+        allocationStrategy: contractNumbering.allocationStrategy,
+        template: contractNumbering.template.trim(),
+      });
+      setContractNumbering(response);
+      const message = 'Настройки нумерации договоров сохранены';
+      setContractNumberingMessage(message);
+      toast.success(message, 'Настройки');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить настройки нумерации договоров');
+      setContractNumberingMessage(message);
+      toast.error(message, 'Настройки');
+    } finally {
+      setContractNumberingLoading(false);
+    }
+  };
+
+  const loadContractRules = async () => {
+    setContractRulesLoading(true);
+    setContractRulesMessage(null);
+    try {
+      const response = await apiService.getContractRulesSettings();
+      setContractRules(response);
+    } catch (e) {
+      setContractRulesMessage(e instanceof Error ? e.message : 'Не удалось загрузить правила договоров');
+    } finally {
+      setContractRulesLoading(false);
+    }
+  };
+
+  const saveContractRules = async () => {
+    const approved = await confirm({
+      title: 'Подтверждение действия',
+      description: 'Сохранить правила генерации номера договора',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setContractRulesLoading(true);
+    setContractRulesMessage(null);
+    try {
+      const response = await apiService.updateContractRulesSettings(contractRules);
+      setContractRules(response);
+      const message = 'Правила договоров сохранены';
+      setContractRulesMessage(message);
+      toast.success(message, 'Настройки');
+    } catch (e) {
+      const message = getErrorMessage(e, 'Не удалось сохранить правила договоров');
+      setContractRulesMessage(message);
+      toast.error(message, 'Настройки');
+    } finally {
+      setContractRulesLoading(false);
+    }
+  };
+
   const runMigration = async () => {
     const approved = await confirm({
       title: 'Подтверждение миграции',
@@ -488,6 +585,8 @@ export function AppSettings() {
     if (activeSection === 'general') {
       void loadInvoiceNumbering();
       void loadInvoiceRules();
+      void loadContractNumbering();
+      void loadContractRules();
     }
     if (activeSection === 'db-import') {
       void loadDatabaseStatus();
@@ -786,18 +885,148 @@ export function AppSettings() {
                     </div>
 
                     <div className="grid gap-6 xl:grid-cols-2">
-                      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-                        <h5 className="text-base font-semibold text-gray-900">Нумерация договоров</h5>
-                        <p className="mt-2 text-sm text-gray-600">
-                          Здесь будет отдельная логика нумерации договоров: шаблон номера, стартовые значения и правила генерации.
-                        </p>
+                      <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <div className="space-y-4">
+                          <div>
+                            <h5 className="text-base font-semibold text-gray-900">Нумерация договоров</h5>
+                            <p className="mt-1 text-sm text-gray-600">
+                              Здесь задаются стартовый номер, стратегия подбора и шаблон генерации номера договора.
+                            </p>
+                          </div>
+
+                          <label className="block">
+                            <span className="text-sm font-medium text-gray-700">Стартовый номер</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={contractNumbering.startNumber}
+                              onChange={(e) =>
+                                setContractNumbering((prev) => ({
+                                  ...prev,
+                                  startNumber: Math.max(1, Number(e.target.value) || 1),
+                                }))
+                              }
+                              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                          </label>
+
+                          <label className="block">
+                            <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
+                            <select
+                              value={contractNumbering.allocationStrategy}
+                              onChange={(e) =>
+                                setContractNumbering((prev) => ({
+                                  ...prev,
+                                  allocationStrategy: e.target.value as ContractNumberingSettingsDto['allocationStrategy'],
+                                }))
+                              }
+                              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="max-plus-one">Максимальный номер + 1</option>
+                              <option value="first-free">Первый свободный номер</option>
+                            </select>
+                          </label>
+
+                          <label className="block">
+                            <span className="text-sm font-medium text-gray-700">Шаблон номера</span>
+                            <input
+                              type="text"
+                              value={contractNumbering.template}
+                              onChange={(e) =>
+                                setContractNumbering((prev) => ({
+                                  ...prev,
+                                  template: e.target.value,
+                                }))
+                              }
+                              placeholder="{N}-{DD}/{MM}-{YY}"
+                              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                            <p className="mt-2 text-xs text-gray-500">
+                              Поддерживаются маркеры номера <code>{'{N}'}</code>, <code>{'{NN}'}</code>, <code>{'{NNN}'}</code>, <code>{'{NNNN}'}</code> и даты <code>{'{DD}'}</code>, <code>{'{MM}'}</code>, <code>{'{YY}'}</code>, <code>{'{YYYY}'}</code>.
+                            </p>
+                          </label>
+                        </div>
+
+                        <div className="mt-auto flex min-h-10 items-end justify-between gap-3 pt-6">
+                          {contractNumberingMessage ? (
+                            <span className="text-sm text-gray-600">{contractNumberingMessage}</span>
+                          ) : (
+                            <span />
+                          )}
+                          <button
+                            type="button"
+                            onClick={saveContractNumbering}
+                            disabled={contractNumberingLoading}
+                            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Save className="h-4 w-4" />
+                            <span>{contractNumberingLoading ? 'Сохранение…' : 'Сохранить'}</span>
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-                        <h5 className="text-base font-semibold text-gray-900">Правила договоров</h5>
-                        <p className="mt-2 text-sm text-gray-600">
-                          Здесь будут ограничения, обязательные параметры и дальнейшие настройки, связанные только с договорами.
-                        </p>
+                      <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <div className="space-y-4">
+                          <div>
+                            <h5 className="text-base font-semibold text-gray-900">Правила договоров</h5>
+                            <p className="mt-1 text-sm text-gray-600">
+                              Здесь настраивается автогенерация номера и возможность ручного редактирования.
+                            </p>
+                          </div>
+
+                          <label className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={contractRules.autoGenerateWhenEmpty}
+                              onChange={(e) =>
+                                setContractRules((prev) => ({
+                                  ...prev,
+                                  autoGenerateWhenEmpty: e.target.checked,
+                                }))
+                              }
+                              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>
+                              <span className="block font-medium text-gray-900">Автоматически заполнять номер, если поле пустое</span>
+                              <span className="mt-1 block text-gray-500">Подойдёт, если договор обычно создаётся без ручного ввода номера.</span>
+                            </span>
+                          </label>
+
+                          <label className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={contractRules.allowManualNumberEdit}
+                              onChange={(e) =>
+                                setContractRules((prev) => ({
+                                  ...prev,
+                                  allowManualNumberEdit: e.target.checked,
+                                }))
+                              }
+                              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>
+                              <span className="block font-medium text-gray-900">Разрешить ручное изменение номера договора</span>
+                              <span className="mt-1 block text-gray-500">Если опция выключена, система будет удерживать номер по правилам и не даст изменить его вручную.</span>
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="mt-auto flex min-h-10 items-end justify-between gap-3 pt-6">
+                          {contractRulesMessage ? (
+                            <span className="text-sm text-gray-600">{contractRulesMessage}</span>
+                          ) : (
+                            <span />
+                          )}
+                          <button
+                            type="button"
+                            onClick={saveContractRules}
+                            disabled={contractRulesLoading}
+                            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Save className="h-4 w-4" />
+                            <span>{contractRulesLoading ? 'Сохранение…' : 'Сохранить'}</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

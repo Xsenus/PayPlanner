@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
-import { apiService } from '../../services/api';
+import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -48,6 +48,10 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
   const [localError, setLocalError] = useState<string | null>(null);
   const [numberManuallyEdited, setNumberManuallyEdited] = useState(false);
   const numberManuallyEditedRef = useRef(false);
+  const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
+    autoGenerateWhenEmpty: true,
+    allowManualNumberEdit: true,
+  });
   const [selectedClients, setSelectedClients] = useState<ContractClient[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [selectedPageSize, setSelectedPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
@@ -77,12 +81,21 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
         const nextNumber = await apiService.getNextContractNumber(fromInputToApiDate(requestDate) ?? requestDate);
         if (cancelled) return;
 
+        setContractRules({
+          autoGenerateWhenEmpty: nextNumber.autoGenerateWhenEmpty,
+          allowManualNumberEdit: nextNumber.allowManualNumberEdit,
+        });
+
         setForm((prev) => {
-          if (prev.date !== requestDate || numberManuallyEditedRef.current) {
+          const shouldAutofill =
+            nextNumber.autoGenerateWhenEmpty
+            && (!numberManuallyEditedRef.current || !nextNumber.allowManualNumberEdit);
+
+          if (prev.date !== requestDate || !shouldAutofill) {
             return prev;
           }
 
-          return { ...prev, number: nextNumber };
+          return { ...prev, number: nextNumber.number };
         });
       } catch {}
     };
@@ -167,7 +180,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     event.preventDefault();
     setLocalError(null);
 
-    if (!form.number.trim()) {
+    if (!form.number.trim() && !contractRules.autoGenerateWhenEmpty) {
       setLocalError('Номер договора обязателен');
       return;
     }
@@ -245,13 +258,21 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                 type="text"
                 value={form.number}
                 onChange={(e) => {
+                  if (!contractRules.allowManualNumberEdit) {
+                    return;
+                  }
+
                   numberManuallyEditedRef.current = true;
                   setNumberManuallyEdited(true);
                   setForm((prev) => ({ ...prev, number: e.target.value }));
                 }}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                required
+                disabled={!contractRules.allowManualNumberEdit}
+                required={!contractRules.autoGenerateWhenEmpty}
               />
+              {!contractRules.allowManualNumberEdit && (
+                <span className="text-xs text-slate-500">Номер договора формируется автоматически по настройкам.</span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Дата договора</span>

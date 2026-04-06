@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import { apiService } from '../../services/api';
+import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Client, Contract, ContractClient, ContractInput, Invoice, Payment } from '../../types';
 import { fromInputToApiDate, toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -130,6 +130,10 @@ export function ContractDetailPage({
   const { user } = useAuth();
   const toast = useToast();
   const [contract, setContract] = useState<Contract | null>(null);
+  const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
+    autoGenerateWhenEmpty: true,
+    allowManualNumberEdit: true,
+  });
   const [amountInput, setAmountInput] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('clients');
   const [loading, setLoading] = useState(true);
@@ -272,11 +276,15 @@ export function ContractDetailPage({
     const load = async () => {
       setLoading(true);
       try {
-        const nextContract = await apiService.getContract(contractId);
+        const [nextContract, nextRules] = await Promise.all([
+          apiService.getContract(contractId),
+          apiService.getContractRulesSettings(),
+        ]);
 
         if (cancel) return;
 
         setContract(nextContract);
+        setContractRules(nextRules);
         setAmountInput(formatAmountInput(nextContract.amount));
       } finally {
         if (!cancel) {
@@ -663,7 +671,7 @@ export function ContractDetailPage({
           Номер договора
           <input
             value={contract.number}
-            disabled={!editMode}
+            disabled={!editMode || !contractRules.allowManualNumberEdit}
             onChange={(event) =>
               setContract((prev) => (prev ? { ...prev, number: event.target.value } : prev))
             }

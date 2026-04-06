@@ -348,8 +348,13 @@ export function ExternalAuthPanel({
       });
       setHint(buildPendingMessage('telegram'));
 
-      const popup = window.open(started.authUrl, '_blank', 'noopener,noreferrer');
-      if (!popup) {
+      popupRef.current = window.open(
+        started.authUrl,
+        'pp-telegram-auth',
+        'popup=yes,width=540,height=720',
+      );
+
+      if (!popupRef.current) {
         window.location.assign(started.authUrl);
       }
     } catch (nextError) {
@@ -426,12 +431,14 @@ export function ExternalAuthPanel({
         }
 
         if (await applyAuthStatus(status, 'telegram')) {
+          closePopup();
           setTelegramSession(null);
           setHint(null);
           return;
         }
 
         if (status.status === 'failed' || status.status === 'expired' || status.status === 'consumed') {
+          closePopup();
           setTelegramSession(null);
           const message = status.detail
             || (status.status === 'expired'
@@ -446,6 +453,7 @@ export function ExternalAuthPanel({
           return;
         }
 
+        closePopup();
         setTelegramSession(null);
         setHint(null);
         const message = getErrorMessage(nextError, 'Ошибка проверки входа через Telegram.');
