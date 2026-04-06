@@ -16,7 +16,6 @@ import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 
 type PaymentKind = 'Income' | 'Expense';
-type AccountOption = { account: string; accountDate?: string | null };
 type LinkedInvoiceContext = {
   invoiceEntityId: number;
   invoiceRecordId?: number | null;
@@ -152,9 +151,6 @@ export function PaymentModal({
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [accountOpts, setAccountOpts] = useState<AccountOption[]>([]);
-  const [accountLoading, setAccountLoading] = useState(false);
   const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
   const [invoicePickerLoading, setInvoicePickerLoading] = useState(false);
   const [invoicePickerError, setInvoicePickerError] = useState<string | null>(null);
@@ -172,7 +168,6 @@ export function PaymentModal({
   const [showProcessHelp, setShowProcessHelp] = useState(false);
   const [detailsTab, setDetailsTab] = useState<'details' | 'system'>('details');
   const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
-  const hasSelectedInvoice = hasLockedInvoice || Boolean(formData.invoiceId);
   const selectedInvoiceSummary = useMemo(() => {
     if (!formData.invoiceId) return null;
 
@@ -237,12 +232,6 @@ export function PaymentModal({
     };
   }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
-  /* -------------------- Legacy account fields stay read-only -------------------- */
-  useEffect(() => {
-    setAccountOpts([]);
-    setAccountLoading(false);
-  }, [isOpen]);
-
   useEffect(() => {
     if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
       setInvoicePickerLoading(false);
@@ -301,6 +290,7 @@ export function PaymentModal({
     formData.account,
     formData.clientCaseId,
     formData.clientId,
+    formData.invoiceId,
     formData.type,
     hasLockedInvoice,
     invoicePickerOpen,
@@ -986,8 +976,7 @@ export function PaymentModal({
       setInvoiceCreateSeedContractId('');
       const finalizeSelection = () => {
         applyInvoiceSelection(normalizedCreated);
-        return toast.success('\u0421\u0447\u0435\u0442 \u0441\u043e\u0437\u0434\u0430\u043d \u0438 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u043f\u043b\u0430\u0442\u0435\u0436\u0443.', '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0441\u0447\u0435\u0442\u0430');
-        toast.success('РЎС‡РµС‚ СЃРѕР·РґР°РЅ Рё РїСЂРёРІСЏР·Р°РЅ Рє РїР»Р°С‚РµР¶Сѓ.', 'РЎРѕР·РґР°РЅРёРµ СЃС‡РµС‚Р°');
+        toast.success('Счет создан и привязан к платежу.', 'Создание счета');
       };
 
       if (typeof window !== 'undefined') {
@@ -1655,64 +1644,6 @@ export function PaymentModal({
                           </div>
                         )}
 
-                        {false && !hasLockedInvoice && invoicePickerOpen && (
-                          <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3">
-                            <input
-                              type="text"
-                              value={invoiceSearch}
-                              onChange={(event) => setInvoiceSearch(event.target.value)}
-                              placeholder={'\u041f\u043e\u0438\u0441\u043a \u0441\u0447\u0451\u0442\u0430 \u043f\u043e \u043d\u043e\u043c\u0435\u0440\u0443, \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u044e \u0438\u043b\u0438 \u0434\u0435\u043b\u0443'}
-                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                            />
-
-                            {invoicePickerLoading && (
-                              <div className="text-sm text-gray-500">{'\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0441\u0447\u0451\u0442\u043e\u0432...'}</div>
-                            )}
-
-                            {invoicePickerError && (
-                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                                {invoicePickerError}
-                              </div>
-                            )}
-
-                            {!invoicePickerLoading && !invoicePickerError && invoiceOptions.length === 0 && (
-                              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-500">
-                                {'\u041f\u043e\u0434\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u0441\u0447\u0451\u0442\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b. \u041c\u043e\u0436\u043d\u043e \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442 \u0438\u0437 \u044d\u0442\u043e\u0433\u043e \u043f\u043b\u0430\u0442\u0435\u0436\u0430.'}
-                              </div>
-                            )}
-
-                            {!invoicePickerLoading && invoiceOptions.length > 0 && (
-                              <div className="max-h-56 space-y-2 overflow-y-auto">
-                                {invoiceOptions.map((invoiceOption) => {
-                                  const canonicalId = invoiceOption.invoiceEntityId;
-                                  const selected = canonicalId && String(canonicalId) === formData.invoiceId;
-                                  const caseLabel = invoiceOption.clientCases?.length
-                                    ? invoiceOption.clientCases.map((item) => item.title).filter(Boolean).join(', ')
-                                    : invoiceOption.clientCaseTitle;
-
-                                  return (
-                                    <button
-                                      key={`${canonicalId ?? 'legacy'}-${invoiceOption.id}`}
-                                      type="button"
-                                      onClick={() => applyInvoiceSelection(invoiceOption)}
-                                      className={`w-full rounded-lg border px-3 py-2 text-left transition ${
-                                        selected
-                                          ? 'border-emerald-300 bg-emerald-50'
-                                          : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
-                                      }`}>
-                                      <div className="text-sm font-semibold text-gray-900">{'\u0421\u0447\u0451\u0442 \u2116 '}{invoiceOption.number}</div>
-                                      <div className="mt-1 text-xs text-gray-500">
-                                        {toRuDate(invoiceOption.date) || invoiceOption.date}
-                                        {caseLabel ? ` - ${caseLabel}` : ''}
-                                        {invoiceOption.description ? ` - ${invoiceOption.description}` : ''}
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>

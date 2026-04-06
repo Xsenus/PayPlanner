@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type {
@@ -114,7 +114,7 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupFormat(overview?.selectedFormat ?? overview?.availableFormats[0]?.key ?? '');
   };
 
-  const refreshAll = async (silent = false) => {
+  const refreshAll = useCallback(async (silent = false) => {
     if (silent) {
       setRefreshing(true);
     } else {
@@ -144,11 +144,11 @@ export function DatabaseMaintenanceSettings() {
         setLoading(false);
       }
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     void refreshAll();
-  }, []);
+  }, [refreshAll]);
 
   const hasUserActivitySettingsChanges = useMemo(
     () =>

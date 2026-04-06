@@ -1,22 +1,4 @@
-import {
-  ArrowDown,
-  ArrowUp,
-  Ban,
-  CalendarRange,
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-  FileCheck2,
-  GripVertical,
-  Loader2,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Search,
-  Send,
-  SlidersHorizontal,
-  Trash2,
-} from 'lucide-react';
+import { Ban, CalendarRange, CheckCircle2, FileCheck2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, Send, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -136,12 +118,10 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   const {
     columnOrder,
-    reorderColumns,
     orderedVisibleColumns: orderedVisibleColumnKeys,
     visibleColumns,
     pageSize,
     setPageSize,
-    draggingColumn,
     toggleColumn,
     moveColumn,
     handleColumnDragStart,
@@ -160,8 +140,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     maxPageSize: 100,
     minColumnWidth: 110,
   });
-  const draggingColumnId = draggingColumn;
-
   const {
     acts,
     loading,
@@ -404,13 +382,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     setPage(1);
   };
 
-  const pageNumbers = useMemo(() => {
-    const pages = new Set<number>([1, totalPages, page - 1, page, page + 1]);
-    return Array.from(pages)
-      .filter((value) => value >= 1 && value <= totalPages)
-      .sort((a, b) => a - b);
-  }, [page, totalPages]);
-
   const renderActCell = (act: Act, columnKey: ActColumnKey, key: string) => {
     switch (columnKey) {
       case 'date':
@@ -613,74 +584,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                 <SlidersHorizontal className="h-4 w-4" />
                 {t('visibleColumns') ?? 'Колонки'}
               </button>
-              {false && columnsOpen && (
-                <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {t('visibleColumns') ?? 'Отображаемые столбцы'}
-                  </p>
-                  <div className="space-y-2">
-                    {columnsForSettings.map((column) => {
-                      const columnId = column.key;
-                      const visibleIndex = visibleColumns.indexOf(columnId);
-                      const isVisible = visibleIndex >= 0;
-
-                      return (
-                        <div
-                          key={columnId}
-                          className={`flex items-center justify-between rounded-lg border px-2 py-1.5 ${draggingColumnId === columnId ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'}`}
-                          draggable={isVisible}
-                          onDragStart={(event) => {
-                            if (!isVisible) return;
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('text/plain', columnId);
-                            setDraggingColumnId(columnId);
-                          }}
-                          onDragOver={(event) => {
-                            if (!isVisible) return;
-                            event.preventDefault();
-                          }}
-                          onDrop={(event) => {
-                            if (!isVisible) return;
-                            event.preventDefault();
-                            const sourceId = event.dataTransfer.getData('text/plain') as ActColumnKey;
-                            reorderColumns(sourceId, columnId);
-                            setDraggingColumnId(null);
-                          }}
-                          onDragEnd={() => setDraggingColumnId(null)}>
-                          <div className="flex items-center gap-2">
-                            <GripVertical className={`h-4 w-4 ${isVisible ? 'text-slate-400' : 'text-slate-300'}`} />
-                            <label className="flex items-center gap-2 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={isVisible}
-                                onChange={() => toggleColumn(columnId)}
-                                disabled={visibleColumns.length === 1 && isVisible}
-                              />
-                              <span>{column.label}</span>
-                            </label>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => moveColumn(columnId, 'up')}
-                              disabled={!isVisible || visibleIndex === 0}
-                              className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moveColumn(columnId, 'down')}
-                              disabled={!isVisible || visibleIndex === visibleColumns.length - 1}
-                              className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
             <button
               type="button"
@@ -843,54 +746,6 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
               </tbody>
             </table>
           </div>
-          {false && acts.length > 0 && (
-            <div className="flex flex-col justify-between gap-4 border-t border-slate-200 px-4 py-4 text-sm text-slate-600 lg:flex-row lg:items-center">
-              <div className="flex items-center gap-3">
-                <span>{t('recordsFound') ?? 'Найдено записей:'} {pagination.total}</span>
-                <label className="flex items-center gap-2">
-                  <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select
-                    value={pageSize}
-                    onChange={(event) => setPageSize(Number(event.target.value))}
-                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-slate-700">
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>{size}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                  disabled={page <= 1}
-                  className="inline-flex items-center rounded-lg border border-slate-300 px-2 py-2 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                {pageNumbers.map((value, idx) => {
-                  const showDots = idx > 0 && value - pageNumbers[idx - 1] > 1;
-                  return (
-                    <div key={value} className="flex items-center">
-                      {showDots && <span className="px-1 text-slate-400">…</span>}
-                      <button
-                        type="button"
-                        onClick={() => setPage(value)}
-                        className={`rounded-lg border px-3 py-1.5 text-sm ${value === page ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
-                        {value}
-                      </button>
-                    </div>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                  disabled={page >= totalPages}
-                  className="inline-flex items-center rounded-lg border border-slate-300 px-2 py-2 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         <TablePagination

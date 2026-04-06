@@ -766,20 +766,6 @@ export function InvoiceModal({
     () => selectedActs.map((item) => actLabel(item)).filter(Boolean).join(', '),
     [selectedActs],
   );
-  const selectedClientCases = useMemo(
-    () => selectedClientCaseIds
-      .map((id) => clientCaseOptions.find((item) => item.id === id) ?? null)
-      .filter((item): item is ClientCaseOption => item !== null),
-    [clientCaseOptions, selectedClientCaseIds],
-  );
-  const availableClientCases = useMemo(
-    () => clientCaseOptions.filter((item) => !selectedClientCaseIds.includes(item.id)),
-    [clientCaseOptions, selectedClientCaseIds],
-  );
-  const availableActOptions = useMemo(
-    () => actOptions.filter((item) => !selectedActs.some((selected) => selected.id === item.id)),
-    [actOptions, selectedActs],
-  );
 
   const filteredClients = useMemo(() => {
     const query = clientPickerSearch.trim().toLowerCase();
@@ -994,7 +980,7 @@ export function InvoiceModal({
       }
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
-  }, [open, invoice, resumeDraft, defaultClientId, defaultResponsibleId, defaultType, presentation]);
+  }, [defaultClientId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
 
   useEffect(() => {
     if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {

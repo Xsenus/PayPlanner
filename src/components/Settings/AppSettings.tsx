@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
@@ -101,7 +101,7 @@ export function AppSettings() {
     return 'Финансовые правила';
   }, [activeSection]);
 
-  const migrationDetails = result?.details ?? [];
+  const migrationDetails = useMemo(() => result?.details ?? [], [result]);
   const migrationDetailsTotalPages = useMemo(
     () => Math.max(1, Math.ceil(migrationDetails.length / detailsPageSize || 1)),
     [detailsPageSize, migrationDetails.length],
@@ -126,7 +126,7 @@ export function AppSettings() {
     }
   };
 
-  const loadDatabaseStatus = async () => {
+  const loadDatabaseStatus = useCallback(async () => {
     setDatabaseStatusLoading(true);
     try {
       const status = await apiService.getDatabaseStatus();
@@ -137,7 +137,7 @@ export function AppSettings() {
     } finally {
       setDatabaseStatusLoading(false);
     }
-  };
+  }, []);
 
   const runDatabaseImport = async () => {
     if (!databaseImportFile) {
@@ -233,7 +233,7 @@ export function AppSettings() {
     }
   };
 
-  const loadDuplicates = async (
+  const loadDuplicates = useCallback(async (
     kind: MergeKind,
     options?: { showSuccessToast?: boolean; showErrorToast?: boolean },
   ) => {
@@ -266,7 +266,7 @@ export function AppSettings() {
     } finally {
       setMergeLoading(false);
     }
-  };
+  }, [toast]);
 
   const runMerge = async () => {
     const group = duplicates.find((item) => item.canonical === selectedGroupKey);
@@ -597,7 +597,7 @@ export function AppSettings() {
     if (activeSection === 'form-requirements') {
       void loadFormRequirements();
     }
-  }, [activeDatabaseOperationsSubsection, activeSection, mergeKind]);
+  }, [activeDatabaseOperationsSubsection, activeSection, loadDatabaseStatus, loadDuplicates, mergeKind]);
 
   return (
     <div className="p-6 lg:p-8">

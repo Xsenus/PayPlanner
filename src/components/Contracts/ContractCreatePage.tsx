@@ -97,7 +97,14 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
 
           return { ...prev, number: nextNumber.number };
         });
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setContractRules({
+            autoGenerateWhenEmpty: true,
+            allowManualNumberEdit: true,
+          });
+        }
+      }
     };
 
     void loadNextNumber();

@@ -363,7 +363,7 @@ function parseContentDispositionFileName(header: string | null): string | null {
     }
   }
 
-  const plainMatch = header.match(/filename\s*=\s*"?([^\";]+)"?/i);
+  const plainMatch = header.match(/filename\s*=\s*"?([^";]+)"?/i);
   return plainMatch?.[1]?.trim() || null;
 }
 

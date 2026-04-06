@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Copy, ExternalLink, Loader2, RefreshCw, Save } from 'lucide-react';
 import {
   authService,
@@ -323,7 +323,7 @@ export function AuthProviderSettings() {
   const setSectionMessage = (key: ActionKey, value: string | null) =>
     setMessages((current) => ({ ...current, [key]: value }));
 
-  const refreshAll = async (silent = false) => {
+  const refreshAll = useCallback(async (silent = false) => {
     if (silent) {
       setRefreshing(true);
     } else {
@@ -347,11 +347,11 @@ export function AuthProviderSettings() {
         setLoading(false);
       }
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     void refreshAll();
-  }, []);
+  }, [refreshAll]);
 
   const applySaveResult = async (key: ActionKey, message: string, nextSettings: AuthProviderSettingsDto) => {
     setSettings(nextSettings);

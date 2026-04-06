@@ -127,7 +127,14 @@ export function ContractModal({
 
           return { ...prev, number: nextNumber.number };
         });
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setContractRules({
+            autoGenerateWhenEmpty: true,
+            allowManualNumberEdit: true,
+          });
+        }
+      }
     };
 
     void loadNextNumber();

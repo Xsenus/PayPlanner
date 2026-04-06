@@ -1788,13 +1788,6 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   });
 
   const visiblePayments = payments;
-  const selectedInvoiceRelatedPayments = useMemo(() => {
-    if (!selectedInvoice) {
-      return [];
-    }
-
-    return visiblePayments.filter((payment) => isPaymentLinkedToInvoice(payment, selectedInvoice));
-  }, [selectedInvoice, visiblePayments]);
   const loadInvoiceRelatedPayments = useCallback(async (invoiceSnapshot: Invoice | null) => {
     if (!invoiceSnapshot) {
       setInvoiceModalRelatedPayments([]);
@@ -1923,7 +1916,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     }
 
     return actClients;
-  }, [actClients, clientId, clientName]);
+  }, [actClients, clientData?.responsibleUserId, clientData?.responsibleUserName, clientId, clientName]);
 
   const invoiceModalClients = useMemo(() => {
     const normalizedName = clientName && clientName !== '...' ? clientName : `Клиент #${clientId}`;

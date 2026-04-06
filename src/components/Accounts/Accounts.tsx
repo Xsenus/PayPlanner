@@ -1721,26 +1721,6 @@ export function Accounts({
                       <SlidersHorizontal className="h-4 w-4" />
                       {t('tableSettings') ?? 'Таблица'}
                     </button>
-                    {false && columnsOpen && (
-                      <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-                        <div className="mb-2 text-xs font-semibold uppercase text-gray-500">
-                          {t('visibleColumns') ?? 'Отображаемые столбцы'}
-                        </div>
-                        <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                          {columns.map((column) => (
-                            <label key={column.key} className="flex items-center gap-2 text-sm text-gray-700">
-                              <input
-                                type="checkbox"
-                                checked={visibleColumns.includes(column.key)}
-                                onChange={() => toggleColumn(column.key)}
-                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span>{column.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -2014,9 +1994,6 @@ export function Accounts({
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
                                     <div className="flex flex-col items-center gap-2">
-                                      {false && actsForInvoice.length === 0 && (
-                                        <div className="text-xs text-gray-400">{t('loading') ?? 'Загрузка...'}</div>
-                                      )}
                                       {actsForInvoice.length > 0 ? (
                                         <>
                                           <div className="flex items-center justify-center gap-2">
@@ -2215,51 +2192,6 @@ export function Accounts({
 
           {error && (
             <div className="border-t border-gray-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{String(error)}</div>
-          )}
-
-          {false && !isLoading && mergedTotal > 0 && (
-            <div className="flex flex-col gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-4">
-                <div>
-                  {t('recordsFound') ?? 'Найдено записей'}: {mergedTotal}
-                </div>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <span>{t('rowsPerPage') ?? 'Строк на странице'}:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
-                    className="rounded-lg border border-gray-200 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  >
-                    {[10, 15, 25, 50, 100].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {t('previous') ?? 'Назад'}
-                </button>
-                <span>
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded-lg border border-gray-200 px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {t('next') ?? 'Вперёд'}
-                </button>
-              </div>
-            </div>
           )}
           {!isLoading && mergedTotal > 0 && (
             <TablePagination

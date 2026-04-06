@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -7,8 +7,6 @@ import {
   type ExternalAuthStartResponse,
   type ExternalAuthStatusResponse,
 } from '../../services/authService';
-
-type ProviderName = 'google' | 'vk' | 'yandex' | 'telegram';
 
 interface ExternalAuthPanelProps {
   disabled?: boolean;
@@ -55,22 +53,6 @@ function buildPendingMessage(provider: string) {
     : `Ожидаем завершение входа через ${getProviderLabel(provider)}.`;
 }
 
-function isProviderEnabled(settings: AuthProviderPublicSettings | null, provider: ProviderName) {
-  if (!settings) {
-    return false;
-  }
-
-  switch (provider) {
-    case 'google':
-      return settings.googleEnabled;
-    case 'vk':
-      return settings.vkEnabled;
-    case 'yandex':
-      return settings.yandexEnabled;
-    default:
-      return settings.telegramEnabled;
-  }
-}
 
 function normalizeTelegramBotUsername(value?: string | null) {
   return String(value ?? '').trim().replace(/^@+/, '');
@@ -223,7 +205,7 @@ export function ExternalAuthPanel({
     popupRef.current = null;
   };
 
-  const applyAuthStatus = async (status: ExternalAuthStatusResponse, fallbackProvider: string) => {
+  const applyAuthStatus = useCallback(async (status: ExternalAuthStatusResponse, fallbackProvider: string) => {
     if (!status.completed) {
       return false;
     }
@@ -248,7 +230,7 @@ export function ExternalAuthPanel({
     }
 
     return false;
-  };
+  }, [onError, onInactive, onPendingApproval, signInWithToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,7 +397,7 @@ export function ExternalAuthPanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [externalSession, onError, signInWithToken]);
+  }, [applyAuthStatus, externalSession, onError]);
 
   useEffect(() => {
     if (!telegramSession?.state) {
@@ -466,7 +448,7 @@ export function ExternalAuthPanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [onError, signInWithToken, telegramSession]);
+  }, [applyAuthStatus, onError, telegramSession]);
 
   useEffect(() => {
     if (!settings?.telegramWidgetEnabled || !telegramBotUsername || !widgetContainerRef.current) {
@@ -541,7 +523,7 @@ export function ExternalAuthPanel({
       delete widgetWindow[TELEGRAM_WIDGET_CALLBACK];
       container.innerHTML = '';
     };
-  }, [onError, settings?.telegramWidgetEnabled, telegramBotUsername, signInWithToken]);
+  }, [applyAuthStatus, onError, settings?.telegramWidgetEnabled, telegramBotUsername]);
 
   if (loadingSettings) {
     return (

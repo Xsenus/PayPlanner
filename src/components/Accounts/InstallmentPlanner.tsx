@@ -95,26 +95,6 @@ function parseMoneyInput(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoneyInputValue(value: string | number | null | undefined): string {
-  const normalized = normalizeMoneyInput(value);
-  if (!normalized) return '';
-
-  const hasDecimal = normalized.includes('.');
-  const hasTrailingDot = normalized.endsWith('.');
-  const [integerPartRaw, decimalPartRaw = ''] = normalized.split('.', 2);
-  const integerPart = groupThousands((integerPartRaw || '0').replace(/^0+(?=\d)/, '') || '0');
-  const decimalPart = decimalPartRaw.slice(0, 2);
-
-  if (hasTrailingDot) {
-    return `${integerPart}.`;
-  }
-
-  if (hasDecimal) {
-    return `${integerPart}.${decimalPart}`;
-  }
-
-  return integerPart;
-}
 
 function formatFixedAmount(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -240,8 +220,6 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   const currentTotal = parseMoneyInput(requestForm.total);
   const currentDownPayment = parseMoneyInput(requestForm.downPayment);
   const currentLoanAmount = Math.max(currentTotal - currentDownPayment, 0);
-  const currentAnnualRate = Number.parseFloat(normalizeRateInput(requestForm.annualRate)) || 0;
-  const currentMonths = Math.max(0, Number.parseInt(normalizeIntegerInput(requestForm.months), 10) || 0);
   const currentMonthlyPayment =
     planDraft?.roundedMonthlyPayment
     ?? planDraft?.baseMonthlyPayment

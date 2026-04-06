@@ -102,11 +102,12 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
         setSummary(EMPTY_SUMMARY);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить платежи.');
       } finally {
-        if (controller.signal.aborted) return;
-        if (mode === 'initial') {
-          setLoadingInitial(false);
-        } else {
-          setRefreshing(false);
+        if (!controller.signal.aborted) {
+          if (mode === 'initial') {
+            setLoadingInitial(false);
+          } else {
+            setRefreshing(false);
+          }
         }
       }
     },
