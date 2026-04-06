@@ -127,19 +127,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         CancellationToken cancellationToken)
     {
         await RunTableAsync(result, target, "Roles", "Роли", table =>
-            ImportEntitiesAsync(
-                source,
-                target,
-                table,
-                ctx => ctx.Roles.AsNoTracking(),
-                ctx => ctx.Roles,
-                x => x.Id,
-                x => x.Id,
-                x => Key(x.Name),
-                x => Key(x.Name),
-                CopyRole,
-                maps.Roles,
-                cancellationToken));
+            ImportRolesAsync(source, target, table, maps, cancellationToken));
 
         await RunTableAsync(result, target, "RolePermissions", "Права ролей", table =>
             ImportEntitiesAsync(
