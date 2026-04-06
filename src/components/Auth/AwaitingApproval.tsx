@@ -10,8 +10,11 @@ export const AwaitingApproval = ({ onBackToLogin }: AwaitingApprovalProps) => {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex items-center justify-center mb-8">
-            <div className="bg-amber-100 rounded-full p-4">
-              <Clock className="w-12 h-12 text-amber-600" />
+            <div className="space-y-5">
+              <img src="/logo.png" alt="ElitPravo CRM" className="mx-auto h-24 w-auto object-contain" />
+              <div className="mx-auto flex w-fit items-center justify-center rounded-full bg-amber-100 p-4">
+                <Clock className="w-12 h-12 text-amber-600" />
+              </div>
             </div>
           </div>
 
@@ -20,7 +23,7 @@ export const AwaitingApproval = ({ onBackToLogin }: AwaitingApprovalProps) => {
           </h1>
 
           <div className="space-y-4 mb-8 text-slate-600">
-            <p className="text-center">Спасибо за регистрацию в PayPlanner!</p>
+            <p className="text-center">Спасибо за регистрацию в crm.elitpravo.com!</p>
 
             <div className="bg-slate-50 rounded-lg p-4 space-y-3">
               <div className="flex items-start gap-3">
@@ -59,7 +62,7 @@ export const AwaitingApproval = ({ onBackToLogin }: AwaitingApprovalProps) => {
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
-          <p>Если возникли вопросы — свяжитесь с администратором системы.</p>
+          <p>crm.elitpravo.com</p>
         </div>
       </div>
     </div>

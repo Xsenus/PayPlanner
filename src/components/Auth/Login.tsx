@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eye, EyeOff, LogIn, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, UserPlus } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import type { ApiError } from '../../services/authService';
 import { ExternalAuthPanel } from './ExternalAuthPanel';
@@ -58,13 +58,11 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex items-center justify-center mb-8">
-            <div className="bg-slate-900 rounded-full p-4">
-              <LogIn className="w-8 h-8 text-white" />
-            </div>
+            <img src="/logo.png" alt="ElitPravo CRM" className="h-28 w-auto object-contain" />
           </div>
 
-          <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">Добро пожаловать</h1>
-          <p className="text-center text-slate-600 mb-8">Войдите в аккаунт, чтобы продолжить</p>
+          <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">Вход в аккаунт</h1>
+          <p className="text-center text-slate-600 mb-8">Войдите, чтобы продолжить работу в crm.elitpravo.com</p>
 
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
@@ -146,7 +144,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
-          <p>PayPlanner - система управления платежами</p>
+          <p>crm.elitpravo.com</p>
         </div>
       </div>
     </div>

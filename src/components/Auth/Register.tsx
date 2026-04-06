@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { UserPlus, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../../services/authService';
 
 interface RegisterProps {
@@ -77,14 +77,12 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
 
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex items-center justify-center mb-8">
-            <div className="bg-slate-900 rounded-full p-4">
-              <UserPlus className="w-8 h-8 text-white" />
-            </div>
+            <img src="/logo.png" alt="ElitPravo CRM" className="h-28 w-auto object-contain" />
           </div>
 
           <h1 className="text-3xl font-bold text-center text-slate-900 mb-2">Создать аккаунт</h1>
           <p className="text-center text-slate-600 mb-8">
-            Зарегистрируйтесь для доступа к PayPlanner
+            Зарегистрируйтесь для доступа к crm.elitpravo.com
           </p>
 
           {error && (
@@ -166,6 +164,10 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
           <p className="mt-6 text-center text-sm text-slate-600">
             Перед входом аккаунт должен быть одобрен администратором.
           </p>
+        </div>
+
+        <div className="mt-6 text-center text-sm text-slate-600">
+          <p>crm.elitpravo.com</p>
         </div>
       </div>
     </div>

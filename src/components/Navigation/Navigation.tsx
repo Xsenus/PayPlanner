@@ -339,16 +339,17 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           ].join(' ')}>
           {!collapsed ? (
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-                <span className="text-white font-bold">PP</span>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 p-1 shadow-lg ring-1 ring-white/10">
+                <img src="/logo.ico" alt="ElitPravo CRM" className="h-full w-full object-contain" />
               </div>
-              <div className="text-xl font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent">
-                PayPlanner
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-white">crm.elitpravo.com</div>
+                <div className="truncate text-xs text-slate-400">ElitPravo CRM</div>
               </div>
             </div>
           ) : (
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold">PP</span>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 p-1 shadow-lg ring-1 ring-white/10">
+              <img src="/logo.ico" alt="ElitPravo CRM" className="h-full w-full object-contain" />
             </div>
           )}
         </div>
