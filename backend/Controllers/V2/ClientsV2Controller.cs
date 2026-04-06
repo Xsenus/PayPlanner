@@ -15,8 +15,20 @@ public class ClientsV2Controller : ControllerBase
     private readonly PaymentContext _db;
     public ClientsV2Controller(PaymentContext db) => _db = db;
 
-    private IQueryable<Client> BuildVisibleClientsQuery(int? currentUserId)
-        => _db.Clients.ApplyClientVisibility(User.IsInRole("admin"), currentUserId);
+    private IQueryable<Client> BuildVisibleClientsQuery(int? currentUserId, bool isAdmin)
+        => _db.Clients.ApplyClientVisibility(isAdmin, currentUserId);
+
+    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+        {
+            return (null, false);
+        }
+
+        var isAdmin = await _db.IsUserAdminAsync(currentUserId.Value, ct);
+        return (currentUserId, isAdmin);
+    }
 
     private static string? FormatResponsibleUserName(User? user)
     {
@@ -66,13 +78,13 @@ public class ClientsV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
 
-        var currentUserId = User.GetUserId();
-        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
         {
             return Unauthorized();
         }
 
-        var q = BuildVisibleClientsQuery(currentUserId)
+        var q = BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
             .Include(c => c.Cases)
             .Include(c => c.Contracts)
             .Include(c => c.LegalEntity)
@@ -156,13 +168,13 @@ public class ClientsV2Controller : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var currentUserId = User.GetUserId();
-        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
         {
             return Unauthorized();
         }
 
-        var client = await BuildVisibleClientsQuery(currentUserId)
+        var client = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
@@ -179,15 +191,15 @@ public class ClientsV2Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
-        var currentUserId = User.GetUserId();
-        if (!currentUserId.HasValue)
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.UserId.HasValue)
         {
             return Unauthorized();
         }
 
-        var responsibleUserId = User.IsInRole("admin")
-            ? (model.ResponsibleUserId ?? currentUserId.Value)
-            : currentUserId.Value;
+        var responsibleUserId = access.IsAdmin
+            ? (model.ResponsibleUserId ?? access.UserId.Value)
+            : access.UserId.Value;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest($"Ответственный #{responsibleUserId} не найден");
@@ -204,17 +216,17 @@ public class ClientsV2Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
-        var currentUserId = User.GetUserId();
-        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(currentUserId)
+        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
-        var responsibleUserId = User.IsInRole("admin")
+        var responsibleUserId = access.IsAdmin
             ? model.ResponsibleUserId
             : e.ResponsibleUserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
@@ -242,13 +254,13 @@ public class ClientsV2Controller : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var currentUserId = User.GetUserId();
-        if (!User.IsInRole("admin") && !currentUserId.HasValue)
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(currentUserId)
+        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
