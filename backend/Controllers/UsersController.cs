@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Extensions;
@@ -34,7 +34,7 @@ public class UsersController : ControllerBase
     {
         var dto = await _svc.CreateUserAsync(req);
         return dto is null
-            ? Conflict(new { message = "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј email СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚." })
+            ? Conflict(new { message = "Пользователь с таким email уже существует." })
             : Created($"/api/users/{dto.Id}", dto);
     }
 
@@ -53,11 +53,11 @@ public class UsersController : ControllerBase
         }
         catch (InvalidOperationException ex) when (ex.Message == "UserInUseAsResponsible")
         {
-            return Conflict(new { message = "РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: РѕРЅ РЅР°Р·РЅР°С‡РµРЅ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Рј РІ РґРѕРєСѓРјРµРЅС‚Р°С…." });
+            return Conflict(new { message = "Нельзя удалить пользователя: он назначен ответственным в документах." });
         }
         catch (InvalidOperationException ex) when (ex.Message == "ProtectedUserCannotBeDeleted")
         {
-            return Conflict(new { message = "РЎРёСЃС‚РµРјРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ." });
+            return Conflict(new { message = "Системного администратора нельзя удалить." });
         }
     }
 
@@ -98,7 +98,7 @@ public class UsersController : ControllerBase
             ex.Message == "ProtectedUserManagedOnlyBySelf"
             || ex.Message == "ProtectedUserCannotBeDeleted")
         {
-            return Conflict(new { message = "РЎРёСЃС‚РµРјРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµР»СЊР·СЏ РѕС‚РєР»РѕРЅРёС‚СЊ РёР»Рё СѓРґР°Р»РёС‚СЊ." });
+            return Conflict(new { message = "Системного администратора нельзя отклонить или удалить." });
         }
     }
 

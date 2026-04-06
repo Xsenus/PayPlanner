@@ -219,7 +219,7 @@ public class PaymentsV2Controller : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 entity,
-                $"РР·РјРµРЅРµРЅР° РїР»Р°РЅРѕРІР°СЏ РґР°С‚Р°: {originalPlannedDate:dd.MM.yyyy} в†’ {entity.PlannedDate:dd.MM.yyyy}",
+                $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {entity.PlannedDate:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -230,7 +230,7 @@ public class PaymentsV2Controller : ControllerBase
             rescheduleCount++;
             PaymentDomainService.AppendSystemNote(
                 entity,
-                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° РёР·РјРµРЅРµРЅР°: {originalDueDate:dd.MM.yyyy} в†’ {entity.Date:dd.MM.yyyy}",
+                $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {entity.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -238,7 +238,7 @@ public class PaymentsV2Controller : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 entity,
-                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅР° РЅР° {entity.Date:dd.MM.yyyy}",
+                $"Дата платежа автоматически скорректирована на {entity.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -247,7 +247,7 @@ public class PaymentsV2Controller : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 entity,
-                $"РР·РјРµРЅРµРЅР° РѕРїР»Р°С‡РµРЅРЅР°СЏ СЃСѓРјРјР°: Р±С‹Р»Рѕ {originalPaidAmount.ToString("N2", culture)}, СЃС‚Р°Р»Рѕ {entity.PaidAmount.ToString("N2", culture)}",
+                $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {entity.PaidAmount.ToString("N2", culture)}",
                 now,
                 actor);
         }
@@ -256,7 +256,7 @@ public class PaymentsV2Controller : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 entity,
-                $"РЎС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»С‘РЅ: {originalStatus.ToDisplayString()} в†’ {entity.Status.ToDisplayString()}",
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {entity.Status.ToDisplayString()}",
                 now,
                 actor);
         }
