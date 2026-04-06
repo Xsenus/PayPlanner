@@ -311,10 +311,13 @@ public partial class AuthService
         }
 
         var preferredPhone = ResolveMergedPhoneCandidate(request.PrimaryPhoneNumber, targetUser, sourceUsers);
+        var mergedRoleId = await ResolveMergedRoleIdAsync(targetUser, sourceUsers, cancellationToken);
 
         await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            targetUser.RoleId = mergedRoleId;
+
             foreach (var sourceUser in sourceUsers)
             {
                 MergeUserFields(targetUser, sourceUser);
@@ -364,6 +367,66 @@ public partial class AuthService
             .FirstAsync(x => x.Id == targetUser.Id, cancellationToken);
 
         return MapToDto(mergedUser);
+    }
+
+    private async Task<int> ResolveMergedRoleIdAsync(
+        User targetUser,
+        IEnumerable<User> sourceUsers,
+        CancellationToken cancellationToken)
+    {
+        var candidateRoleIds = sourceUsers
+            .Select(x => x.RoleId)
+            .Append(targetUser.RoleId)
+            .Where(x => x > 0)
+            .Distinct()
+            .ToList();
+
+        if (candidateRoleIds.Count == 0)
+        {
+            return targetUser.RoleId;
+        }
+
+        if (candidateRoleIds.Count == 1)
+        {
+            return candidateRoleIds[0];
+        }
+
+        var roles = await _context.Roles
+            .AsNoTracking()
+            .Where(x => candidateRoleIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name })
+            .ToListAsync(cancellationToken);
+
+        var permissions = await _context.RolePermissions
+            .AsNoTracking()
+            .Where(x => candidateRoleIds.Contains(x.RoleId))
+            .ToListAsync(cancellationToken);
+
+        var roleNameById = roles.ToDictionary(x => x.Id, x => x.Name);
+        var statsByRoleId = permissions
+            .GroupBy(x => x.RoleId)
+            .ToDictionary(x => x.Key, CalculateMergedRoleStrength);
+
+        var strongestRole = candidateRoleIds
+            .Select(roleId =>
+            {
+                statsByRoleId.TryGetValue(roleId, out var stats);
+                roleNameById.TryGetValue(roleId, out var roleName);
+
+                return new MergedRoleCandidate(
+                    roleId,
+                    string.Equals(roleName, "admin", StringComparison.Ordinal),
+                    stats?.GrantedOperations ?? 0,
+                    stats?.VisibleSections ?? 0,
+                    roleId == targetUser.RoleId);
+            })
+            .OrderByDescending(x => x.IsSystemAdministrator)
+            .ThenByDescending(x => x.GrantedOperations)
+            .ThenByDescending(x => x.VisibleSections)
+            .ThenByDescending(x => x.IsCurrentTargetRole)
+            .First();
+
+        return strongestRole.RoleId;
     }
 
     private static void MergeUserFields(User targetUser, User sourceUser)
@@ -671,4 +734,55 @@ public partial class AuthService
 
         return null;
     }
+
+    private static MergedRoleStrength CalculateMergedRoleStrength(IEnumerable<RolePermission> permissions)
+    {
+        var grantedOperations = 0;
+        var visibleSections = 0;
+
+        foreach (var permission in permissions)
+        {
+            if (permission.CanView)
+            {
+                grantedOperations++;
+                visibleSections++;
+            }
+
+            if (permission.CanCreate)
+            {
+                grantedOperations++;
+            }
+
+            if (permission.CanEdit)
+            {
+                grantedOperations++;
+            }
+
+            if (permission.CanDelete)
+            {
+                grantedOperations++;
+            }
+
+            if (permission.CanExport)
+            {
+                grantedOperations++;
+            }
+
+            if (permission.CanViewAnalytics)
+            {
+                grantedOperations++;
+            }
+        }
+
+        return new MergedRoleStrength(grantedOperations, visibleSections);
+    }
+
+    private sealed record MergedRoleCandidate(
+        int RoleId,
+        bool IsSystemAdministrator,
+        int GrantedOperations,
+        int VisibleSections,
+        bool IsCurrentTargetRole);
+
+    private sealed record MergedRoleStrength(int GrantedOperations, int VisibleSections);
 }
