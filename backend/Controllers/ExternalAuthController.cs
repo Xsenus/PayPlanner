@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 
@@ -29,9 +30,11 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            var result = await _externalAuthService.StartExternalAsync(
+            var result = await _externalAuthService.StartExternalFlowAsync(
                 request.Provider,
                 request.ReturnUrl,
+                request.Intent,
+                User.GetUserId(),
                 Request,
                 cancellationToken);
 
@@ -49,7 +52,7 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            return Ok(await _externalAuthService.GetExternalStatusAsync(state, cancellationToken));
+            return Ok(await _externalAuthService.GetExternalStatusForClientAsync(state, cancellationToken));
         }
         catch (KeyNotFoundException ex)
         {
@@ -72,7 +75,7 @@ public class ExternalAuthController : ControllerBase
         [FromQuery(Name = "error_description")] string? errorDescription,
         CancellationToken cancellationToken)
     {
-        var html = await _externalAuthService.HandleExternalCallbackAsync(
+        var html = await _externalAuthService.HandleExternalCallbackForClientAsync(
             provider,
             state,
             code,
@@ -93,7 +96,7 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            return Ok(await _externalAuthService.CompleteTelegramWidgetAsync(request, cancellationToken));
+            return Ok(await _externalAuthService.CompleteTelegramWidgetFlowAsync(request, User.GetUserId(), cancellationToken));
         }
         catch (InvalidOperationException ex)
         {
@@ -109,7 +112,7 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            return Ok(await _externalAuthService.StartTelegramBotAsync(request.ReturnUrl, Request, cancellationToken));
+            return Ok(await _externalAuthService.StartTelegramBotFlowAsync(request.ReturnUrl, request.Intent, User.GetUserId(), Request, cancellationToken));
         }
         catch (InvalidOperationException ex)
         {
@@ -123,7 +126,7 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            return Ok(await _externalAuthService.GetTelegramBotStatusAsync(state, cancellationToken));
+            return Ok(await _externalAuthService.GetTelegramBotStatusForClientAsync(state, cancellationToken));
         }
         catch (KeyNotFoundException ex)
         {
@@ -141,7 +144,7 @@ public class ExternalAuthController : ControllerBase
     {
         try
         {
-            await _externalAuthService.HandleTelegramWebhookAsync(request, Request, cancellationToken);
+            await _externalAuthService.HandleTelegramWebhookFlowAsync(request, Request, cancellationToken);
             return Ok(new { ok = true });
         }
         catch (UnauthorizedAccessException ex)

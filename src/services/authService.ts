@@ -54,6 +54,21 @@ export interface Role {
   permissionsUpdatedByUserName?: string | null;
 }
 
+export interface ExternalIdentity {
+  id: number;
+  provider: string;
+  providerUserId: string;
+  providerEmail?: string | null;
+  providerUsername?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  telegramUserId?: string | null;
+  chatId?: number | null;
+  verifiedAt?: string | null;
+  lastUsedAt?: string | null;
+  createdAt?: string | null;
+}
+
 export interface User {
   id: number;
   email: string;
@@ -77,6 +92,7 @@ export interface User {
   isApproved: boolean;
   createdAt: string;
   approvedAt?: string | null;
+  externalIdentities?: ExternalIdentity[];
 }
 
 export interface AuthProviderPublicSettings {
@@ -151,6 +167,7 @@ export interface ExternalAuthStartResponse {
   returnUrl: string;
   expiresAt: string;
   pollIntervalMs: number;
+  intent?: string;
 }
 
 export interface ExternalAuthStatusResponse {
@@ -163,6 +180,7 @@ export interface ExternalAuthStatusResponse {
   isInactive: boolean;
   token?: string | null;
   user?: User | null;
+  linked?: boolean;
 }
 
 export interface CreateUserDto {
@@ -174,6 +192,7 @@ export interface CreateUserDto {
 }
 
 export interface UpdateUserDto {
+  email?: string;
   fullName?: string;
   firstName?: string;
   lastName?: string;
@@ -191,6 +210,29 @@ export interface UpdateUserDto {
   employmentEndDate?: string;
   roleId?: number;
   isActive?: boolean;
+}
+
+export interface UpdateProfileDto {
+  email?: string;
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  dateOfBirth?: string;
+  photoUrl?: string;
+  phoneNumber?: string;
+  whatsApp?: string;
+  telegram?: string;
+  instagram?: string;
+  messenger?: string;
+  viber?: string;
+}
+
+export interface MergeUsersDto {
+  targetUserId: number;
+  sourceUserIds: number[];
+  primaryEmail?: string;
+  primaryPhoneNumber?: string;
 }
 
 export type ApiErrorCode = 'PendingApproval' | 'UserInactive' | 'InvalidCredentials' | string;
@@ -336,10 +378,10 @@ class AuthApiService {
     return this.request<AuthProviderPublicSettings>('/auth/providers');
   }
 
-  public async startExternalAuth(provider: string, returnUrl = '/') {
+  public async startExternalAuth(provider: string, returnUrl = '/', intent = 'signin') {
     return this.request<ExternalAuthStartResponse>('/auth/external/start', {
       method: 'POST',
-      body: JSON.stringify({ provider, returnUrl }),
+      body: JSON.stringify({ provider, returnUrl, intent }),
     });
   }
 
@@ -354,10 +396,10 @@ class AuthApiService {
     });
   }
 
-  public async startTelegramBotAuth(returnUrl = '/') {
+  public async startTelegramBotAuth(returnUrl = '/', intent = 'signin') {
     return this.request<ExternalAuthStartResponse>('/auth/telegram/bot/start', {
       method: 'POST',
-      body: JSON.stringify({ returnUrl }),
+      body: JSON.stringify({ returnUrl, intent }),
     });
   }
 
@@ -457,6 +499,10 @@ class AuthApiService {
     return this.request<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) });
   }
 
+  public async mergeUsers(data: MergeUsersDto) {
+    return this.request<User>('/users/merge', { method: 'POST', body: JSON.stringify(data) });
+  }
+
   public async deleteUser(id: number) {
     return this.request<void>(`/users/${id}`, { method: 'DELETE' });
   }
@@ -499,6 +545,24 @@ class AuthApiService {
 
   public async deleteRole(id: number) {
     return this.request<void>(`/roles/${id}`, { method: 'DELETE' });
+  }
+
+  public async getProfile() {
+    return this.request<User>('/profile');
+  }
+
+  public async updateProfile(data: UpdateProfileDto) {
+    return this.request<User>('/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async detachExternalIdentity(provider: string) {
+    return this.request<{ detached: boolean; user?: User | null }>(
+      `/profile/external/${encodeURIComponent(provider)}`,
+      { method: 'DELETE' },
+    );
   }
 }
 

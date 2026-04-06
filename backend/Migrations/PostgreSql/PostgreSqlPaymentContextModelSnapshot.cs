@@ -721,6 +721,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("Intent")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("signin");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -2186,6 +2193,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("Intent")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("signin");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -2968,7 +2982,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.UserExternalIdentity", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
-                        .WithMany()
+                        .WithMany("ExternalIdentities")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -3083,6 +3097,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("ExternalIdentities");
 
                     b.Navigation("InvoiceResponsibles");
                 });

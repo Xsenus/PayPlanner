@@ -24,4 +24,7 @@ public class TelegramWidgetLoginRequest
 
     [JsonPropertyName("hash")]
     public string Hash { get; set; } = string.Empty;
+
+    [JsonPropertyName("intent")]
+    public string? Intent { get; set; }
 }

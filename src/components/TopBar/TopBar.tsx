@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, Bell, Building2, LogOut, User } from 'lucide-react';
+import { Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -7,6 +7,7 @@ import { useDialog } from '../../hooks/useDialog';
 type TopBarProps = {
   title: string;
   onSignOut: () => Promise<void>;
+  onOpenProfile: () => void;
 };
 
 const getInitials = (fullName?: string | null) =>
@@ -18,12 +19,12 @@ const getInitials = (fullName?: string | null) =>
     .join('')
     .toUpperCase();
 
-export default function TopBar({ title, onSignOut }: TopBarProps) {
-  const { user } = useAuth();
+export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps) {
+  const { user, isAdmin } = useAuth();
   const { setActiveTab } = useTabNavigation();
+  const { confirm } = useDialog();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const { confirm } = useDialog();
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
 
@@ -39,6 +40,7 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
         setNotificationsOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
@@ -47,11 +49,12 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
     setUserMenuOpen(false);
     const accepted = await confirm({
       title: 'Выход из системы',
-      description: 'Вы действительно хотите выйти из системы?',
+      description: 'Подтвердите, что хотите завершить текущую сессию.',
       confirmLabel: 'Выйти',
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
+
     if (accepted) {
       await onSignOut();
     }
@@ -61,20 +64,23 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="flex h-16 items-center justify-between px-6">
         <div className="text-sm font-semibold text-slate-700">{title}</div>
+
         <div className="flex items-center gap-3">
           <div className="relative" ref={notificationsRef}>
             <button
               type="button"
               onClick={() => setNotificationsOpen((prev) => !prev)}
               className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700"
-              aria-label="Уведомления">
+              aria-label="Уведомления"
+            >
               <Bell className="h-5 w-5" />
             </button>
-            {notificationsOpen && (
+
+            {notificationsOpen ? (
               <div className="absolute right-0 mt-3 w-64 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-xl">
-                Нет уведомлений
+                Новых уведомлений пока нет
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="relative" ref={userMenuRef}>
@@ -82,7 +88,8 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
               type="button"
               onClick={() => setUserMenuOpen((prev) => !prev)}
               className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1.5 text-slate-700 transition-colors hover:border-slate-300"
-              aria-label="Меню пользователя">
+              aria-label="Меню пользователя"
+            >
               {user?.photoUrl ? (
                 <img
                   src={user.photoUrl}
@@ -96,49 +103,55 @@ export default function TopBar({ title, onSignOut }: TopBarProps) {
               )}
             </button>
 
-            {userMenuOpen && (
+            {userMenuOpen ? (
               <div className="absolute right-0 mt-3 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                 <div className="border-b border-slate-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-slate-900">{user?.fullName ?? 'Пользователь'}</div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    {user?.fullName ?? 'Пользователь'}
+                  </div>
                   <div className="text-xs text-slate-500">{user?.email ?? '—'}</div>
                 </div>
+
                 <div className="py-2">
+                  {isAdmin() ? (
                     <button
+                      type="button"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setActiveTab('companyProfile');
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <Building2 className="h-4 w-4 text-slate-400" />
+                      Профиль компании
+                    </button>
+                  ) : null}
+
+                  <button
                     type="button"
                     onClick={() => {
                       setUserMenuOpen(false);
-                      setActiveTab('companyProfile');
+                      onOpenProfile();
                     }}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
-                    <Building2 className="h-4 w-4 text-slate-400" />
-                    Профиль компании
-                    </button>
-                  <button
-                    type="button"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
-                    <BadgeCheck className="h-4 w-4 text-slate-400" />
-                    Визитка Компании
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
+                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                  >
                     <User className="h-4 w-4 text-slate-400" />
                     Ваш профиль
                   </button>
                 </div>
+
                 <div className="border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={handleSignOut}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-red-600 transition-colors hover:bg-red-50">
+                    onClick={() => void handleSignOut()}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                  >
                     <LogOut className="h-4 w-4" />
-                    Выход
+                    Выйти
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

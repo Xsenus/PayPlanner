@@ -6,6 +6,7 @@ public class ExternalAuthRequest
     public string Provider { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public string ReturnUrl { get; set; } = "/";
+    public string Intent { get; set; } = "signin";
     public string Status { get; set; } = "pending";
     public string? Error { get; set; }
     public int? UserId { get; set; }

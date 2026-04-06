@@ -5,6 +5,7 @@ public class TelegramAuthRequest
     public int Id { get; set; }
     public string State { get; set; } = string.Empty;
     public int? UserId { get; set; }
+    public string Intent { get; set; } = "signin";
     public string? TelegramUserId { get; set; }
     public long? ChatId { get; set; }
     public string Status { get; set; } = "pending";

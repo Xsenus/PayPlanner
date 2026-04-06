@@ -11,7 +11,7 @@ using System.Text;
 
 namespace PayPlanner.Api.Services;
 
-public class AuthService
+public partial class AuthService
 {
     private readonly IConfiguration _configuration;
     private readonly PaymentContext _context;
@@ -47,8 +47,7 @@ public class AuthService
     private string GenerateJwtToken(User user)
     {
         var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_configuration["Jwt:Secret"] ?? "your-secret-key-min-32-characters-long!")
-        );
+            Encoding.UTF8.GetBytes(_configuration["Jwt:Secret"] ?? "your-secret-key-min-32-characters-long!"));
 
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -65,8 +64,7 @@ public class AuthService
             audience: _configuration["Jwt:Audience"] ?? "PayPlanner",
             claims: claims,
             expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: credentials
-        );
+            signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
@@ -76,8 +74,6 @@ public class AuthService
         Id = user.Id,
         Email = user.Email,
         FullName = user.FullName,
-
-        // ïðîôèëü
         FirstName = user.FirstName,
         LastName = user.LastName,
         MiddleName = user.MiddleName,
@@ -92,14 +88,11 @@ public class AuthService
         IsEmployee = user.IsEmployee,
         EmploymentStartDate = user.EmploymentStartDate,
         EmploymentEndDate = user.EmploymentEndDate,
-
-        // ñòàòóñû/äàòû
         IsActive = user.IsActive,
         IsApproved = user.IsApproved,
         ApprovedAt = user.ApprovedAt,
         CreatedAt = user.CreatedAt,
-
-        // ðîëü
+        ExternalIdentities = MapExternalIdentities(user.ExternalIdentities),
         Role = new RoleDto
         {
             Id = user.Role?.Id ?? 0,
@@ -123,6 +116,8 @@ public class AuthService
         {
             await _context.Entry(user).Reference(x => x.Role).LoadAsync(cancellationToken);
         }
+
+        await _context.Entry(user).Collection(x => x.ExternalIdentities).LoadAsync(cancellationToken);
 
         return new LoginResponse
         {
@@ -182,18 +177,21 @@ public class AuthService
     public static string CreateGeneratedPassword()
         => $"{Guid.NewGuid():N}!Aa9";
 
-
-    // -------- Admin moderation --------
-
     public async Task<bool> ApproveUserAsync(int userId, int approvedByUserId)
     {
         var approverExists = await _context.Users.AsNoTracking()
             .AnyAsync(u => u.Id == approvedByUserId);
-        if (!approverExists) return false;
+        if (!approverExists)
+        {
+            return false;
+        }
 
         var user = await _context.Users.Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
-        if (user is null || user.IsApproved) return false;
+        if (user is null || user.IsApproved)
+        {
+            return false;
+        }
 
         user.IsApproved = true;
         user.ApprovedAt = DateTime.UtcNow;
@@ -209,7 +207,10 @@ public class AuthService
     {
         var user = await _context.Users.Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
-        if (user == null) return false;
+        if (user == null)
+        {
+            return false;
+        }
 
         await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
         _context.Users.Remove(user);
@@ -217,28 +218,30 @@ public class AuthService
         return true;
     }
 
-    // -------- CRUD --------
-
     public async Task<UserDto?> CreateUserAsync(CreateUserRequest request)
     {
         var email = NormalizeEmail(request.Email);
 
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(request.Password))
+        {
             throw new ArgumentException("Email and Password are required.");
+        }
 
-        // Íå ñîçäà¸ì äóáëèêàòû
         var emailExists = await _context.Users
             .AsNoTracking()
             .AnyAsync(u => u.Email == email);
         if (emailExists)
+        {
             return null;
+        }
 
-        // Ïðîâåðÿåì âàëèäíîñòü ðîëè
         var roleExists = await _context.Roles
             .AsNoTracking()
             .AnyAsync(r => r.Id == request.RoleId);
         if (!roleExists)
+        {
             throw new InvalidOperationException("RoleNotFound");
+        }
 
         var user = new User
         {
@@ -256,16 +259,14 @@ public class AuthService
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
-
         await _context.Entry(user).Reference(u => u.Role).LoadAsync();
 
         return MapToDto(user);
     }
 
-
     public async Task<List<RoleDto>> GetAllRolesAsync()
     {
-        var roles = await _context.Roles
+        return await _context.Roles
             .AsNoTracking()
             .OrderBy(r => r.Name)
             .Select(r => new RoleDto
@@ -283,8 +284,6 @@ public class AuthService
                 PermissionsUpdatedByUserName = r.PermissionsUpdatedByUserName
             })
             .ToListAsync();
-
-        return roles;
     }
 
     public async Task<PagedResponse<UserDto>> GetUsersPagedAsync(string? status = null, int page = 1, int pageSize = 20)
@@ -292,12 +291,7 @@ public class AuthService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var query = ApplyUserStatusFilter(
-            _context.Users
-                .AsNoTracking()
-                .Include(u => u.Role),
-            status);
-
+        var query = ApplyUserStatusFilter(QueryUsersWithRelations().AsNoTracking(), status);
         var total = await query.CountAsync();
         var users = await query
             .OrderByDescending(u => u.CreatedAt)
@@ -314,66 +308,23 @@ public class AuthService
         };
     }
 
-
     public async Task<UserDto?> UpdateUserAsync(int id, UpdateUserRequest request)
     {
-        var user = await _context.Users
-            .Include(u => u.Role)
+        var user = await QueryUsersWithRelations()
             .FirstOrDefaultAsync(u => u.Id == id);
-
         if (user == null)
+        {
             return null;
-
-        // ---- strings: åñëè ïîëå ïðèøëî (!= null) — ïðèìåíÿåì (ñ trim). Ïóñòàÿ ñòðîêà äîïóñòèìà äëÿ "î÷èñòêè".
-        if (request.FullName != null) user.FullName = request.FullName.Trim();
-        if (request.FirstName != null) user.FirstName = request.FirstName.Trim();
-        if (request.LastName != null) user.LastName = request.LastName.Trim();
-        if (request.MiddleName != null) user.MiddleName = request.MiddleName.Trim();
-        if (request.PhotoUrl != null) user.PhotoUrl = request.PhotoUrl.Trim();
-        if (request.PhoneNumber != null) user.PhoneNumber = request.PhoneNumber.Trim();
-        if (request.WhatsApp != null) user.WhatsApp = request.WhatsApp.Trim();
-        if (request.Telegram != null) user.Telegram = request.Telegram.Trim();
-        if (request.Instagram != null) user.Instagram = request.Instagram.Trim();
-        if (request.Messenger != null) user.Messenger = request.Messenger.Trim();
-        if (request.Viber != null) user.Viber = request.Viber.Trim();
-
-        // ---- dates/bools: ïðèìåíÿåì, åñëè HasValue
-        if (request.DateOfBirth.HasValue)
-        {
-            if (request.DateOfBirth > DateTime.UtcNow.Date)
-                throw new ArgumentException("DateOfBirth cannot be in the future.");
-            user.DateOfBirth = request.DateOfBirth;
         }
 
-        if (request.EmploymentStartDate.HasValue)
-            user.EmploymentStartDate = request.EmploymentStartDate;
-
-        if (request.EmploymentEndDate.HasValue)
-            user.EmploymentEndDate = request.EmploymentEndDate;
-
-        if (user.EmploymentStartDate.HasValue && user.EmploymentEndDate.HasValue &&
-            user.EmploymentStartDate > user.EmploymentEndDate)
-            throw new ArgumentException("EmploymentStartDate cannot be after EmploymentEndDate.");
-
-        if (request.IsEmployee.HasValue)
-            user.IsEmployee = request.IsEmployee.Value;
-
-        var roleChanged = false;
-        if (request.RoleId.HasValue && request.RoleId.Value != user.RoleId)
-        {
-            user.RoleId = request.RoleId.Value;
-            roleChanged = true;
-        }
-
-        if (request.IsActive.HasValue)
-            user.IsActive = request.IsActive.Value;
-
-        user.UpdatedAt = DateTime.UtcNow;
-
+        var previousRoleId = user.RoleId;
+        await ApplyUserChangesAsync(user, request, allowAdministrativeFields: true);
         await _context.SaveChangesAsync();
 
-        if (roleChanged)
+        if (previousRoleId != user.RoleId)
+        {
             await _context.Entry(user).Reference(u => u.Role).LoadAsync();
+        }
 
         return MapToDto(user);
     }
@@ -381,7 +332,10 @@ public class AuthService
     public async Task<bool> DeleteUserAsync(int id)
     {
         var user = await _context.Users.FindAsync(id);
-        if (user == null) return false;
+        if (user == null)
+        {
+            return false;
+        }
 
         var hasActUsage = await _context.Acts.AsNoTracking().AnyAsync(a => a.ResponsibleId == id);
         if (hasActUsage)
@@ -402,40 +356,44 @@ public class AuthService
 
     public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
     {
-        var q = ApplyUserStatusFilter(_context.Users.Include(u => u.Role).AsQueryable(), status);
-
-        // Äîïîëíåí ôèëüòð "inactive" (èç âòîðîãî âàðèàíòà), îñòàëüíîå — êàê áûëî.
-        var users = await q.OrderByDescending(u => u.CreatedAt).ToListAsync();
+        var query = ApplyUserStatusFilter(QueryUsersWithRelations().AsNoTracking(), status);
+        var users = await query.OrderByDescending(u => u.CreatedAt).ToListAsync();
         return users.Select(MapToDto).ToList();
     }
 
     public async Task<UserDto?> GetUserByIdAsync(int id)
     {
-        var user = await _context.Users.Include(u => u.Role)
+        var user = await QueryUsersWithRelations()
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == id);
         return user == null ? null : MapToDto(user);
     }
 
-    // -------- Auth --------
-
     public async Task<LoginResponse?> LoginAsync(string email, string password)
     {
         var emailNorm = NormalizeEmail(email);
-
-        var user = await _context.Users.Include(u => u.Role)
+        var user = await QueryUsersWithRelations()
             .FirstOrDefaultAsync(u => u.Email == emailNorm);
-
-        // Íå ðàñêðûâàåì ñóùåñòâîâàíèå ïîëüçîâàòåëÿ — âåðí¸ì null (401 íà ôðîíòå).
-        if (user == null) return null;
+        if (user == null)
+        {
+            return null;
+        }
 
         if (!user.IsActive)
+        {
             throw new InvalidOperationException("UserInactive");
+        }
 
         if (!user.IsApproved)
+        {
             throw new InvalidOperationException("PendingApproval");
+        }
 
         var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
-        if (verify == PasswordVerificationResult.Failed) return null;
+        if (verify == PasswordVerificationResult.Failed)
+        {
+            return null;
+        }
 
         if (verify == PasswordVerificationResult.SuccessRehashNeeded)
         {
@@ -444,11 +402,9 @@ public class AuthService
             await _context.SaveChangesAsync();
         }
 
-        var token = GenerateJwtToken(user);
-
         return new LoginResponse
         {
-            Token = token,
+            Token = GenerateJwtToken(user),
             User = MapToDto(user)
         };
     }
@@ -458,11 +414,15 @@ public class AuthService
         var email = NormalizeEmail(request.Email);
 
         if (await _context.Users.AnyAsync(u => u.Email == email))
+        {
             return null;
+        }
 
         var registrationEnabled = _configuration.GetValue<bool>("Features:RegistrationEnabled", true);
         if (!registrationEnabled)
+        {
             throw new InvalidOperationException("Registration is currently disabled");
+        }
 
         var defaultRoleId = await GetDefaultUserRoleIdAsync();
 
@@ -482,11 +442,10 @@ public class AuthService
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        user = await _context.Users.Include(u => u.Role)
+        user = await QueryUsersWithRelations()
             .FirstAsync(u => u.Id == user.Id);
 
         await NotifyPendingRegistrationAsync(user);
-
         return MapToDto(user);
     }
 }

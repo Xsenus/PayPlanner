@@ -6,6 +6,7 @@ public class ExternalAuthStartResponseDto
     public string State { get; set; } = string.Empty;
     public string AuthUrl { get; set; } = string.Empty;
     public string ReturnUrl { get; set; } = "/";
+    public string Intent { get; set; } = "signin";
     public DateTime ExpiresAt { get; set; }
     public int PollIntervalMs { get; set; } = 2000;
 }

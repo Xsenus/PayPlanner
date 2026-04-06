@@ -7,6 +7,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
+import { UserMergeSettings } from './UserMergeSettings';
 import type {
   DatabaseImportResultDto,
   DatabaseStatusDto,
@@ -26,7 +27,7 @@ type SettingsSection =
   | 'db-operations'
   | 'form-requirements';
 type FinancialRulesSubsection = 'invoices' | 'contracts';
-type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge';
+type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge' | 'users-merge';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -985,6 +986,17 @@ export function AppSettings() {
                   >
                     Объединение дублей
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDatabaseOperationsSubsection('users-merge')}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                      activeDatabaseOperationsSubsection === 'users-merge'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Пользователи
+                  </button>
                 </div>
               </div>
             )}
@@ -1413,6 +1425,10 @@ export function AppSettings() {
                   </div>
                 )}
               </div>
+            )}
+
+            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'users-merge' && (
+              <UserMergeSettings />
             )}
           </section>
         </div>

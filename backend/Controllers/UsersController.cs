@@ -70,6 +70,19 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> RejectUser(int id, [FromBody] RejectUserRequest? request)
         => await _svc.RejectUserAsync(id, request?.Reason) ? Ok(new { rejected = true }) : NotFound();
 
+    [HttpPost("merge")]
+    public async Task<IActionResult> MergeUsers([FromBody] MergeUsersRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _svc.MergeUsersAsync(request, cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(title: "UserMergeFailed", detail: ex.Message, statusCode: 400);
+        }
+    }
+
     [HttpPut("{id:int}")]
     public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest req)
         => (await _svc.UpdateUserAsync(id, req)) is { } u ? Ok(u) : NotFound();

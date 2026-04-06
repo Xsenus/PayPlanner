@@ -30,6 +30,7 @@ namespace PayPlanner.Api.Models.Responses
         public bool IsApproved { get; set; }
         public DateTime? ApprovedAt { get; set; }
         public DateTime CreatedAt { get; set; }
+        public List<ExternalIdentityDto> ExternalIdentities { get; set; } = new();
     }
 
     public class RoleDto

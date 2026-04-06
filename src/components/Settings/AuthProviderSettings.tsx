@@ -8,7 +8,13 @@ import {
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
-type SectionId = 'overview' | 'google' | 'vk' | 'yandex' | 'telegramBot' | 'telegramWidget';
+type SectionId =
+  | 'overview'
+  | 'google'
+  | 'vk'
+  | 'yandex'
+  | 'telegramBot'
+  | 'telegramWidget';
 type ActionKey = 'google' | 'vk' | 'yandex' | 'telegramBot' | 'telegramWidget';
 type StatusTone = 'success' | 'warning' | 'muted' | 'info';
 
@@ -1130,6 +1136,7 @@ export function AuthProviderSettings() {
               </div>
             </>
           ) : null}
+
         </div>
       </div>
     </div>

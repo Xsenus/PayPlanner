@@ -818,7 +818,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.User)
-                .WithMany()
+                .WithMany(u => u.ExternalIdentities)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
@@ -838,6 +838,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Provider).HasMaxLength(50).IsRequired();
             entity.Property(e => e.State).HasMaxLength(100).IsRequired();
             entity.Property(e => e.ReturnUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Intent).HasMaxLength(50).IsRequired().HasDefaultValue("signin");
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Error).HasMaxLength(2000);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -858,6 +859,7 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.State).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Intent).HasMaxLength(50).IsRequired().HasDefaultValue("signin");
             entity.Property(e => e.TelegramUserId).HasMaxLength(100);
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Error).HasMaxLength(2000);

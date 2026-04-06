@@ -9,6 +9,7 @@ public class ExternalAuthStatusResponseDto
     public string? ReturnUrl { get; set; }
     public bool RequiresApproval { get; set; }
     public bool IsInactive { get; set; }
+    public bool Linked { get; set; }
     public string? Token { get; set; }
     public UserDto? User { get; set; }
 }

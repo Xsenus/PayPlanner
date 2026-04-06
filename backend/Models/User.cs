@@ -39,4 +39,5 @@ public class User
 
     public ICollection<Act> Acts { get; set; } = new List<Act>();
     public ICollection<PaymentResponsible> InvoiceResponsibles { get; set; } = new List<PaymentResponsible>();
+    public ICollection<UserExternalIdentity> ExternalIdentities { get; set; } = new List<UserExternalIdentity>();
 }
