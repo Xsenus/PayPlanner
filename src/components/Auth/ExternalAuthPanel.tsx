@@ -319,7 +319,7 @@ export function ExternalAuthPanel({
       popupRef.current = window.open(
         started.authUrl,
         'pp-external-auth',
-        'popup=yes,width=540,height=720,noopener,noreferrer',
+        'popup=yes,width=540,height=720',
       );
 
       if (!popupRef.current) {

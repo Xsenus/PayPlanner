@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2 } from 'lucide-react';
 import {
   authService,
@@ -130,6 +130,7 @@ export function ProfilePage() {
   const [linkingProvider, setLinkingProvider] = useState<ProviderId | null>(null);
   const [unlinkingProvider, setUnlinkingProvider] = useState<ProviderId | null>(null);
   const [pendingLink, setPendingLink] = useState<{ provider: ProviderId; state: string } | null>(null);
+  const popupRef = useRef<Window | null>(null);
 
   const loadProfile = useCallback(async () => {
     const [nextProfile, nextProviders] = await Promise.all([
@@ -179,6 +180,24 @@ export function ProfilePage() {
     return providers.filter((item) => item.available || item.identity);
   }, [profile?.externalIdentities, publicSettings]);
 
+  const linkableProviders = useMemo(
+    () => providerCards.filter((item) => item.available && !item.identity),
+    [providerCards],
+  );
+
+  const linkedProviders = useMemo(
+    () => providerCards.filter((item) => Boolean(item.identity)),
+    [providerCards],
+  );
+
+  const closePopup = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) {
+      popupRef.current.close();
+    }
+
+    popupRef.current = null;
+  }, []);
+
   useEffect(() => {
     if (!pendingLink?.state || !pendingLink.provider) {
       return;
@@ -194,6 +213,7 @@ export function ProfilePage() {
 
         if (status.completed && status.linked) {
           window.clearInterval(interval);
+          closePopup();
           setPendingLink(null);
           setLinkingProvider(null);
           clearExternalAuthQueryParams();
@@ -205,6 +225,7 @@ export function ProfilePage() {
 
         if (status.status === 'failed' || status.status === 'expired' || status.status === 'consumed') {
           window.clearInterval(interval);
+          closePopup();
           setPendingLink(null);
           setLinkingProvider(null);
           clearExternalAuthQueryParams();
@@ -217,6 +238,7 @@ export function ProfilePage() {
         }
       } catch (error) {
         window.clearInterval(interval);
+        closePopup();
         setPendingLink(null);
         setLinkingProvider(null);
         clearExternalAuthQueryParams();
@@ -228,7 +250,9 @@ export function ProfilePage() {
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [loadProfile, pendingLink, refreshUser, toast]);
+  }, [closePopup, loadProfile, pendingLink, refreshUser, toast]);
+
+  useEffect(() => () => closePopup(), [closePopup]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -284,16 +308,24 @@ export function ProfilePage() {
       if (provider === 'telegram') {
         const started = await authService.startTelegramBotAuth('/?ppTab=profile', 'link');
         setPendingLink({ provider, state: started.state });
-        window.open(started.authUrl, '_blank', 'noopener,noreferrer');
+        popupRef.current = window.open(started.authUrl, 'pp-profile-telegram-link', 'popup=yes,width=540,height=720');
+        if (!popupRef.current) {
+          window.location.assign(started.authUrl);
+        }
         toast.success('Открылся Telegram Bot. Подтвердите привязку и вернитесь в CRM.');
         return;
       }
 
       const started = await authService.startExternalAuth(provider, '/?ppTab=profile', 'link');
-      window.location.assign(started.authUrl);
+      setPendingLink({ provider, state: started.state });
+      popupRef.current = window.open(started.authUrl, 'pp-profile-external-link', 'popup=yes,width=540,height=720');
+      if (!popupRef.current) {
+        window.location.assign(started.authUrl);
+      }
     } catch (error) {
       setLinkingProvider(null);
       setPendingLink(null);
+      closePopup();
       toast.error(
         extractDisplayErrorMessage(error, `Не удалось запустить привязку через ${providerLabel(provider)}.`),
       );
@@ -523,7 +555,35 @@ export function ProfilePage() {
               </div>
 
               <div className="mt-5 space-y-4">
-                {providerCards.map((item) => {
+                {linkableProviders.length > 0 && (
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="text-sm font-semibold text-slate-900">Добавить способ входа</div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Подключите еще один сервис, чтобы входить в этот профиль через любой доступный провайдер.
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      {linkableProviders.map((item) => {
+                        const meta = PROVIDER_META[item.id];
+                        const isLinking = linkingProvider === item.id;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => void handleLink(item.id)}
+                            disabled={isLinking || unlinkingProvider !== null}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:border-slate-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isLinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                            <span>Подключить {meta.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {linkedProviders.map((item) => {
                   const meta = PROVIDER_META[item.id];
                   const isLinking = linkingProvider === item.id;
                   const isUnlinking = unlinkingProvider === item.id;
@@ -586,6 +646,12 @@ export function ProfilePage() {
                     </div>
                   );
                 })}
+
+                {!linkableProviders.length && linkedProviders.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    Все доступные способы входа уже привязаны к вашему профилю.
+                  </div>
+                )}
               </div>
             </div>
           </div>
