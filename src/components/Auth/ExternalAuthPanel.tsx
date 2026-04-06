@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Loader2 } from 'lucide-react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   authService,
@@ -76,6 +76,86 @@ function normalizeTelegramBotUsername(value?: string | null) {
   return String(value ?? '').trim().replace(/^@+/, '');
 }
 
+function QuickAuthTile({
+  label,
+  title,
+  active = false,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  title?: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title || label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        'flex h-14 w-20 items-center justify-center rounded-2xl border bg-white px-0 shadow-sm transition-all',
+        active
+          ? 'border-slate-900/60 shadow-md'
+          : 'border-slate-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md',
+        disabled ? 'cursor-not-allowed opacity-60' : '',
+      ].join(' ')}
+    >
+      <span className="sr-only">{label}</span>
+      {children}
+    </button>
+  );
+}
+
+function GoogleBrandIcon() {
+  return (
+    <span
+      aria-hidden="true"
+      className="text-[28px] font-semibold leading-none"
+      style={{
+        backgroundImage:
+          'linear-gradient(135deg, #4285F4 0%, #4285F4 34%, #EA4335 34%, #EA4335 57%, #FBBC05 57%, #FBBC05 74%, #34A853 74%, #34A853 100%)',
+        WebkitBackgroundClip: 'text',
+        color: 'transparent',
+      }}
+    >
+      G
+    </span>
+  );
+}
+
+function VkBrandIcon() {
+  return (
+    <span aria-hidden="true" className="text-lg font-black uppercase tracking-tight text-[#0077FF]">
+      VK
+    </span>
+  );
+}
+
+function YandexBrandIcon() {
+  return (
+    <span aria-hidden="true" className="text-[28px] font-black leading-none text-[#FC3F1D]">
+      Я
+    </span>
+  );
+}
+
+function TelegramBrandIcon() {
+  return (
+    <svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M20.67 4.34L3.95 10.79C2.81 11.24 2.82 11.87 3.74 12.15L8.03 13.49L9.68 18.67C9.89 19.31 10.06 19.55 10.46 19.55C10.77 19.55 10.9 19.41 11.08 19.1L13.16 15.72L17.49 18.91C18.29 19.35 18.86 19.13 19.06 18.17L21.91 4.73C22.2 3.55 21.47 3.01 20.67 4.34Z"
+        fill="#229ED9"
+      />
+    </svg>
+  );
+}
+
 export function ExternalAuthPanel({
   disabled,
   onPendingApproval,
@@ -103,10 +183,34 @@ export function ExternalAuthPanel({
   const providerButtons = useMemo(
     () =>
       [
-        { id: 'google', enabled: settings?.googleEnabled, label: 'Google', accent: 'text-[#4285F4]' },
-        { id: 'vk', enabled: settings?.vkEnabled, label: 'VK', accent: 'text-[#0077FF]' },
-        { id: 'yandex', enabled: settings?.yandexEnabled, label: 'Yandex', accent: 'text-[#FC3F1D]' },
-        { id: 'telegram', enabled: settings?.telegramEnabled, label: 'Telegram', accent: 'text-[#229ED9]' },
+        {
+          id: 'google',
+          enabled: settings?.googleEnabled,
+          label: 'Google',
+          title: 'Войти через Google',
+          icon: <GoogleBrandIcon />,
+        },
+        {
+          id: 'vk',
+          enabled: settings?.vkEnabled,
+          label: 'VK',
+          title: 'Войти через VK',
+          icon: <VkBrandIcon />,
+        },
+        {
+          id: 'yandex',
+          enabled: settings?.yandexEnabled,
+          label: 'Яндекс',
+          title: 'Войти через Яндекс',
+          icon: <YandexBrandIcon />,
+        },
+        {
+          id: 'telegram',
+          enabled: settings?.telegramEnabled,
+          label: 'Telegram',
+          title: 'Войти через Telegram',
+          icon: <TelegramBrandIcon />,
+        },
       ].filter((item) => item.enabled),
     [settings],
   );
@@ -450,34 +554,28 @@ export function ExternalAuthPanel({
           <div className="w-full border-t border-slate-200" />
         </div>
         <div className="relative flex justify-center">
-          <span className="bg-white px-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
-            Быстрый вход
+          <span className="bg-white px-3 text-xs font-medium text-slate-400">
+            или быстрый вход
           </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         {providerButtons.map((provider) => {
           const isBusy = busyProvider === provider.id;
           const isTelegram = provider.id === 'telegram';
 
           return (
-            <button
+            <QuickAuthTile
               key={provider.id}
-              type="button"
+              label={provider.label}
+              title={provider.title}
+              active={isBusy}
               disabled={disabled || Boolean(busyProvider)}
               onClick={() => (isTelegram ? void startTelegramBotAuth() : void startExternalAuth(provider.id as 'google' | 'vk' | 'yandex'))}
-              className="flex items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : isTelegram ? (
-                <Bot className={`h-4 w-4 ${provider.accent}`} />
-              ) : (
-                <span className={`text-base font-semibold ${provider.accent}`}>{provider.label.slice(0, 1)}</span>
-              )}
-              <span>Через {provider.label}</span>
-            </button>
+              {isBusy ? <Loader2 className="h-5 w-5 animate-spin text-slate-500" /> : provider.icon}
+            </QuickAuthTile>
           );
         })}
       </div>
