@@ -77,9 +77,35 @@ function isValidTab(value: string | null): value is Tab {
   return Boolean(value) && ALL_TABS.includes(value as Tab);
 }
 
+function getPathInvoiceId(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const match = window.location.pathname.match(/^\/invoices\/(\d+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isInvoicesListPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/invoices\/?$/i.test(window.location.pathname);
+}
+
 function getInitialTab(): Tab {
   if (typeof window === 'undefined') {
     return 'calendar';
+  }
+
+  if (getPathInvoiceId() || isInvoicesListPath()) {
+    return 'accounts';
   }
 
   const params = new URLSearchParams(window.location.search);
@@ -113,6 +139,10 @@ function getInitialUserId(): number | null {
 
   const nextValue = Number(rawValue);
   return Number.isInteger(nextValue) && nextValue > 0 ? nextValue : null;
+}
+
+function getInitialInvoiceId(): number | null {
+  return getPathInvoiceId();
 }
 
 function AppContent() {
@@ -161,6 +191,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<Tab>(getInitialTab);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
@@ -321,6 +352,10 @@ function AppContent() {
         setSelectedUserId(null);
       }
 
+      if (tab !== 'accounts' && tab !== 'accountsIncome' && tab !== 'accountsExpense') {
+        setSelectedInvoiceId(null);
+      }
+
       setActiveTab(tab);
     },
     [canViewTab],
@@ -332,6 +367,12 @@ function AppContent() {
     }
 
     const url = new URL(window.location.href);
+    if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
+      url.pathname = selectedInvoiceId ? `/invoices/${selectedInvoiceId}` : '/invoices';
+    } else if (/^\/invoices(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    }
+
     if (activeTab === 'profile' || activeTab === 'userDetail') {
       url.searchParams.set('ppTab', activeTab);
     } else {
@@ -345,7 +386,7 @@ function AppContent() {
     }
 
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-  }, [activeTab, selectedUserId]);
+  }, [activeTab, selectedInvoiceId, selectedUserId]);
 
   useEffect(() => {
     try {
@@ -522,13 +563,21 @@ function AppContent() {
 
       case 'accounts':
         return permissions.accounts.canView
-          ? <Accounts onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })} />
+          ? (
+              <Accounts
+                routeInvoiceId={selectedInvoiceId}
+                onRouteInvoiceChange={setSelectedInvoiceId}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })}
+              />
+            )
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
 
       case 'accountsIncome':
         return permissions.accounts.canView
           ? (
               <Accounts
+                routeInvoiceId={selectedInvoiceId}
+                onRouteInvoiceChange={setSelectedInvoiceId}
                 defaultType="Income"
                 lockType
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })}
@@ -540,6 +589,8 @@ function AppContent() {
         return permissions.accounts.canView
           ? (
               <Accounts
+                routeInvoiceId={selectedInvoiceId}
+                onRouteInvoiceChange={setSelectedInvoiceId}
                 defaultType="Expense"
                 lockType
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })}

@@ -59,6 +59,8 @@ import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 interface AccountsProps {
   defaultType?: PaymentKind;
   lockType?: boolean;
+  routeInvoiceId?: number | null;
+  onRouteInvoiceChange?: (invoiceId: number | null) => void;
   onOpenClient?: (clientId: number) => void;
 }
 
@@ -239,7 +241,13 @@ function safeWrite<T>(key: string, value: T) {
   }
 }
 
-export function Accounts({ defaultType, lockType = false, onOpenClient }: AccountsProps) {
+export function Accounts({
+  defaultType,
+  lockType = false,
+  routeInvoiceId,
+  onRouteInvoiceChange,
+  onOpenClient,
+}: AccountsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -539,7 +547,8 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setPageInvoiceLoading(true);
     setResumeInvoiceDraft(draft);
     setModalError(null);
-  }, []);
+    onRouteInvoiceChange?.(invoiceId);
+  }, [onRouteInvoiceChange]);
 
   useEffect(() => {
     if (!pageEditingInvoiceId) return;
@@ -624,7 +633,16 @@ export function Accounts({ defaultType, lockType = false, onOpenClient }: Accoun
     setPageInvoiceLoading(false);
     setResumeInvoiceDraft(null);
     setModalError(null);
+    onRouteInvoiceChange?.(null);
   };
+
+  useEffect(() => {
+    if (!routeInvoiceId || routeInvoiceId <= 0 || routeInvoiceId === pageEditingInvoiceId) {
+      return;
+    }
+
+    openEditPage(routeInvoiceId);
+  }, [openEditPage, pageEditingInvoiceId, routeInvoiceId]);
 
   const openClientFromEditor = (clientId: number) => {
     onOpenClient?.(clientId);
