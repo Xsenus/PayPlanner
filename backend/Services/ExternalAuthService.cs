@@ -449,7 +449,7 @@ public sealed partial class ExternalAuthService
         {
             Provider = normalizedProvider,
             State = GenerateToken(12),
-            ReturnUrl = NormalizeReturnUrl(returnUrl),
+            ReturnUrl = ResolveFrontendReturnUrl(request, returnUrl),
             Status = "pending",
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddMinutes(10)
@@ -567,12 +567,14 @@ public sealed partial class ExternalAuthService
         var authRequest = await _context.ExternalAuthRequests
             .OrderByDescending(x => x.CreatedAt)
             .FirstOrDefaultAsync(x => x.Provider == normalizedProvider && x.State == normalizedState, cancellationToken);
-        var redirectPath = BuildAuthRedirectPath(normalizedState, normalizedProvider);
+        var redirectPath = BuildAuthRedirectPath(ResolveFrontendReturnUrl(request, "/"), normalizedState, normalizedProvider);
 
         if (authRequest is null)
         {
             return BuildExternalAuthPopupHtml(false, "Запрос внешней авторизации не найден.", redirectPath);
         }
+
+        redirectPath = BuildAuthRedirectPath(authRequest.ReturnUrl, normalizedState, normalizedProvider);
 
         if (authRequest.ExpiresAt <= DateTime.UtcNow)
         {

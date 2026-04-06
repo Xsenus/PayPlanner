@@ -186,6 +186,25 @@ public sealed partial class ExternalAuthService
         return normalized;
     }
 
+    private string ResolveFrontendReturnUrl(HttpRequest request, string? returnUrl)
+    {
+        var normalizedPath = NormalizeReturnUrl(returnUrl);
+        var configuredFrontendUrl = NormalizeAbsoluteHttpUrl(
+            _configuration["App:FrontendUrl"]
+            ?? _configuration["Frontend:BaseUrl"]
+            ?? _configuration["Frontend:PublicUrl"]);
+
+        if (!string.IsNullOrWhiteSpace(configuredFrontendUrl))
+        {
+            return CombineAbsoluteUrl(configuredFrontendUrl, normalizedPath);
+        }
+
+        var developmentOrigin = ResolveDevelopmentFrontendOrigin(request);
+        return string.IsNullOrWhiteSpace(developmentOrigin)
+            ? normalizedPath
+            : CombineAbsoluteUrl(developmentOrigin, normalizedPath);
+    }
+
     private static string? NormalizeOptional(string? value)
     {
         var normalized = value?.Trim();
@@ -222,15 +241,87 @@ public sealed partial class ExternalAuthService
             : null;
     }
 
-    private static string BuildAuthRedirectPath(string state, string provider)
+    private static string BuildAuthRedirectPath(string? returnUrl, string state, string provider)
     {
+        var redirectTarget = NormalizeAbsoluteHttpReturnUrl(returnUrl) ?? NormalizeReturnUrl(returnUrl);
+
         return QueryHelpers.AddQueryString(
-            "/",
+            redirectTarget,
             new Dictionary<string, string?>
             {
                 ["externalAuthState"] = state,
                 ["externalAuthProvider"] = provider
             });
+    }
+
+    private static string CombineAbsoluteUrl(string absoluteBaseUrl, string relativePath)
+    {
+        var baseUri = new Uri(EnsureTrailingSlash(absoluteBaseUrl), UriKind.Absolute);
+        var combinedUri = new Uri(baseUri, relativePath.TrimStart('/'));
+        return combinedUri.ToString();
+    }
+
+    private static string EnsureTrailingSlash(string value)
+        => value.EndsWith("/", StringComparison.Ordinal) ? value : value + "/";
+
+    private static string? ResolveDevelopmentFrontendOrigin(HttpRequest request)
+    {
+        var origin = NormalizeAbsoluteHttpUrl(request.Headers.Origin.ToString());
+        if (IsLocalOrigin(origin))
+        {
+            return origin;
+        }
+
+        var referer = NormalizeOptional(request.Headers.Referer.ToString());
+        if (Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
+        {
+            var refererOrigin = NormalizeAbsoluteHttpUrl(refererUri.GetLeftPart(UriPartial.Authority));
+            if (IsLocalOrigin(refererOrigin))
+            {
+                return refererOrigin;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeAbsoluteHttpUrl(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized)
+            || !Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return null;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    private static string? NormalizeAbsoluteHttpReturnUrl(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized)
+            || !Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return null;
+        }
+
+        return uri.ToString();
+    }
+
+    private static bool IsLocalOrigin(string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(origin)
+            || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return uri.IsLoopback
+            || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildExternalAuthPopupHtml(bool success, string? message, string? redirectPath = null)
