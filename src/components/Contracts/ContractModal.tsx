@@ -16,6 +16,7 @@ interface ContractModalProps {
   submitting: boolean;
   errorMessage?: string | null;
   defaultClients?: ContractClient[];
+  overlayClassName?: string;
 }
 
 type FormState = {
@@ -62,6 +63,7 @@ export function ContractModal({
   submitting,
   errorMessage,
   defaultClients,
+  overlayClassName,
 }: ContractModalProps) {
   const { t } = useTranslation();
   const isEdit = mode === 'edit';
@@ -280,7 +282,7 @@ export function ContractModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
+    <div className={`fixed inset-0 flex items-center justify-center bg-slate-900/60 px-4 py-8 ${overlayClassName ?? 'z-50'}`}>
       <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>

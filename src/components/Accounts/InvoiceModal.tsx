@@ -7,6 +7,8 @@ import type {
   Client,
   ClientCase,
   Contract,
+  ContractClient,
+  ContractInput,
   Invoice,
   InvoiceInput,
   InstallmentPlanInput,
@@ -27,6 +29,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { CaseModal } from '../Clients/CaseModal';
+import { ContractModal } from '../Contracts/ContractModal';
 import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
@@ -130,7 +133,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       id: `${Date.now()}-${index}`,
       name: item.name ?? '',
       quantity: String(item.quantity ?? 0),
-      unit: item.unit ?? 'шт',
+      unit: item.unit ?? 'РЎв‚¬РЎвЂљ',
       price: formatMoneyValue(item.price),
     }));
   }
@@ -140,7 +143,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       id: `${Date.now()}-base`,
       name: '',
       quantity: '1',
-      unit: 'шт',
+      unit: 'РЎв‚¬РЎвЂљ',
       price: formatMoneyValue(fallbackAmount ?? 0),
     },
   ];
@@ -293,34 +296,34 @@ function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
 function actLabel(act: ActOption | null): string {
   if (!act) return '';
   const parts: string[] = [];
-  if (act.number) parts.push(`№${act.number}`);
+  if (act.number) parts.push(`РІвЂћвЂ“${act.number}`);
   if (act.title) parts.push(act.title);
-  return parts.join(' В· ');
+  return parts.join(' Р вЂ™Р’В· ');
 }
 
 function clientCaseLabel(clientCase: ClientCaseOption | null): string {
   if (!clientCase) return '';
-  return clientCase.title?.trim() || `Дело #${clientCase.id}`;
+  return clientCase.title?.trim() || `Р вЂќР ВµР В»Р С• #${clientCase.id}`;
 }
 
 function clientCaseStatusLabel(statusRaw?: string | null): string {
   const status = (statusRaw ?? '').trim();
   const normalized = status.toLowerCase();
 
-  if (!normalized) return 'Без статуса';
-  if (normalized.includes('open')) return 'Открыто';
-  if (normalized.includes('onhold') || normalized.includes('hold')) return 'Приостановлено';
-  if (normalized.includes('closed')) return 'Закрыто';
-  if (normalized.includes('в работе') || normalized.includes('актив')) return 'Открыто';
-  if (normalized.includes('ожид')) return 'Приостановлено';
-  if (normalized.includes('закры')) return 'Закрыто';
+  if (!normalized) return 'Р вЂР ВµР В· РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓР В°';
+  if (normalized.includes('open')) return 'Р С›РЎвЂљР С”РЎР‚РЎвЂ№РЎвЂљР С•';
+  if (normalized.includes('onhold') || normalized.includes('hold')) return 'Р СџРЎР‚Р С‘Р С•РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С•';
+  if (normalized.includes('closed')) return 'Р вЂ”Р В°Р С”РЎР‚РЎвЂ№РЎвЂљР С•';
+  if (normalized.includes('Р Р† РЎР‚Р В°Р В±Р С•РЎвЂљР Вµ') || normalized.includes('Р В°Р С”РЎвЂљР С‘Р Р†')) return 'Р С›РЎвЂљР С”РЎР‚РЎвЂ№РЎвЂљР С•';
+  if (normalized.includes('Р С•Р В¶Р С‘Р Т‘')) return 'Р СџРЎР‚Р С‘Р С•РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С•';
+  if (normalized.includes('Р В·Р В°Р С”РЎР‚РЎвЂ№')) return 'Р вЂ”Р В°Р С”РЎР‚РЎвЂ№РЎвЂљР С•';
 
   return status;
 }
 
 function contractLabel(contract: Contract | null): string {
-  if (!contract) return 'Без договора';
-  return contract.title?.trim() ? `${contract.number} — ${contract.title}` : contract.number;
+  if (!contract) return 'Р вЂР ВµР В· Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚Р В°';
+  return contract.title?.trim() ? `${contract.number} РІР‚вЂќ ${contract.title}` : contract.number;
 }
 
 function formatDate(value?: string | null): string {
@@ -379,9 +382,9 @@ function resolveOutstandingAmount(payment: Payment): number {
 function paymentSourceLabel(payment: Payment): string {
   const description = payment.description?.trim();
   if (description) return description;
-  if (payment.documentKind === 'Invoice' && payment.account) return `Счет №${payment.account}`;
-  if (payment.account) return `Платеж по счету №${payment.account}`;
-  return `Платеж #${payment.id}`;
+  if (payment.documentKind === 'Invoice' && payment.account) return `Р РЋРЎвЂЎР ВµРЎвЂљ РІвЂћвЂ“${payment.account}`;
+  if (payment.account) return `Р СџР В»Р В°РЎвЂљР ВµР В¶ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ РІвЂћвЂ“${payment.account}`;
+  return `Р СџР В»Р В°РЎвЂљР ВµР В¶ #${payment.id}`;
 }
 
 function deriveInvoiceStatusFromPayments(
@@ -430,28 +433,28 @@ function deriveInvoiceStatusFromPayments(
 function invoiceStatusLabel(status: PaymentStatus): string {
   switch (status) {
     case 'Completed':
-      return 'Оплачен';
+      return 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…';
     case 'Processing':
-      return 'Частично оплачен';
+      return 'Р В§Р В°РЎРѓРЎвЂљР С‘РЎвЂЎР Р…Р С• Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…';
     case 'Overdue':
-      return 'Просрочен';
+      return 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…';
     case 'Cancelled':
-      return 'Отменен';
+      return 'Р С›РЎвЂљР СР ВµР Р…Р ВµР Р…';
     case 'Pending':
     default:
-      return 'Не оплачен';
+      return 'Р СњР Вµ Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…';
   }
 }
 
 function parseStatusTimelineEntry(note: string, payment: Payment, index: number): StatusTimelineEntry | null {
-  const trimmed = note.trim().replace(/^[•*-]\s*/u, '');
+  const trimmed = note.trim().replace(/^[РІР‚Сћ*-]\s*/u, '');
   if (!trimmed) return null;
 
-  if (!/статус|оплач|остаток|срок|планов|дата платежа|перенес|перенос|частич/iu.test(trimmed)) {
+  if (!/РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ|Р С•Р С—Р В»Р В°РЎвЂЎ|Р С•РЎРѓРЎвЂљР В°РЎвЂљР С•Р С”|РЎРѓРЎР‚Р С•Р С”|Р С—Р В»Р В°Р Р…Р С•Р Р†|Р Т‘Р В°РЎвЂљР В° Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°|Р С—Р ВµРЎР‚Р ВµР Р…Р ВµРЎРѓ|Р С—Р ВµРЎР‚Р ВµР Р…Р С•РЎРѓ|РЎвЂЎР В°РЎРѓРЎвЂљР С‘РЎвЂЎ/iu.test(trimmed)) {
     return null;
   }
 
-  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4}) \((\d{2}):(\d{2}):(\d{2})\)\s*[—-]\s*(.+?):\s*(.+)$/u);
+  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4}) \((\d{2}):(\d{2}):(\d{2})\)\s*[РІР‚вЂќ-]\s*(.+?):\s*(.+)$/u);
   if (match) {
     const [, day, month, year, hour, minute, second, author, message] = match;
     const sortValue = Date.UTC(
@@ -478,9 +481,9 @@ function parseStatusTimelineEntry(note: string, payment: Payment, index: number)
   return {
     key: `${payment.id}-${index}-${trimmed}`,
     title: trimmed,
-    description: 'Системное изменение по связанному платежу',
+    description: 'Р РЋР С‘РЎРѓРЎвЂљР ВµР СР Р…Р С•Р Вµ Р С‘Р В·Р СР ВµР Р…Р ВµР Р…Р С‘Р Вµ Р С—Р С• РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…Р С•Р СРЎС“ Р С—Р В»Р В°РЎвЂљР ВµР В¶РЎС“',
     sourceLabel: paymentSourceLabel(payment),
-    timestampLabel: formatDate(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt) || 'Без даты',
+    timestampLabel: formatDate(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt) || 'Р вЂР ВµР В· Р Т‘Р В°РЎвЂљРЎвЂ№',
     sortValue: fallbackTimestamp,
     isCurrent: false,
   };
@@ -510,21 +513,21 @@ function buildInvoiceStatusSnapshot(
     ? rawOutstandingAmount
     : Math.max(totalAmount - paidAmount, 0);
 
-  let reason = 'Связанные платежи по счету еще не созданы.';
+  let reason = 'Р РЋР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р Р…РЎвЂ№.';
   if (status === 'Completed') {
-    reason = 'Все связанные платежи проведены, остатка к оплате нет.';
+    reason = 'Р вЂ™РЎРѓР Вµ РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—РЎР‚Р С•Р Р†Р ВµР Т‘Р ВµР Р…РЎвЂ№, Р С•РЎРѓРЎвЂљР В°РЎвЂљР С”Р В° Р С” Р С•Р С—Р В»Р В°РЎвЂљР Вµ Р Р…Р ВµРЎвЂљ.';
   } else if (status === 'Cancelled') {
-    reason = 'Все связанные платежи по счету отменены.';
+    reason = 'Р вЂ™РЎРѓР Вµ РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р С•РЎвЂљР СР ВµР Р…Р ВµР Р…РЎвЂ№.';
   } else if (status === 'Overdue') {
     reason = paidAmount > 0 && totalAmount > 0
-      ? `По счету есть оплаты на ${formatCurrencySmart(paidAmount).short}, но остаток ${formatCurrencySmart(outstandingAmount).short} уже просрочен.`
-      : 'Срок оплаты истек, а связанные платежи по счету еще не закрыты.';
+      ? `Р СџР С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р ВµРЎРѓРЎвЂљРЎРЉ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р Р…Р В° ${formatCurrencySmart(paidAmount).short}, Р Р…Р С• Р С•РЎРѓРЎвЂљР В°РЎвЂљР С•Р С” ${formatCurrencySmart(outstandingAmount).short} РЎС“Р В¶Р Вµ Р С—РЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р….`
+      : 'Р РЋРЎР‚Р С•Р С” Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С‘РЎРѓРЎвЂљР ВµР С”, Р В° РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ Р В·Р В°Р С”РЎР‚РЎвЂ№РЎвЂљРЎвЂ№.';
   } else if (status === 'Processing') {
     reason = totalAmount > 0
-      ? `По счету оплачено ${formatCurrencySmart(paidAmount).short} из ${formatCurrencySmart(totalAmount).short}. Остаток ${formatCurrencySmart(outstandingAmount).short} еще не закрыт.`
-      : 'По счету есть частичная оплата, но он еще не закрыт полностью.';
+      ? `Р СџР С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…Р С• ${formatCurrencySmart(paidAmount).short} Р С‘Р В· ${formatCurrencySmart(totalAmount).short}. Р С›РЎРѓРЎвЂљР В°РЎвЂљР С•Р С” ${formatCurrencySmart(outstandingAmount).short} Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ Р В·Р В°Р С”РЎР‚РЎвЂ№РЎвЂљ.`
+      : 'Р СџР С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р ВµРЎРѓРЎвЂљРЎРЉ РЎвЂЎР В°РЎРѓРЎвЂљР С‘РЎвЂЎР Р…Р В°РЎРЏ Р С•Р С—Р В»Р В°РЎвЂљР В°, Р Р…Р С• Р С•Р Р… Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ Р В·Р В°Р С”РЎР‚РЎвЂ№РЎвЂљ Р С—Р С•Р В»Р Р…Р С•РЎРѓРЎвЂљРЎРЉРЎР‹.';
   } else if (sourcePayments.length > 0) {
-    reason = 'Связанные платежи созданы, но оплаты по счету пока не поступили.';
+    reason = 'Р РЋР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ РЎРѓР С•Р В·Р Т‘Р В°Р Р…РЎвЂ№, Р Р…Р С• Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ Р С—Р С•Р С”Р В° Р Р…Р Вµ Р С—Р С•РЎРѓРЎвЂљРЎС“Р С—Р С‘Р В»Р С‘.';
   }
 
   const historyEntries = payments
@@ -540,12 +543,12 @@ function buildInvoiceStatusSnapshot(
 
   const currentEntry: StatusTimelineEntry = {
     key: `current-${fallbackStatus}-${paidAmount}-${outstandingAmount}`,
-    title: `Текущий статус: ${invoiceStatusLabel(fallbackStatus)}`,
+    title: `Р СћР ВµР С”РЎС“РЎвЂ°Р С‘Р в„– РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ: ${invoiceStatusLabel(fallbackStatus)}`,
     description: reason,
     sourceLabel: sourcePayments.length > 0
-      ? `Связанных платежей: ${sourcePayments.length}`
-      : 'Статус пока определяется по самому счету',
-    timestampLabel: historyEntries[0]?.timestampLabel ?? 'Сейчас',
+      ? `Р РЋР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–: ${sourcePayments.length}`
+      : 'Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р С—Р С•Р С”Р В° Р С•Р С—РЎР‚Р ВµР Т‘Р ВµР В»РЎРЏР ВµРЎвЂљРЎРѓРЎРЏ Р С—Р С• РЎРѓР В°Р СР С•Р СРЎС“ РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“',
+    timestampLabel: historyEntries[0]?.timestampLabel ?? 'Р РЋР ВµР в„–РЎвЂЎР В°РЎРѓ',
     sortValue: historyEntries[0]?.sortValue ?? Date.now(),
     isCurrent: true,
   };
@@ -625,6 +628,9 @@ export function InvoiceModal({
   const [contractOptions, setContractOptions] = useState<Contract[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
+  const [createContractOpen, setCreateContractOpen] = useState(false);
+  const [createContractSubmitting, setCreateContractSubmitting] = useState(false);
+  const [createContractError, setCreateContractError] = useState<string | null>(null);
   const [clientCasesLoading, setClientCasesLoading] = useState(false);
   const [clientCasesError, setClientCasesError] = useState<string | null>(null);
   const [actsLoading, setActsLoading] = useState(false);
@@ -696,6 +702,21 @@ export function InvoiceModal({
   const selectedContract = useMemo(
     () => contractOptions.find((contract) => String(contract.id) === form.contractId) ?? null,
     [contractOptions, form.contractId],
+  );
+  const defaultContractClients = useMemo<ContractClient[]>(
+    () =>
+      selectedClient
+        ? [
+            {
+              id: selectedClient.id,
+              name: selectedClient.name,
+              company: selectedClient.company,
+              clientStatusId: selectedClient.clientStatusId ?? null,
+              clientStatus: selectedClient.clientStatus ?? null,
+            },
+          ]
+        : [],
+    [selectedClient],
   );
   const responsibleOptions = useMemo(() => {
     const options = [...responsibles];
@@ -837,7 +858,7 @@ export function InvoiceModal({
       } catch (error) {
         if (!cancelled) {
           setContractOptions([]);
-          setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры');
+          setContractsError(error instanceof Error ? error.message : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚РЎвЂ№');
         }
       } finally {
         if (!cancelled) setContractsLoading(false);
@@ -878,6 +899,33 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, contractId: '' }));
   }, [contractOptions, form.contractId]);
 
+  const handleCreateContractFromInvoice = useCallback(async (payload: ContractInput) => {
+    setCreateContractSubmitting(true);
+    setCreateContractError(null);
+    try {
+      const created = await apiService.createContract(payload);
+      setContractOptions((prev) => {
+        const next = [created, ...prev.filter((contract) => contract.id !== created.id)];
+        return next.sort((left, right) => {
+          const leftDate = Date.parse(left.date ?? '');
+          const rightDate = Date.parse(right.date ?? '');
+          if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) {
+            return rightDate - leftDate;
+          }
+          return right.id - left.id;
+        });
+      });
+      setForm((prev) => ({ ...prev, contractId: String(created.id) }));
+      lastAutoContractClientIdRef.current = form.clientId;
+      setCreateContractOpen(false);
+      toast.success('Р вЂќР С•Р С–Р С•Р Р†Р С•РЎР‚ РЎРѓР С•Р В·Р Т‘Р В°Р Р… Р С‘ Р Р†РЎвЂ№Р В±РЎР‚Р В°Р Р… Р Р† РЎРѓРЎвЂЎР ВµРЎвЂљР Вµ.', 'Р вЂќР С•Р С–Р С•Р Р†Р С•РЎР‚РЎвЂ№');
+    } catch (error) {
+      setCreateContractError(extractDisplayErrorMessage(error, 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚'));
+    } finally {
+      setCreateContractSubmitting(false);
+    }
+  }, [form.clientId, toast]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -908,7 +956,7 @@ export function InvoiceModal({
       } catch (error) {
         if (!cancelled) {
           setClientCaseOptions([]);
-          setClientCasesError(error instanceof Error ? error.message : 'Не удалось загрузить дела');
+          setClientCasesError(error instanceof Error ? error.message : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ Р Т‘Р ВµР В»Р В°');
         }
       } finally {
         if (!cancelled) setClientCasesLoading(false);
@@ -1011,7 +1059,7 @@ export function InvoiceModal({
 
     toast.error(
       errorMessage,
-      mode === 'edit' ? 'Не удалось обновить счет' : 'Не удалось создать счет',
+      mode === 'edit' ? 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎР ВµРЎвЂљ' : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎР ВµРЎвЂљ',
     );
     lastErrorToastRef.current = errorMessage;
   }, [errorMessage, mode, toast]);
@@ -1026,7 +1074,7 @@ export function InvoiceModal({
       return;
     }
 
-    toast.error(localError, 'Проверьте данные счета');
+    toast.error(localError, 'Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ РЎРѓРЎвЂЎР ВµРЎвЂљР В°');
     lastLocalErrorToastRef.current = localError;
   }, [localError, toast]);
 
@@ -1042,7 +1090,7 @@ export function InvoiceModal({
           setForm((prev) => ({ ...prev, number: next.nextNumber || prev.number }));
         }
       } catch {
-        // noop: оставляем номер как есть
+        // noop: Р С•РЎРѓРЎвЂљР В°Р Р†Р В»РЎРЏР ВµР С Р Р…Р С•Р СР ВµРЎР‚ Р С”Р В°Р С” Р ВµРЎРѓРЎвЂљРЎРЉ
       }
     }
 
@@ -1077,7 +1125,7 @@ export function InvoiceModal({
         id: `${Date.now()}-${prev.length}`,
         name: '',
         quantity: '1',
-        unit: unitOptions[0] || 'шт',
+        unit: unitOptions[0] || 'РЎв‚¬РЎвЂљ',
         price: formatMoneyDisplayValue(0),
       },
     ]);
@@ -1085,10 +1133,10 @@ export function InvoiceModal({
 
   const removeLineItem = async (id: string) => {
     const accepted = await confirm({
-      title: 'Удалить позицию',
-      description: 'Точно ли хотите удалить позицию?',
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
+      title: 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ Р С—Р С•Р В·Р С‘РЎвЂ Р С‘РЎР‹',
+      description: 'Р СћР С•РЎвЂЎР Р…Р С• Р В»Р С‘ РЎвЂ¦Р С•РЎвЂљР С‘РЎвЂљР Вµ РЎС“Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ Р С—Р С•Р В·Р С‘РЎвЂ Р С‘РЎР‹?',
+      confirmLabel: 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ',
+      cancelLabel: 'Р С›РЎвЂљР СР ВµР Р…Р В°',
       variant: 'danger',
     });
     if (!accepted) return;
@@ -1137,7 +1185,7 @@ export function InvoiceModal({
         setActsError(null);
       } catch (err) {
         if (cancelled) return;
-        setActsError(err instanceof Error ? err.message : 'Не удалось загрузить акты');
+        setActsError(err instanceof Error ? err.message : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ Р В°Р С”РЎвЂљРЎвЂ№');
         setActOptions([]);
       } finally {
         if (!cancelled) {
@@ -1154,7 +1202,7 @@ export function InvoiceModal({
 
   const handleActSelect = (act: ActOption) => {
     if (!selectedActs.some((item) => item.id === act.id) && selectedActs.length >= invoiceRules.maxActsPerInvoice) {
-      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+      toast.error(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• Р Р†РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxActsPerInvoice} Р В°Р С”РЎвЂљР В°(Р С•Р Р†).`, 'Р С›Р С–РЎР‚Р В°Р Р…Р С‘РЎвЂЎР ВµР Р…Р С‘Р Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°');
       return;
     }
 
@@ -1209,7 +1257,7 @@ export function InvoiceModal({
 
   const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
     if (!selectedClientCaseIds.includes(clientCase.id) && selectedClientCaseIds.length >= invoiceRules.maxClientCasesPerInvoice) {
-      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+      toast.error(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• Р Р†РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxClientCasesPerInvoice} Р Т‘Р ВµР В»Р В°(Р Т‘Р ВµР В»).`, 'Р С›Р С–РЎР‚Р В°Р Р…Р С‘РЎвЂЎР ВµР Р…Р С‘Р Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°');
       return;
     }
 
@@ -1234,7 +1282,7 @@ export function InvoiceModal({
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
     if (!form.clientId) {
-      throw new Error('Сначала выберите поставщика услуг');
+      throw new Error('Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–');
     }
 
     const created = await apiService.createCase({
@@ -1251,7 +1299,7 @@ export function InvoiceModal({
     setSelectedClientCaseIds((prev) => {
       if (prev.includes(created.id)) return prev;
       if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
-        toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+        toast.error(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• Р Р†РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxClientCasesPerInvoice} Р Т‘Р ВµР В»Р В°(Р Т‘Р ВµР В»).`, 'Р С›Р С–РЎР‚Р В°Р Р…Р С‘РЎвЂЎР ВµР Р…Р С‘Р Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°');
         return prev;
       }
 
@@ -1263,13 +1311,13 @@ export function InvoiceModal({
 
   const handleCreateAct = async () => {
     if (!draftAct.number.trim()) {
-      setCreateActError(t('actNumber') ?? 'Номер акта обязателен');
+      setCreateActError(t('actNumber') ?? 'Р СњР С•Р СР ВµРЎР‚ Р В°Р С”РЎвЂљР В° Р С•Р В±РЎРЏР В·Р В°РЎвЂљР ВµР В»Р ВµР Р…');
       return;
     }
 
     const actAmount = parseMoneyInput(draftAct.amount || form.amount);
     if (!Number.isFinite(actAmount) || actAmount < 0) {
-      setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      setCreateActError(t('invoiceAmount') ?? 'Р вЂ™Р Р†Р ВµР Т‘Р С‘РЎвЂљР Вµ Р С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎС“РЎР‹ РЎРѓРЎС“Р СР СРЎС“');
       return;
     }
 
@@ -1304,7 +1352,7 @@ export function InvoiceModal({
       setSelectedActs((prev) => {
         if (prev.some((item) => item.id === option.id)) return prev;
         if (prev.length >= invoiceRules.maxActsPerInvoice) {
-          toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+          toast.error(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• Р Р†РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxActsPerInvoice} Р В°Р С”РЎвЂљР В°(Р С•Р Р†).`, 'Р С›Р С–РЎР‚Р В°Р Р…Р С‘РЎвЂЎР ВµР Р…Р С‘Р Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°');
           return prev;
         }
 
@@ -1320,7 +1368,7 @@ export function InvoiceModal({
         comment: '',
       });
     } catch (err) {
-      setCreateActError(err instanceof Error ? err.message : 'Не удалось создать акт');
+      setCreateActError(err instanceof Error ? err.message : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ');
     } finally {
       setCreatingAct(false);
     }
@@ -1387,7 +1435,7 @@ export function InvoiceModal({
         .map((item) => ({
           name: item.name.trim(),
           quantity: parseMoneyInput(item.quantity),
-          unit: item.unit.trim() || 'шт',
+          unit: item.unit.trim() || 'РЎв‚¬РЎвЂљ',
           price: parseMoneyInput(item.price),
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
@@ -1420,36 +1468,36 @@ export function InvoiceModal({
 
     const number = form.number.trim();
     if (!number) {
-      setLocalError(t('invoiceNumber') ?? 'Номер счёта обязателен');
+      setLocalError(t('invoiceNumber') ?? 'Р СњР С•Р СР ВµРЎР‚ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В° Р С•Р В±РЎРЏР В·Р В°РЎвЂљР ВµР В»Р ВµР Р…');
       return;
     }
     if (!form.date) {
-      setLocalError(t('invoiceDate') ?? 'Дата обязательна');
+      setLocalError(t('invoiceDate') ?? 'Р вЂќР В°РЎвЂљР В° Р С•Р В±РЎРЏР В·Р В°РЎвЂљР ВµР В»РЎРЉР Р…Р В°');
       return;
     }
     if (!form.clientId) {
-      setLocalError(t('invoiceClientPlaceholder') ?? 'Выберите клиента');
+      setLocalError(t('invoiceClientPlaceholder') ?? 'Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р С”Р В»Р С‘Р ВµР Р…РЎвЂљР В°');
       return;
     }
 
     const parsedAmount = parseMoneyInput(form.amount);
     if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
-      setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      setLocalError(t('invoiceAmount') ?? 'Р вЂ™Р Р†Р ВµР Т‘Р С‘РЎвЂљР Вµ Р С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎС“РЎР‹ РЎРѓРЎС“Р СР СРЎС“');
       return;
     }
 
     if (installmentPlanAmountMismatch) {
-      setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
+      setLocalError('Р РЋРЎС“Р СР СР В° РЎРѓРЎвЂЎР ВµРЎвЂљР В° Р С‘Р В·Р СР ВµР Р…Р С‘Р В»Р В°РЎРѓРЎРЉ Р С—Р С•РЎРѓР В»Р Вµ Р Р…Р В°РЎРѓРЎвЂљРЎР‚Р С•Р в„–Р С”Р С‘ РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘. Р СџР ВµРЎР‚Р ВµРЎРѓРЎвЂЎР С‘РЎвЂљР В°Р в„–РЎвЂљР Вµ Р С–РЎР‚Р В°РЎвЂћР С‘Р С”.');
       return;
     }
 
     if (selectedClientCaseIds.length > invoiceRules.maxClientCasesPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`);
+      setLocalError(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• РЎС“Р С”Р В°Р В·Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxClientCasesPerInvoice} Р Т‘Р ВµР В»Р В°(Р Т‘Р ВµР В»).`);
       return;
     }
 
     if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
+      setLocalError(`Р вЂ™ РЎРѓРЎвЂЎРЎвЂРЎвЂљР Вµ Р СР С•Р В¶Р Р…Р С• РЎС“Р С”Р В°Р В·Р В°РЎвЂљРЎРЉ Р Р…Р Вµ Р В±Р С•Р В»Р ВµР Вµ ${invoiceRules.maxActsPerInvoice} Р В°Р С”РЎвЂљР В°(Р С•Р Р†).`);
       return;
     }
 
@@ -1463,7 +1511,7 @@ export function InvoiceModal({
         setLocalError(
           extractDisplayErrorMessage(
             err,
-            mode === 'edit' ? 'Не удалось сохранить счет' : 'Не удалось создать счет',
+            mode === 'edit' ? 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎР ВµРЎвЂљ' : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎР ВµРЎвЂљ',
           ),
         );
       }
@@ -1489,12 +1537,12 @@ export function InvoiceModal({
         await onRefreshRequested?.();
         setInstallmentModalOpen(false);
         if (nextPlan) {
-          toast.success(`График рассрочки сохранен: ${nextPlan.items.length} платежей.`);
+          toast.success(`Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…: ${nextPlan.items.length} Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–.`);
         } else {
-          toast.success('График рассрочки удален.');
+          toast.success('Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘ РЎС“Р Т‘Р В°Р В»Р ВµР Р….');
         }
       } catch (error) {
-        const message = extractDisplayErrorMessage(error, 'Не удалось сохранить график рассрочки.');
+        const message = extractDisplayErrorMessage(error, 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљРЎРЉ Р С–РЎР‚Р В°РЎвЂћР С‘Р С” РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘.');
         setLocalError(message);
         toast.error(message);
       }
@@ -1506,11 +1554,11 @@ export function InvoiceModal({
     if (nextPlan) {
       toast.success(
         mode === 'create'
-          ? `График сохранен в форме счета: ${nextPlan.items.length} платежей. Чтобы создать платежи, сохраните счет.`
-          : `График рассрочки сохранен в счете: ${nextPlan.items.length} платежей.`,
+          ? `Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р… Р Р† РЎвЂћР С•РЎР‚Р СР Вµ РЎРѓРЎвЂЎР ВµРЎвЂљР В°: ${nextPlan.items.length} Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–. Р В§РЎвЂљР С•Р В±РЎвЂ№ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘, РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљР Вµ РЎРѓРЎвЂЎР ВµРЎвЂљ.`
+          : `Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р… Р Р† РЎРѓРЎвЂЎР ВµРЎвЂљР Вµ: ${nextPlan.items.length} Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–.`,
       );
     } else {
-      toast.success(mode === 'create' ? 'График удален из формы счета.' : 'График рассрочки обновлен.');
+      toast.success(mode === 'create' ? 'Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎС“Р Т‘Р В°Р В»Р ВµР Р… Р С‘Р В· РЎвЂћР С•РЎР‚Р СРЎвЂ№ РЎРѓРЎвЂЎР ВµРЎвЂљР В°.' : 'Р вЂњРЎР‚Р В°РЎвЂћР С‘Р С” РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р С‘ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р….');
     }
   };
 
@@ -1536,7 +1584,7 @@ export function InvoiceModal({
     const printWindow = window.open(href, '_blank', 'noopener,noreferrer,width=1024,height=768');
     if (!printWindow) {
       URL.revokeObjectURL(href);
-      throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
+      throw new Error('Р вЂРЎР‚Р В°РЎС“Р В·Р ВµРЎР‚ Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р В» Р С•Р С”Р Р…Р С• Р С—Р ВµРЎвЂЎР В°РЎвЂљР С‘. Р В Р В°Р В·РЎР‚Р ВµРЎв‚¬Р С‘РЎвЂљР Вµ Р Р†РЎРѓР С—Р В»РЎвЂ№Р Р†Р В°РЎР‹РЎвЂ°Р С‘Р Вµ Р С•Р С”Р Р…Р В° Р С‘ Р С—Р С•Р Р†РЎвЂљР С•РЎР‚Р С‘РЎвЂљР Вµ.');
     }
     const cleanup = () => URL.revokeObjectURL(href);
     printWindow.addEventListener('load', () => {
@@ -1553,20 +1601,20 @@ export function InvoiceModal({
 
   const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
-      send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
-      print: { title: 'Печать счёта', message: 'Сформировать документ WORD и отправить его на печать?', confirmLabel: 'Печать' },
-      download: { title: 'Скачать счёт', message: 'Скачать документ счёта в формате WORD?', confirmLabel: 'Скачать' },
-      copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
-      paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
-      cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
-      delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+      send: { title: 'Р С›РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ', message: 'Р РЋРЎвЂћР С•РЎР‚Р СР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ WORD Р С‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р Р…Р В° email Р С”Р В»Р С‘Р ВµР Р…РЎвЂљР В°?', confirmLabel: 'Р С›РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ' },
+      print: { title: 'Р СџР ВµРЎвЂЎР В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°', message: 'Р РЋРЎвЂћР С•РЎР‚Р СР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ WORD Р С‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р ВµР С–Р С• Р Р…Р В° Р С—Р ВµРЎвЂЎР В°РЎвЂљРЎРЉ?', confirmLabel: 'Р СџР ВµРЎвЂЎР В°РЎвЂљРЎРЉ' },
+      download: { title: 'Р РЋР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ', message: 'Р РЋР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В° Р Р† РЎвЂћР С•РЎР‚Р СР В°РЎвЂљР Вµ WORD?', confirmLabel: 'Р РЋР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ' },
+      copy: { title: 'Р С™Р С•Р С—Р С‘РЎРЏ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°', message: 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р С”Р С•Р С—Р С‘РЎР‹ РЎвЂљР ВµР С”РЎС“РЎвЂ°Р ВµР С–Р С• РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°?', confirmLabel: 'Р С™Р С•Р С—Р С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ' },
+      paid: { title: 'Р С›РЎвЂљР СР ВµРЎвЂљР С‘РЎвЂљРЎРЉ Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…Р Р…РЎвЂ№Р С', message: 'Р С›РЎвЂљР СР ВµРЎвЂљР С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ Р С”Р В°Р С” Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…Р Р…РЎвЂ№Р в„–?', confirmLabel: 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…' },
+      cancel: { title: 'Р С›РЎвЂљР СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ', message: 'Р СџР С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р Т‘Р С‘РЎвЂљР Вµ Р С•РЎвЂљР СР ВµР Р…РЎС“ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°.', confirmLabel: 'Р С›РЎвЂљР СР ВµР Р…Р С‘РЎвЂљРЎРЉ' },
+      delete: { title: 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ', message: 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ Р В±Р ВµР В· Р Р†Р С•Р В·Р СР С•Р В¶Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р†Р С•РЎРѓРЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ?', confirmLabel: 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ' },
     }[action];
 
     const accepted = await confirm({
       title: actionMeta.title,
       description: actionMeta.message,
       confirmLabel: actionMeta.confirmLabel,
-      cancelLabel: 'Отмена',
+      cancelLabel: 'Р С›РЎвЂљР СР ВµР Р…Р В°',
       variant: action === 'cancel' || action === 'delete' ? 'danger' : 'primary',
     });
     if (!accepted) return;
@@ -1574,21 +1622,21 @@ export function InvoiceModal({
     try {
       if (action === 'send') {
         if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно отправить документ.');
+          throw new Error('Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљР Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљ, Р В·Р В°РЎвЂљР ВµР С Р СР С•Р В¶Р Р…Р С• Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ.');
         }
         await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
         toast.success(
           selectedClient?.email
-            ? `Документ WORD отправлен на ${selectedClient.email}.`
-            : 'Документ WORD отправлен клиенту по email.',
-          'Счет отправлен',
+            ? `Р вЂќР С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ WORD Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р… Р Р…Р В° ${selectedClient.email}.`
+            : 'Р вЂќР С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ WORD Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р… Р С”Р В»Р С‘Р ВµР Р…РЎвЂљРЎС“ Р С—Р С• email.',
+          'Р РЋРЎвЂЎР ВµРЎвЂљ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р…',
         );
         return;
       }
 
       if (action === 'print') {
         if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно печатать документ.');
+          throw new Error('Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљР Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљ, Р В·Р В°РЎвЂљР ВµР С Р СР С•Р В¶Р Р…Р С• Р С—Р ВµРЎвЂЎР В°РЎвЂљР В°РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ.');
         }
         const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
         printBlob(blob);
@@ -1597,7 +1645,7 @@ export function InvoiceModal({
 
       if (action === 'download') {
         if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно скачать документ.');
+          throw new Error('Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљР Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљ, Р В·Р В°РЎвЂљР ВµР С Р СР С•Р В¶Р Р…Р С• РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ.');
         }
         const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
         downloadBlob(`invoice-${form.number || 'export'}.doc`, blob);
@@ -1606,10 +1654,10 @@ export function InvoiceModal({
 
       if (action === 'copy') {
         const payload = buildInvoicePayload();
-        payload.number = `${form.number || 'Счёт'} (копия)`;
+        payload.number = `${form.number || 'Р РЋРЎвЂЎРЎвЂРЎвЂљ'} (Р С”Р С•Р С—Р С‘РЎРЏ)`;
         await apiService.createInvoice(payload);
         await onRefreshRequested?.();
-        toast.success('Создана копия текущего счета.', 'Копия создана');
+        toast.success('Р РЋР С•Р В·Р Т‘Р В°Р Р…Р В° Р С”Р С•Р С—Р С‘РЎРЏ РЎвЂљР ВµР С”РЎС“РЎвЂ°Р ВµР С–Р С• РЎРѓРЎвЂЎР ВµРЎвЂљР В°.', 'Р С™Р С•Р С—Р С‘РЎРЏ РЎРѓР С•Р В·Р Т‘Р В°Р Р…Р В°');
         return;
       }
 
@@ -1631,8 +1679,8 @@ export function InvoiceModal({
         )));
         await onRefreshRequested?.();
         toast.success(
-          action === 'paid' ? 'Статус счета обновлен: оплачен.' : 'Статус счета обновлен: отменен.',
-          'Счет обновлен',
+          action === 'paid' ? 'Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓРЎвЂЎР ВµРЎвЂљР В° Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…: Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р….' : 'Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓРЎвЂЎР ВµРЎвЂљР В° Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…: Р С•РЎвЂљР СР ВµР Р…Р ВµР Р….',
+          'Р РЋРЎвЂЎР ВµРЎвЂљ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…',
         );
         return;
       }
@@ -1640,12 +1688,12 @@ export function InvoiceModal({
       if (action === 'delete' && invoice?.id) {
         await apiService.deleteInvoice(invoice.id);
         await onRefreshRequested?.();
-        toast.success('Счет удален.');
+        toast.success('Р РЋРЎвЂЎР ВµРЎвЂљ РЎС“Р Т‘Р В°Р В»Р ВµР Р….');
         deferClose(onClose);
         return;
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось выполнить действие по счету.');
+      toast.error(err instanceof Error ? err.message : 'Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘Р Вµ Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“.');
     }
   };
 
@@ -1654,11 +1702,11 @@ export function InvoiceModal({
   const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
-    Pending: { label: 'Создан', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Processing: { label: 'В работе', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
-    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
-    Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
-    Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
+    Pending: { label: 'Р РЋР С•Р В·Р Т‘Р В°Р Р…', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'Р вЂ™ РЎР‚Р В°Р В±Р С•РЎвЂљР Вµ', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Completed: { label: 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'Р С›РЎвЂљР СР ВµР Р…Р ВµР Р…', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+    Overdue: { label: 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
   };
   const relatedPaymentStatusMeta: Record<PaymentStatus, string> = {
     Pending: 'bg-slate-100 text-slate-700',
@@ -1668,25 +1716,25 @@ export function InvoiceModal({
     Overdue: 'bg-amber-100 text-amber-700',
   };
   const relatedPaymentStatusLabel: Record<PaymentStatus, string> = {
-    Pending: t('pending') ?? 'Ожидается',
-    Processing: t('processingStatus') ?? 'В обработке',
-    Completed: t('completedStatus') ?? 'Оплачен',
-    Cancelled: t('cancelledStatus') ?? 'Отменён',
-    Overdue: t('overdue') ?? 'Просрочен',
+    Pending: t('pending') ?? 'Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ',
+    Processing: t('processingStatus') ?? 'Р вЂ™ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р Вµ',
+    Completed: t('completedStatus') ?? 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…',
+    Cancelled: t('cancelledStatus') ?? 'Р С›РЎвЂљР СР ВµР Р…РЎвЂР Р…',
+    Overdue: t('overdue') ?? 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…',
   };
   const invoiceStatusMeta: Record<PaymentStatus, { label: string; className: string }> = {
-    Pending: { label: 'Не оплачен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Processing: { label: 'Частично оплачен', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
-    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
-    Cancelled: { label: 'Отменен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Overdue: { label: 'Просрочен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+    Pending: { label: 'Р СњР Вµ Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'Р В§Р В°РЎРѓРЎвЂљР С‘РЎвЂЎР Р…Р С• Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Completed: { label: 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'Р С›РЎвЂљР СР ВµР Р…Р ВµР Р…', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Overdue: { label: 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
   };
   const invoicePaymentStatusLabel: Record<PaymentStatus, string> = {
-    Pending: 'Не оплачен',
-    Processing: 'Частично оплачен',
-    Completed: 'Оплачен',
-    Cancelled: t('cancelledStatus') ?? 'Отменён',
-    Overdue: t('overdue') ?? 'Просрочен',
+    Pending: 'Р СњР Вµ Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…',
+    Processing: 'Р В§Р В°РЎРѓРЎвЂљР С‘РЎвЂЎР Р…Р С• Р С•Р С—Р В»Р В°РЎвЂЎР ВµР Р…',
+    Completed: 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…',
+    Cancelled: t('cancelledStatus') ?? 'Р С›РЎвЂљР СР ВµР Р…РЎвЂР Р…',
+    Overdue: t('overdue') ?? 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…',
   };
   const currentStatusMeta = invoiceStatusMeta[effectiveInvoiceStatus] ?? invoiceStatusMeta.Pending;
   void statusMeta;
@@ -1705,10 +1753,10 @@ export function InvoiceModal({
     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Статус счета</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓРЎвЂЎР ВµРЎвЂљР В°</p>
           <span
             className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
-            title="Количество связанных платежей"
+            title="Р С™Р С•Р В»Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С• РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–"
           >
             {statusSnapshot.sourcePayments.length}
           </span>
@@ -1721,11 +1769,11 @@ export function InvoiceModal({
         <p className="text-center text-sm text-slate-600">{statusSnapshot.reason}</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
-            <div className="text-[11px] uppercase tracking-wide text-slate-500">Оплачено</div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…Р С•</div>
             <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.paidAmount).full}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
-            <div className="text-[11px] uppercase tracking-wide text-slate-500">Остаток</div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Р С›РЎРѓРЎвЂљР В°РЎвЂљР С•Р С”</div>
             <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.outstandingAmount).full}</div>
           </div>
         </div>
@@ -1734,12 +1782,12 @@ export function InvoiceModal({
       <div className="mt-4 border-t border-slate-200 pt-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Хроника статуса</p>
-            <p className="mt-1 text-xs text-slate-500">Изменения собираются по связанным платежам и самому счету.</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р ТђРЎР‚Р С•Р Р…Р С‘Р С”Р В° РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓР В°</p>
+            <p className="mt-1 text-xs text-slate-500">Р ВР В·Р СР ВµР Р…Р ВµР Р…Р С‘РЎРЏ РЎРѓР С•Р В±Р С‘РЎР‚Р В°РЎР‹РЎвЂљРЎРѓРЎРЏ Р С—Р С• РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р С Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°Р С Р С‘ РЎРѓР В°Р СР С•Р СРЎС“ РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“.</p>
           </div>
           <span
             className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
-            title="Количество записей в хронике"
+            title="Р С™Р С•Р В»Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С• Р В·Р В°Р С—Р С‘РЎРѓР ВµР в„– Р Р† РЎвЂ¦РЎР‚Р С•Р Р…Р С‘Р С”Р Вµ"
           >
             {statusSnapshot.timeline.length}
           </span>
@@ -1773,23 +1821,23 @@ export function InvoiceModal({
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
       <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
+          {t('invoiceDocumentsTitle') ?? 'Р РЋР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№'}
         </span>
       </header>
       <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="space-y-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="font-medium text-slate-700">{t('cases') ?? 'Дела'}</span>
+              <span className="font-medium text-slate-700">{t('cases') ?? 'Р вЂќР ВµР В»Р В°'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите дело поставщика услуг из списка или создайте новое.
+                Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р Т‘Р ВµР В»Р С• Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С– Р С‘Р В· РЎРѓР С—Р С‘РЎРѓР С”Р В° Р С‘Р В»Р С‘ РЎРѓР С•Р В·Р Т‘Р В°Р в„–РЎвЂљР Вµ Р Р…Р С•Р Р†Р С•Р Вµ.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                title="Выбрать дело"
-                aria-label="Выбрать дело"
+                title="Р вЂ™РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Т‘Р ВµР В»Р С•"
+                aria-label="Р вЂ™РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р Т‘Р ВµР В»Р С•"
                 onClick={() => {
                   setCaseDropdownOpen((prev) => !prev);
                   setActDropdownOpen(false);
@@ -1801,8 +1849,8 @@ export function InvoiceModal({
               </button>
               <button
                 type="button"
-                title="Создать дело"
-                aria-label="Создать дело"
+                title="Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р Т‘Р ВµР В»Р С•"
+                aria-label="Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р Т‘Р ВµР В»Р С•"
                 onClick={() => setCreateCaseOpen(true)}
                 disabled={!form.clientId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1815,11 +1863,11 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!form.clientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите поставщика услуг.
+                Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–.
               </div>
             ) : selectedClientCaseIds.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Дела еще не добавлены в счет.
+                Р вЂќР ВµР В»Р В° Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р…РЎвЂ№ Р Р† РЎРѓРЎвЂЎР ВµРЎвЂљ.
               </div>
             ) : (
               <div className="space-y-2">
@@ -1840,7 +1888,7 @@ export function InvoiceModal({
                         type="button"
                         onClick={() => removeSelectedClientCase(id)}
                         className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
-                        aria-label={t('clear') ?? 'Очистить'}
+                        aria-label={t('clear') ?? 'Р С›РЎвЂЎР С‘РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ'}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -1854,12 +1902,12 @@ export function InvoiceModal({
           {caseDropdownOpen && (
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите дело</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р Т‘Р ВµР В»Р С•</span>
                 <button
                   type="button"
                   onClick={() => setCaseDropdownOpen(false)}
                   className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                  aria-label={t('clear') ?? 'Очистить'}
+                  aria-label={t('clear') ?? 'Р С›РЎвЂЎР С‘РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ'}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1867,13 +1915,13 @@ export function InvoiceModal({
               <div className="max-h-56 overflow-auto p-2">
                 {clientCasesLoading ? (
                   <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В°...'}
                   </div>
                 ) : clientCasesError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{clientCasesError}</div>
                 ) : clientCaseOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У поставщика услуг пока нет дел.
+                    Р Р€ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С– Р С—Р С•Р С”Р В° Р Р…Р ВµРЎвЂљ Р Т‘Р ВµР В».
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1907,12 +1955,12 @@ export function InvoiceModal({
           )}
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">Комментарий по делу</span>
+            <span className="font-medium text-slate-700">Р С™Р С•Р СР СР ВµР Р…РЎвЂљР В°РЎР‚Р С‘Р в„– Р С—Р С• Р Т‘Р ВµР В»РЎС“</span>
             <textarea
               value={form.clientCaseReference}
               onChange={handleChange('clientCaseReference')}
               rows={2}
-              placeholder="Например: дело ожидает подтверждения документов"
+              placeholder="Р СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р Т‘Р ВµР В»Р С• Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ Р С—Р С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р ВµР Р…Р С‘РЎРЏ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР С•Р Р†"
               className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </label>
@@ -1921,16 +1969,16 @@ export function InvoiceModal({
         <div className="space-y-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="font-medium text-slate-700">{t('acts') ?? 'Акты'}</span>
+              <span className="font-medium text-slate-700">{t('acts') ?? 'Р С’Р С”РЎвЂљРЎвЂ№'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите акт поставщика услуг из списка или создайте новый.
+                Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р В°Р С”РЎвЂљ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С– Р С‘Р В· РЎРѓР С—Р С‘РЎРѓР С”Р В° Р С‘Р В»Р С‘ РЎРѓР С•Р В·Р Т‘Р В°Р в„–РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„–.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                title="Выбрать акт"
-                aria-label="Выбрать акт"
+                title="Р вЂ™РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ"
+                aria-label="Р вЂ™РЎвЂ№Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ"
                 onClick={() => {
                   setActDropdownOpen((prev) => !prev);
                   setCaseDropdownOpen(false);
@@ -1942,8 +1990,8 @@ export function InvoiceModal({
               </button>
               <button
                 type="button"
-                title="Создать акт"
-                aria-label="Создать акт"
+                title="Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ"
+                aria-label="Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ"
                 onClick={() => {
                   setDraftAct((prev) => ({
                     ...prev,
@@ -1964,11 +2012,11 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!form.clientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите поставщика услуг.
+                Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–.
               </div>
             ) : selectedActs.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Акты еще не добавлены в счет.
+                Р С’Р С”РЎвЂљРЎвЂ№ Р ВµРЎвЂ°Р Вµ Р Р…Р Вµ Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р…РЎвЂ№ Р Р† РЎРѓРЎвЂЎР ВµРЎвЂљ.
               </div>
             ) : (
               <div className="space-y-2">
@@ -1980,14 +2028,14 @@ export function InvoiceModal({
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{actLabel(act)}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
+                        {formatDate(act.date)} Р вЂ™Р’В· {formatCurrencySmart(act.amount ?? 0).full}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => removeSelectedAct(act.id)}
                       className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
-                      aria-label={t('clear') ?? 'Очистить'}
+                      aria-label={t('clear') ?? 'Р С›РЎвЂЎР С‘РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ'}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -2000,12 +2048,12 @@ export function InvoiceModal({
           {actDropdownOpen && (
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите акт</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р В°Р С”РЎвЂљ</span>
                 <button
                   type="button"
                   onClick={() => setActDropdownOpen(false)}
                   className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                  aria-label={t('clear') ?? 'Очистить'}
+                  aria-label={t('clear') ?? 'Р С›РЎвЂЎР С‘РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ'}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -2013,13 +2061,13 @@ export function InvoiceModal({
               <div className="max-h-56 overflow-auto p-2">
                 {actsLoading ? (
                   <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В°...'}
                   </div>
                 ) : actsError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{actsError}</div>
                 ) : actOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У поставщика услуг пока нет актов.
+                    Р Р€ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С– Р С—Р С•Р С”Р В° Р Р…Р ВµРЎвЂљ Р В°Р С”РЎвЂљР С•Р Р†.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2042,7 +2090,7 @@ export function InvoiceModal({
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-slate-900">{actLabel(act)}</span>
                             <span className="mt-1 block text-xs text-slate-500">
-                              {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
+                              {formatDate(act.date)} Р вЂ™Р’В· {formatCurrencySmart(act.amount ?? 0).full}
                             </span>
                           </span>
                         </button>
@@ -2055,12 +2103,12 @@ export function InvoiceModal({
           )}
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
+            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Р С™Р С•Р СР СР ВµР Р…РЎвЂљР В°РЎР‚Р С‘Р в„– Р С—Р С• Р В°Р С”РЎвЂљРЎС“'}</span>
             <textarea
               value={form.actReference}
               onChange={handleChange('actReference')}
               rows={2}
-              placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
+              placeholder={t('invoiceActManualPlaceholder') ?? 'Р СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р В°Р С”РЎвЂљ Р В±РЎС“Р Т‘Р ВµРЎвЂљ Р С—Р С•Р Т‘Р С—Р С‘РЎРѓР В°Р Р… Р С—Р С•Р В·Р В¶Р Вµ'}
               className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </label>
@@ -2071,7 +2119,7 @@ export function InvoiceModal({
   if (!open) return null;
 
   const content = (
-    <div className={`relative w-full max-w-none overflow-hidden rounded-2xl bg-white ${isPageMode ? 'border border-slate-200 shadow-sm' : 'shadow-2xl'}`}>
+    <div className={`relative w-full overflow-hidden rounded-2xl bg-white ${isPageMode ? 'max-w-none border border-slate-200 shadow-sm' : 'max-w-5xl shadow-2xl'}`}>
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
         <div className="flex items-center gap-3">
           {isPageMode && (
@@ -2081,21 +2129,21 @@ export function InvoiceModal({
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
-              Назад
+              Р СњР В°Р В·Р В°Р Т‘
             </button>
           )}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
               {isPageMode && pageViewMode
-                ? `Счёт №${form.number || '—'} от ${formatDate(form.date) || '—'}`
+                ? `Р РЋРЎвЂЎРЎвЂРЎвЂљ РІвЂћвЂ“${form.number || 'РІР‚вЂќ'} Р С•РЎвЂљ ${formatDate(form.date) || 'РІР‚вЂќ'}`
                 : mode === 'edit'
-                ? t('invoiceEdit') ?? 'Редактировать счёт'
-                : t('invoiceCreate') ?? 'Создать счёт'}
+                ? t('invoiceEdit') ?? 'Р В Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ'
+                : t('invoiceCreate') ?? 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ'}
             </h2>
             <p className="text-sm text-slate-500">
               {isPageMode && pageViewMode
-                ? 'Просмотр счёта с действиями и документом для печати/отправки'
-                : t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
+                ? 'Р СџРЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В° РЎРѓ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎРЏР СР С‘ Р С‘ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР С•Р С Р Т‘Р В»РЎРЏ Р С—Р ВµРЎвЂЎР В°РЎвЂљР С‘/Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘'
+                : t('invoiceModalSubtitle') ?? 'Р Р€Р С”Р В°Р В¶Р С‘РЎвЂљР Вµ Р С—Р В°РЎР‚Р В°Р СР ВµРЎвЂљРЎР‚РЎвЂ№ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°'}
             </p>
           </div>
         </div>
@@ -2107,8 +2155,8 @@ export function InvoiceModal({
                 type="button"
                 onClick={() => setPageViewMode(false)}
                 className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
-                aria-label="Редактировать счёт"
-                title="Редактировать счёт"
+                aria-label="Р В Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ"
+                title="Р В Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ"
               >
                 <Pencil className="h-4 w-4" />
               </button>
@@ -2121,14 +2169,14 @@ export function InvoiceModal({
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+                  {mode === 'edit' ? 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљРЎРЉ' : t('invoiceCreate') ?? 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPageViewMode(true)}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
                 >
-                  {t('cancel') ?? 'Отмена'}
+                  {t('cancel') ?? 'Р С›РЎвЂљР СР ВµР Р…Р В°'}
                 </button>
               </>
             )}
@@ -2139,7 +2187,7 @@ export function InvoiceModal({
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-            aria-label={t('close') ?? 'Закрыть'}
+            aria-label={t('close') ?? 'Р вЂ”Р В°Р С”РЎР‚РЎвЂ№РЎвЂљРЎРЉ'}
           >
             <X className="h-5 w-5" />
           </button>
@@ -2154,14 +2202,14 @@ export function InvoiceModal({
 
               <div className="border border-slate-800 p-3 text-sm text-slate-900">
                 <div className="grid grid-cols-2 border border-slate-800">
-                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || (t('invoiceClient') ?? 'Поставщик услуг')}</div>
-                  <div className="p-2">БИК / Счёт</div>
+                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || (t('invoiceClient') ?? 'Р СџР С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С” РЎС“РЎРѓР В»РЎС“Р С–')}</div>
+                  <div className="p-2">Р вЂР ВР С™ / Р РЋРЎвЂЎРЎвЂРЎвЂљ</div>
                 </div>
-                <h3 className="my-4 text-center text-2xl font-bold">Счёт № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
+                <h3 className="my-4 text-center text-2xl font-bold">Р РЋРЎвЂЎРЎвЂРЎвЂљ РІвЂћвЂ“ {form.number || 'РІР‚вЂќ'} Р С•РЎвЂљ {formatDate(form.date) || 'РІР‚вЂќ'} Р С–.</h3>
                 <div className="space-y-1 border-t border-slate-800 pt-3 text-xs sm:text-sm">
-                  <p><span className="font-semibold">{t('invoiceClient') ?? 'Поставщик услуг'}:</span> {selectedClient?.name || '—'}</p>
-                  <p><span className="font-semibold">Договор:</span> {contractLabel(selectedContract)}</p>
-                  <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
+                  <p><span className="font-semibold">{t('invoiceClient') ?? 'Р СџР С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С” РЎС“РЎРѓР В»РЎС“Р С–'}:</span> {selectedClient?.name || 'РІР‚вЂќ'}</p>
+                  <p><span className="font-semibold">Р вЂќР С•Р С–Р С•Р Р†Р С•РЎР‚:</span> {contractLabel(selectedContract)}</p>
+                  <p><span className="font-semibold">Р С›РЎРѓР Р…Р С•Р Р†Р В°Р Р…Р С‘Р Вµ:</span> {form.description || 'РІР‚вЂќ'}</p>
                 </div>
 
                 <table className="mt-3 w-full table-fixed border-collapse text-xs sm:text-sm">
@@ -2175,12 +2223,12 @@ export function InvoiceModal({
                   </colgroup>
                   <thead>
                     <tr>
-                      <th className="border border-slate-800 px-2 py-1 text-left">№</th>
-                      <th className="border border-slate-800 px-2 py-1 text-left">Товары (работы, услуги)</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Кол-во</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Ед.</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Цена</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Сумма</th>
+                      <th className="border border-slate-800 px-2 py-1 text-left">РІвЂћвЂ“</th>
+                      <th className="border border-slate-800 px-2 py-1 text-left">Р СћР С•Р Р†Р В°РЎР‚РЎвЂ№ (РЎР‚Р В°Р В±Р С•РЎвЂљРЎвЂ№, РЎС“РЎРѓР В»РЎС“Р С–Р С‘)</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Р С™Р С•Р В»-Р Р†Р С•</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Р вЂўР Т‘.</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Р В¦Р ВµР Р…Р В°</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Р РЋРЎС“Р СР СР В°</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2191,9 +2239,9 @@ export function InvoiceModal({
                       return (
                         <tr key={item.id}>
                           <td className="border border-slate-800 px-2 py-1">{index + 1}</td>
-                          <td className="border border-slate-800 px-2 py-1">{item.name || '—'}</td>
+                          <td className="border border-slate-800 px-2 py-1">{item.name || 'РІР‚вЂќ'}</td>
                           <td className="border border-slate-800 px-2 py-1 text-right">{qty.toFixed(2)}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{item.unit || 'шт'}</td>
+                          <td className="border border-slate-800 px-2 py-1 text-right">{item.unit || 'РЎв‚¬РЎвЂљ'}</td>
                           <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(price)}</td>
                           <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(rowTotal)}</td>
                         </tr>
@@ -2203,8 +2251,8 @@ export function InvoiceModal({
                 </table>
 
                 <div className="mt-3 text-right text-sm">
-                  <p><span className="font-semibold">Итого:</span> {formatMoneyDisplayValue(lineItemsTotal)}</p>
-                  <p><span className="font-semibold">Всего к оплате:</span> {formatMoneyDisplayValue(amountValue)}</p>
+                  <p><span className="font-semibold">Р ВРЎвЂљР С•Р С–Р С•:</span> {formatMoneyDisplayValue(lineItemsTotal)}</p>
+                  <p><span className="font-semibold">Р вЂ™РЎРѓР ВµР С–Р С• Р С” Р С•Р С—Р В»Р В°РЎвЂљР Вµ:</span> {formatMoneyDisplayValue(amountValue)}</p>
                 </div>
               </div>
             </section>
@@ -2218,13 +2266,13 @@ export function InvoiceModal({
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
-                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Ссылка на счет</div>
-                <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
+                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Р РЋРЎРѓРЎвЂ№Р В»Р С”Р В° Р Р…Р В° РЎРѓРЎвЂЎР ВµРЎвЂљ</div>
+                <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || 'РІР‚вЂќ'}</a>
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
                 <p>
-                  <span className="text-slate-500">{t('invoiceClient') ?? 'Поставщик услуг'}:</span>{' '}
+                  <span className="text-slate-500">{t('invoiceClient') ?? 'Р СџР С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С” РЎС“РЎРѓР В»РЎС“Р С–'}:</span>{' '}
                   {selectedClient && onOpenClient ? (
                     <button
                       type="button"
@@ -2234,30 +2282,30 @@ export function InvoiceModal({
                       {selectedClient.name}
                     </button>
                   ) : (
-                    selectedClient?.name || '—'
+                    selectedClient?.name || 'РІР‚вЂќ'
                   )}
                 </p>
-                <p><span className="text-slate-500">Договор:</span> {contractLabel(selectedContract)}</p>
-                <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
-                <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
-                <p><span className="text-slate-500">{t('acts') ?? 'Акты'}:</span> {selectedActsSummary || '—'}</p>
-                <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}:</span> {form.actReference || '—'}</p>
-                <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
-                <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
-                <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
-                <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
+                <p><span className="text-slate-500">Р вЂќР С•Р С–Р С•Р Р†Р С•РЎР‚:</span> {contractLabel(selectedContract)}</p>
+                <p><span className="text-slate-500">{t('cases') ?? 'Р вЂќР ВµР В»Р В°'}:</span> {selectedClientCasesSummary || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">Р С™Р С•Р СР СР ВµР Р…РЎвЂљР В°РЎР‚Р С‘Р в„– Р С—Р С• Р Т‘Р ВµР В»РЎС“:</span> {form.clientCaseReference || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">{t('acts') ?? 'Р С’Р С”РЎвЂљРЎвЂ№'}:</span> {selectedActsSummary || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Р С™Р С•Р СР СР ВµР Р…РЎвЂљР В°РЎР‚Р С‘Р в„– Р С—Р С• Р В°Р С”РЎвЂљРЎС“'}:</span> {form.actReference || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">Р вЂќР В°РЎвЂљР В° Р Р†РЎвЂ№РЎРѓРЎвЂљР В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ:</span> {formatDate(form.date) || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">Р РЋРЎР‚Р С•Р С” Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№:</span> {formatDate(form.dueDate) || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">Р вЂќР В°РЎвЂљР В° Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№:</span> {formatDate(form.paidDate) || 'РІР‚вЂќ'}</p>
+                <p><span className="text-slate-500">Р СџР С•Р В·Р С‘РЎвЂ Р С‘Р С‘:</span> {lineItemsCount}</p>
               </div>
             </aside>
           </div>
 
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-7">
-            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
-            <button type="button" onClick={() => void handlePageAction('print')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
-            <button type="button" onClick={() => void handlePageAction('download')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Download className="h-4 w-4" />Скачать</button>
-            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
-            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
-            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
-            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Р С›РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ</button>
+            <button type="button" onClick={() => void handlePageAction('print')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Р СџР ВµРЎвЂЎР В°РЎвЂљРЎРЉ</button>
+            <button type="button" onClick={() => void handlePageAction('download')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Download className="h-4 w-4" />Р РЋР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ</button>
+            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Р С™Р С•Р С—Р С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ</button>
+            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…</button>
+            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Р С›РЎвЂљР СР ВµР Р…Р ВµР Р…</button>
+            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ</button>
           </div>
         </div>
       ) : (
@@ -2267,7 +2315,7 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceMainDetailsTitle') ?? 'Основные параметры'}
+                              {t('invoiceMainDetailsTitle') ?? 'Р С›РЎРѓР Р…Р С•Р Р†Р Р…РЎвЂ№Р Вµ Р С—Р В°РЎР‚Р В°Р СР ВµРЎвЂљРЎР‚РЎвЂ№'}
                             </span>
               
                           </header>
@@ -2275,10 +2323,10 @@ export function InvoiceModal({
                           <div className="mt-4 space-y-4">
                             <div className="flex flex-col gap-2">
                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
+                                <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Р СћР С‘Р С— РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°'}</span>
                                 {lockType && mode === 'edit' && (
                                   <span className="text-xs text-slate-500">
-                                    {t('invoiceTypeEditHint') ?? 'Можно изменить тип, если счёт попал не в ту группу.'}
+                                    {t('invoiceTypeEditHint') ?? 'Р СљР С•Р В¶Р Р…Р С• Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎвЂљР С‘Р С—, Р ВµРЎРѓР В»Р С‘ РЎРѓРЎвЂЎРЎвЂРЎвЂљ Р С—Р С•Р С—Р В°Р В» Р Р…Р Вµ Р Р† РЎвЂљРЎС“ Р С–РЎР‚РЎС“Р С—Р С—РЎС“.'}
                                   </span>
                                 )}
                               </div>
@@ -2290,8 +2338,8 @@ export function InvoiceModal({
                                     }`}
                                   >
                                     {form.type === 'Income'
-                                      ? t('invoiceTypeIncome') ?? 'Доходные счета'
-                                      : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                                      ? t('invoiceTypeIncome') ?? 'Р вЂќР С•РЎвЂ¦Р С•Р Т‘Р Р…РЎвЂ№Р Вµ РЎРѓРЎвЂЎР ВµРЎвЂљР В°'
+                                      : t('invoiceTypeExpense') ?? 'Р В Р В°РЎРѓРЎвЂ¦Р С•Р Т‘Р Р…РЎвЂ№Р Вµ РЎРѓРЎвЂЎР ВµРЎвЂљР В°'}
                                   </span>
                                 ) : (
                                   <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
@@ -2309,8 +2357,8 @@ export function InvoiceModal({
                                           }`}
                                         >
                                           {option === 'Income'
-                                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Р вЂќР С•РЎвЂ¦Р С•Р Т‘Р Р…РЎвЂ№Р Вµ'
+                                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Р В Р В°РЎРѓРЎвЂ¦Р С•Р Т‘Р Р…РЎвЂ№Р Вµ'}
                                         </button>
                                       );
                                     })}
@@ -2321,7 +2369,7 @@ export function InvoiceModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Р СњР С•Р СР ВµРЎР‚ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°'}</span>
                                 <input
                                   type="text"
                                   value={form.number}
@@ -2332,14 +2380,14 @@ export function InvoiceModal({
                               </label>
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
-                                  {t('invoiceAmount') ?? 'Сумма'}
+                                  {t('invoiceAmount') ?? 'Р РЋРЎС“Р СР СР В°'}
                                   {isIncome && (
                                     <button
                                       type="button"
                                       onClick={handleOpenInstallmentCalculator}
                                       className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
                                     >
-                                      {installmentPlan ? 'Изменить рассрочку' : (t('invoiceInstallmentButton') ?? 'Рассрочка')}
+                                      {installmentPlan ? 'Р ВР В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”РЎС“' : (t('invoiceInstallmentButton') ?? 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В°')}
                                     </button>
                                   )}
                                 </span>
@@ -2354,8 +2402,8 @@ export function InvoiceModal({
                                 {isIncome && installmentPlan ? (
                                   <span className={`text-xs ${installmentPlanAmountMismatch ? 'text-amber-600' : 'text-slate-500'}`}>
                                     {installmentPlanAmountMismatch
-                                      ? 'Сумма изменилась, пересчитайте рассрочку.'
-                                      : `Настроено платежей: ${installmentPlan.items.length}, к оплате ${formatCurrencySmart(installmentPlan.toPay).short}.`}
+                                      ? 'Р РЋРЎС“Р СР СР В° Р С‘Р В·Р СР ВµР Р…Р С‘Р В»Р В°РЎРѓРЎРЉ, Р С—Р ВµРЎР‚Р ВµРЎРѓРЎвЂЎР С‘РЎвЂљР В°Р в„–РЎвЂљР Вµ РЎР‚Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”РЎС“.'
+                                      : `Р СњР В°РЎРѓРЎвЂљРЎР‚Р С•Р ВµР Р…Р С• Р С—Р В»Р В°РЎвЂљР ВµР В¶Р ВµР в„–: ${installmentPlan.items.length}, Р С” Р С•Р С—Р В»Р В°РЎвЂљР Вµ ${formatCurrencySmart(installmentPlan.toPay).short}.`}
                                   </span>
                                 ) : null}
                               </label>
@@ -2363,32 +2411,32 @@ export function InvoiceModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ'}</span>
                                 <select
                                   value={form.status}
                                   onChange={handleChange('status')}
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                 >
-                                  <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается'}</option>
-                                  <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
-                                  <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
-                                  <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
-                                  <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
+                                  <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ'}</option>
+                                  <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Р С›Р С—Р В»Р В°РЎвЂЎР ВµР Р…'}</option>
+                                  <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Р СџРЎР‚Р С•РЎРѓРЎР‚Р С•РЎвЂЎР ВµР Р…'}</option>
+                                  <option value="Processing">{t('processingStatus') ?? 'Р вЂ™ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р Вµ'}</option>
+                                  <option value="Cancelled">{t('cancelledStatus') ?? 'Р С›РЎвЂљР СР ВµР Р…РЎвЂР Р…'}</option>
                                 </select>
                               </label>
 
                               <LookupSelect
-                                label={t('invoiceResponsible') ?? 'Ответственный'}
+                                label={t('invoiceResponsible') ?? 'Р С›РЎвЂљР Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…РЎвЂ№Р в„–'}
                                 value={selectedResponsibleId}
                                 onChange={handleResponsibleChange}
                                 options={responsibleOptions}
-                                placeholder={t('actResponsibleNotSelected') ?? 'Не указан'}
-                                title="Выбор ответственного"
-                                searchPlaceholder="Поиск ответственного"
-                                emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                placeholder={t('actResponsibleNotSelected') ?? 'Р СњР Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}
+                                title="Р вЂ™РЎвЂ№Р В±Р С•РЎР‚ Р С•РЎвЂљР Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…Р С•Р С–Р С•"
+                                searchPlaceholder="Р СџР С•Р С‘РЎРѓР С” Р С•РЎвЂљР Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…Р С•Р С–Р С•"
+                                emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Р СњР Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}
                                 helperText={
                                   selectedClient?.responsibleUserName
-                                    ? `По клиенту: ${selectedClient.responsibleUserName}`
+                                    ? `Р СџР С• Р С”Р В»Р С‘Р ВµР Р…РЎвЂљРЎС“: ${selectedClient.responsibleUserName}`
                                     : undefined
                                 }
                                 disabled={lookupsLoading}
@@ -2397,13 +2445,13 @@ export function InvoiceModal({
                             </div>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Р С›Р С—Р С‘РЎРѓР В°Р Р…Р С‘Р Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљР В°'}</span>
                               <textarea
                                 value={form.description}
                                 onChange={handleChange('description')}
                                 rows={3}
                                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                                placeholder={t('invoiceDescriptionHint') ?? 'Р СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: РЎРѓРЎвЂЎРЎвЂРЎвЂљ Р Р…Р В° Р С•Р С—Р В»Р В°РЎвЂљРЎС“ Р В°РЎР‚Р ВµР Р…Р Т‘РЎвЂ№ Р С•РЎвЂћР С‘РЎРѓР В° Р В·Р В° Р С‘РЎР‹Р В»РЎРЉ.'}
                               />
                             </label>
                           </div>
@@ -2413,23 +2461,23 @@ export function InvoiceModal({
 
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                           <header className="mb-3 flex items-center justify-between">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р СџР С•Р В·Р С‘РЎвЂ Р С‘Р С‘ РЎРѓРЎвЂЎР ВµРЎвЂљР В°</span>
                             <button
                               type="button"
                               onClick={addLineItem}
                               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              + Добавить
+                              + Р вЂќР С•Р В±Р В°Р Р†Р С‘РЎвЂљРЎРЉ
                             </button>
                           </header>
                           <div className="space-y-2">
                             {lineItems.map((item) => (
                               <div key={item.id} className="flex items-center gap-2">
-                                <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Наименование" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
-                                <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Р СњР В°Р С‘Р СР ВµР Р…Р С•Р Р†Р В°Р Р…Р С‘Р Вµ" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Р С™Р С•Р В»-Р Р†Р С•" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
+                                <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Р вЂўР Т‘." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                                 <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums" />
-                                <button type="button" onClick={() => { void removeLineItem(item.id); }} className="w-10 rounded-lg border border-slate-200 px-1 text-slate-500 hover:bg-slate-50" aria-label="Удалить">×</button>
+<button type="button" onClick={() => { void removeLineItem(item.id); }} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" aria-label="РЈРґР°Р»РёС‚СЊ" title="Удалить позицию"><X className="h-4 w-4" /></button>
                               </div>
                             ))}
                           </div>
@@ -2443,17 +2491,17 @@ export function InvoiceModal({
                               <option key={name} value={name} />
                             ))}
                           </datalist>
-                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
+                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Р ВРЎвЂљР С•Р С–Р С•: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <header className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Платежи по счёту
+                      Р СџР В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—Р С• РЎРѓРЎвЂЎРЎвЂРЎвЂљРЎС“
                     </span>
                     <p className="mt-1 text-sm text-slate-500">
-                      Здесь отображаются связанные календарные платежи и оплаты по текущему счёту.
+                      Р вЂ”Р Т‘Р ВµРЎРѓРЎРЉ Р С•РЎвЂљР С•Р В±РЎР‚Р В°Р В¶Р В°РЎР‹РЎвЂљРЎРѓРЎРЏ РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С”Р В°Р В»Р ВµР Р…Р Т‘Р В°РЎР‚Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С‘ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С—Р С• РЎвЂљР ВµР С”РЎС“РЎвЂ°Р ВµР СРЎС“ РЎРѓРЎвЂЎРЎвЂРЎвЂљРЎС“.
                     </p>
                   </div>
                   {canShowRelatedPaymentActions && (
@@ -2463,23 +2511,23 @@ export function InvoiceModal({
                       className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
                     >
                       <Plus className="h-4 w-4" />
-                      Добавить платеж
+                      Р вЂќР С•Р В±Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р С—Р В»Р В°РЎвЂљР ВµР В¶
                     </button>
                   )}
                 </header>
 
                 {!canManageRelatedPayments ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    Сначала сохраните счёт, после этого здесь можно будет создавать и редактировать связанные платежи.
+                    Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљР Вµ РЎРѓРЎвЂЎРЎвЂРЎвЂљ, Р С—Р С•РЎРѓР В»Р Вµ РЎРЊРЎвЂљР С•Р С–Р С• Р В·Р Т‘Р ВµРЎРѓРЎРЉ Р СР С•Р В¶Р Р…Р С• Р В±РЎС“Р Т‘Р ВµРЎвЂљ РЎРѓР С•Р В·Р Т‘Р В°Р Р†Р В°РЎвЂљРЎРЉ Р С‘ РЎР‚Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ РЎРѓР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘.
                   </div>
                 ) : paymentsLoading ? (
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {t('loading') ?? 'Загрузка...'}
+                    {t('loading') ?? 'Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В°...'}
                   </div>
                 ) : displayPayments.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    Связанные платежи пока не добавлены.
+                    Р РЋР Р†РЎРЏР В·Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С‘ Р С—Р С•Р С”Р В° Р Р…Р Вµ Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р…РЎвЂ№.
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2508,17 +2556,17 @@ export function InvoiceModal({
                             </span>
                             {installmentMeta ? (
                               <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
-                                Рассрочка {installmentSequenceLabel}
+                                Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° {installmentSequenceLabel}
                               </span>
                             ) : null}
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
-                            {payment.description?.trim() || 'Без описания'}
+                            {payment.description?.trim() || 'Р вЂР ВµР В· Р С•Р С—Р С‘РЎРѓР В°Р Р…Р С‘РЎРЏ'}
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                            <span>План: {formatDate(payment.plannedDate || payment.date) || '—'}</span>
-                            <span>Факт: {formatDate(payment.paidDate || payment.lastPaymentDate) || '—'}</span>
-                            {payment.account && <span>Счёт: {payment.account}</span>}
+                            <span>Р СџР В»Р В°Р Р…: {formatDate(payment.plannedDate || payment.date) || 'РІР‚вЂќ'}</span>
+                            <span>Р В¤Р В°Р С”РЎвЂљ: {formatDate(payment.paidDate || payment.lastPaymentDate) || 'РІР‚вЂќ'}</span>
+                            {payment.account && <span>Р РЋРЎвЂЎРЎвЂРЎвЂљ: {payment.account}</span>}
                           </div>
                         </div>
                         {(onEditRelatedPayment || onDeleteRelatedPayment) && (
@@ -2528,8 +2576,8 @@ export function InvoiceModal({
                                 type="button"
                                 onClick={() => onEditRelatedPayment(payment)}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
-                                title={t('edit') ?? 'Редактировать'}
-                                aria-label={t('edit') ?? 'Редактировать'}
+                                title={t('edit') ?? 'Р В Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ'}
+                                aria-label={t('edit') ?? 'Р В Р ВµР Т‘Р В°Р С”РЎвЂљР С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉ'}
                               >
                                 <Pencil className="h-4 w-4" />
                               </button>
@@ -2541,8 +2589,8 @@ export function InvoiceModal({
                                   void onDeleteRelatedPayment(payment);
                                 }}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-red-600 transition hover:bg-red-50"
-                                title={t('delete') ?? 'Удалить'}
-                                aria-label={t('delete') ?? 'Удалить'}
+                                title={t('delete') ?? 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ'}
+                                aria-label={t('delete') ?? 'Р Р€Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ'}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -2561,20 +2609,20 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoicePartiesTitle') ?? 'Поставщик услуг и договор'}
+                              {t('invoicePartiesTitle') ?? 'Р СџР С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С” РЎС“РЎРѓР В»РЎС“Р С– Р С‘ Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚'}
                             </span>
               
                           </header>
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Поставщик услуг'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Р СџР С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С” РЎС“РЎРѓР В»РЎС“Р С–'}</span>
                               <div className="flex gap-2">
                                 <input
                                   type="text"
                                   value={selectedClient?.name ?? ''}
                                   readOnly
                                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50"
-                                  placeholder={t('invoiceClientPlaceholder') ?? 'Выберите поставщика услуг'}
+                                  placeholder={t('invoiceClientPlaceholder') ?? 'Р вЂ™РЎвЂ№Р В±Р ВµРЎР‚Р С‘РЎвЂљР Вµ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–'}
                                 />
                                 <button
                                   type="button"
@@ -2585,7 +2633,7 @@ export function InvoiceModal({
                                 </button>
                               </div>
                               {lookupsLoading && (
-                                <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
+                                <span className="text-xs text-slate-500">{t('loading') ?? 'Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В°...'}</span>
                               )}
                               {lookupsError && (
                                 <span className="text-xs text-rose-600">{lookupsError}</span>
@@ -2597,7 +2645,7 @@ export function InvoiceModal({
                                   )}
                                   {selectedClient.responsibleUserName && (
                                     <p className="text-xs text-slate-600">
-                                      Ответственный: {selectedClient.responsibleUserName}
+                                      Р С›РЎвЂљР Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…РЎвЂ№Р в„–: {selectedClient.responsibleUserName}
                                     </p>
                                   )}
                                   {selectedClient.clientStatus.description && (
@@ -2611,28 +2659,44 @@ export function InvoiceModal({
                                   onClick={() => handleOpenClientCard(selectedClient.id)}
                                   className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
                                 >
-                                  Открыть карточку поставщика услуг
+                                  Р С›РЎвЂљР С”РЎР‚РЎвЂ№РЎвЂљРЎРЉ Р С”Р В°РЎР‚РЎвЂљР С•РЎвЂЎР С”РЎС“ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–
                                 </button>
                               )}
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">Договор</span>
-                              <select
-                                value={form.contractId}
-                                onChange={handleChange('contractId')}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                disabled={!form.clientId || contractsLoading}
-                              >
-                                <option value="">Без договора</option>
-                                {contractOptions.map((contract) => (
-                                  <option key={contract.id} value={String(contract.id)}>
-                                    {contract.number}{contract.title ? ` — ${contract.title}` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                              {contractsLoading && <span className="text-xs text-slate-500">Загрузка договоров...</span>}
+                              <span className="font-medium text-slate-700">Р вЂќР С•Р С–Р С•Р Р†Р С•РЎР‚</span>
+                              <div className="flex items-stretch gap-2">
+                                <select
+                                  value={form.contractId}
+                                  onChange={handleChange('contractId')}
+                                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  disabled={!form.clientId || contractsLoading}
+                                >
+                                  <option value="">Р вЂР ВµР В· Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚Р В°</option>
+                                  {contractOptions.map((contract) => (
+                                    <option key={contract.id} value={String(contract.id)}>
+                                      {contract.number}{contract.title ? ` РІР‚вЂќ ${contract.title}` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCreateContractError(null);
+                                    setCreateContractOpen(true);
+                                  }}
+                                  disabled={!form.clientId}
+                                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  aria-label="Р”РѕР±Р°РІРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
+                                  title="Р”РѕР±Р°РІРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              </div>
+                              {contractsLoading && <span className="text-xs text-slate-500">Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В° Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚Р С•Р Р†...</span>}
                               {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
+                              {!form.clientId && <span className="text-xs text-slate-500">РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°, Р·Р°С‚РµРј РјРѕР¶РЅРѕ Р±СѓРґРµС‚ Р±С‹СЃС‚СЂРѕ СЃРѕР·РґР°С‚СЊ РґРѕРіРѕРІРѕСЂ.</span>}
                             </label>
 
                           </div>
@@ -2641,13 +2705,13 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceScheduleTitle') ?? 'Сроки и оплата'}
+                              {t('invoiceScheduleTitle') ?? 'Р РЋРЎР‚Р С•Р С”Р С‘ Р С‘ Р С•Р С—Р В»Р В°РЎвЂљР В°'}
                             </span>
               
                           </header>
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Дата выставления'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Р вЂќР В°РЎвЂљР В° Р Р†РЎвЂ№РЎРѓРЎвЂљР В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ'}</span>
                               <input
                                 type="date"
                                 value={form.date}
@@ -2658,7 +2722,7 @@ export function InvoiceModal({
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Срок оплаты'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Р РЋРЎР‚Р С•Р С” Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№'}</span>
                               <input
                                 type="date"
                                 value={form.dueDate}
@@ -2668,7 +2732,7 @@ export function InvoiceModal({
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Дата оплаты'}</span>
+                              <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Р вЂќР В°РЎвЂљР В° Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№'}</span>
                               <input
                                 type="date"
                                 value={form.paidDate}
@@ -2691,7 +2755,7 @@ export function InvoiceModal({
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+                {mode === 'edit' ? 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљРЎРЉ' : t('invoiceCreate') ?? 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљ'}
               </button>
               <button
                 type="button"
@@ -2704,7 +2768,7 @@ export function InvoiceModal({
                 }}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
               >
-                {t('cancel') ?? 'Отмена'}
+                {t('cancel') ?? 'Р С›РЎвЂљР СР ВµР Р…Р В°'}
               </button>
             </div>
           )}
@@ -2716,7 +2780,7 @@ export function InvoiceModal({
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-base font-semibold text-slate-900">
-                {t('invoicePickClientTitle') ?? 'Выбор поставщика услуг'}
+                {t('invoicePickClientTitle') ?? 'Р вЂ™РЎвЂ№Р В±Р С•РЎР‚ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†РЎвЂ°Р С‘Р С”Р В° РЎС“РЎРѓР В»РЎС“Р С–'}
               </h3>
               <button type="button" onClick={() => setClientPickerOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
@@ -2726,7 +2790,7 @@ export function InvoiceModal({
               type="text"
               value={clientPickerSearch}
               onChange={(event) => setClientPickerSearch(event.target.value)}
-              placeholder={t('search') ?? 'Поиск'}
+              placeholder={t('search') ?? 'Р СџР С•Р С‘РЎРѓР С”'}
               className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
             <div className="max-h-72 overflow-auto rounded-lg border border-slate-200">
@@ -2777,44 +2841,60 @@ export function InvoiceModal({
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-slate-900">{t('actCreate') ?? 'Создать акт'}</h3>
+              <h3 className="text-base font-semibold text-slate-900">{t('actCreate') ?? 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ'}</h3>
               <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'Р СњР С•Р СР ВµРЎР‚ Р В°Р С”РЎвЂљР В°'}</span>
                 <input value={draftAct.number} onChange={(e) => setDraftAct((prev) => ({ ...prev, number: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Р вЂќР В°РЎвЂљР В°'}</span>
                 <input type="date" value={draftAct.date} onChange={(e) => setDraftAct((prev) => ({ ...prev, date: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'Р СњР В°Р В·Р Р†Р В°Р Р…Р С‘Р Вµ'}</span>
                 <input value={draftAct.title} onChange={(e) => setDraftAct((prev) => ({ ...prev, title: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'Сумма'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'Р РЋРЎС“Р СР СР В°'}</span>
                 <input value={draftAct.amount} onChange={(e) => setDraftAct((prev) => ({ ...prev, amount: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actComment') ?? 'Р С™Р С•Р СР СР ВµР Р…РЎвЂљР В°РЎР‚Р С‘Р в„–'}</span>
                 <textarea value={draftAct.comment} onChange={(e) => setDraftAct((prev) => ({ ...prev, comment: e.target.value }))} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
             </div>
             {createActError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{createActError}</div>}
             <div className="mt-4 flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'Отмена'}</button>
+              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'Р С›РЎвЂљР СР ВµР Р…Р В°'}</button>
               <button type="button" onClick={() => void handleCreateAct()} disabled={creatingAct} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {creatingAct && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t('actCreate') ?? 'Создать акт'}
+                {t('actCreate') ?? 'Р РЋР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р В°Р С”РЎвЂљ'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <ContractModal
+        open={createContractOpen}
+        mode="create"
+        contract={null}
+        onClose={() => {
+          if (createContractSubmitting) return;
+          setCreateContractOpen(false);
+          setCreateContractError(null);
+        }}
+        onSubmit={handleCreateContractFromInvoice}
+        submitting={createContractSubmitting}
+        errorMessage={createContractError}
+        defaultClients={defaultContractClients}
+        overlayClassName="z-[2300]"
+      />
     </div>
   );
 
