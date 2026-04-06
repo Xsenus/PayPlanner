@@ -105,6 +105,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
 
         await ImportReferenceDataAsync(source, target, result, maps, cancellationToken);
         await ImportBusinessDataAsync(source, target, result, maps, cancellationToken);
+        await RunTableAsync(result, target, "DerivedClientContracts", "Restore client-contract links", table =>
+            RestoreDerivedClientContractsAsync(target, table, cancellationToken));
         await ImportActivityDataAsync(source, target, result, maps, cancellationToken);
 
         result.FinishedAt = DateTime.UtcNow;

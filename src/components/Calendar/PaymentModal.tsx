@@ -112,6 +112,7 @@ export function PaymentModal({
     paymentSourceId: '',
     paymentStatusId: '',
     invoiceId: '',
+    contractId: '',
     type: (type ?? 'Income') as PaymentKind,
     account: '',
     accountDate: '',
@@ -162,6 +163,7 @@ export function PaymentModal({
   const [invoiceCreateOpen, setInvoiceCreateOpen] = useState(false);
   const [invoiceCreateSubmitting, setInvoiceCreateSubmitting] = useState(false);
   const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
+  const [invoiceCreateSeedContractId, setInvoiceCreateSeedContractId] = useState('');
   const [invoiceCreateResponsibles, setInvoiceCreateResponsibles] = useState<ActResponsible[]>([]);
   const [invoiceCreateLookupsLoading, setInvoiceCreateLookupsLoading] = useState(false);
   const [invoiceCreateLookupsError, setInvoiceCreateLookupsError] = useState<string | null>(null);
@@ -214,7 +216,7 @@ export function PaymentModal({
         type: formData.type,
         status: formData.status,
         clientId,
-        contractId: '',
+        contractId: formData.contractId || invoiceCreateSeedContractId,
         clientCaseReference: '',
         description,
         actReference: '',
@@ -233,7 +235,7 @@ export function PaymentModal({
       selectedActs: [],
       selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
     };
-  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen]);
+  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
   /* -------------------- Legacy account fields stay read-only -------------------- */
   useEffect(() => {
@@ -356,6 +358,7 @@ export function PaymentModal({
       setInvoicePickerOpen(false);
       setInvoiceSearch('');
       setInvoicePickerError(null);
+      setInvoiceCreateSeedContractId('');
       return;
     }
 
@@ -382,6 +385,7 @@ export function PaymentModal({
           paymentSourceId: p.paymentSourceId?.toString() || '',
           paymentStatusId: p.paymentStatusId?.toString() || '',
           invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
+          contractId: p.contractId?.toString() || '',
           type: (p.type as PaymentKind) ?? linkedInvoice?.type ?? type ?? 'Income',
           account: linkedInvoice?.number ?? p.account ?? '',
           accountDate: toDateInputValue(linkedInvoice?.date) || toDateInputValue(p.accountDate) || '',
@@ -413,6 +417,7 @@ export function PaymentModal({
           paymentSourceId: '',
           paymentStatusId: '',
           invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
+          contractId: '',
           type: (linkedInvoice?.type ?? type ?? 'Income') as PaymentKind,
           account: linkedInvoice?.number ?? '',
           accountDate: toDateInputValue(linkedInvoice?.date) || '',
@@ -855,6 +860,7 @@ export function PaymentModal({
       ...prev,
       clientId: String(client.id),
       clientCaseId: '',
+      contractId: hasLockedInvoice ? prev.contractId : '',
       invoiceId: hasLockedInvoice ? prev.invoiceId : '',
       account: hasLockedInvoice ? prev.account : '',
       accountDate: hasLockedInvoice ? prev.accountDate : '',
@@ -890,6 +896,7 @@ export function PaymentModal({
       invoiceId: String(canonicalId),
       account: invoice.number,
       accountDate: toDateInputValue(invoice.date) || prev.accountDate,
+      contractId: invoice.contractId ? String(invoice.contractId) : prev.contractId,
       type: invoice.type ?? prev.type,
       clientId: invoice.clientId ? String(invoice.clientId) : prev.clientId,
       clientCaseId: invoice.clientCaseId ? String(invoice.clientCaseId) : prev.clientCaseId,
@@ -912,6 +919,7 @@ export function PaymentModal({
 
     setFormData((prev) => ({
       ...prev,
+      contractId: '',
       invoiceId: '',
       account: '',
       accountDate: '',
@@ -927,6 +935,27 @@ export function PaymentModal({
       return;
     }
 
+    let seedContractId = formData.contractId;
+    if (!seedContractId) {
+      try {
+        const response = await apiService.getContracts({
+          clientId,
+          page: 1,
+          pageSize: 25,
+          sortBy: 'createdAt',
+          sortDir: 'desc',
+        });
+
+        const latestContract = response.items?.[0];
+        if (latestContract?.id) {
+          seedContractId = String(latestContract.id);
+        }
+      } catch {
+        seedContractId = '';
+      }
+    }
+
+    setInvoiceCreateSeedContractId(seedContractId);
     setInvoiceCreateError(null);
     setInvoicePickerOpen(false);
     setInvoiceCreateOpen(true);
@@ -950,9 +979,24 @@ export function PaymentModal({
         return [normalizedCreated, ...next];
       });
 
-      applyInvoiceSelection(normalizedCreated);
+      
       setInvoiceCreateOpen(false);
-      toast.success('Счет создан и привязан к платежу.', 'Создание счета');
+      setInvoiceCreateError(null);
+      setInvoicePickerOpen(false);
+      setInvoiceCreateSeedContractId('');
+      const finalizeSelection = () => {
+        applyInvoiceSelection(normalizedCreated);
+        return toast.success('\u0421\u0447\u0435\u0442 \u0441\u043e\u0437\u0434\u0430\u043d \u0438 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u043f\u043b\u0430\u0442\u0435\u0436\u0443.', '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0441\u0447\u0435\u0442\u0430');
+        toast.success('РЎС‡РµС‚ СЃРѕР·РґР°РЅ Рё РїСЂРёРІСЏР·Р°РЅ Рє РїР»Р°С‚РµР¶Сѓ.', 'РЎРѕР·РґР°РЅРёРµ СЃС‡РµС‚Р°');
+      };
+
+      if (typeof window !== 'undefined') {
+        window.setTimeout(finalizeSelection, 0);
+      } else {
+        finalizeSelection();
+      }
+
+      return;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось создать счет.';
       setInvoiceCreateError(message);
@@ -1951,6 +1995,7 @@ export function PaymentModal({
       onClose={() => {
         setInvoiceCreateOpen(false);
         setInvoiceCreateError(null);
+        setInvoiceCreateSeedContractId('');
       }}
       onSubmit={handleSubmitCreatedInvoice}
       submitting={invoiceCreateSubmitting}
@@ -1976,7 +2021,7 @@ export function PaymentModal({
   return (
     <>
       {createPortal(modal, document.body)}
-      {createInvoiceModal}
+      {createPortal(createInvoiceModal, document.body)}
     </>
   );
 }
