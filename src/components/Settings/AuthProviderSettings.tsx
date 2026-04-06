@@ -174,18 +174,24 @@ function Card({
   title,
   children,
   actions,
+  headerClassName = '',
+  titleClassName = '',
+  bodyClassName = '',
 }: {
   title: string;
   children: ReactNode;
   actions?: ReactNode;
+  headerClassName?: string;
+  titleClassName?: string;
+  bodyClassName?: string;
 }) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      <div className={`flex flex-wrap items-start justify-between gap-3 ${headerClassName}`.trim()}>
+        <h3 className={`text-lg font-semibold text-slate-900 ${titleClassName}`.trim()}>{title}</h3>
         {actions}
       </div>
-      <div className="mt-4 space-y-4">{children}</div>
+      <div className={`mt-4 space-y-4 ${bodyClassName}`.trim()}>{children}</div>
     </div>
   );
 }
@@ -217,6 +223,15 @@ function ReadonlyField({
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function AutofillGuard() {
+  return (
+    <div className="hidden" aria-hidden="true">
+      <input type="text" name="pp_fake_username" autoComplete="username" tabIndex={-1} />
+      <input type="password" name="pp_fake_password" autoComplete="current-password" tabIndex={-1} />
     </div>
   );
 }
@@ -522,14 +537,14 @@ export function AuthProviderSettings() {
 
       <div className="grid gap-6 xl:grid-cols-[280px,minmax(0,1fr)]">
         <aside className="space-y-4">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 text-center shadow-sm">
             <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Секция доступа</div>
             <div className="mt-3 text-2xl font-semibold text-slate-900">Внешняя авторизация</div>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Каждый блок сохраняется отдельно. Проверки показывают только готовность backend и публичной части. Совпадение
               callback URL с кабинетом провайдера нужно сверять вручную.
             </p>
-            <div className="mt-4">
+            <div className="mt-4 flex justify-center">
               <ActionButton busy={refreshing} onClick={() => void refreshAll(true)} icon={<RefreshCw size={16} />} variant="secondary">
                 Обновить статусы
               </ActionButton>
@@ -548,33 +563,46 @@ export function AuthProviderSettings() {
               ))}
             </div>
           </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
-            <div className="text-base font-semibold text-slate-900">Следующий модуль</div>
-            <div className="mt-3 space-y-3 leading-6">
-              <div>
-                <div className="font-semibold text-slate-800">Telegram Bots</div>
-                <div>Несколько ботов, автоответы, команды и шаблоны нужно выносить в отдельную секцию, как в `clothing_store`.</div>
-              </div>
-              <div>
-                <div className="font-semibold text-slate-800">Email</div>
-                <div>SMTP и шаблоны писем у нас тоже нужно развивать отдельным административным блоком.</div>
-              </div>
-            </div>
-          </div>
         </aside>
 
         <div className="space-y-6">
           {activeSection === 'overview' ? (
             <>
-              <Card title="Текущая сводка">
-                <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+              <Card
+                title="Текущая сводка"
+                headerClassName="justify-center"
+                titleClassName="w-full text-center"
+              >
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                   {summaryCards.map((item) => (
-                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div
+                      key={item.label}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-center"
+                    >
                       <div className="text-sm font-semibold text-slate-900">{item.label}</div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <StatusPill label={item.ready ? 'Backend готов' : 'Backend не готов'} tone={item.ready ? 'success' : 'warning'} />
-                        <StatusPill label={item.visible ? 'Виден на входе' : 'Скрыт'} tone={item.visible ? 'success' : 'muted'} />
+                      <div className="mt-4 space-y-3">
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
+                            Backend
+                          </div>
+                          <div className="flex justify-center">
+                            <StatusPill
+                              label={item.ready ? 'Готов' : 'Не готов'}
+                              tone={item.ready ? 'success' : 'warning'}
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
+                            Вход
+                          </div>
+                          <div className="flex justify-center">
+                            <StatusPill
+                              label={item.visible ? 'Виден' : 'Скрыт'}
+                              tone={item.visible ? 'success' : 'muted'}
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -654,6 +682,7 @@ export function AuthProviderSettings() {
                   </div>
                 }
               >
+                <AutofillGuard />
                 <div className="grid gap-4 lg:grid-cols-2">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-slate-700">Client ID</span>
@@ -662,6 +691,13 @@ export function AuthProviderSettings() {
                       value={settings.googleClientId}
                       onChange={(event) => setSettings((current) => ({ ...current, googleClientId: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="google-oauth-client-id"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="Google OAuth Client ID"
                     />
                   </label>
@@ -672,6 +708,13 @@ export function AuthProviderSettings() {
                       value={settings.googleClientSecret}
                       onChange={(event) => setSettings((current) => ({ ...current, googleClientSecret: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="google-oauth-client-secret"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="Google OAuth Client Secret"
                     />
                   </label>
@@ -740,6 +783,7 @@ export function AuthProviderSettings() {
                   </div>
                 }
               >
+                <AutofillGuard />
                 <div className="grid gap-4 lg:grid-cols-2">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-slate-700">App ID / Client ID</span>
@@ -748,6 +792,13 @@ export function AuthProviderSettings() {
                       value={settings.vkClientId}
                       onChange={(event) => setSettings((current) => ({ ...current, vkClientId: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="vk-oauth-client-id"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="VK Client ID"
                     />
                   </label>
@@ -758,6 +809,13 @@ export function AuthProviderSettings() {
                       value={settings.vkClientSecret}
                       onChange={(event) => setSettings((current) => ({ ...current, vkClientSecret: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="vk-oauth-client-secret"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="VK Client Secret"
                     />
                   </label>
@@ -826,6 +884,7 @@ export function AuthProviderSettings() {
                   </div>
                 }
               >
+                <AutofillGuard />
                 <div className="grid gap-4 lg:grid-cols-2">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-slate-700">Client ID</span>
@@ -834,6 +893,13 @@ export function AuthProviderSettings() {
                       value={settings.yandexClientId}
                       onChange={(event) => setSettings((current) => ({ ...current, yandexClientId: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="yandex-oauth-client-id"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="Yandex Client ID"
                     />
                   </label>
@@ -844,6 +910,13 @@ export function AuthProviderSettings() {
                       value={settings.yandexClientSecret}
                       onChange={(event) => setSettings((current) => ({ ...current, yandexClientSecret: event.target.value }))}
                       className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      name="yandex-oauth-client-secret"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       placeholder="Yandex Client Secret"
                     />
                   </label>
