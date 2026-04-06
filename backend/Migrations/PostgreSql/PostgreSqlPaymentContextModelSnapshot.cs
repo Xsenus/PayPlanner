@@ -1858,7 +1858,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -1870,11 +1872,24 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTime?>("PermissionsUpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("PermissionsUpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PermissionsUpdatedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
                         .IsUnique()
                         .HasDatabaseName("IX_Roles_Name");
+
+                    b.HasIndex("PermissionsUpdatedAt")
+                        .HasDatabaseName("IX_Roles_PermissionsUpdatedAt");
 
                     b.ToTable("Roles");
                 });

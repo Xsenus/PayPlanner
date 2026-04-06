@@ -38,5 +38,12 @@ namespace PayPlanner.Api.Models.Responses
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public DateTime? CreatedAt { get; set; }
+        public bool IsSystemRole { get; set; }
+        public int AssignedUsersCount { get; set; }
+        public int AccessibleSectionsCount { get; set; }
+        public int TotalSectionsCount { get; set; }
+        public DateTime? PermissionsUpdatedAt { get; set; }
+        public int? PermissionsUpdatedByUserId { get; set; }
+        public string? PermissionsUpdatedByUserName { get; set; }
     }
 }

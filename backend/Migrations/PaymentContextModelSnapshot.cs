@@ -1799,7 +1799,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -1811,11 +1813,24 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("PermissionsUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PermissionsUpdatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PermissionsUpdatedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
                         .IsUnique()
                         .HasDatabaseName("IX_Roles_Name");
+
+                    b.HasIndex("PermissionsUpdatedAt")
+                        .HasDatabaseName("IX_Roles_PermissionsUpdatedAt");
 
                     b.ToTable("Roles");
                 });

@@ -6,6 +6,9 @@ public class Role
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? PermissionsUpdatedAt { get; set; }
+    public int? PermissionsUpdatedByUserId { get; set; }
+    public string? PermissionsUpdatedByUserName { get; set; }
 
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<RolePermission> Permissions { get; set; } = new List<RolePermission>();

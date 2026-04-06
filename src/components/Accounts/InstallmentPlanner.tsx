@@ -1,4 +1,4 @@
-﻿import { CalendarDays, CreditCard, Loader2, ReceiptText, Wallet } from 'lucide-react';
+import { CalendarDays, CreditCard, Loader2, ReceiptText, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useDialog } from '../../hooks/useDialog';

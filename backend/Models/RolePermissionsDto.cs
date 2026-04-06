@@ -23,6 +23,8 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto LegalEntities { get; set; } = new();
     public MenuSectionPermissionsDto Accounts { get; set; } = new();
     public MenuSectionPermissionsDto Acts { get; set; } = new();
+    public MenuSectionPermissionsDto Payments { get; set; } = new();
     public MenuSectionPermissionsDto Contracts { get; set; } = new();
     public MenuSectionPermissionsDto Dictionaries { get; set; } = new();
+    public MenuSectionPermissionsDto Roles { get; set; } = new();
 }

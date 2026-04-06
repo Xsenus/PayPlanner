@@ -229,18 +229,26 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     return items;
   }, [permissions, t]);
 
+  const canManageRoles = isAdmin() || permissions.roles.canView;
+
   const adminItems = useMemo<SidebarItem[]>(() => {
-    if (!isAdmin()) {
+    if (!isAdmin() && !canManageRoles) {
       return [];
     }
 
     return [
-      { id: 'users', tab: 'users' as Tab, label: 'Пользователи', icon: UserCog },
-      { id: 'roles', tab: 'roles' as Tab, label: 'Роли', icon: Shield },
-      { id: 'userActivity', tab: 'userActivity' as Tab, label: 'Контроль пользователей', icon: Eye },
-      { id: 'settings', tab: 'settings' as Tab, label: 'Настройки', icon: Settings },
+      ...(isAdmin()
+        ? [{ id: 'users', tab: 'users' as Tab, label: '\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438', icon: UserCog }]
+        : []),
+      { id: 'roles', tab: 'roles' as Tab, label: '\u0420\u043e\u043b\u0438', icon: Shield },
+      ...(isAdmin()
+        ? [
+            { id: 'userActivity', tab: 'userActivity' as Tab, label: '\u041a\u043e\u043d\u0442\u0440\u043e\u043b\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439', icon: Eye },
+            { id: 'settings', tab: 'settings' as Tab, label: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438', icon: Settings },
+          ]
+        : []),
     ];
-  }, [isAdmin]);
+  }, [canManageRoles, isAdmin]);
 
   const sidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
 

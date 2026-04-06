@@ -8,7 +8,8 @@ export type MenuSectionKey =
   | 'acts'
   | 'payments'
   | 'contracts'
-  | 'dictionaries';
+  | 'dictionaries'
+  | 'roles';
 
 export type MenuPermissionKey =
   | 'canView'
@@ -48,6 +49,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'payments',
   'contracts',
   'dictionaries',
+  'roles',
 ];
 
 export const MENU_PERMISSION_KEYS: MenuPermissionKey[] = [
@@ -66,6 +68,14 @@ export const defaultMenuPermissions: MenuSectionPermissions = {
   canExport: true,
 };
 
+export const defaultRestrictedMenuPermissions: MenuSectionPermissions = {
+  canView: false,
+  canCreate: false,
+  canEdit: false,
+  canDelete: false,
+  canExport: false,
+};
+
 export const defaultRolePermissions: RolePermissions = {
   calendar: {
     ...defaultMenuPermissions,
@@ -80,4 +90,5 @@ export const defaultRolePermissions: RolePermissions = {
   payments: { ...defaultMenuPermissions },
   contracts: { ...defaultMenuPermissions },
   dictionaries: { ...defaultMenuPermissions },
+  roles: { ...defaultRestrictedMenuPermissions },
 };

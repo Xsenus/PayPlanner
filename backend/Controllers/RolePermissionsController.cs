@@ -1,62 +1,49 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [Route("api/role-permissions")]
+[Authorize]
 public class RolePermissionsController : ControllerBase
 {
-    private static readonly string[] Sections =
-    {
-        "calendar",
-        "reports",
-        "calculator",
-        "clients",
-        "legalEntities",
-        "accounts",
-        "acts",
-        "contracts",
-        "dictionaries",
-    };
+    private const string SystemAdministratorRoleName = "admin";
 
     private readonly PaymentContext _db;
+    private readonly RoleManagementAccessService _roleAccess;
 
-    public RolePermissionsController(PaymentContext db) => _db = db;
+    public RolePermissionsController(PaymentContext db, RoleManagementAccessService roleAccess)
+    {
+        _db = db;
+        _roleAccess = roleAccess;
+    }
 
     [HttpGet("{roleId:int}")]
-    [Authorize]
     public async Task<ActionResult<RolePermissionsDto>> Get(int roleId, CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        var access = await _roleAccess.GetSnapshotAsync(User, ct);
+        if (!access.IsAdmin && !access.CanView && access.RoleId != roleId)
         {
-            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!int.TryParse(userIdClaim, out var userId))
-            {
-                return Forbid();
-            }
-
-            var userRoleId = await _db.Users
-                .AsNoTracking()
-                .Where(u => u.Id == userId)
-                .Select(u => u.RoleId)
-                .FirstOrDefaultAsync(ct);
-
-            if (userRoleId == 0 || userRoleId != roleId)
-            {
-                return Forbid();
-            }
+            return Forbid();
         }
 
-        if (!await _db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct))
+        var roleInfo = await _db.Roles
+            .AsNoTracking()
+            .Where(role => role.Id == roleId)
+            .Select(role => new
+            {
+                role.Id,
+                role.Name
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (roleInfo is null)
         {
             return NotFound();
         }
@@ -66,16 +53,27 @@ public class RolePermissionsController : ControllerBase
             .Where(rp => rp.RoleId == roleId)
             .ToListAsync(ct);
 
-        return Ok(MapToDto(permissions));
+        return Ok(MapToDto(permissions, IsProtectedRole(roleInfo.Name)));
     }
 
     [HttpPut("{roleId:int}")]
-    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> Update(int roleId, [FromBody] RolePermissionsDto request, CancellationToken ct)
     {
-        if (!await _db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct))
+        var access = await _roleAccess.GetSnapshotAsync(User, ct);
+        if (!access.IsAdmin && !access.CanEdit)
+        {
+            return Forbid();
+        }
+
+        var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct);
+        if (role is null)
         {
             return NotFound();
+        }
+
+        if (IsProtectedRole(role.Name))
+        {
+            return BadRequest(new { message = "Стандартную роль администратора нельзя изменять." });
         }
 
         var existing = await _db.RolePermissions
@@ -85,17 +83,12 @@ public class RolePermissionsController : ControllerBase
         var bySection = existing.ToDictionary(rp => rp.Section, StringComparer.OrdinalIgnoreCase);
         var incoming = Flatten(request);
 
-        foreach (var section in Sections)
+        foreach (var section in RolePermissionCatalog.AllSections)
         {
-            var values = incoming[section];
+            var values = Normalize(section, incoming[section]);
             if (bySection.TryGetValue(section, out var entity))
             {
-                entity.CanView = values.CanView;
-                entity.CanCreate = values.CanCreate;
-                entity.CanEdit = values.CanEdit;
-                entity.CanDelete = values.CanDelete;
-                entity.CanExport = values.CanExport;
-                entity.CanViewAnalytics = values.CanViewAnalytics;
+                Apply(entity, values);
             }
             else
             {
@@ -113,42 +106,93 @@ public class RolePermissionsController : ControllerBase
             }
         }
 
-        var unused = existing.Where(rp => !incoming.ContainsKey(rp.Section)).ToList();
+        var unused = existing
+            .Where(rp => !RolePermissionCatalog.AllSections.Contains(rp.Section, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
         if (unused.Count > 0)
         {
             _db.RolePermissions.RemoveRange(unused);
         }
 
+        StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 
     [HttpDelete("{roleId:int}")]
-    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> Reset(int roleId, CancellationToken ct)
     {
-        var entries = await _db.RolePermissions
+        var access = await _roleAccess.GetSnapshotAsync(User, ct);
+        if (!access.IsAdmin && !access.CanEdit)
+        {
+            return Forbid();
+        }
+
+        var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct);
+        if (role is null)
+        {
+            return NotFound();
+        }
+
+        if (IsProtectedRole(role.Name))
+        {
+            return BadRequest(new { message = "Стандартную роль администратора нельзя изменять." });
+        }
+
+        var defaults = RolePermissionCatalog.BuildDefaults(false);
+        var existing = await _db.RolePermissions
             .Where(rp => rp.RoleId == roleId)
             .ToListAsync(ct);
 
-        if (entries.Count == 0)
+        var bySection = existing.ToDictionary(rp => rp.Section, StringComparer.OrdinalIgnoreCase);
+        foreach (var section in RolePermissionCatalog.AllSections)
         {
-            return NoContent();
+            var values = defaults[section];
+            if (bySection.TryGetValue(section, out var entity))
+            {
+                Apply(entity, values);
+            }
+            else
+            {
+                _db.RolePermissions.Add(new RolePermission
+                {
+                    RoleId = roleId,
+                    Section = section,
+                    CanView = values.CanView,
+                    CanCreate = values.CanCreate,
+                    CanEdit = values.CanEdit,
+                    CanDelete = values.CanDelete,
+                    CanExport = values.CanExport,
+                    CanViewAnalytics = values.CanViewAnalytics,
+                });
+            }
         }
 
-        _db.RolePermissions.RemoveRange(entries);
+        var unused = existing
+            .Where(rp => !RolePermissionCatalog.AllSections.Contains(rp.Section, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (unused.Count > 0)
+        {
+            _db.RolePermissions.RemoveRange(unused);
+        }
+
+        StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    private static RolePermissionsDto MapToDto(IReadOnlyCollection<RolePermission> permissions)
+    private static RolePermissionsDto MapToDto(
+        IReadOnlyCollection<RolePermission> permissions,
+        bool allowRoleManagement)
     {
-        var dto = CreateDefault();
+        var dto = RolePermissionCatalog.CreateDto(allowRoleManagement);
         foreach (var permission in permissions)
         {
             switch (permission.Section)
             {
-                case "calendar":
+                case RolePermissionCatalog.Calendar:
                     dto.Calendar = new CalendarPermissionsDto
                     {
                         CanView = permission.CanView,
@@ -159,29 +203,35 @@ public class RolePermissionsController : ControllerBase
                         CanViewAnalytics = permission.CanViewAnalytics,
                     };
                     break;
-                case "reports":
+                case RolePermissionCatalog.Reports:
                     dto.Reports = ToSection(permission);
                     break;
-                case "calculator":
+                case RolePermissionCatalog.Calculator:
                     dto.Calculator = ToSection(permission);
                     break;
-                case "clients":
-                    dto.Clients = ToSection(permission);
-                    break;
-                case "legalEntities":
+                case RolePermissionCatalog.LegalEntities:
                     dto.LegalEntities = ToSection(permission);
                     break;
-                case "accounts":
+                case RolePermissionCatalog.Clients:
+                    dto.Clients = ToSection(permission);
+                    break;
+                case RolePermissionCatalog.Accounts:
                     dto.Accounts = ToSection(permission);
                     break;
-                case "acts":
+                case RolePermissionCatalog.Acts:
                     dto.Acts = ToSection(permission);
                     break;
-                case "contracts":
+                case RolePermissionCatalog.Payments:
+                    dto.Payments = ToSection(permission);
+                    break;
+                case RolePermissionCatalog.Contracts:
                     dto.Contracts = ToSection(permission);
                     break;
-                case "dictionaries":
+                case RolePermissionCatalog.Dictionaries:
                     dto.Dictionaries = ToSection(permission);
+                    break;
+                case RolePermissionCatalog.Roles:
+                    dto.Roles = ToSection(permission);
                     break;
             }
         }
@@ -189,62 +239,63 @@ public class RolePermissionsController : ControllerBase
         return dto;
     }
 
-    private static Dictionary<string, SectionValues> Flatten(RolePermissionsDto dto)
+    private static Dictionary<string, RolePermissionValues> Flatten(RolePermissionsDto dto)
         => new(StringComparer.OrdinalIgnoreCase)
         {
-            ["calendar"] = ToValues(dto.Calendar),
-            ["reports"] = ToValues(dto.Reports),
-            ["calculator"] = ToValues(dto.Calculator),
-            ["clients"] = ToValues(dto.Clients),
-            ["legalEntities"] = ToValues(dto.LegalEntities),
-            ["accounts"] = ToValues(dto.Accounts),
-            ["acts"] = ToValues(dto.Acts),
-            ["contracts"] = ToValues(dto.Contracts),
-            ["dictionaries"] = ToValues(dto.Dictionaries),
+            [RolePermissionCatalog.Calendar] = ToValues(dto.Calendar),
+            [RolePermissionCatalog.Reports] = ToValues(dto.Reports),
+            [RolePermissionCatalog.Calculator] = ToValues(dto.Calculator),
+            [RolePermissionCatalog.LegalEntities] = ToValues(dto.LegalEntities),
+            [RolePermissionCatalog.Clients] = ToValues(dto.Clients),
+            [RolePermissionCatalog.Accounts] = ToValues(dto.Accounts),
+            [RolePermissionCatalog.Acts] = ToValues(dto.Acts),
+            [RolePermissionCatalog.Payments] = ToValues(dto.Payments),
+            [RolePermissionCatalog.Contracts] = ToValues(dto.Contracts),
+            [RolePermissionCatalog.Dictionaries] = ToValues(dto.Dictionaries),
+            [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
         };
 
-    private static RolePermissionsDto CreateDefault()
+    private void StampPermissionsAudit(Role role)
     {
-        var allTrue = new MenuSectionPermissionsDto
-        {
-            CanView = true,
-            CanCreate = true,
-            CanEdit = true,
-            CanDelete = true,
-            CanExport = true,
-        };
+        role.PermissionsUpdatedAt = DateTime.UtcNow;
+        role.PermissionsUpdatedByUserId = User.GetUserId();
+        role.PermissionsUpdatedByUserName = User.GetDisplayName();
+    }
 
-        return new RolePermissionsDto
+    private static void Apply(RolePermission entity, RolePermissionValues values)
+    {
+        entity.CanView = values.CanView;
+        entity.CanCreate = values.CanCreate;
+        entity.CanEdit = values.CanEdit;
+        entity.CanDelete = values.CanDelete;
+        entity.CanExport = values.CanExport;
+        entity.CanViewAnalytics = values.CanViewAnalytics;
+    }
+
+    private static RolePermissionValues Normalize(string section, RolePermissionValues values)
+    {
+        if (!values.CanView)
         {
-            Calendar = new CalendarPermissionsDto
-            {
-                CanView = true,
-                CanCreate = true,
-                CanEdit = true,
-                CanDelete = true,
-                CanExport = true,
-                CanViewAnalytics = true,
-            },
-            Reports = Clone(allTrue),
-            Calculator = Clone(allTrue),
-            Clients = Clone(allTrue),
-            LegalEntities = Clone(allTrue),
-            Accounts = Clone(allTrue),
-            Acts = Clone(allTrue),
-            Contracts = Clone(allTrue),
-            Dictionaries = Clone(allTrue),
+            return new RolePermissionValues(false, false, false, false, false, false);
+        }
+
+        var canExport = string.Equals(section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
+            ? false
+            : values.CanExport;
+
+        var canViewAnalytics = string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
+            ? values.CanViewAnalytics
+            : false;
+
+        return values with
+        {
+            CanExport = canExport,
+            CanViewAnalytics = canViewAnalytics
         };
     }
 
-    private static MenuSectionPermissionsDto Clone(MenuSectionPermissionsDto source)
-        => new()
-        {
-            CanView = source.CanView,
-            CanCreate = source.CanCreate,
-            CanEdit = source.CanEdit,
-            CanDelete = source.CanDelete,
-            CanExport = source.CanExport,
-        };
+    private static bool IsProtectedRole(string roleName)
+        => string.Equals(roleName, SystemAdministratorRoleName, StringComparison.Ordinal);
 
     private static MenuSectionPermissionsDto ToSection(RolePermission permission)
         => new()
@@ -256,11 +307,21 @@ public class RolePermissionsController : ControllerBase
             CanExport = permission.CanExport,
         };
 
-    private static SectionValues ToValues(CalendarPermissionsDto section)
-        => new(section.CanView, section.CanCreate, section.CanEdit, section.CanDelete, section.CanExport, section.CanViewAnalytics);
+    private static RolePermissionValues ToValues(CalendarPermissionsDto section)
+        => new(
+            section.CanView,
+            section.CanCreate,
+            section.CanEdit,
+            section.CanDelete,
+            section.CanExport,
+            section.CanViewAnalytics);
 
-    private static SectionValues ToValues(MenuSectionPermissionsDto section)
-        => new(section.CanView, section.CanCreate, section.CanEdit, section.CanDelete, section.CanExport, section is CalendarPermissionsDto calendar ? calendar.CanViewAnalytics : false);
-
-    private sealed record SectionValues(bool CanView, bool CanCreate, bool CanEdit, bool CanDelete, bool CanExport, bool CanViewAnalytics);
+    private static RolePermissionValues ToValues(MenuSectionPermissionsDto section)
+        => new(
+            section.CanView,
+            section.CanCreate,
+            section.CanEdit,
+            section.CanDelete,
+            section.CanExport,
+            false);
 }

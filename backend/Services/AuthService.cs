@@ -105,7 +105,9 @@ public class AuthService
             Id = user.Role?.Id ?? 0,
             Name = user.Role?.Name ?? "user",
             Description = user.Role?.Description ?? string.Empty,
-            CreatedAt = user.Role?.CreatedAt
+            CreatedAt = user.Role?.CreatedAt,
+            IsSystemRole = user.Role?.Name == "admin",
+            TotalSectionsCount = RolePermissionCatalog.AllSections.Length
         }
     };
 
@@ -271,7 +273,14 @@ public class AuthService
                 Id = r.Id,
                 Name = r.Name,
                 Description = r.Description,
-                CreatedAt = r.CreatedAt
+                CreatedAt = r.CreatedAt,
+                IsSystemRole = r.Name == "admin",
+                AssignedUsersCount = r.Users.Count(),
+                AccessibleSectionsCount = r.Permissions.Count(permission => permission.CanView),
+                TotalSectionsCount = RolePermissionCatalog.AllSections.Length,
+                PermissionsUpdatedAt = r.PermissionsUpdatedAt,
+                PermissionsUpdatedByUserId = r.PermissionsUpdatedByUserId,
+                PermissionsUpdatedByUserName = r.PermissionsUpdatedByUserName
             })
             .ToListAsync();
 

@@ -1,15 +1,10 @@
 import { apiService } from './api';
-import {
-  defaultRolePermissions,
-  type RolePermissions,
-} from '../types/permissions';
+import { defaultRolePermissions, type RolePermissions } from '../types/permissions';
 
 const CHANGE_EVENT = 'pp.permissions.changed';
 
 type ChangeListener = (roleId?: number) => void;
-
 type PermissionsCache = Map<number, RolePermissions>;
-
 type LoadingCache = Map<number, Promise<RolePermissions>>;
 
 const cache: PermissionsCache = new Map();
@@ -17,6 +12,7 @@ const loading: LoadingCache = new Map();
 
 function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
   const source = perms ?? {};
+
   return {
     calendar: {
       ...defaultRolePermissions.calendar,
@@ -30,13 +26,13 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
       ...defaultRolePermissions.calculator,
       ...(source.calculator ?? {}),
     },
-    clients: {
-      ...defaultRolePermissions.clients,
-      ...(source.clients ?? {}),
-    },
     legalEntities: {
       ...defaultRolePermissions.legalEntities,
       ...(source.legalEntities ?? {}),
+    },
+    clients: {
+      ...defaultRolePermissions.clients,
+      ...(source.clients ?? {}),
     },
     accounts: {
       ...defaultRolePermissions.accounts,
@@ -58,6 +54,10 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
       ...defaultRolePermissions.dictionaries,
       ...(source.dictionaries ?? {}),
     },
+    roles: {
+      ...defaultRolePermissions.roles,
+      ...(source.roles ?? {}),
+    },
   };
 }
 
@@ -66,13 +66,14 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
     calendar: { ...perms.calendar },
     reports: { ...perms.reports },
     calculator: { ...perms.calculator },
-    clients: { ...perms.clients },
     legalEntities: { ...perms.legalEntities },
+    clients: { ...perms.clients },
     accounts: { ...perms.accounts },
     acts: { ...perms.acts },
     payments: { ...perms.payments },
     contracts: { ...perms.contracts },
     dictionaries: { ...perms.dictionaries },
+    roles: { ...perms.roles },
   };
 }
 
@@ -80,6 +81,7 @@ function notify(roleId?: number) {
   if (typeof window === 'undefined') {
     return;
   }
+
   try {
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { roleId } }));
   } catch (error) {
@@ -147,10 +149,12 @@ export function subscribeOnPermissionsChange(listener: ChangeListener) {
   if (typeof window === 'undefined') {
     return () => undefined;
   }
+
   const handler = (event: Event) => {
     const detail = (event as CustomEvent<{ roleId?: number }>).detail;
     listener(detail?.roleId);
   };
+
   window.addEventListener(CHANGE_EVENT, handler as EventListener);
   return () => window.removeEventListener(CHANGE_EVENT, handler as EventListener);
 }

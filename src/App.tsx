@@ -127,6 +127,7 @@ function AppContent() {
   };
 
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
+  const canManageRoles = isAdminRole || permissions.roles.canView;
 
   const accessibleMenuTabs = useMemo(
     () =>
@@ -151,11 +152,12 @@ function AppContent() {
         { tab: 'contractCreate' as Tab, allowed: permissions.contracts.canCreate },
         { tab: 'contractDetail' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
+        { tab: 'roles' as Tab, allowed: canManageRoles },
         { tab: 'settings' as Tab, allowed: isAdminRole },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole],
+    [permissions, canManageRoles, isAdminRole],
   );
 
   const canViewTab = useCallback(
@@ -201,15 +203,16 @@ function AppContent() {
         case 'dictionaries':
           return permissions.dictionaries.canView;
         case 'users':
-        case 'roles':
         case 'userActivity':
         case 'settings':
           return isAdminRole;
+        case 'roles':
+          return canManageRoles;
         default:
           return true;
       }
     },
-    [permissions, isAdminRole],
+    [permissions, canManageRoles, isAdminRole],
   );
 
   useEffect(() => {
@@ -489,7 +492,9 @@ function AppContent() {
       case 'companyProfile':
         return isAdminRole ? <CompanyProfile /> : renderNoAccess('Раздел доступен только администратору.');
       case 'roles':
-        return isAdminRole ? <Roles /> : renderNoAccess('Нужны права администратора.');
+        return canManageRoles
+          ? <Roles />
+          : renderNoAccess('\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u043f\u0440\u0430\u0432 \u0434\u043b\u044f \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u0440\u043e\u043b\u044f\u043c\u0438 \u0438 \u043f\u0440\u0430\u0432\u0438\u043b\u0430\u043c\u0438 \u0434\u043e\u0441\u0442\u0443\u043f\u0430.');
       case 'userActivity':
         return isAdminRole ? <UserActivity /> : renderNoAccess('Нужны права администратора.');
       case 'dictionaries':

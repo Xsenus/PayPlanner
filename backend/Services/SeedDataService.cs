@@ -556,24 +556,18 @@ namespace PayPlanner.Api.Services
 
         private static async Task SeedRolePermissionsAsync(PaymentContext context)
         {
-            var roles = await context.Roles.AsNoTracking().Select(r => new { r.Id }).ToListAsync();
+            var roles = await context.Roles
+                .AsNoTracking()
+                .Select(r => new
+                {
+                    r.Id,
+                    r.Name
+                })
+                .ToListAsync();
             if (roles.Count == 0)
             {
                 return;
             }
-
-            var sections = new[]
-            {
-                "calendar",
-                "reports",
-                "calculator",
-                "clients",
-                "legalEntities",
-                "accounts",
-                "acts",
-                "contracts",
-                "dictionaries",
-            };
 
             var existing = await context.RolePermissions
                 .AsNoTracking()
@@ -582,23 +576,28 @@ namespace PayPlanner.Api.Services
 
             foreach (var role in roles)
             {
-                foreach (var section in sections)
+                var defaults = RolePermissionCatalog.BuildDefaults(
+                    string.Equals(role.Name, "admin", StringComparison.Ordinal));
+
+                foreach (var section in RolePermissionCatalog.AllSections)
                 {
                     if (existing.Any(rp => rp.RoleId == role.Id && rp.Section == section))
                     {
                         continue;
                     }
 
+                    var values = defaults[section];
+
                     context.RolePermissions.Add(new RolePermission
                     {
                         RoleId = role.Id,
                         Section = section,
-                        CanView = true,
-                        CanCreate = true,
-                        CanEdit = true,
-                        CanDelete = true,
-                        CanExport = true,
-                        CanViewAnalytics = section == "calendar",
+                        CanView = values.CanView,
+                        CanCreate = values.CanCreate,
+                        CanEdit = values.CanEdit,
+                        CanDelete = values.CanDelete,
+                        CanExport = values.CanExport,
+                        CanViewAnalytics = values.CanViewAnalytics,
                     });
                 }
             }

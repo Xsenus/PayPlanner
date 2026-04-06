@@ -1,26 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  X,
-  ShieldCheck,
-  CalendarDays,
   BarChart3,
-  Calculator,
-  Users,
-  Building2,
-  WalletCards,
-  FileCheck2,
   Banknote,
+  Building2,
+  Calculator,
+  CalendarDays,
+  FileCheck2,
   FileSignature,
-  Settings,
   Lock,
+  RotateCcw,
+  Settings,
+  Shield,
+  ShieldCheck,
   Unlock,
+  Users,
+  WalletCards,
+  X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Role } from './Roles';
 import {
   getRolePermissions,
-  setRolePermissions,
+  refreshRolePermissions,
   resetRolePermissions,
+  setRolePermissions,
   subscribeOnPermissionsChange,
 } from '../../services/permissionsService';
 import {
@@ -29,178 +32,306 @@ import {
   type MenuSectionKey,
   type RolePermissions,
 } from '../../types/permissions';
-import { useTranslation } from '../../hooks/useTranslation';
 
 interface RolePermissionsModalProps {
   role: Role;
+  canEdit: boolean;
   onClose: () => void;
+  onSaved?: () => void;
 }
 
 type SectionConfig = {
   key: MenuSectionKey;
-  titleKey: string;
-  descriptionKey: string;
+  title: string;
+  description: string;
   icon: LucideIcon;
 };
 
 type PermissionMeta = {
   key: MenuPermissionKey;
-  labelKey: string;
-  descriptionKey: string;
+  label: string;
+  description: string;
 };
 
-const SECTION_CONFIG: SectionConfig[] = [
-  {
+type GroupKey = 'core' | 'crm' | 'finance' | 'administration';
+
+type GroupConfig = {
+  key: GroupKey;
+  title: string;
+  description: string;
+  sections: MenuSectionKey[];
+};
+
+const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
+  calendar: {
     key: 'calendar',
-    titleKey: 'calendar',
-    descriptionKey: 'permissionSectionCalendar',
+    title: 'Календарь',
+    description: 'Права на работу с календарём, событиями и аналитикой.',
     icon: CalendarDays,
   },
-  {
+  reports: {
     key: 'reports',
-    titleKey: 'reports',
-    descriptionKey: 'permissionSectionReports',
+    title: 'Отчёты',
+    description: 'Доступ к отчётам, обзорам и аналитическим данным.',
     icon: BarChart3,
   },
-  {
+  calculator: {
     key: 'calculator',
-    titleKey: 'calculator',
-    descriptionKey: 'permissionSectionCalculator',
+    title: 'Калькулятор',
+    description: 'Работа с калькулятором и расчётными сценариями.',
     icon: Calculator,
   },
-  {
-    key: 'clients',
-    titleKey: 'clients',
-    descriptionKey: 'permissionSectionClients',
-    icon: Users,
-  },
-  {
+  legalEntities: {
     key: 'legalEntities',
-    titleKey: 'legalEntities',
-    descriptionKey: 'permissionSectionLegalEntities',
+    title: 'Юридические лица',
+    description: 'Просмотр и управление карточками юридических лиц.',
     icon: Building2,
   },
-  {
+  clients: {
+    key: 'clients',
+    title: 'Клиенты',
+    description: 'Доступ к списку клиентов, карточкам и связанным данным.',
+    icon: Users,
+  },
+  accounts: {
     key: 'accounts',
-    titleKey: 'accounts',
-    descriptionKey: 'permissionSectionAccounts',
+    title: 'Счета',
+    description: 'Работа со счетами, реестром и связанными операциями.',
     icon: WalletCards,
   },
-  {
+  acts: {
     key: 'acts',
-    titleKey: 'acts',
-    descriptionKey: 'permissionSectionActs',
+    title: 'Акты',
+    description: 'Создание и сопровождение актов оказанных услуг.',
     icon: FileCheck2,
   },
-  {
+  payments: {
     key: 'payments',
-    titleKey: 'payments',
-    descriptionKey: 'permissionSectionPayments',
+    title: 'Платежи',
+    description: 'Доступ к журналам платежей и денежным операциям.',
     icon: Banknote,
   },
-  {
+  contracts: {
     key: 'contracts',
-    titleKey: 'contracts',
-    descriptionKey: 'permissionSectionContracts',
+    title: 'Договоры',
+    description: 'Работа с договорами, связями и карточками документов.',
     icon: FileSignature,
   },
-  {
+  dictionaries: {
     key: 'dictionaries',
-    titleKey: 'dictionaries',
-    descriptionKey: 'permissionSectionDictionaries',
+    title: 'Справочники',
+    description: 'Настройка и поддержка справочников системы.',
     icon: Settings,
+  },
+  roles: {
+    key: 'roles',
+    title: 'Роли и правила',
+    description: 'Доступ к списку ролей и настройке правил доступа.',
+    icon: Shield,
+  },
+};
+
+const GROUPS: GroupConfig[] = [
+  {
+    key: 'core',
+    title: 'Основные разделы',
+    description: 'Базовые рабочие модули и аналитика.',
+    sections: ['calendar', 'reports', 'calculator'],
+  },
+  {
+    key: 'crm',
+    title: 'Клиенты и документы',
+    description: 'Карточки клиентов, юрлица, договоры и справочники.',
+    sections: ['legalEntities', 'clients', 'contracts', 'dictionaries'],
+  },
+  {
+    key: 'finance',
+    title: 'Финансовый контур',
+    description: 'Счета, акты и платёжные операции.',
+    sections: ['accounts', 'acts', 'payments'],
+  },
+  {
+    key: 'administration',
+    title: 'Администрирование прав',
+    description: 'Просмотр ролей и делегирование управления правилами.',
+    sections: ['roles'],
   },
 ];
 
-const PERMISSION_META: PermissionMeta[] = [
+const DEFAULT_PERMISSION_META: PermissionMeta[] = [
   {
     key: 'canView',
-    labelKey: 'permissionView',
-    descriptionKey: 'permissionViewDescription',
+    label: 'Просмотр',
+    description: 'Открывать раздел и просматривать данные.',
   },
   {
     key: 'canCreate',
-    labelKey: 'permissionCreate',
-    descriptionKey: 'permissionCreateDescription',
+    label: 'Создание',
+    description: 'Создавать новые записи и документы.',
   },
   {
     key: 'canEdit',
-    labelKey: 'permissionEdit',
-    descriptionKey: 'permissionEditDescription',
+    label: 'Редактирование',
+    description: 'Изменять существующие записи и настройки раздела.',
   },
   {
     key: 'canDelete',
-    labelKey: 'permissionDelete',
-    descriptionKey: 'permissionDeleteDescription',
+    label: 'Удаление',
+    description: 'Удалять записи и очищать данные в разделе.',
   },
   {
     key: 'canExport',
-    labelKey: 'permissionExport',
-    descriptionKey: 'permissionExportDescription',
+    label: 'Экспорт',
+    description: 'Выгружать данные и использовать экспортные действия.',
   },
 ];
 
-const CALENDAR_EXTRA_META = {
-  key: 'canViewAnalytics' as const,
-  labelKey: 'permissionCalendarAnalytics',
-  descriptionKey: 'permissionCalendarAnalyticsDescription',
-};
+const ROLES_PERMISSION_META: PermissionMeta[] = [
+  {
+    key: 'canView',
+    label: 'Просмотр ролей',
+    description: 'Открывать список ролей и смотреть состав правил.',
+  },
+  {
+    key: 'canCreate',
+    label: 'Создание и копирование',
+    description: 'Создавать новые роли и копировать существующие.',
+  },
+  {
+    key: 'canEdit',
+    label: 'Настройка правил',
+    description: 'Менять имя роли, описание и её правила доступа.',
+  },
+  {
+    key: 'canDelete',
+    label: 'Удаление ролей',
+    description: 'Удалять пользовательские роли, если они никому не назначены.',
+  },
+];
 
 type PermissionToggleProps = {
   label: string;
-  description?: string;
+  description: string;
   checked: boolean;
   onChange: () => void;
-  disabled?: boolean;
+  disabled: boolean;
 };
 
-function PermissionToggle({ label, description, checked, onChange, disabled }: PermissionToggleProps) {
+function PermissionToggle({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: PermissionToggleProps) {
   return (
     <label
-      className={`flex items-start gap-4 rounded-lg border border-slate-200 p-4 transition-colors ${
-        disabled ? 'opacity-60 cursor-not-allowed' : 'hover:border-slate-300 cursor-pointer'
-      }`}>
+      className={`flex min-h-[108px] items-start gap-4 rounded-2xl border px-4 py-4 transition-colors ${
+        checked
+          ? 'border-blue-200 bg-blue-50/60'
+          : 'border-slate-200 bg-white'
+      } ${
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'cursor-pointer hover:border-slate-300 hover:bg-slate-50'
+      }`}
+    >
       <input
         type="checkbox"
-        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
         checked={checked}
         onChange={onChange}
         disabled={disabled}
       />
-      <div>
-        <div className="text-sm font-semibold text-slate-900">{label}</div>
-        {description ? <div className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</div> : null}
+      <div className="min-w-0">
+        <div className="text-base font-semibold text-slate-900">{label}</div>
+        <div className="mt-2 text-sm leading-6 text-slate-500">{description}</div>
       </div>
     </label>
   );
 }
 
-export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProps) {
-  const { t } = useTranslation();
-  const [permissions, setPermissions] = useState<RolePermissions>(() => getRolePermissions(role.id));
+function formatDateTime(value?: string | null) {
+  if (!value) return '—';
+
+  return new Date(value).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSectionKey[]) {
+  return sections.filter((sectionKey) => permissions[sectionKey].canView).length;
+}
+
+function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: RolePermissions) {
+  const section = permissions[sectionKey];
+  let count = MENU_PERMISSION_KEYS.filter((permissionKey) => section[permissionKey]).length;
+
+  if (sectionKey === 'calendar' && permissions.calendar.canViewAnalytics) {
+    count += 1;
+  }
+
+  return count;
+}
+
+function getTotalPermissionCount(sectionKey: MenuSectionKey) {
+  return sectionKey === 'calendar' ? MENU_PERMISSION_KEYS.length + 1 : MENU_PERMISSION_KEYS.length;
+}
+
+export function RolePermissionsModal({
+  role,
+  canEdit,
+  onClose,
+  onSaved,
+}: RolePermissionsModalProps) {
+  const isProtectedRole = Boolean(role.isSystemRole);
+  const isReadOnly = isProtectedRole || !canEdit;
+
+  const [permissions, setPermissionsState] = useState<RolePermissions>(() =>
+    getRolePermissions(role.id),
+  );
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeGroup, setActiveGroup] = useState<GroupKey>('core');
 
   useEffect(() => {
-    setPermissions(getRolePermissions(role.id));
+    setPermissionsState(getRolePermissions(role.id));
     setErrorMessage(null);
+    setActiveGroup('core');
   }, [role.id]);
 
   useEffect(() => {
     const unsubscribe = subscribeOnPermissionsChange((changedRoleId) => {
       if (changedRoleId === undefined || changedRoleId === role.id) {
-        setPermissions(getRolePermissions(role.id));
+        setPermissionsState(getRolePermissions(role.id));
       }
     });
+
     return unsubscribe;
   }, [role.id]);
+
+  const activeGroupConfig = useMemo(
+    () => GROUPS.find((group) => group.key === activeGroup) ?? GROUPS[0],
+    [activeGroup],
+  );
+
+  const openedSectionsCount = useMemo(
+    () =>
+      (Object.keys(permissions) as MenuSectionKey[]).filter((sectionKey) => permissions[sectionKey].canView)
+        .length,
+    [permissions],
+  );
 
   const updateSection = <K extends MenuSectionKey>(
     key: K,
     updater: (section: RolePermissions[K]) => RolePermissions[K],
   ) => {
-    setPermissions((prev) => ({
+    setPermissionsState((prev) => ({
       ...prev,
       [key]: updater(prev[key]),
     }));
@@ -216,9 +347,11 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
 
       if (permissionKey === 'canView' && !nextValue) {
         MENU_PERMISSION_KEYS.forEach((key) => {
-          if (key === 'canView') return;
-          updated[key] = false;
+          if (key !== 'canView') {
+            updated[key] = false;
+          }
         });
+
         if (sectionKey === 'calendar') {
           (updated as RolePermissions['calendar']).canViewAnalytics = false;
         }
@@ -228,7 +361,7 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
     });
   };
 
-  const toggleCalendarExtra = () => {
+  const toggleCalendarAnalytics = () => {
     updateSection('calendar', (section) => ({
       ...section,
       canViewAnalytics: !section.canViewAnalytics,
@@ -243,11 +376,39 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
         canCreate: value,
         canEdit: value,
         canDelete: value,
-        canExport: value,
+        canExport: sectionKey === 'roles' ? false : value,
       } as typeof section;
+
       if (sectionKey === 'calendar') {
         (next as RolePermissions['calendar']).canViewAnalytics = value;
       }
+
+      return next;
+    });
+  };
+
+  const setAllSections = (value: boolean) => {
+    setPermissionsState((prev) => {
+      const next = { ...prev };
+
+      for (const key of Object.keys(prev) as MenuSectionKey[]) {
+        next[key] = {
+          ...prev[key],
+          canView: value,
+          canCreate: value,
+          canEdit: value,
+          canDelete: value,
+          canExport: key === 'roles' ? false : value,
+        } as RolePermissions[typeof key];
+
+        if (key === 'calendar') {
+          next.calendar = {
+            ...next.calendar,
+            canViewAnalytics: value,
+          };
+        }
+      }
+
       return next;
     });
   };
@@ -255,8 +416,10 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
   const handleSave = async () => {
     setSaving(true);
     setErrorMessage(null);
+
     try {
       await setRolePermissions(role.id, permissions);
+      onSaved?.();
       onClose();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Не удалось сохранить права');
@@ -268,136 +431,326 @@ export function RolePermissionsModal({ role, onClose }: RolePermissionsModalProp
   const handleReset = async () => {
     setResetting(true);
     setErrorMessage(null);
+
     try {
       await resetRolePermissions(role.id);
-      setPermissions(getRolePermissions(role.id));
+      await refreshRolePermissions(role.id);
+      setPermissionsState(getRolePermissions(role.id));
+      onSaved?.();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Не удалось сбросить права');
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Не удалось сбросить права к стандартным значениям',
+      );
     } finally {
       setResetting(false);
     }
   };
 
-  const sectionTitle = (key: string) => t(key) ?? key;
-  const sectionDescription = (key: string) => t(key) ?? key;
-
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-slate-700" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]">
+      <div className="flex h-[92vh] w-full max-w-[1260px] flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-8 py-6">
+          <div className="flex items-start gap-4">
+            <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {t('permissionsForRole', { role: role.name }) ?? `Права роли «${role.name}»`}
-              </h2>
-              <p className="text-sm text-slate-500">
-                {t('permissionsModalSubtitle') ?? 'Настройте доступ к разделам и операциям'}
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[30px] font-semibold leading-none text-slate-900">
+                  Права роли «{role.name}»
+                </h2>
+                {isProtectedRole ? (
+                  <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    Системная роль
+                  </span>
+                ) : null}
+              </div>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Детальная настройка доступа по разделам. Каждая группа прав редактируется отдельно.
               </p>
             </div>
           </div>
+
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="px-6 py-5 space-y-6 max-h-[70vh] overflow-y-auto">
-          {errorMessage ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {errorMessage}
-            </div>
-          ) : null}
-          {SECTION_CONFIG.map(({ key, icon: Icon, titleKey, descriptionKey }) => {
-            const section = permissions[key];
-            return (
-              <section key={key} className="rounded-xl border border-slate-200">
-                <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 rounded-lg bg-slate-100 p-2 text-slate-600">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-900">{sectionTitle(titleKey)}</h3>
-                      <p className="text-sm text-slate-500 mt-1">{sectionDescription(descriptionKey)}</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSectionAll(key, true)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 disabled:cursor-not-allowed"
-                      disabled={saving || resetting}
-                    >
-                      <Unlock className="h-3.5 w-3.5" />
-                      {t('permissionAllowAll') ?? 'Разрешить всё'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSectionAll(key, false)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                      disabled={saving || resetting}
-                    >
-                      <Lock className="h-3.5 w-3.5" />
-                      {t('permissionDenyAll') ?? 'Запретить всё'}
-                    </button>
-                  </div>
-                </div>
-                <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
-                  {PERMISSION_META.map(({ key: permKey, labelKey, descriptionKey: descKey }) => (
-                    <PermissionToggle
-                      key={permKey}
-                      label={sectionTitle(labelKey)}
-                      description={sectionDescription(descKey)}
-                      checked={section[permKey]}
-                      onChange={() => toggleBasePermission(key, permKey)}
-                      disabled={saving || resetting || (permKey !== 'canView' && !section.canView)}
-                    />
-                  ))}
-                  {key === 'calendar' ? (
-                    <PermissionToggle
-                      label={sectionTitle(CALENDAR_EXTRA_META.labelKey)}
-                      description={sectionDescription(CALENDAR_EXTRA_META.descriptionKey)}
-                      checked={(section as RolePermissions['calendar']).canViewAnalytics}
-                      onChange={toggleCalendarExtra}
-                      disabled={saving || resetting || !section.canView}
-                    />
-                  ) : null}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-
-        <div className="px-6 py-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
-            disabled={saving || resetting}
+            className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Закрыть"
           >
-            {t('permissionResetDefaults') ?? t('resetPermissions') ?? 'Сбросить по умолчанию'}
+            <X className="h-5 w-5" />
           </button>
+        </div>
 
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            >
-              {t('cancel') ?? 'Отмена'}
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed"
-              disabled={saving || resetting}
-            >
-              <ShieldCheck className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
-              {saving ? t('saving') ?? 'Сохранение…' : t('savePermissions') ?? 'Сохранить права'}
-            </button>
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="min-h-0 border-r border-slate-200 bg-slate-50/80">
+            <div className="flex h-full flex-col gap-5 overflow-y-auto p-5">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Глобальные действия
+                </div>
+
+                <div className="mt-4 grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAllSections(true)}
+                    disabled={isReadOnly || saving || resetting}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-4 py-3 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Unlock className="h-4 w-4" />
+                    Принять всё
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllSections(false)}
+                    disabled={isReadOnly || saving || resetting}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Lock className="h-4 w-4" />
+                    Отклонить всё
+                  </button>
+                </div>
+              </div>
+
+              {!isProtectedRole ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Сервисное действие
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    disabled={isReadOnly || saving || resetting}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Сбросить к стандарту
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="space-y-3">
+                {GROUPS.map((group) => {
+                  const openedInGroup = getOpenedSectionsCount(permissions, group.sections);
+                  const isActive = group.key === activeGroup;
+
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      onClick={() => setActiveGroup(group.key)}
+                      className={`w-full rounded-2xl border p-4 text-left transition-colors ${
+                        isActive
+                          ? 'border-blue-200 bg-blue-50 text-blue-900 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-lg font-semibold">{group.title}</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-500">{group.description}</div>
+                      <div className="mt-4 text-sm font-medium text-slate-500">
+                        Разделов открыто: {openedInGroup} из {group.sections.length}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <div className="min-h-0 overflow-y-auto bg-white">
+            <div className="px-6 py-5">
+              {errorMessage ? (
+                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {errorMessage}
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 xl:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Последнее изменение
+                  </div>
+                  <div className="mt-3 text-xl font-semibold text-slate-900">
+                    {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt) : '—'}
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">
+                    {role.permissionsUpdatedByUserName || 'После создания права не менялись'}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Сводка
+                  </div>
+                  <div className="mt-3 text-xl font-semibold text-slate-900">
+                    {openedSectionsCount} из {role.totalSectionsCount ?? Object.keys(permissions).length} разделов открыто
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">
+                    {(role.assignedUsersCount ?? 0) > 0
+                      ? `Роль назначена пользователям: ${role.assignedUsersCount}`
+                      : 'Роль пока никому не назначена'}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Режим
+                  </div>
+                  <div className="mt-3 text-xl font-semibold text-slate-900">
+                    {isProtectedRole
+                      ? 'Только просмотр'
+                      : isReadOnly
+                        ? 'Редактирование запрещено'
+                        : 'Редактирование доступно'}
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">
+                    {isProtectedRole
+                      ? 'Стандартная роль администратора защищена от изменения и удаления.'
+                      : isReadOnly
+                        ? 'Текущий пользователь может только просматривать права.'
+                        : 'Можно применять массовые действия по секциям и по всей роли.'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <h3 className="text-[28px] font-semibold text-slate-900">
+                  {activeGroupConfig.title}
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">{activeGroupConfig.description}</p>
+              </div>
+
+              <div className="mt-6 space-y-6 pb-6">
+                {activeGroupConfig.sections.map((sectionKey) => {
+                  const sectionConfig = SECTION_CONFIG[sectionKey];
+                  const section = permissions[sectionKey];
+                  const permissionMeta =
+                    sectionKey === 'roles' ? ROLES_PERMISSION_META : DEFAULT_PERMISSION_META;
+                  const Icon = sectionConfig.icon;
+                  const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
+                  const totalPermissionCount = getTotalPermissionCount(sectionKey);
+
+                  return (
+                    <section
+                      key={sectionKey}
+                      className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
+                    >
+                      <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="flex items-start gap-4">
+                          <div className="rounded-2xl bg-slate-100 p-3 text-slate-600">
+                            <Icon className="h-5 w-5" />
+                          </div>
+
+                          <div>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <h4 className="text-2xl font-semibold text-slate-900">
+                                {sectionConfig.title}
+                              </h4>
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
+                                {enabledPermissionCount} из {totalPermissionCount} операций
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm leading-6 text-slate-500">
+                              {sectionConfig.description}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSectionAll(sectionKey, true)}
+                            disabled={isReadOnly || saving || resetting}
+                            className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Unlock className="h-4 w-4" />
+                            Принять всё
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSectionAll(sectionKey, false)}
+                            disabled={isReadOnly || saving || resetting}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Lock className="h-4 w-4" />
+                            Отклонить всё
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 px-5 py-5 xl:grid-cols-2">
+                        {permissionMeta.map((permission) => (
+                          <PermissionToggle
+                            key={`${sectionKey}-${permission.key}`}
+                            label={permission.label}
+                            description={permission.description}
+                            checked={section[permission.key]}
+                            onChange={() => toggleBasePermission(sectionKey, permission.key)}
+                            disabled={
+                              isReadOnly
+                              || saving
+                              || resetting
+                              || (permission.key !== 'canView' && !section.canView)
+                            }
+                          />
+                        ))}
+
+                        {sectionKey === 'calendar' ? (
+                          <PermissionToggle
+                            label="Аналитика календаря"
+                            description="Просмотр аналитических блоков и расширенных представлений календаря."
+                            checked={permissions.calendar.canViewAnalytics}
+                            onChange={toggleCalendarAnalytics}
+                            disabled={
+                              isReadOnly
+                              || saving
+                              || resetting
+                              || !permissions.calendar.canView
+                            }
+                          />
+                        ) : null}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-10px_24px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="text-sm text-slate-500">
+              {isReadOnly
+                ? 'Раздел открыт в режиме просмотра.'
+                : 'Сохранение применит изменения ко всем пользователям с этой ролью.'}
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                Закрыть
+              </button>
+
+              {!isReadOnly ? (
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving || resetting}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ShieldCheck className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+                  {saving ? 'Сохранение...' : 'Сохранить права'}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

@@ -696,11 +696,15 @@ public class PaymentContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.PermissionsUpdatedByUserName).HasMaxLength(200);
 
             // ---- Индексы ----
             entity.HasIndex(e => e.Name)
                   .IsUnique()
                   .HasDatabaseName("IX_Roles_Name");
+            entity.HasIndex(e => e.PermissionsUpdatedAt)
+                  .HasDatabaseName("IX_Roles_PermissionsUpdatedAt");
         });
 
         // ================== Role Permissions ==================
