@@ -20,12 +20,12 @@ jobs:
       BE_CSPROJ: backend/PayPlanner.Api.csproj
       OUT_DIR: out
       TAR_NAME: payplanner_${{ github.sha }}.tar.gz
+      FE_API_URL: https://api.elitpravo.com/api
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # ---------- Build backend (.NET 9) ----------
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -37,7 +37,6 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
-      # ---------- Build frontend (Node 20 / Vite) ----------
       - name: Setup Node (with cache)
         if: ${{ hashFiles('package-lock.json') != '' }}
         uses: actions/setup-node@v6
@@ -62,7 +61,7 @@ jobs:
 
       - name: Build FE
         env:
-          VITE_API_URL: /api
+          VITE_API_URL: ${{ env.FE_API_URL }}
         run: npm run build
 
       - name: Prepare FE artifacts
@@ -70,11 +69,9 @@ jobs:
           mkdir -p "${{ env.OUT_DIR }}/fe"
           cp -r dist/* "${{ env.OUT_DIR }}/fe/"
 
-      # ---------- Pack artifacts ----------
       - name: Create tarball
         run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
 
-      # ---------- Upload to VPS ----------
       - name: Upload package to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -85,7 +82,6 @@ jobs:
           source: "${{ env.TAR_NAME }}"
           target: "/tmp"
 
-      # ---------- Deploy on VPS ----------
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -99,10 +95,11 @@ jobs:
 
             TAR="/tmp/${{ env.TAR_NAME }}"
             STAGE="/tmp/payplanner-${{ github.sha }}"
-            BE_DIR="/var/www/payplanner-be"
-            FE_DIR="/var/www/payplanner-fe"
+            APP_DIR="/opt/payplanner/app"
+            BE_DIR="/opt/payplanner/app/backend"
+            FE_APP_DIR="/opt/payplanner/app/frontend"
+            FE_PUBLIC_DIR="/var/www/crm.elitpravo.com"
             PRIMARY_HEALTH_URL="http://127.0.0.1:5080/api/health"
-            FALLBACK_HEALTH_URL="http://127.0.0.1:5000/api/health"
             MIN_FREE_KB=262144
 
             cleanup() {
@@ -135,55 +132,44 @@ jobs:
             sudo systemctl stop payplanner.service || true
 
             echo "[4/10] Ensure target dirs"
-            sudo mkdir -p "$BE_DIR" "$FE_DIR" "$BE_DIR/backups"
-            sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
+            sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" /opt/payplanner/shared/backups
 
-            echo "[5/10] Rsync backend -> $BE_DIR (keep DB & backups)"
-            sudo rsync -a --delete \
-              --exclude "payplanner.db*" \
-              --exclude "backups/" \
-              "$STAGE/be/" "$BE_DIR/"
+            echo "[5/10] Rsync backend"
+            sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
-            echo "[6/10] Rsync frontend -> $FE_DIR"
-            sudo rsync -a --delete "$STAGE/fe/" "$FE_DIR/"
+            echo "[6/10] Rsync frontend"
+            sudo rsync -a --delete "$STAGE/fe/" "$FE_APP_DIR/"
+            sudo rsync -a --delete "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
             echo "[7/10] Cleanup temp artifacts"
             cleanup
 
             echo "[8/10] Permissions"
-            sudo chown -R www-data:www-data "$BE_DIR" "$FE_DIR"
+            sudo chown -R payplanner:payplanner /opt/payplanner
+            sudo chown -R www-data:www-data "$FE_PUBLIC_DIR"
 
             echo "[9/10] Restart service"
             check_space "/" "$MIN_FREE_KB"
             sudo systemctl daemon-reload || true
+            sudo systemctl enable --now payplanner.service
             sudo systemctl restart payplanner.service
 
             echo "[10/10] Wait for health"
-            # ждём, пока сервис реально начнёт слушать и /api/health отдаст 200
             ok=0
-            active_health_url=""
             for i in $(seq 1 30); do
               if curl -fsS "$PRIMARY_HEALTH_URL" >/dev/null; then
                 ok=1
-                active_health_url="$PRIMARY_HEALTH_URL"
-                echo "Health OK on attempt $i via $active_health_url"
-                break
-              fi
-              if [ "$FALLBACK_HEALTH_URL" != "$PRIMARY_HEALTH_URL" ] && curl -fsS "$FALLBACK_HEALTH_URL" >/dev/null; then
-                ok=1
-                active_health_url="$FALLBACK_HEALTH_URL"
-                echo "Health OK on attempt $i via fallback $active_health_url"
+                echo "Health OK on attempt $i via $PRIMARY_HEALTH_URL"
                 break
               fi
               sleep 2
             done
             if [ "$ok" -ne 1 ]; then
-              echo "Health checks failed after retries. Tried: $PRIMARY_HEALTH_URL and $FALLBACK_HEALTH_URL"
+              echo "Health check failed after retries: $PRIMARY_HEALTH_URL"
               sudo systemctl status payplanner.service --no-pager || true
               sudo systemctl show payplanner.service -p Environment -p ExecStart || true
-              sudo ls -lah "$BE_DIR"/payplanner.db* || true
               sudo df -h "$BE_DIR" || true
-              sudo du -sh "$BE_DIR/backups" /tmp 2>/dev/null || true
+              sudo du -sh /opt/payplanner/shared/backups /tmp 2>/dev/null || true
               sudo ss -ltnp | grep dotnet || true
               sudo journalctl -u payplanner.service --no-pager -n 200 || true
               exit 1
