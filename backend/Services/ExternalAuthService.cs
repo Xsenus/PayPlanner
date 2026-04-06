@@ -110,19 +110,52 @@ public sealed partial class ExternalAuthService
 
     public async Task<AuthProviderSettingsDto> GetAdminSettingsAsync(HttpRequest request, CancellationToken cancellationToken = default)
     {
+        var googleReady = await IsExternalProviderReadyAsync(
+            GoogleEnabledKey,
+            "Auth:Google:Enabled",
+            GoogleClientIdKey,
+            "Auth:Google:ClientId",
+            GoogleClientSecretKey,
+            "Auth:Google:ClientSecret",
+            cancellationToken);
+        var vkReady = await IsExternalProviderReadyAsync(
+            VkEnabledKey,
+            "Auth:Vk:Enabled",
+            VkClientIdKey,
+            "Auth:Vk:ClientId",
+            VkClientSecretKey,
+            "Auth:Vk:ClientSecret",
+            cancellationToken);
+        var yandexReady = await IsExternalProviderReadyAsync(
+            YandexEnabledKey,
+            "Auth:Yandex:Enabled",
+            YandexClientIdKey,
+            "Auth:Yandex:ClientId",
+            YandexClientSecretKey,
+            "Auth:Yandex:ClientSecret",
+            cancellationToken);
+        var telegramBotReady = await IsTelegramReadyAsync(cancellationToken);
+        var telegramWidgetReady = await IsTelegramWidgetReadyAsync(request, cancellationToken);
+
         return new AuthProviderSettingsDto
         {
             GoogleEnabled = await GetBooleanSettingOrConfigAsync(GoogleEnabledKey, "Auth:Google:Enabled", false, cancellationToken),
             GoogleClientId = await GetSettingOrConfigAsync(GoogleClientIdKey, "Auth:Google:ClientId", cancellationToken) ?? string.Empty,
             GoogleClientSecret = await GetSettingOrConfigAsync(GoogleClientSecretKey, "Auth:Google:ClientSecret", cancellationToken) ?? string.Empty,
+            GoogleReady = googleReady,
+            GoogleCallbackUrl = BuildAbsoluteUrl(request, "/api/auth/external/callback/google"),
 
             VkEnabled = await GetBooleanSettingOrConfigAsync(VkEnabledKey, "Auth:Vk:Enabled", false, cancellationToken),
             VkClientId = await GetSettingOrConfigAsync(VkClientIdKey, "Auth:Vk:ClientId", cancellationToken) ?? string.Empty,
             VkClientSecret = await GetSettingOrConfigAsync(VkClientSecretKey, "Auth:Vk:ClientSecret", cancellationToken) ?? string.Empty,
+            VkReady = vkReady,
+            VkCallbackUrl = BuildAbsoluteUrl(request, "/api/auth/external/callback/vk"),
 
             YandexEnabled = await GetBooleanSettingOrConfigAsync(YandexEnabledKey, "Auth:Yandex:Enabled", false, cancellationToken),
             YandexClientId = await GetSettingOrConfigAsync(YandexClientIdKey, "Auth:Yandex:ClientId", cancellationToken) ?? string.Empty,
             YandexClientSecret = await GetSettingOrConfigAsync(YandexClientSecretKey, "Auth:Yandex:ClientSecret", cancellationToken) ?? string.Empty,
+            YandexReady = yandexReady,
+            YandexCallbackUrl = BuildAbsoluteUrl(request, "/api/auth/external/callback/yandex"),
 
             TelegramEnabled = await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken),
             TelegramWidgetEnabled = await GetBooleanSettingOrConfigAsync(TelegramWidgetEnabledKey, "Auth:Telegram:WidgetEnabled", false, cancellationToken),
@@ -131,9 +164,99 @@ public sealed partial class ExternalAuthService
             TelegramWebhookSecret = await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken) ?? string.Empty,
             TelegramWebhookUrl = BuildAbsoluteUrl(request, "/api/auth/telegram/webhook"),
             TelegramWebhookConfigured = await HasTelegramWebhookSyncAsync(cancellationToken),
+            TelegramBotReady = telegramBotReady,
+            TelegramWidgetReady = telegramWidgetReady,
             TelegramBotInfoSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramBotInfoSyncedAtKey, null, cancellationToken)),
             TelegramWebhookSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramWebhookSyncedAtKey, null, cancellationToken)),
         };
+    }
+
+    public async Task<AuthProviderSettingsSaveResultDto> SaveGoogleSettingsAsync(
+        ExternalOAuthProviderSettingsUpdateRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await SaveExternalProviderSettingsCoreAsync(
+            GoogleEnabledKey,
+            GoogleClientIdKey,
+            GoogleClientSecretKey,
+            request.Enabled,
+            request.ClientId,
+            request.ClientSecret,
+            now,
+            cancellationToken);
+
+        await _context.SaveChangesAsync(cancellationToken);
+#pragma warning disable CS0162
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки Google сохранены.", cancellationToken);
+    }
+
+    public async Task<AuthProviderSettingsSaveResultDto> SaveVkSettingsAsync(
+        ExternalOAuthProviderSettingsUpdateRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await SaveExternalProviderSettingsCoreAsync(
+            VkEnabledKey,
+            VkClientIdKey,
+            VkClientSecretKey,
+            request.Enabled,
+            request.ClientId,
+            request.ClientSecret,
+            now,
+            cancellationToken);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки VK сохранены.", cancellationToken);
+    }
+
+    public async Task<AuthProviderSettingsSaveResultDto> SaveYandexSettingsAsync(
+        ExternalOAuthProviderSettingsUpdateRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await SaveExternalProviderSettingsCoreAsync(
+            YandexEnabledKey,
+            YandexClientIdKey,
+            YandexClientSecretKey,
+            request.Enabled,
+            request.ClientId,
+            request.ClientSecret,
+            now,
+            cancellationToken);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки Яндекса сохранены.", cancellationToken);
+    }
+
+    public async Task<AuthProviderSettingsSaveResultDto> SaveTelegramBotSettingsAsync(
+        TelegramLoginBotSettingsUpdateRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await SaveTelegramBotSettingsCoreAsync(
+            request.Enabled,
+            request.BotToken,
+            now,
+            cancellationToken);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки Telegram Bot сохранены.", cancellationToken);
+    }
+
+    public async Task<AuthProviderSettingsSaveResultDto> SaveTelegramWidgetSettingsAsync(
+        TelegramWidgetSettingsUpdateRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await UpsertSystemSettingAsync(TelegramWidgetEnabledKey, request.Enabled ? "true" : "false", now, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки Telegram Widget сохранены.", cancellationToken);
     }
 
     public async Task<AuthProviderSettingsSaveResultDto> UpdateSettingsAsync(
@@ -143,42 +266,119 @@ public sealed partial class ExternalAuthService
     {
         var now = DateTime.UtcNow;
 
-        await UpsertSystemSettingAsync(GoogleEnabledKey, request.GoogleEnabled ? "true" : "false", now, cancellationToken);
-        await UpsertSystemSettingAsync(GoogleClientIdKey, NormalizeOptional(request.GoogleClientId) ?? string.Empty, now, cancellationToken);
-        await UpsertSystemSettingAsync(GoogleClientSecretKey, NormalizeOptional(request.GoogleClientSecret) ?? string.Empty, now, cancellationToken);
+        await SaveExternalProviderSettingsCoreAsync(
+            GoogleEnabledKey,
+            GoogleClientIdKey,
+            GoogleClientSecretKey,
+            request.GoogleEnabled,
+            request.GoogleClientId,
+            request.GoogleClientSecret,
+            now,
+            cancellationToken);
 
-        await UpsertSystemSettingAsync(VkEnabledKey, request.VkEnabled ? "true" : "false", now, cancellationToken);
-        await UpsertSystemSettingAsync(VkClientIdKey, NormalizeOptional(request.VkClientId) ?? string.Empty, now, cancellationToken);
-        await UpsertSystemSettingAsync(VkClientSecretKey, NormalizeOptional(request.VkClientSecret) ?? string.Empty, now, cancellationToken);
+        await SaveExternalProviderSettingsCoreAsync(
+            VkEnabledKey,
+            VkClientIdKey,
+            VkClientSecretKey,
+            request.VkEnabled,
+            request.VkClientId,
+            request.VkClientSecret,
+            now,
+            cancellationToken);
 
-        await UpsertSystemSettingAsync(YandexEnabledKey, request.YandexEnabled ? "true" : "false", now, cancellationToken);
-        await UpsertSystemSettingAsync(YandexClientIdKey, NormalizeOptional(request.YandexClientId) ?? string.Empty, now, cancellationToken);
-        await UpsertSystemSettingAsync(YandexClientSecretKey, NormalizeOptional(request.YandexClientSecret) ?? string.Empty, now, cancellationToken);
+        await SaveExternalProviderSettingsCoreAsync(
+            YandexEnabledKey,
+            YandexClientIdKey,
+            YandexClientSecretKey,
+            request.YandexEnabled,
+            request.YandexClientId,
+            request.YandexClientSecret,
+            now,
+            cancellationToken);
 
-        await UpsertSystemSettingAsync(TelegramEnabledKey, request.TelegramEnabled ? "true" : "false", now, cancellationToken);
+        await SaveTelegramBotSettingsCoreAsync(
+            request.TelegramEnabled,
+            request.TelegramBotToken,
+            now,
+            cancellationToken);
+
         await UpsertSystemSettingAsync(TelegramWidgetEnabledKey, request.TelegramWidgetEnabled ? "true" : "false", now, cancellationToken);
-        await UpsertSystemSettingAsync(TelegramBotTokenKey, NormalizeOptional(request.TelegramBotToken) ?? string.Empty, now, cancellationToken);
-
-        if (string.IsNullOrWhiteSpace(request.TelegramBotToken))
-        {
-            await UpsertSystemSettingAsync(TelegramBotUsernameKey, string.Empty, now, cancellationToken);
-        }
-        else
-        {
-            await RefreshTelegramBotInfoAsync(request.TelegramBotToken!, now, cancellationToken);
-        }
-
-        if (string.IsNullOrWhiteSpace(await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken)))
-        {
-            await UpsertSystemSettingAsync(TelegramWebhookSecretKey, GenerateToken(24), now, cancellationToken);
-        }
 
         await _context.SaveChangesAsync(cancellationToken);
+        return await BuildSettingsSaveResultAsync(httpRequest, "Настройки внешней авторизации сохранены.", cancellationToken);
 
         return new AuthProviderSettingsSaveResultDto
         {
             Settings = await GetAdminSettingsAsync(httpRequest, cancellationToken),
             Message = "Настройки внешней авторизации сохранены"
+        };
+    }
+
+#pragma warning restore CS0162
+    private async Task SaveExternalProviderSettingsCoreAsync(
+        string enabledSettingKey,
+        string clientIdSettingKey,
+        string clientSecretSettingKey,
+        bool enabled,
+        string? clientId,
+        string? clientSecret,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        await UpsertSystemSettingAsync(enabledSettingKey, enabled ? "true" : "false", now, cancellationToken);
+        await UpsertSystemSettingAsync(clientIdSettingKey, NormalizeOptional(clientId) ?? string.Empty, now, cancellationToken);
+        await UpsertSystemSettingAsync(clientSecretSettingKey, NormalizeOptional(clientSecret) ?? string.Empty, now, cancellationToken);
+    }
+
+    private async Task SaveTelegramBotSettingsCoreAsync(
+        bool enabled,
+        string? botToken,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedToken = NormalizeOptional(botToken) ?? string.Empty;
+        var previousEnabled = await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken);
+        var previousToken = await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken) ?? string.Empty;
+        var tokenChanged = !string.Equals(previousToken, normalizedToken, StringComparison.Ordinal);
+        var enabledChanged = previousEnabled != enabled;
+
+        await UpsertSystemSettingAsync(TelegramEnabledKey, enabled ? "true" : "false", now, cancellationToken);
+        await UpsertSystemSettingAsync(TelegramBotTokenKey, normalizedToken, now, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(normalizedToken))
+        {
+            await UpsertSystemSettingAsync(TelegramBotUsernameKey, string.Empty, now, cancellationToken);
+            await UpsertSystemSettingAsync(TelegramBotInfoSyncedAtKey, string.Empty, now, cancellationToken);
+            await UpsertSystemSettingAsync(TelegramWebhookSyncedAtKey, string.Empty, now, cancellationToken);
+            return;
+        }
+
+        await RefreshTelegramBotInfoAsync(normalizedToken, now, cancellationToken);
+        await EnsureTelegramWebhookSecretAsync(now, cancellationToken);
+
+        if (tokenChanged || enabledChanged)
+        {
+            await UpsertSystemSettingAsync(TelegramWebhookSyncedAtKey, string.Empty, now, cancellationToken);
+        }
+    }
+
+    private async Task EnsureTelegramWebhookSecretAsync(DateTime now, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken)))
+        {
+            await UpsertSystemSettingAsync(TelegramWebhookSecretKey, GenerateToken(24), now, cancellationToken);
+        }
+    }
+
+    private async Task<AuthProviderSettingsSaveResultDto> BuildSettingsSaveResultAsync(
+        HttpRequest httpRequest,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        return new AuthProviderSettingsSaveResultDto
+        {
+            Settings = await GetAdminSettingsAsync(httpRequest, cancellationToken),
+            Message = message
         };
     }
 

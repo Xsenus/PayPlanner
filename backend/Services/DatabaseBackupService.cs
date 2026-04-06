@@ -17,11 +17,20 @@ public sealed record DatabaseBackupFileInfo(
     DateTime CreatedAt,
     string Trigger);
 
+public sealed record DatabaseBackupFormatOption(
+    string Key,
+    string Label,
+    string Description,
+    string FileExtension,
+    bool IsDefault);
+
 public sealed record DatabaseBackupOverview(
     string Provider,
     string ProviderDisplayName,
     string BackupFormat,
     string FileExtension,
+    string SelectedFormat,
+    IReadOnlyList<DatabaseBackupFormatOption> AvailableFormats,
     bool AutomaticEnabled,
     string ScheduleLocal,
     int RetentionDays,
@@ -34,11 +43,16 @@ public sealed record DatabaseBackupCreateResult(
     DatabaseBackupFileInfo Backup,
     string DownloadPath);
 
+public sealed record DatabaseBackupDeleteResult(
+    int DeletedCount,
+    bool DeletedAll);
+
 public sealed class DatabaseBackupService
 {
     private const string AutomaticEnabledSettingKey = "database-backup.enabled";
     private const string ScheduleSettingKey = "database-backup.schedule-local";
     private const string RetentionDaysSettingKey = "database-backup.retention-days";
+    private const string FormatSettingKey = "database-backup.format";
     private static readonly TimeOnly[] DefaultSchedule =
     [
         new(3, 0),
@@ -76,8 +90,10 @@ public sealed class DatabaseBackupService
         return new DatabaseBackupOverview(
             _databaseProvider.Key,
             _databaseProvider.DisplayName,
-            _databaseProvider.IsSqlite ? "ZIP archive (.zip)" : "PostgreSQL custom dump (.dump)",
-            _databaseProvider.IsSqlite ? ".zip" : ".dump",
+            settings.Format.Label,
+            settings.Format.FileExtension,
+            settings.Format.Key,
+            settings.AvailableFormats,
             settings.AutomaticEnabled,
             settings.ScheduleDisplay,
             settings.RetentionDays,
@@ -92,8 +108,9 @@ public sealed class DatabaseBackupService
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(_backupRootDirectory);
 
-        var searchPattern = _databaseProvider.IsSqlite ? "*.zip" : "*.dump";
-        var items = Directory.EnumerateFiles(_backupRootDirectory, searchPattern, SearchOption.AllDirectories)
+        var items = GetBackupSearchPatterns()
+            .SelectMany(pattern => Directory.EnumerateFiles(_backupRootDirectory, pattern, SearchOption.AllDirectories))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(path => BuildFileInfo(path, _backupRootDirectory))
             .Where(static item => item is not null)
             .Select(static item => item!)
@@ -108,6 +125,7 @@ public sealed class DatabaseBackupService
         bool automaticEnabled,
         string? scheduleLocal,
         int retentionDays,
+        string? backupFormat,
         CancellationToken cancellationToken = default)
     {
         var parsedSchedule = ParseSchedule(scheduleLocal, fallbackToDefault: false);
@@ -122,12 +140,14 @@ public sealed class DatabaseBackupService
         }
 
         var normalizedSchedule = FormatSchedule(parsedSchedule);
+        var format = ResolveSelectedFormat(backupFormat, fallbackToDefault: false);
         var now = DateTime.UtcNow;
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         await UpsertSystemSettingAsync(context, AutomaticEnabledSettingKey, automaticEnabled ? "true" : "false", now, cancellationToken);
         await UpsertSystemSettingAsync(context, ScheduleSettingKey, normalizedSchedule, now, cancellationToken);
         await UpsertSystemSettingAsync(context, RetentionDaysSettingKey, retentionDays.ToString(CultureInfo.InvariantCulture), now, cancellationToken);
+        await UpsertSystemSettingAsync(context, FormatSettingKey, format.Key, now, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
 
         return await GetOverviewAsync(cancellationToken);
@@ -139,6 +159,40 @@ public sealed class DatabaseBackupService
         return new DatabaseBackupCreateResult(
             backup,
             $"/api/database/backups/download?relativePath={Uri.EscapeDataString(backup.RelativePath)}");
+    }
+
+    public Task<DatabaseBackupDeleteResult> DeleteBackupAsync(string? relativePath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var resolvedPath = ResolveBackupPath(relativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            throw new FileNotFoundException("Резервная копия не найдена.");
+        }
+
+        TryDeleteFile(resolvedPath);
+        CleanupEmptyDirectories();
+        return Task.FromResult(new DatabaseBackupDeleteResult(1, DeletedAll: false));
+    }
+
+    public Task<DatabaseBackupDeleteResult> DeleteAllBackupsAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var deletedCount = 0;
+        foreach (var pattern in GetBackupSearchPatterns())
+        {
+            foreach (var filePath in Directory.EnumerateFiles(_backupRootDirectory, pattern, SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                TryDeleteFile(filePath);
+                deletedCount++;
+            }
+        }
+
+        CleanupEmptyDirectories();
+        return Task.FromResult(new DatabaseBackupDeleteResult(deletedCount, DeletedAll: true));
     }
 
     public async Task<int> EnsureScheduledBackupsAsync(CancellationToken cancellationToken = default)
@@ -221,8 +275,8 @@ public sealed class DatabaseBackupService
             Directory.CreateDirectory(targetDirectory);
 
             DatabaseBackupFileInfo fileInfo = _databaseProvider.IsSqlite
-                ? await CreateSqliteBackupAsync(targetDirectory, nowLocal, trigger, scheduleSlot, cancellationToken)
-                : await CreatePostgreSqlBackupAsync(targetDirectory, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
+                ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, cancellationToken)
+                : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
 
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             return fileInfo;
@@ -235,6 +289,7 @@ public sealed class DatabaseBackupService
 
     private async Task<DatabaseBackupFileInfo> CreateSqliteBackupAsync(
         string targetDirectory,
+        DatabaseBackupFormatOption format,
         DateTimeOffset nowLocal,
         string trigger,
         string? scheduleSlot,
@@ -258,7 +313,7 @@ public sealed class DatabaseBackupService
         }
 
         var baseName = SanitizeFilePart(Path.GetFileNameWithoutExtension(databasePath));
-        var fileName = BuildBackupFileName(baseName, nowLocal, trigger, scheduleSlot, ".zip");
+        var fileName = BuildBackupFileName(baseName, nowLocal, trigger, scheduleSlot, format.FileExtension);
         var outputPath = Path.Combine(targetDirectory, fileName);
         var tempCopyPath = Path.Combine(targetDirectory, $"{Guid.NewGuid():N}.sqlite");
 
@@ -284,6 +339,13 @@ public sealed class DatabaseBackupService
                 }
             }
 
+            if (string.Equals(format.Key, "sqlite", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Move(tempCopyPath, outputPath, overwrite: true);
+                return BuildFileInfo(outputPath, _backupRootDirectory)
+                    ?? throw new InvalidOperationException("SQLite backup was created but could not be indexed.");
+            }
+
             using (var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create))
             {
                 archive.CreateEntryFromFile(tempCopyPath, $"{baseName}.db", CompressionLevel.Optimal);
@@ -300,6 +362,7 @@ public sealed class DatabaseBackupService
 
     private async Task<DatabaseBackupFileInfo> CreatePostgreSqlBackupAsync(
         string targetDirectory,
+        DatabaseBackupFormatOption format,
         string? toolCommand,
         DateTimeOffset nowLocal,
         string trigger,
@@ -313,7 +376,7 @@ public sealed class DatabaseBackupService
         }
 
         var databaseName = SanitizeFilePart(connectionBuilder.Database);
-        var fileName = BuildBackupFileName(databaseName, nowLocal, trigger, scheduleSlot, ".dump");
+        var fileName = BuildBackupFileName(databaseName, nowLocal, trigger, scheduleSlot, format.FileExtension);
         var outputPath = Path.Combine(targetDirectory, fileName);
         var pgDumpExecutable = ResolvePgDumpExecutable(toolCommand);
 
@@ -338,10 +401,13 @@ public sealed class DatabaseBackupService
         startInfo.ArgumentList.Add("--dbname");
         startInfo.ArgumentList.Add(connectionBuilder.Database);
         startInfo.ArgumentList.Add("--format");
-        startInfo.ArgumentList.Add("custom");
-        startInfo.ArgumentList.Add("--compress");
-        startInfo.ArgumentList.Add("6");
-        startInfo.ArgumentList.Add("--blobs");
+        startInfo.ArgumentList.Add(string.Equals(format.Key, "sql", StringComparison.OrdinalIgnoreCase) ? "plain" : "custom");
+        if (!string.Equals(format.Key, "sql", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.ArgumentList.Add("--compress");
+            startInfo.ArgumentList.Add("6");
+            startInfo.ArgumentList.Add("--blobs");
+        }
         startInfo.ArgumentList.Add("--no-password");
         startInfo.ArgumentList.Add("--file");
         startInfo.ArgumentList.Add(outputPath);
@@ -404,11 +470,10 @@ public sealed class DatabaseBackupService
             return false;
         }
 
-        var pattern = _databaseProvider.IsSqlite
-            ? $"*_{_databaseProvider.Key}_*_auto_{slotKey}.zip"
-            : $"*_{_databaseProvider.Key}_*_auto_{slotKey}.dump";
-
-        return Directory.EnumerateFiles(dayDirectory, pattern, SearchOption.TopDirectoryOnly).Any();
+        var pattern = $"*_{_databaseProvider.Key}_*_auto_{slotKey}.*";
+        return Directory.EnumerateFiles(dayDirectory, pattern, SearchOption.TopDirectoryOnly)
+            .Any(filePath => GetBackupSearchPatterns().Any(searchPattern =>
+                IsFileMatchingPattern(filePath, searchPattern)));
     }
 
     private Task CleanupExpiredBackupsAsync(int retentionDays, CancellationToken cancellationToken)
@@ -420,7 +485,7 @@ public sealed class DatabaseBackupService
         }
 
         var thresholdUtc = DateTimeOffset.UtcNow.AddDays(-retentionDays).UtcDateTime;
-        foreach (var searchPattern in new[] { "*.zip", "*.dump" })
+        foreach (var searchPattern in GetBackupSearchPatterns())
         {
             foreach (var filePath in Directory.EnumerateFiles(_backupRootDirectory, searchPattern, SearchOption.AllDirectories))
             {
@@ -435,15 +500,7 @@ public sealed class DatabaseBackupService
             }
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(_backupRootDirectory, "*", SearchOption.AllDirectories)
-                     .OrderByDescending(path => path.Length))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!Directory.EnumerateFileSystemEntries(directory).Any())
-            {
-                Directory.Delete(directory, false);
-            }
-        }
+        CleanupEmptyDirectories(cancellationToken);
 
         return Task.CompletedTask;
     }
@@ -453,7 +510,11 @@ public sealed class DatabaseBackupService
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var settings = await context.SystemSettings
             .AsNoTracking()
-            .Where(x => x.Key == AutomaticEnabledSettingKey || x.Key == ScheduleSettingKey || x.Key == RetentionDaysSettingKey)
+            .Where(x =>
+                x.Key == AutomaticEnabledSettingKey
+                || x.Key == ScheduleSettingKey
+                || x.Key == RetentionDaysSettingKey
+                || x.Key == FormatSettingKey)
             .ToDictionaryAsync(x => x.Key, x => x.Value, cancellationToken);
 
         var scheduleRaw = GetSettingOrConfig(settings, ScheduleSettingKey, "DatabaseBackup:ScheduleLocal") ?? BuildLegacyScheduleFallback();
@@ -467,12 +528,18 @@ public sealed class DatabaseBackupService
         var automaticEnabled = ParseBoolean(
             GetSettingOrConfig(settings, AutomaticEnabledSettingKey, "DatabaseBackup:Enabled"),
             fallback: true);
+        var selectedFormat = ResolveSelectedFormat(
+            GetSettingOrConfig(settings, FormatSettingKey, "DatabaseBackup:Format"),
+            fallbackToDefault: true);
+        var availableFormats = GetAvailableFormats();
 
         return new BackupSettings(
             automaticEnabled,
             normalizedSchedule,
             schedule,
             retentionDays,
+            selectedFormat,
+            availableFormats,
             _backupRootDirectory,
             _databaseProvider.IsPostgreSql ? ResolveConfiguredPgDumpCommand() : null);
     }
@@ -597,6 +664,81 @@ public sealed class DatabaseBackupService
         }
 
         return TryResolvePgDumpExecutable(configuredCommand) ?? configuredCommand;
+    }
+
+    private IReadOnlyList<DatabaseBackupFormatOption> GetAvailableFormats()
+    {
+        if (_databaseProvider.IsSqlite)
+        {
+            return
+            [
+                new DatabaseBackupFormatOption("zip", "SQLite archive (.zip)", "Консистентная копия SQLite, упакованная в ZIP.", ".zip", true),
+                new DatabaseBackupFormatOption("sqlite", "SQLite file (.sqlite)", "Отдельный консистентный файл SQLite без архива.", ".sqlite", false),
+            ];
+        }
+
+        return
+        [
+            new DatabaseBackupFormatOption("backup", "PostgreSQL backup (.backup)", "Custom backup через pg_dump, подходит для pg_restore.", ".backup", true),
+            new DatabaseBackupFormatOption("sql", "SQL script (.sql)", "Обычный SQL-дамп через pg_dump --format=plain.", ".sql", false),
+        ];
+    }
+
+    private DatabaseBackupFormatOption ResolveSelectedFormat(string? requestedFormat, bool fallbackToDefault)
+    {
+        var availableFormats = GetAvailableFormats();
+        var normalizedRequestedFormat = (requestedFormat ?? string.Empty).Trim().ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(normalizedRequestedFormat))
+        {
+          var selected = availableFormats.FirstOrDefault(option => option.Key == normalizedRequestedFormat);
+          if (selected is not null)
+          {
+              return selected;
+          }
+        }
+
+        if (!fallbackToDefault)
+        {
+            var supported = string.Join(", ", availableFormats.Select(option => option.Key));
+            throw new ArgumentException($"Неподдерживаемый формат резервной копии. Доступно: {supported}.");
+        }
+
+        return availableFormats.First(option => option.IsDefault);
+    }
+
+    private IReadOnlyList<string> GetBackupSearchPatterns()
+    {
+        if (_databaseProvider.IsSqlite)
+        {
+            return ["*.zip", "*.sqlite"];
+        }
+
+        return ["*.backup", "*.dump", "*.sql"];
+    }
+
+    private void CleanupEmptyDirectories(CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(_backupRootDirectory))
+        {
+            return;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(_backupRootDirectory, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(path => path.Length))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Directory.EnumerateFileSystemEntries(directory).Any())
+            {
+                Directory.Delete(directory, false);
+            }
+        }
+    }
+
+    private static bool IsFileMatchingPattern(string filePath, string searchPattern)
+    {
+        var extension = Path.GetExtension(filePath);
+        return string.Equals(searchPattern.TrimStart('*'), extension, StringComparison.OrdinalIgnoreCase);
     }
 
     private string ResolveConfiguredPgDumpCommand()
@@ -892,6 +1034,8 @@ public sealed class DatabaseBackupService
         string ScheduleDisplay,
         IReadOnlyList<TimeOnly> Schedule,
         int RetentionDays,
+        DatabaseBackupFormatOption Format,
+        IReadOnlyList<DatabaseBackupFormatOption> AvailableFormats,
         string RootDirectory,
         string? ToolCommand);
 }

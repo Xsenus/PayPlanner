@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
+import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import type {
-  DatabaseBackupOverviewDto,
   DatabaseImportResultDto,
   DatabaseStatusDto,
   FormRequirementSectionMetadataDto,
-  InvoiceCounterpartyCleanupResultDto,
   InvoiceLegacyMigrationSummaryDto,
   InvoiceNumberingSettingsDto,
   InvoiceRulesSettingsDto,
   LegacyAddressMigrationResult,
-  UserActivityCleanupResultDto,
-  UserActivityCompactionResultDto,
-  UserActivityMaintenanceDto,
 } from '../../services/api';
 
 type SettingsSection =
@@ -26,10 +23,10 @@ type SettingsSection =
   | 'auth-providers'
   | 'db-maintenance'
   | 'db-import'
-  | 'db-invoices'
-  | 'db-addresses'
-  | 'dictionary-merge'
+  | 'db-operations'
   | 'form-requirements';
+type FinancialRulesSubsection = 'invoices' | 'contracts';
+type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -37,6 +34,8 @@ export function AppSettings() {
   const { confirm } = useDialog();
   const toast = useToast();
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
+  const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
+  const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
   const [result, setResult] = useState<LegacyAddressMigrationResult | null>(null);
@@ -63,34 +62,11 @@ export function AppSettings() {
   const [invoiceRules, setInvoiceRules] = useState<InvoiceRulesSettingsDto>({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [invoiceRulesLoading, setInvoiceRulesLoading] = useState(false);
   const [invoiceRulesMessage, setInvoiceRulesMessage] = useState<string | null>(null);
-  const [invoiceCounterpartyCleanupLoading, setInvoiceCounterpartyCleanupLoading] = useState(false);
-  const [invoiceCounterpartyCleanupMessage, setInvoiceCounterpartyCleanupMessage] = useState<string | null>(null);
-  const [invoiceCounterpartyCleanupResult, setInvoiceCounterpartyCleanupResult] = useState<InvoiceCounterpartyCleanupResultDto | null>(null);
   const [invoiceMigrationLoading, setInvoiceMigrationLoading] = useState(false);
   const [invoiceMigrationError, setInvoiceMigrationError] = useState<string | null>(null);
   const [invoiceMigrationResult, setInvoiceMigrationResult] = useState<InvoiceLegacyMigrationSummaryDto | null>(null);
-  const [userActivityMaintenance, setUserActivityMaintenance] = useState<UserActivityMaintenanceDto | null>(null);
-  const [userActivityLoggingEnabled, setUserActivityLoggingEnabled] = useState(true);
-  const [userActivityRetentionDays, setUserActivityRetentionDays] = useState(0);
-  const [userActivityMaintenanceLoading, setUserActivityMaintenanceLoading] = useState(false);
-  const [userActivitySettingsSaving, setUserActivitySettingsSaving] = useState(false);
-  const [userActivityCleanupLoading, setUserActivityCleanupLoading] = useState(false);
-  const [userActivityCompactionLoading, setUserActivityCompactionLoading] = useState(false);
-  const [userActivityMaintenanceMessage, setUserActivityMaintenanceMessage] = useState<string | null>(null);
-  const [userActivityMaintenanceError, setUserActivityMaintenanceError] = useState<string | null>(null);
-  const [userActivityCleanupResult, setUserActivityCleanupResult] = useState<UserActivityCleanupResultDto | null>(null);
-  const [userActivityCompactionResult, setUserActivityCompactionResult] = useState<UserActivityCompactionResultDto | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatusDto | null>(null);
   const [databaseStatusLoading, setDatabaseStatusLoading] = useState(false);
-  const [databaseBackupOverview, setDatabaseBackupOverview] = useState<DatabaseBackupOverviewDto | null>(null);
-  const [databaseBackupAutomaticEnabled, setDatabaseBackupAutomaticEnabled] = useState(true);
-  const [databaseBackupScheduleLocal, setDatabaseBackupScheduleLocal] = useState('00:00,06:00,12:00,18:00');
-  const [databaseBackupRetentionDays, setDatabaseBackupRetentionDays] = useState(8);
-  const [databaseBackupLoading, setDatabaseBackupLoading] = useState(false);
-  const [databaseBackupSaving, setDatabaseBackupSaving] = useState(false);
-  const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
-  const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
-  const [databaseBackupError, setDatabaseBackupError] = useState<string | null>(null);
   const [databaseImportFile, setDatabaseImportFile] = useState<File | null>(null);
   const [databaseImportLoading, setDatabaseImportLoading] = useState(false);
   const [databaseImportError, setDatabaseImportError] = useState<string | null>(null);
@@ -99,15 +75,14 @@ export function AppSettings() {
   const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
 
   const activeSectionTitle = useMemo(() => {
-    if (activeSection === 'general') return 'Основные';
-    if (activeSection === 'integrations') return 'Ключи интеграций';
+    if (activeSection === 'general') return 'Финансовые правила';
+    if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
-    if (activeSection === 'db-maintenance') return 'Работа с базой · Обслуживание';
-    if (activeSection === 'db-import') return 'Работа с базой · Импорт SQLite';
-    if (activeSection === 'dictionary-merge') return 'Слияние дублей справочников';
-    if (activeSection === 'form-requirements') return 'Обязательные поля форм';
-    if (activeSection === 'db-invoices') return 'Работа с базой · Счета';
-    return 'Работа с базой · Адреса';
+    if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
+    if (activeSection === 'db-import') return 'Импорт SQLite';
+    if (activeSection === 'db-operations') return 'Операции по разделам БД';
+    if (activeSection === 'form-requirements') return 'Правила заполнения форм';
+    return 'Финансовые правила';
   }, [activeSection]);
 
   const migrationDetails = result?.details ?? [];
@@ -123,23 +98,6 @@ export function AppSettings() {
   const getErrorMessage = (error: unknown, fallback: string) =>
     extractDisplayErrorMessage(error, fallback);
 
-  const formatBytes = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-      return '0 Б';
-    }
-
-    const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
-    let value = bytes;
-    let index = 0;
-
-    while (value >= 1024 && index < units.length - 1) {
-      value /= 1024;
-      index += 1;
-    }
-
-    return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
-  };
-
   const formatDateTime = (value?: string | null) => {
     if (!value) {
       return '—';
@@ -152,13 +110,6 @@ export function AppSettings() {
     }
   };
 
-  const applyDatabaseBackupOverview = (overview: DatabaseBackupOverviewDto | null) => {
-    setDatabaseBackupOverview(overview);
-    setDatabaseBackupAutomaticEnabled(overview?.automaticEnabled ?? true);
-    setDatabaseBackupScheduleLocal(overview?.scheduleLocal ?? '00:00,06:00,12:00,18:00');
-    setDatabaseBackupRetentionDays(Math.max(1, Number(overview?.retentionDays ?? 8) || 8));
-  };
-
   const loadDatabaseStatus = async () => {
     setDatabaseStatusLoading(true);
     try {
@@ -169,90 +120,6 @@ export function AppSettings() {
       setDatabaseImportError((prev) => prev ?? message);
     } finally {
       setDatabaseStatusLoading(false);
-    }
-  };
-
-  const loadDatabaseBackups = async (options?: { silent?: boolean; showSuccessToast?: boolean }) => {
-    if (!options?.silent) {
-      setDatabaseBackupLoading(true);
-    }
-
-    try {
-      const overview = await apiService.getDatabaseBackupOverview();
-      applyDatabaseBackupOverview(overview);
-      setDatabaseBackupError(null);
-      if (options?.showSuccessToast) {
-        toast.success('Список резервных копий обновлён', 'База данных');
-      }
-      return overview;
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось загрузить список резервных копий');
-      setDatabaseBackupError(message);
-      if (options?.showSuccessToast) {
-        toast.error(message, 'База данных');
-      }
-      return null;
-    } finally {
-      if (!options?.silent) {
-        setDatabaseBackupLoading(false);
-      }
-    }
-  };
-
-  const downloadDatabaseBackup = async (relativePath: string, fallbackFileName?: string) => {
-    const response = await apiService.downloadDatabaseBackup(relativePath);
-    const blobUrl = window.URL.createObjectURL(response.blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = response.fileName || fallbackFileName || `database-backup${databaseBackupOverview?.fileExtension ?? ''}`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(blobUrl);
-  };
-
-  const createAndDownloadDatabaseBackup = async () => {
-    setDatabaseBackupCreating(true);
-    setDatabaseBackupError(null);
-    setDatabaseBackupMessage(null);
-
-    try {
-      const result = await apiService.createDatabaseBackup();
-      await downloadDatabaseBackup(result.backup.relativePath, result.backup.fileName);
-      await loadDatabaseBackups({ silent: true });
-      const message = 'Резервная копия создана, скачивание началось';
-      setDatabaseBackupMessage(message);
-      toast.success(message, 'База данных');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось создать резервную копию');
-      setDatabaseBackupError(message);
-      toast.error(message, 'База данных');
-    } finally {
-      setDatabaseBackupCreating(false);
-    }
-  };
-
-  const saveDatabaseBackupSettings = async () => {
-    setDatabaseBackupSaving(true);
-    setDatabaseBackupError(null);
-    setDatabaseBackupMessage(null);
-
-    try {
-      const overview = await apiService.updateDatabaseBackupSettings({
-        automaticEnabled: databaseBackupAutomaticEnabled,
-        scheduleLocal: databaseBackupScheduleLocal.trim(),
-        retentionDays: Math.max(1, Math.floor(Number(databaseBackupRetentionDays) || 1)),
-      });
-      applyDatabaseBackupOverview(overview);
-      const message = 'Настройки резервного копирования сохранены';
-      setDatabaseBackupMessage(message);
-      toast.success(message, 'База данных');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось сохранить настройки резервного копирования');
-      setDatabaseBackupError(message);
-      toast.error(message, 'База данных');
-    } finally {
-      setDatabaseBackupSaving(false);
     }
   };
 
@@ -557,34 +424,6 @@ export function AppSettings() {
     }
   };
 
-  const runInvoiceCounterpartyCleanup = async () => {
-    const approved = await confirm({
-      title: 'Подтверждение очистки',
-      description: 'Очистить содержимое поля "От кого счёт" во всех старых счетах канонической структуры.',
-      confirmLabel: 'Очистить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
-    setInvoiceCounterpartyCleanupLoading(true);
-    setInvoiceCounterpartyCleanupMessage(null);
-    try {
-      const response = await apiService.cleanupInvoiceCounterpartyNames();
-      setInvoiceCounterpartyCleanupResult(response);
-      const message = 'Очистка поля "От кого счёт" выполнена';
-      setInvoiceCounterpartyCleanupMessage(message);
-      toast.success(message, 'Счета');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось очистить поле "От кого счёт"');
-      setInvoiceCounterpartyCleanupResult(null);
-      setInvoiceCounterpartyCleanupMessage(message);
-      toast.error(message, 'Счета');
-    } finally {
-      setInvoiceCounterpartyCleanupLoading(false);
-    }
-  };
-
   const runMigration = async () => {
     const approved = await confirm({
       title: 'Подтверждение миграции',
@@ -641,160 +480,6 @@ export function AppSettings() {
     }
   };
 
-  const loadUserActivityMaintenance = async (options?: { showSuccessToast?: boolean }) => {
-    setUserActivityMaintenanceLoading(true);
-    setUserActivityMaintenanceError(null);
-    try {
-      const response = await apiService.getUserActivityMaintenance();
-      setUserActivityMaintenance(response);
-      setUserActivityLoggingEnabled(response.isEnabled);
-      setUserActivityRetentionDays(Math.max(0, Number(response.retentionDays ?? 0) || 0));
-      if (options?.showSuccessToast) {
-        toast.success('Статистика журнала и базы обновлена', 'База данных');
-      }
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось загрузить состояние журнала и базы данных');
-      setUserActivityMaintenanceError(message);
-      if (options?.showSuccessToast) {
-        toast.error(message, 'База данных');
-      }
-    } finally {
-      setUserActivityMaintenanceLoading(false);
-    }
-  };
-
-  const saveUserActivitySettings = async () => {
-    const approved = await confirm({
-      title: 'Подтверждение действия',
-      description: userActivityLoggingEnabled
-        ? 'Включить журналирование действий пользователей для всех пользователей системы.'
-        : 'Отключить журналирование действий пользователей для всех пользователей системы.',
-      confirmLabel: 'Сохранить',
-      cancelLabel: 'Отмена',
-    });
-    if (!approved) return;
-
-    setUserActivitySettingsSaving(true);
-    setUserActivityMaintenanceError(null);
-    setUserActivityMaintenanceMessage(null);
-    try {
-      const normalizedRetentionDays = Math.max(0, Math.floor(Number(userActivityRetentionDays) || 0));
-      const response = await apiService.updateUserActivitySettings({
-        isEnabled: userActivityLoggingEnabled,
-        retentionDays: normalizedRetentionDays > 0 ? normalizedRetentionDays : null,
-      });
-      setUserActivityMaintenance(response);
-      setUserActivityLoggingEnabled(response.isEnabled);
-      setUserActivityRetentionDays(Math.max(0, Number(response.retentionDays ?? 0) || 0));
-      const message = response.isEnabled
-        ? normalizedRetentionDays > 0
-          ? `Журналирование включено, автоочистка: ${normalizedRetentionDays} дн.`
-          : 'Журналирование включено, автоочистка выключена'
-        : normalizedRetentionDays > 0
-          ? `Журналирование отключено, автоочистка: ${normalizedRetentionDays} дн.`
-          : 'Журналирование отключено, автоочистка выключена';
-      setUserActivityMaintenanceMessage(message);
-      toast.success(message, 'База данных');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось сохранить настройку журналирования');
-      setUserActivityMaintenanceError(message);
-      toast.error(message, 'База данных');
-    } finally {
-      setUserActivitySettingsSaving(false);
-    }
-  };
-
-  const runUserActivityCleanup = async () => {
-    const approved = await confirm({
-      title: 'Подтверждение очистки',
-      description: 'Удалить все записи журнала активности. Это очистит таблицу логов, но для уменьшения файла SQLite может понадобиться отдельное уплотнение базы.',
-      confirmLabel: 'Удалить записи',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
-    setUserActivityCleanupLoading(true);
-    setUserActivityMaintenanceError(null);
-    setUserActivityMaintenanceMessage(null);
-    try {
-      const response = await apiService.deleteUserActivityLogs();
-      setUserActivityCleanupResult(response);
-      setUserActivityCompactionResult(null);
-      setUserActivityMaintenance(response.maintenance);
-      setUserActivityLoggingEnabled(response.maintenance.isEnabled);
-      setUserActivityRetentionDays(Math.max(0, Number(response.maintenance.retentionDays ?? 0) || 0));
-      const message = `Журнал активности очищен. Удалено записей: ${response.deletedLogs}`;
-      setUserActivityMaintenanceMessage(message);
-      toast.success(message, 'База данных');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось очистить журнал активности');
-      setUserActivityMaintenanceError(message);
-      toast.error(message, 'База данных');
-    } finally {
-      setUserActivityCleanupLoading(false);
-    }
-  };
-
-  const runUserActivityCompaction = async () => {
-    const approved = await confirm({
-      title: 'Подтверждение уплотнения',
-      description: 'Выполнить `VACUUM` и очистить WAL-файл. Операция может занять время и временно увеличить нагрузку на SQLite.',
-      confirmLabel: 'Уплотнить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
-    setUserActivityCompactionLoading(true);
-    setUserActivityMaintenanceError(null);
-    setUserActivityMaintenanceMessage(null);
-    try {
-      const response = await apiService.compactUserActivityDatabase();
-      setUserActivityCompactionResult(response);
-      setUserActivityCleanupResult(null);
-      setUserActivityMaintenance(response.maintenance);
-      setUserActivityLoggingEnabled(response.maintenance.isEnabled);
-      setUserActivityRetentionDays(Math.max(0, Number(response.maintenance.retentionDays ?? 0) || 0));
-      const savedBytes = Math.max(0, response.before.totalSizeBytes - response.after.totalSizeBytes);
-      const message = `Уплотнение базы завершено. Освобождено: ${formatBytes(savedBytes)}`;
-      setUserActivityMaintenanceMessage(message);
-      toast.success(message, 'База данных');
-    } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось уплотнить базу данных');
-      setUserActivityMaintenanceError(message);
-      toast.error(message, 'База данных');
-    } finally {
-      setUserActivityCompactionLoading(false);
-    }
-  };
-
-  const hasUserActivitySettingsChanges = useMemo(
-    () =>
-      userActivityMaintenance !== null
-      && (
-        userActivityLoggingEnabled !== userActivityMaintenance.isEnabled
-        || userActivityRetentionDays !== Math.max(0, Number(userActivityMaintenance.retentionDays ?? 0) || 0)
-      ),
-    [userActivityLoggingEnabled, userActivityMaintenance, userActivityRetentionDays],
-  );
-
-  const hasDatabaseBackupSettingsChanges = useMemo(
-    () =>
-      databaseBackupOverview !== null
-      && (
-        databaseBackupAutomaticEnabled !== databaseBackupOverview.automaticEnabled
-        || databaseBackupScheduleLocal.trim() !== databaseBackupOverview.scheduleLocal.trim()
-        || databaseBackupRetentionDays !== Math.max(1, Number(databaseBackupOverview.retentionDays ?? 0) || 1)
-      ),
-    [
-      databaseBackupAutomaticEnabled,
-      databaseBackupOverview,
-      databaseBackupRetentionDays,
-      databaseBackupScheduleLocal,
-    ],
-  );
-
   useEffect(() => {
     if (activeSection === 'integrations') {
       void loadDaDataCredentials();
@@ -803,660 +488,325 @@ export function AppSettings() {
       void loadInvoiceNumbering();
       void loadInvoiceRules();
     }
-    if (activeSection === 'db-maintenance') {
-      void loadDatabaseStatus();
-      void loadDatabaseBackups();
-      void loadUserActivityMaintenance();
-    }
     if (activeSection === 'db-import') {
       void loadDatabaseStatus();
     }
-    if (activeSection === 'dictionary-merge') {
+    if (activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'dictionary-merge') {
       void loadDuplicates(mergeKind);
     }
     if (activeSection === 'form-requirements') {
       void loadFormRequirements();
     }
-  }, [activeSection, mergeKind]);
+  }, [activeDatabaseOperationsSubsection, activeSection, mergeKind]);
 
   return (
     <div className="p-6 lg:p-8">
       <div className="w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
-          <aside className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 h-fit">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Настройки</h2>
+          <aside className="h-fit rounded-3xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Панель настроек</div>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">Структура разделов</h2>
+            </div>
 
-            <nav aria-label="Разделы настроек" className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setActiveSection('general')}
-                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  activeSection === 'general'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
-                }`}
-              >
-                Основные
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('integrations')}
-                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  activeSection === 'integrations'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
-                }`}
-              >
-                Ключи интеграций
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('auth-providers')}
-                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  activeSection === 'auth-providers'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
-                }`}
-              >
-                Внешняя авторизация
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('form-requirements')}
-                className={`w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  activeSection === 'form-requirements'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'text-gray-700 hover:bg-gray-50 border border-transparent'
-                }`}
-              >
-                Обязательные поля форм
-              </button>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
-                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Работа с базой</div>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('db-maintenance')}
-                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'db-maintenance'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  ↳ Обслуживание
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('db-invoices')}
-                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'db-invoices'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  ↳ Счета
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('db-addresses')}
-                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'db-addresses'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  ↳ Адреса
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('db-import')}
-                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'db-import'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  ↳ Импорт SQLite
-                </button>
+            <nav aria-label="Разделы настроек" className="mt-4 space-y-3">
+              <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
+                <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-white/90 px-3 py-3 shadow-sm">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                    <SlidersHorizontal className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-600">Раздел</div>
+                    <div className="text-sm font-semibold text-slate-900">Операционная модель</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('general')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'general'
+                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
+                    }`}
+                  >
+                    Финансовые правила
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('form-requirements')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'form-requirements'
+                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
+                    }`}
+                  >
+                    Правила заполнения форм
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2">
-                <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Справочники</div>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('dictionary-merge')}
-                  className={`mt-1 w-full text-left rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    activeSection === 'dictionary-merge'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  ↳ Объединение дублей
-                </button>
+              <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
+                <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-600">Раздел</div>
+                    <div className="text-sm font-semibold text-slate-900">Интеграции и доступ</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('integrations')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'integrations'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    Ключи интеграций
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('auth-providers')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'auth-providers'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    Авторизация и вход
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3 shadow-sm">
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white/90 px-3 py-3 shadow-sm">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                    <Database className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">Раздел</div>
+                    <div className="text-sm font-semibold text-slate-900">База данных и обслуживание</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('db-maintenance')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'db-maintenance'
+                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
+                    }`}
+                  >
+                    Обслуживание
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('db-operations')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'db-operations'
+                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
+                    }`}
+                  >
+                    Операции по разделам
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('db-import')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'db-import'
+                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
+                    }`}
+                  >
+                    Импорт SQLite
+                  </button>
+                </div>
               </div>
             </nav>
           </aside>
 
           <section className="space-y-6">
-            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900">{activeSectionTitle}</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                {activeSection === 'general'
-                  ? 'Базовые параметры системы. Раздел подготовлен для последующего расширения.'
-                  : activeSection === 'integrations'
-                    ? 'Хранение и управление ключами доступа к внешним сервисам.'
-                    : activeSection === 'auth-providers'
-                      ? 'Настройка входа через Google, VK, Yandex, Telegram Bot и Telegram Widget.'
-                    : activeSection === 'db-maintenance'
-                      ? 'Управление журналом действий пользователей и обслуживающие операции для SQLite: очистка, checkpoint и уплотнение базы.'
-                    : activeSection === 'form-requirements'
-                      ? 'Администратор определяет обязательные поля отдельно для каждого раздела.'
-                    : activeSection === 'dictionary-merge'
-                      ? 'Безопасное транзакционное объединение дублей в справочниках с заменой ссылок во всех карточках юрлиц.'
-                    : activeSection === 'db-import'
-                      ? 'Загрузка SQLite-файла в текущую базу с автоматическим объединением найденных записей и подробным отчётом по каждой таблице.'
-                    : activeSection === 'db-invoices'
-                      ? 'Операции по формированию канонических счетов и перепривязке платежей к актуальным сущностям счета.'
-                      : 'Операции по переносу и выравниванию адресов. Позже здесь можно будет добавить другие сервисные процедуры.'}
-              </p>
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-2xl font-semibold text-gray-900">{activeSectionTitle}</h3>
             </div>
 
             {activeSection === 'general' && (
-              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
-                <div>
-                  <h4 className="text-base font-semibold text-gray-900">Нумерация счетов</h4>
-                  <p className="text-sm text-gray-600 mt-1">Номер сбрасывается каждый год. Можно выбрать стартовый номер и стратегию подбора следующего номера.</p>
-                </div>
-
-                <label className="block">
-                  <span className="text-sm font-medium text-gray-700">Стартовый номер года</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={invoiceNumbering.startNumber}
-                    onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, startNumber: Math.max(1, Number(e.target.value) || 1) }))}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
-                  <select
-                    value={invoiceNumbering.allocationStrategy}
-                    onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, allocationStrategy: e.target.value as InvoiceNumberingSettingsDto['allocationStrategy'] }))}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                  >
-                    <option value="max-plus-one">Максимальный номер + 1</option>
-                    <option value="first-free">Первый свободный номер от стартового</option>
-                  </select>
-                </label>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={saveInvoiceNumbering}
-                    disabled={invoiceNumberingLoading}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {invoiceNumberingLoading ? 'Сохранение…' : 'Сохранить'}
-                  </button>
-                  {invoiceNumberingMessage && <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>}
-                </div>
-
-                <div className="border-t border-gray-200 pt-4">
-                  <h4 className="text-base font-semibold text-gray-900">Ограничения счёта</h4>
-                  <p className="mt-1 text-sm text-gray-600">
-                    Временно можно ограничить количество связанных дел и актов в одном счёте. Ограничение действует и в форме, и на сервере.
-                  </p>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <label className="block">
-                      <span className="text-sm font-medium text-gray-700">Максимум дел в счёте</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={invoiceRules.maxClientCasesPerInvoice}
-                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxClientCasesPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
-                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="text-sm font-medium text-gray-700">Максимум актов в счёте</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={invoiceRules.maxActsPerInvoice}
-                        onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxActsPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
-                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-3">
+              <div className="space-y-6">
+                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={saveInvoiceRules}
-                      disabled={invoiceRulesLoading}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={() => setActiveFinancialRulesSubsection('invoices')}
+                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                        activeFinancialRulesSubsection === 'invoices'
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
                     >
-                      {invoiceRulesLoading ? 'Сохранение…' : 'Сохранить ограничения'}
+                      Счета
                     </button>
-                    {invoiceRulesMessage && <span className="text-sm text-gray-600">{invoiceRulesMessage}</span>}
+                    <button
+                      type="button"
+                      onClick={() => setActiveFinancialRulesSubsection('contracts')}
+                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                        activeFinancialRulesSubsection === 'contracts'
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      Договоры
+                    </button>
                   </div>
                 </div>
 
-                <div className="border-t border-gray-200 pt-4">
-                  <h4 className="text-base font-semibold text-gray-900">Очистка устаревшего поля счета</h4>
-                  <p className="mt-1 text-sm text-gray-600">
-                    Удаляет сохраненные значения поля "От кого счёт" и снимает старое требование заполнения.
-                  </p>
-                  <div className="mt-3 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={runInvoiceCounterpartyCleanup}
-                      disabled={invoiceCounterpartyCleanupLoading}
-                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {invoiceCounterpartyCleanupLoading ? 'Очищаем…' : 'Очистить поле'}
-                    </button>
-                    {invoiceCounterpartyCleanupMessage && (
-                      <span className="text-sm text-gray-600">{invoiceCounterpartyCleanupMessage}</span>
-                    )}
-                  </div>
-                  {invoiceCounterpartyCleanupResult && (
-                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                      <p>Очищено счетов: {invoiceCounterpartyCleanupResult.cleared}</p>
-                      <p>Удалено legacy-требований: {invoiceCounterpartyCleanupResult.removedRequirements}</p>
+                {activeFinancialRulesSubsection === 'invoices' && (
+                  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div className="mb-6">
+                      <h4 className="text-xl font-semibold text-gray-900">Счета</h4>
                     </div>
-                  )}
-                </div>
+
+                    <div className="grid gap-6 xl:grid-cols-2">
+                      <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <div className="space-y-4">
+                          <div>
+                            <h5 className="text-base font-semibold text-gray-900">Нумерация счетов</h5>
+                            <p className="mt-1 text-sm text-gray-600">
+                              Номер сбрасывается каждый год. Можно выбрать стартовый номер и стратегию подбора следующего номера.
+                            </p>
+                          </div>
+
+                          <label className="block">
+                            <span className="text-sm font-medium text-gray-700">Стартовый номер года</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={invoiceNumbering.startNumber}
+                              onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, startNumber: Math.max(1, Number(e.target.value) || 1) }))}
+                              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                          </label>
+
+                          <label className="block">
+                            <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
+                            <select
+                              value={invoiceNumbering.allocationStrategy}
+                              onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, allocationStrategy: e.target.value as InvoiceNumberingSettingsDto['allocationStrategy'] }))}
+                              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="max-plus-one">Максимальный номер + 1</option>
+                              <option value="first-free">Первый свободный номер от стартового</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="mt-auto flex min-h-10 items-end justify-between gap-3 pt-6">
+                          {invoiceNumberingMessage ? (
+                            <span className="text-sm text-gray-600">{invoiceNumberingMessage}</span>
+                          ) : (
+                            <span />
+                          )}
+                          <button
+                            type="button"
+                            onClick={saveInvoiceNumbering}
+                            disabled={invoiceNumberingLoading}
+                            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Save className="h-4 w-4" />
+                            <span>{invoiceNumberingLoading ? 'Сохранение…' : 'Сохранить'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <div className="space-y-4">
+                          <div>
+                            <h5 className="text-base font-semibold text-gray-900">Ограничения счёта</h5>
+                            <p className="mt-1 text-sm text-gray-600">
+                              Временно можно ограничить количество связанных дел и актов в одном счёте. Ограничение действует и в форме, и на сервере.
+                            </p>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="block">
+                              <span className="text-sm font-medium text-gray-700">Максимум дел в счёте</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={invoiceRules.maxClientCasesPerInvoice}
+                                onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxClientCasesPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </label>
+
+                            <label className="block">
+                              <span className="text-sm font-medium text-gray-700">Максимум актов в счёте</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={invoiceRules.maxActsPerInvoice}
+                                onChange={(e) => setInvoiceRules((prev) => ({ ...prev, maxActsPerInvoice: Math.max(1, Number(e.target.value) || 1) }))}
+                                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="mt-auto flex min-h-10 items-end justify-between gap-3 pt-6">
+                          {invoiceRulesMessage ? (
+                            <span className="text-sm text-gray-600">{invoiceRulesMessage}</span>
+                          ) : (
+                            <span />
+                          )}
+                          <button
+                            type="button"
+                            onClick={saveInvoiceRules}
+                            disabled={invoiceRulesLoading}
+                            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Save className="h-4 w-4" />
+                            <span>{invoiceRulesLoading ? 'Сохранение…' : 'Сохранить'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeFinancialRulesSubsection === 'contracts' && (
+                  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div className="mb-6">
+                      <h4 className="text-xl font-semibold text-gray-900">Договоры</h4>
+                    </div>
+
+                    <div className="grid gap-6 xl:grid-cols-2">
+                      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <h5 className="text-base font-semibold text-gray-900">Нумерация договоров</h5>
+                        <p className="mt-2 text-sm text-gray-600">
+                          Здесь будет отдельная логика нумерации договоров: шаблон номера, стартовые значения и правила генерации.
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <h5 className="text-base font-semibold text-gray-900">Правила договоров</h5>
+                        <p className="mt-2 text-sm text-gray-600">
+                          Здесь будут ограничения, обязательные параметры и дальнейшие настройки, связанные только с договорами.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {activeSection === 'auth-providers' && <AuthProviderSettings />}
 
-            {activeSection === 'db-maintenance' && (
-              <div className="space-y-6">
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <h4 className="text-base font-semibold text-gray-900">Журнал действий пользователей</h4>
-                      <p className="mt-1 text-sm text-gray-600">
-                        Глобальный переключатель для автоматического и ручного журналирования. При отключении новые записи в `UserActivityLogs` больше не создаются.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void loadUserActivityMaintenance({ showSuccessToast: true })}
-                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving || userActivityCleanupLoading || userActivityCompactionLoading}
-                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {userActivityMaintenanceLoading ? 'Обновляем…' : 'Обновить статистику'}
-                    </button>
-                  </div>
-
-                  <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={userActivityLoggingEnabled}
-                      onChange={(event) => setUserActivityLoggingEnabled(event.target.checked)}
-                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving}
-                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>
-                      <span className="block font-medium text-gray-900">Включить журналирование действий пользователей</span>
-                      <span className="mt-1 block text-gray-600">
-                        Когда настройка выключена, система перестаёт писать автоматические API-логи и ручные события активности.
-                      </span>
-                    </span>
-                  </label>
-
-                  <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
-                    <span className="block font-medium text-gray-900">Автоочистка журнала по сроку хранения</span>
-                    <span className="mt-1 block text-gray-600">
-                      Сервер каждые 12 часов удаляет записи старше указанного срока. Значение `0` отключает автоочистку.
-                    </span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={userActivityRetentionDays}
-                      onChange={(event) => setUserActivityRetentionDays(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
-                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving}
-                      className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={saveUserActivitySettings}
-                      disabled={userActivityMaintenanceLoading || userActivitySettingsSaving || !hasUserActivitySettingsChanges}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {userActivitySettingsSaving ? 'Сохраняем…' : 'Сохранить настройку'}
-                    </button>
-                    <span className="text-sm text-gray-500">
-                      Текущее состояние: {userActivityMaintenance?.isEnabled === false ? 'выключено' : 'включено'}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      Автоочистка: {(userActivityMaintenance?.retentionDays ?? 0) > 0 ? `${userActivityMaintenance?.retentionDays} дн.` : 'выключена'}
-                    </span>
-                    {userActivityMaintenance?.updatedAt ? (
-                      <span className="text-sm text-gray-500">
-                        Обновлено: {formatDateTime(userActivityMaintenance.updatedAt)}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {userActivityMaintenanceError && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      {userActivityMaintenanceError}
-                    </div>
-                  )}
-                  {userActivityMaintenanceMessage && (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                      {userActivityMaintenanceMessage}
-                    </div>
-                  )}
-
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Записей в журнале</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">
-                        {userActivityMaintenanceLoading && !userActivityMaintenance ? '…' : userActivityMaintenance?.logEntries ?? 0}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Файл БД</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">
-                        {formatBytes(userActivityMaintenance?.storage.databaseFileSizeBytes ?? 0)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">WAL-файл</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">
-                        {formatBytes(userActivityMaintenance?.storage.walFileSizeBytes ?? 0)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Всего на диске</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">
-                        {formatBytes(userActivityMaintenance?.storage.totalSizeBytes ?? 0)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Можно освободить</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">
-                        {formatBytes(userActivityMaintenance?.storage.estimatedReclaimableBytes ?? 0)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Самая старая запись</div>
-                      <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.oldestLogAt)}</div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Последняя запись</div>
-                      <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.newestLogAt)}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
-                  <div>
-                    <h4 className="text-base font-semibold text-gray-900">Очистка и уплотнение базы</h4>
-                    <p className="mt-1 text-sm text-gray-600">
-                      Очистка удаляет строки журнала. Уплотнение выполняет checkpoint и `VACUUM`, чтобы SQLite реально освободил место на диске.
-                    </p>
-                  </div>
-
-                  {databaseStatus && !databaseStatus.supportsSqliteMaintenance && (
-                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                      Текущее хранилище работает на {databaseStatus.displayName}. Очистка журнала доступна, а файловые операции SQLite вроде `VACUUM` и управления WAL здесь не применяются.
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={runUserActivityCleanup}
-                      disabled={userActivityCleanupLoading || userActivityCompactionLoading}
-                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {userActivityCleanupLoading ? 'Удаляем…' : 'Очистить журнал'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={runUserActivityCompaction}
-                      disabled={userActivityCleanupLoading || userActivityCompactionLoading || databaseStatus?.supportsSqliteMaintenance === false}
-                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {userActivityCompactionLoading ? 'Уплотняем…' : 'Уплотнить БД'}
-                    </button>
-                  </div>
-
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                    После удаления логов размер файла может не уменьшиться сразу. Это нормально для SQLite в режиме `WAL`: сначала освобождаются страницы, а затем их нужно собрать через уплотнение.
-                  </div>
-
-                  {userActivityCleanupResult && (
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                      <p className="font-medium">Журнал очищен</p>
-                      <p className="mt-1">Удалено записей: {userActivityCleanupResult.deletedLogs}</p>
-                      <p className="mt-1">Текущий размер на диске: {formatBytes(userActivityCleanupResult.maintenance.storage.totalSizeBytes)}</p>
-                    </div>
-                  )}
-
-                  {userActivityCompactionResult && (
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                      <p className="font-medium">Уплотнение завершено</p>
-                      <p className="mt-1">До: {formatBytes(userActivityCompactionResult.before.totalSizeBytes)}</p>
-                      <p className="mt-1">После: {formatBytes(userActivityCompactionResult.after.totalSizeBytes)}</p>
-                      <p className="mt-1">
-                        Освобождено: {formatBytes(Math.max(0, userActivityCompactionResult.before.totalSizeBytes - userActivityCompactionResult.after.totalSizeBytes))}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <h4 className="text-base font-semibold text-gray-900">Резервные копии базы</h4>
-                      <p className="mt-1 text-sm text-gray-600">
-                        Для SQLite создаётся архив `.zip` с консистентной копией файла БД. Для PostgreSQL создаётся `.dump` через `pg_dump`, без дополнительной упаковки.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void loadDatabaseBackups({ showSuccessToast: true })}
-                        disabled={databaseBackupLoading || databaseBackupCreating || databaseBackupSaving}
-                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {databaseBackupLoading ? 'Обновляем…' : 'Обновить список'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={createAndDownloadDatabaseBackup}
-                        disabled={databaseBackupLoading || databaseBackupCreating}
-                        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {databaseBackupCreating ? 'Создаём…' : 'Создать и скачать'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
-                      <span className="block font-medium text-gray-900">Автоматические бэкапы</span>
-                      <span className="mt-1 block text-gray-600">
-                        Сервис раз в минуту проверяет локальное расписание и создаёт пропущенные резервные копии.
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={databaseBackupAutomaticEnabled}
-                        onChange={(event) => setDatabaseBackupAutomaticEnabled(event.target.checked)}
-                        disabled={databaseBackupLoading || databaseBackupSaving}
-                        className="mt-4 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </label>
-
-                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
-                      <span className="block font-medium text-gray-900">Расписание</span>
-                      <span className="mt-1 block text-gray-600">
-                        Формат: `HH:mm,HH:mm`. Пример: `03:00,15:00`.
-                      </span>
-                      <input
-                        type="text"
-                        value={databaseBackupScheduleLocal}
-                        onChange={(event) => setDatabaseBackupScheduleLocal(event.target.value)}
-                        disabled={databaseBackupLoading || databaseBackupSaving}
-                        className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                    </label>
-
-                    <label className="block rounded-xl border border-gray-200 p-4 text-sm text-gray-700">
-                      <span className="block font-medium text-gray-900">Хранить дней</span>
-                      <span className="mt-1 block text-gray-600">
-                        Старые копии удаляются автоматически при следующей проверке расписания.
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        step={1}
-                        value={databaseBackupRetentionDays}
-                        onChange={(event) => setDatabaseBackupRetentionDays(Math.max(1, Math.floor(Number(event.target.value) || 1)))}
-                        disabled={databaseBackupLoading || databaseBackupSaving}
-                        className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={saveDatabaseBackupSettings}
-                      disabled={databaseBackupLoading || databaseBackupSaving || !hasDatabaseBackupSettingsChanges}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {databaseBackupSaving ? 'Сохраняем…' : 'Сохранить настройки'}
-                    </button>
-                    <span className="text-sm text-gray-500">
-                      Провайдер: {databaseBackupOverview?.providerDisplayName ?? databaseStatus?.displayName ?? '—'}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      Формат: {databaseBackupOverview?.backupFormat ?? '—'}
-                    </span>
-                  </div>
-
-                  {databaseBackupError && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      {databaseBackupError}
-                    </div>
-                  )}
-                  {databaseBackupMessage && (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                      {databaseBackupMessage}
-                    </div>
-                  )}
-
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Папка на сервере</div>
-                      <div className="mt-2 break-all text-sm text-gray-700">{databaseBackupOverview?.rootDirectory ?? '—'}</div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Часовой пояс</div>
-                      <div className="mt-2 text-sm text-gray-700">{databaseBackupOverview?.timeZone ?? '—'}</div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Файлов в списке</div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">{databaseBackupOverview?.items.length ?? 0}</div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        {databaseBackupOverview?.provider === 'postgresql' ? 'Команда pg_dump' : 'Формат файла'}
-                      </div>
-                      <div className="mt-2 break-all text-sm text-gray-700">
-                        {databaseBackupOverview?.provider === 'postgresql'
-                          ? databaseBackupOverview?.toolCommand || 'pg_dump'
-                          : databaseBackupOverview?.fileExtension || '.zip'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-gray-200 p-4">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h5 className="text-sm font-semibold text-gray-900">Последние резервные копии</h5>
-                        <p className="mt-1 text-sm text-gray-600">
-                          Показываем до 100 последних файлов текущего провайдера.
-                        </p>
-                      </div>
-                    </div>
-
-                    {databaseBackupOverview?.items.length ? (
-                      <div className="mt-4 overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-200 text-left text-gray-500">
-                              <th className="py-2 pr-4">Файл</th>
-                              <th className="py-2 pr-4">Создан</th>
-                              <th className="py-2 pr-4">Размер</th>
-                              <th className="py-2 pr-4">Источник</th>
-                              <th className="py-2 text-right">Действие</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {databaseBackupOverview.items.map((item) => (
-                              <tr key={item.relativePath} className="border-b border-gray-100 align-top">
-                                <td className="py-3 pr-4">
-                                  <div className="font-medium text-gray-900">{item.fileName}</div>
-                                  <div className="text-xs text-gray-500">{item.relativePath}</div>
-                                </td>
-                                <td className="py-3 pr-4 text-gray-700">{formatDateTime(item.createdAt)}</td>
-                                <td className="py-3 pr-4 text-gray-700">{formatBytes(item.sizeBytes)}</td>
-                                <td className="py-3 pr-4 text-gray-700">
-                                  {item.trigger === 'manual' ? 'Вручную' : item.trigger === 'auto' ? 'Автоматически' : item.trigger}
-                                </td>
-                                <td className="py-3 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void downloadDatabaseBackup(item.relativePath, item.fileName).catch((error) => {
-                                        const message = getErrorMessage(error, 'Не удалось скачать резервную копию');
-                                        setDatabaseBackupError(message);
-                                        toast.error(message, 'База данных');
-                                      });
-                                    }}
-                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50"
-                                  >
-                                    Скачать
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="mt-4 rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-600">
-                        Резервные копии пока не найдены. Можно создать первую копию вручную.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+            {activeSection === 'db-maintenance' && <DatabaseMaintenanceSettings />}
 
             {activeSection === 'db-import' && (
               <div className="space-y-6">
@@ -1599,10 +949,50 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-invoices' && (
+            {activeSection === 'db-operations' && (
+              <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveDatabaseOperationsSubsection('invoices')}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                      activeDatabaseOperationsSubsection === 'invoices'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Счета
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDatabaseOperationsSubsection('addresses')}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                      activeDatabaseOperationsSubsection === 'addresses'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Адреса
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDatabaseOperationsSubsection('dictionary-merge')}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                      activeDatabaseOperationsSubsection === 'dictionary-merge'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Объединение дублей
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'invoices' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
-                  <h4 className="text-base font-semibold text-gray-900">Формирование канонических счетов из операций</h4>
+                  <h4 className="text-base font-semibold text-gray-900">Счета</h4>
                   <p className="text-sm text-gray-600 mt-1">
                     Операция анализирует платежи, у которых заполнен legacy-счет, и формирует канонические счета с привязкой по клиенту, номеру счета, году и делу.
                     Платежи с одинаковым счетом и одним делом объединяются в один счет; одинаковый номер счета, но разные дела, разделяются на разные счета.
@@ -1654,42 +1044,70 @@ export function AppSettings() {
 
 
             {activeSection === 'integrations' && (
-              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="text-sm text-gray-700">
-                    <span className="mb-1 block">DaData API token</span>
-                    <input
-                      value={dadataToken}
-                      onChange={(event) => setDadataToken(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                      placeholder="Введите токен"
-                    />
-                  </label>
-                  <label className="text-sm text-gray-700">
-                    <span className="mb-1 block">DaData Secret key</span>
-                    <input
-                      value={dadataSecret}
-                      onChange={(event) => setDadataSecret(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                      placeholder="Введите секретный ключ"
-                    />
-                  </label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={saveDaDataCredentials}
-                    disabled={credentialsLoading}
-                    className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
-                  >
-                    {credentialsLoading ? 'Сохраняем…' : 'Сохранить ключи'}
-                  </button>
-                </div>
-                {credentialsMessage && (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    {credentialsMessage}
+              <div className="space-y-6">
+                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900"
+                    >
+                      DaData
+                    </button>
                   </div>
-                )}
+                </div>
+
+                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                  <div className="mb-6">
+                    <h4 className="text-xl font-semibold text-gray-900">DaData</h4>
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div>
+                      <h5 className="text-base font-semibold text-gray-900">Ключи доступа</h5>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Токен и секретный ключ для подсказок, нормализации и проверок через DaData.
+                      </p>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-gray-700">DaData API token</span>
+                        <input
+                          value={dadataToken}
+                          onChange={(event) => setDadataToken(event.target.value)}
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          placeholder="Введите токен"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-medium text-gray-700">DaData Secret key</span>
+                        <input
+                          value={dadataSecret}
+                          onChange={(event) => setDadataSecret(event.target.value)}
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          placeholder="Введите секретный ключ"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-6 flex min-h-10 items-end justify-between gap-3">
+                      {credentialsMessage ? (
+                        <span className="text-sm text-gray-600">{credentialsMessage}</span>
+                      ) : (
+                        <span />
+                      )}
+                      <button
+                        type="button"
+                        onClick={saveDaDataCredentials}
+                        disabled={credentialsLoading}
+                        className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Save className="h-4 w-4" />
+                        <span>{credentialsLoading ? 'Сохраняем…' : 'Сохранить'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1760,7 +1178,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-addresses' && (
+            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'addresses' && (
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                   <label className="flex items-start gap-3 text-sm text-gray-700">
@@ -1903,7 +1321,7 @@ export function AppSettings() {
               </>
             )}
 
-            {activeSection === 'dictionary-merge' && (
+            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'dictionary-merge' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <label className="text-sm text-gray-700">
@@ -2002,3 +1420,4 @@ export function AppSettings() {
     </div>
   );
 }
+

@@ -88,11 +88,21 @@ export interface DatabaseBackupFileDto {
   trigger: string;
 }
 
+export interface DatabaseBackupFormatOptionDto {
+  key: string;
+  label: string;
+  description: string;
+  fileExtension: string;
+  isDefault: boolean;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
   backupFormat: string;
   fileExtension: string;
+  selectedFormat: string;
+  availableFormats: DatabaseBackupFormatOptionDto[];
   automaticEnabled: boolean;
   scheduleLocal: string;
   retentionDays: number;
@@ -105,6 +115,12 @@ export interface DatabaseBackupOverviewDto {
 export interface DatabaseBackupCreateResultDto {
   backup: DatabaseBackupFileDto;
   downloadPath: string;
+}
+
+export interface DatabaseBackupDeleteResultDto {
+  deletedCount: number;
+  deletedAll: boolean;
+  overview: DatabaseBackupOverviewDto;
 }
 
 export interface DatabaseImportTableResultDto {
@@ -491,6 +507,7 @@ export class ApiService {
     automaticEnabled: boolean;
     scheduleLocal: string;
     retentionDays: number;
+    backupFormat?: string;
   }) {
     return this.request<DatabaseBackupOverviewDto>('/database/backups/settings', {
       method: 'PUT',
@@ -501,6 +518,18 @@ export class ApiService {
   async createDatabaseBackup() {
     return this.request<DatabaseBackupCreateResultDto>('/database/backups', {
       method: 'POST',
+    });
+  }
+
+  async deleteDatabaseBackup(relativePath: string) {
+    return this.request<DatabaseBackupDeleteResultDto>(`/database/backups/file?relativePath=${encodeURIComponent(relativePath)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async deleteAllDatabaseBackups() {
+    return this.request<DatabaseBackupDeleteResultDto>('/database/backups/all', {
+      method: 'DELETE',
     });
   }
 

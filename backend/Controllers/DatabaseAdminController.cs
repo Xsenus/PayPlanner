@@ -58,6 +58,7 @@ public class DatabaseAdminController : ControllerBase
                 request.AutomaticEnabled,
                 request.ScheduleLocal,
                 request.RetentionDays,
+                request.BackupFormat,
                 cancellationToken);
 
             return Ok(MapOverview(overview));
@@ -86,6 +87,41 @@ public class DatabaseAdminController : ControllerBase
         }
     }
 
+    [HttpDelete("backups/file")]
+    public async Task<ActionResult<DatabaseBackupDeleteResultDto>> DeleteBackupAsync(
+        [FromQuery] string? relativePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _databaseBackupService.DeleteBackupAsync(relativePath, cancellationToken);
+            var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
+            return Ok(new DatabaseBackupDeleteResultDto
+            {
+                DeletedCount = result.DeletedCount,
+                DeletedAll = result.DeletedAll,
+                Overview = MapOverview(overview),
+            });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("backups/all")]
+    public async Task<ActionResult<DatabaseBackupDeleteResultDto>> DeleteAllBackupsAsync(CancellationToken cancellationToken)
+    {
+        var result = await _databaseBackupService.DeleteAllBackupsAsync(cancellationToken);
+        var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
+        return Ok(new DatabaseBackupDeleteResultDto
+        {
+            DeletedCount = result.DeletedCount,
+            DeletedAll = result.DeletedAll,
+            Overview = MapOverview(overview),
+        });
+    }
+
     [HttpGet("backups/download")]
     public IActionResult DownloadBackupAsync([FromQuery] string? relativePath)
     {
@@ -103,10 +139,11 @@ public class DatabaseAdminController : ControllerBase
     }
 
     [HttpPost("import/sqlite")]
+    [Consumes("multipart/form-data")]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxImportFileSizeBytes)]
     [RequestSizeLimit(MaxImportFileSizeBytes)]
     public async Task<ActionResult<DatabaseImportResultDto>> ImportSqliteAsync(
-        [FromForm] IFormFile? file,
+        IFormFile? file,
         CancellationToken cancellationToken)
     {
         if (file is null || file.Length <= 0)
@@ -149,6 +186,15 @@ public class DatabaseAdminController : ControllerBase
             ProviderDisplayName = overview.ProviderDisplayName,
             BackupFormat = overview.BackupFormat,
             FileExtension = overview.FileExtension,
+            SelectedFormat = overview.SelectedFormat,
+            AvailableFormats = overview.AvailableFormats.Select(format => new DatabaseBackupFormatOptionDto
+            {
+                Key = format.Key,
+                Label = format.Label,
+                Description = format.Description,
+                FileExtension = format.FileExtension,
+                IsDefault = format.IsDefault,
+            }).ToList(),
             AutomaticEnabled = overview.AutomaticEnabled,
             ScheduleLocal = overview.ScheduleLocal,
             RetentionDays = overview.RetentionDays,

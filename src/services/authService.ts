@@ -45,6 +45,13 @@ export interface Role {
   name: string;
   description?: string | null;
   createdAt?: string | null;
+  isSystemRole?: boolean;
+  assignedUsersCount?: number;
+  accessibleSectionsCount?: number;
+  totalSectionsCount?: number;
+  permissionsUpdatedAt?: string | null;
+  permissionsUpdatedByUserId?: number | null;
+  permissionsUpdatedByUserName?: string | null;
 }
 
 export interface User {
@@ -85,12 +92,18 @@ export interface AuthProviderSettings {
   googleEnabled: boolean;
   googleClientId: string;
   googleClientSecret: string;
+  googleReady: boolean;
+  googleCallbackUrl?: string | null;
   vkEnabled: boolean;
   vkClientId: string;
   vkClientSecret: string;
+  vkReady: boolean;
+  vkCallbackUrl?: string | null;
   yandexEnabled: boolean;
   yandexClientId: string;
   yandexClientSecret: string;
+  yandexReady: boolean;
+  yandexCallbackUrl?: string | null;
   telegramEnabled: boolean;
   telegramWidgetEnabled: boolean;
   telegramBotToken: string;
@@ -98,6 +111,8 @@ export interface AuthProviderSettings {
   telegramWebhookSecret: string;
   telegramWebhookUrl?: string | null;
   telegramWebhookConfigured: boolean;
+  telegramBotReady: boolean;
+  telegramWidgetReady: boolean;
   telegramBotInfoSyncedAt?: string | null;
   telegramWebhookSyncedAt?: string | null;
 }
@@ -105,6 +120,21 @@ export interface AuthProviderSettings {
 export interface AuthProviderSettingsSaveResult {
   settings: AuthProviderSettings;
   message: string;
+}
+
+export interface ExternalOAuthProviderSettingsUpdateRequest {
+  enabled: boolean;
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface TelegramLoginBotSettingsUpdateRequest {
+  enabled: boolean;
+  botToken: string;
+}
+
+export interface TelegramWidgetSettingsUpdateRequest {
+  enabled: boolean;
 }
 
 export interface TelegramWebhookSyncResult {
@@ -359,6 +389,41 @@ class AuthApiService {
     });
   }
 
+  public async updateGoogleAuthProviderSettings(data: ExternalOAuthProviderSettingsUpdateRequest) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers/google', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async updateVkAuthProviderSettings(data: ExternalOAuthProviderSettingsUpdateRequest) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers/vk', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async updateYandexAuthProviderSettings(data: ExternalOAuthProviderSettingsUpdateRequest) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers/yandex', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async updateTelegramLoginBotSettings(data: TelegramLoginBotSettingsUpdateRequest) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers/telegram/bot', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async updateTelegramWidgetSettings(data: TelegramWidgetSettingsUpdateRequest) {
+    return this.request<AuthProviderSettingsSaveResult>('/auth/admin/providers/telegram/widget', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   public async syncTelegramWebhook() {
     return this.request<TelegramWebhookSyncResult>('/auth/admin/providers/telegram/sync', {
       method: 'POST',
@@ -422,6 +487,10 @@ class AuthApiService {
 
   public async createRole(data: { name: string; description: string }) {
     return this.request<Role>('/roles', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  public async copyRole(id: number, data: { name: string; description: string }) {
+    return this.request<Role>(`/roles/${id}/copy`, { method: 'POST', body: JSON.stringify(data) });
   }
 
   public async updateRole(id: number, data: { name: string; description: string }) {
