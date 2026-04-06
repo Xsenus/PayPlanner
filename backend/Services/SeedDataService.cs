@@ -614,6 +614,11 @@ namespace PayPlanner.Api.Services
             var adminPassword = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_PASSWORD") ?? "ChangeMeAdmin#12345";
             var adminFullName = Environment.GetEnvironmentVariable("PAYPLANNER_ADMIN_FULLNAME") ?? "System Administrator";
 
+            if (await context.Users.AsNoTracking().AnyAsync())
+            {
+                return;
+            }
+
             var exists = await context.Users.AsNoTracking().AnyAsync(u => u.Email == adminEmail);
             if (exists) return;
 

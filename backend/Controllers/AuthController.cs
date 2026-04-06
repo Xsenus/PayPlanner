@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+ï»¿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
@@ -21,33 +21,33 @@ public class AuthController : ControllerBase
         {
             var res = await _svc.LoginAsync(req.Email, req.Password);
 
-            // Íåâåðíûå ëîãèí/ïàðîëü
+            // ÐÐµÐ²ÐµÑ€Ð½Ñ‹Ðµ Ð»Ð¾Ð³Ð¸Ð½/Ð¿Ð°Ñ€Ð¾Ð»ÑŒ
             if (res is null)
             {
                 return Problem(
                     title: "InvalidCredentials",
-                    detail: "Íåâåðíûé email èëè ïàðîëü.",
+                    detail: "ÐÐµÐ²ÐµÑ€Ð½Ñ‹Ð¹ email Ð¸Ð»Ð¸ Ð¿Ð°Ñ€Ð¾Ð»ÑŒ.",
                     statusCode: 401
                 );
             }
 
             return Ok(res);
         }
-        // Àêêàóíò åù¸ íå îäîáðåí
+        // ÐÐºÐºÐ°ÑƒÐ½Ñ‚ ÐµÑ‰Ñ‘ Ð½Ðµ Ð¾Ð´Ð¾Ð±Ñ€ÐµÐ½
         catch (InvalidOperationException ex) when (ex.Message == "PendingApproval")
         {
             return Problem(
                 title: "PendingApproval",
-                detail: "Âàø àêêàóíò îæèäàåò îäîáðåíèÿ àäìèíèñòðàòîðîì.",
+                detail: "Ð’Ð°Ñˆ Ð°ÐºÐºÐ°ÑƒÐ½Ñ‚ Ð¾Ð¶Ð¸Ð´Ð°ÐµÑ‚ Ð¾Ð´Ð¾Ð±Ñ€ÐµÐ½Ð¸Ñ Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð¾Ð¼.",
                 statusCode: 403
             );
         }
-        // Àêêàóíò îòêëþ÷¸í
+        // ÐÐºÐºÐ°ÑƒÐ½Ñ‚ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡Ñ‘Ð½
         catch (InvalidOperationException ex) when (ex.Message == "UserInactive")
         {
             return Problem(
                 title: "UserInactive",
-                detail: "Âàø àêêàóíò îòêëþ÷¸í. Îáðàòèòåñü ê àäìèíèñòðàòîðó.",
+                detail: "Ð’Ð°Ñˆ Ð°ÐºÐºÐ°ÑƒÐ½Ñ‚ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡Ñ‘Ð½. ÐžÐ±Ñ€Ð°Ñ‚Ð¸Ñ‚ÐµÑÑŒ Ðº Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ñƒ.",
                 statusCode: 403
             );
         }
@@ -64,12 +64,20 @@ public class AuthController : ControllerBase
             {
                 return Problem(
                     title: "UserAlreadyExists",
-                    detail: "Ïîëüçîâàòåëü ñ òàêèì email óæå ñóùåñòâóåò.",
+                    detail: "ÐŸÐ¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ Ñ Ñ‚Ð°ÐºÐ¸Ð¼ email ÑƒÐ¶Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÐµÑ‚.",
                     statusCode: 409
                 );
             }
 
             return Created($"/api/auth/users/{dto.Id}", dto);
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "ProtectedUserEmailReserved")
+        {
+            return Problem(
+                title: "ProtectedUserEmailReserved",
+                detail: "Ð­Ñ‚Ð¾Ñ‚ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ð¹ email Ð·Ð°Ñ€ÐµÐ·ÐµÑ€Ð²Ð¸Ñ€Ð¾Ð²Ð°Ð½ Ð¸ Ð½Ðµ Ð¼Ð¾Ð¶ÐµÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½ Ð´Ð»Ñ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¸.",
+                statusCode: 409
+            );
         }
         catch (InvalidOperationException ex)
         {
@@ -96,3 +104,4 @@ public class AuthController : ControllerBase
     private static int? GetUserId(ClaimsPrincipal user)
         => int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (int?)null;
 }
+

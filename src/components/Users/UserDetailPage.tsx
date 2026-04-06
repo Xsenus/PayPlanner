@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Loader2, Save, ShieldCheck, UserRound } from 'lucide-react';
 import { authService, type Role, type UpdateUserDto, type User } from '../../services/authService';
+import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
@@ -20,7 +21,6 @@ type FormState = {
   lastName: string;
   middleName: string;
   dateOfBirth: string;
-  photoUrl: string;
   phoneNumber: string;
   whatsApp: string;
   telegram: string;
@@ -42,7 +42,6 @@ const EMPTY_FORM: FormState = {
   lastName: '',
   middleName: '',
   dateOfBirth: '',
-  photoUrl: '',
   phoneNumber: '',
   whatsApp: '',
   telegram: '',
@@ -80,7 +79,6 @@ function buildForm(user?: User | null): FormState {
     lastName: user.lastName ?? '',
     middleName: user.middleName ?? '',
     dateOfBirth: toDateInputValue(user.dateOfBirth),
-    photoUrl: user.photoUrl ?? '',
     phoneNumber: user.phoneNumber ?? '',
     whatsApp: user.whatsApp ?? '',
     telegram: user.telegram ?? '',
@@ -102,6 +100,16 @@ function providerLabel(provider?: string | null) {
   return 'Google';
 }
 
+function getInitials(value?: string | null) {
+  return (value ?? 'U')
+    .split(' ')
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
 function buildUpdatePayload(form: FormState): UpdateUserDto {
   return {
     email: form.email.trim() || undefined,
@@ -110,7 +118,6 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     lastName: form.lastName.trim() || undefined,
     middleName: form.middleName.trim() || undefined,
     dateOfBirth: form.dateOfBirth || undefined,
-    photoUrl: form.photoUrl.trim() || undefined,
     phoneNumber: form.phoneNumber.trim() || undefined,
     whatsApp: form.whatsApp.trim() || undefined,
     telegram: form.telegram.trim() || undefined,
@@ -126,6 +133,7 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
 }
 
 export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps) {
+  const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
   const [activeSection, setActiveSection] = useState<UserDetailSection>('main');
@@ -173,6 +181,15 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
       { label: 'Привязанных входов', value: String(user?.externalIdentities?.length ?? 0) },
     ],
     [form.isActive, isCreateMode, user?.externalIdentities?.length, user?.isApproved],
+  );
+
+  const isProtectedTarget = Boolean(user?.isProtectedUser);
+  const canEditProtectedTarget = !isProtectedTarget || currentUser?.id === user?.id;
+  const mainFieldsDisabled = isProtectedTarget && !canEditProtectedTarget;
+  const administrativeFieldsDisabled = isProtectedTarget;
+  const avatarInitials = useMemo(
+    () => getInitials(form.fullName || user?.fullName || user?.email),
+    [form.fullName, user?.email, user?.fullName],
   );
 
   const handleSave = async () => {
@@ -256,13 +273,19 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={saving}
+              disabled={saving || (isProtectedTarget && !canEditProtectedTarget)}
               className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Сохранить
             </button>
           </div>
+
+          {isProtectedTarget && !canEditProtectedTarget ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Этот системный пользователь управляет собой только самостоятельно. Для остальных профиль открыт только на просмотр.
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
@@ -305,6 +328,32 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
           <div className="space-y-6">
             {activeSection === 'main' ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-6 flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Основная информация</div>
+                    <div className="mt-1 text-sm text-slate-500">
+                      Фото пользователь обновляет сам в личном профиле. Здесь показывается актуальный аватар и базовые данные.
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-center">
+                    {user?.photoUrl ? (
+                      <img
+                        src={user.photoUrl}
+                        alt={form.fullName || user.email || 'Профиль'}
+                        className="h-24 w-24 rounded-3xl object-cover shadow-sm"
+                      />
+                    ) : (
+                      <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm">
+                        {avatarInitials}
+                      </div>
+                    )}
+                    <div className="text-xs font-medium text-slate-500">
+                      {user?.photoUrl ? 'Фото загружено пользователем' : 'Фото пока не загружено'}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2 md:col-span-2">
                     <span className="text-sm font-medium text-slate-700">Полное имя</span>
@@ -312,7 +361,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.fullName}
                       onChange={(event) => updateForm('fullName', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -321,7 +371,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="email"
                       value={form.email}
                       onChange={(event) => updateForm('email', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled || isProtectedTarget}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   {isCreateMode ? (
@@ -341,7 +392,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.firstName}
                       onChange={(event) => updateForm('firstName', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -350,7 +402,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.lastName}
                       onChange={(event) => updateForm('lastName', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -359,7 +412,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.middleName}
                       onChange={(event) => updateForm('middleName', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -368,16 +422,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="date"
                       value={form.dateOfBirth}
                       onChange={(event) => updateForm('dateOfBirth', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
-                    />
-                  </label>
-                  <label className="space-y-2 md:col-span-2">
-                    <span className="text-sm font-medium text-slate-700">Фото (URL)</span>
-                    <input
-                      type="url"
-                      value={form.photoUrl}
-                      onChange={(event) => updateForm('photoUrl', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                 </div>
@@ -393,7 +439,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.phoneNumber}
                       onChange={(event) => updateForm('phoneNumber', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -402,7 +449,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.whatsApp}
                       onChange={(event) => updateForm('whatsApp', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -411,7 +459,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.telegram}
                       onChange={(event) => updateForm('telegram', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -420,7 +469,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.instagram}
                       onChange={(event) => updateForm('instagram', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -429,7 +479,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.messenger}
                       onChange={(event) => updateForm('messenger', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                   <label className="space-y-2">
@@ -438,7 +489,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="text"
                       value={form.viber}
                       onChange={(event) => updateForm('viber', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={mainFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                 </div>
@@ -447,13 +499,19 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
 
             {activeSection === 'employment' ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                {administrativeFieldsDisabled ? (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Для системного администратора роль и служебный статус зафиксированы и не меняются через карточку пользователя.
+                  </div>
+                ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-slate-700">Роль</span>
                     <select
                       value={form.roleId}
                       onChange={(event) => updateForm('roleId', Number(event.target.value) || 0)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={administrativeFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     >
                       {roles.map((role) => (
                         <option key={role.id} value={role.id}>
@@ -468,6 +526,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="checkbox"
                       checked={form.isActive}
                       onChange={(event) => updateForm('isActive', event.target.checked)}
+                      disabled={administrativeFieldsDisabled}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600"
                     />
                     Пользователь активен
@@ -478,6 +537,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="checkbox"
                       checked={form.isEmployee}
                       onChange={(event) => updateForm('isEmployee', event.target.checked)}
+                      disabled={administrativeFieldsDisabled}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600"
                     />
                     Учитывать как сотрудника
@@ -489,7 +549,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="date"
                       value={form.employmentStartDate}
                       onChange={(event) => updateForm('employmentStartDate', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={administrativeFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
 
@@ -499,7 +560,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                       type="date"
                       value={form.employmentEndDate}
                       onChange={(event) => updateForm('employmentEndDate', event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                      disabled={administrativeFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
                 </div>

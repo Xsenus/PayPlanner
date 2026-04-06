@@ -28,6 +28,7 @@ namespace PayPlanner.Api.Models.Responses
         public RoleDto Role { get; set; } = null!;
         public bool IsActive { get; set; }
         public bool IsApproved { get; set; }
+        public bool IsProtectedUser { get; set; }
         public DateTime? ApprovedAt { get; set; }
         public DateTime CreatedAt { get; set; }
         public List<ExternalIdentityDto> ExternalIdentities { get; set; } = new();

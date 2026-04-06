@@ -51,7 +51,7 @@ function displayUserName(user: User) {
 }
 
 export function Users({ onCreateUser, onEditUser }: UsersProps) {
-  const { isAdmin } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
 
@@ -307,6 +307,13 @@ export function Users({ onCreateUser, onEditUser }: UsersProps) {
                     <tr key={user.id} className="transition hover:bg-slate-50">
                       <td className="px-5 py-4 align-top">
                         <div className="font-semibold text-slate-900">{displayUserName(user)}</div>
+                        {user.isProtectedUser ? (
+                          <div className="mt-2">
+                            <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                              Системный пользователь
+                            </span>
+                          </div>
+                        ) : null}
                         {!user.isApproved ? (
                           <div className="mt-1 text-xs text-amber-600">Требует подтверждения</div>
                         ) : null}
@@ -373,22 +380,26 @@ export function Users({ onCreateUser, onEditUser }: UsersProps) {
                             </>
                           ) : (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => onEditUser(user.id)}
-                                className="rounded-2xl p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                                title="Редактировать пользователя"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(user)}
-                                className="rounded-2xl p-2 text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
-                                title="Удалить пользователя"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              {!user.isProtectedUser || currentUser?.id === user.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditUser(user.id)}
+                                  className="rounded-2xl p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                                  title="Редактировать пользователя"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                              {!user.isProtectedUser ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDelete(user)}
+                                  className="rounded-2xl p-2 text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
+                                  title="Удалить пользователя"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              ) : null}
                             </>
                           )}
                         </div>

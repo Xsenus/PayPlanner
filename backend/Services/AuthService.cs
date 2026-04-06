@@ -90,6 +90,7 @@ public partial class AuthService
         EmploymentEndDate = user.EmploymentEndDate,
         IsActive = user.IsActive,
         IsApproved = user.IsApproved,
+        IsProtectedUser = IsProtectedSystemUser(user),
         ApprovedAt = user.ApprovedAt,
         CreatedAt = user.CreatedAt,
         ExternalIdentities = MapExternalIdentities(user.ExternalIdentities),
@@ -193,6 +194,8 @@ public partial class AuthService
             return false;
         }
 
+        EnsureProtectedUserManagedBySelf(user, approvedByUserId);
+
         user.IsApproved = true;
         user.ApprovedAt = DateTime.UtcNow;
         user.ApprovedByUserId = approvedByUserId;
@@ -203,7 +206,7 @@ public partial class AuthService
         return true;
     }
 
-    public async Task<bool> RejectUserAsync(int userId, string? reason = null)
+    public async Task<bool> RejectUserAsync(int userId, int actorUserId, string? reason = null)
     {
         var user = await _context.Users.Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
@@ -211,6 +214,9 @@ public partial class AuthService
         {
             return false;
         }
+
+        EnsureProtectedUserManagedBySelf(user, actorUserId);
+        EnsureProtectedUserNotDeleted(user);
 
         await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
         _context.Users.Remove(user);
@@ -235,9 +241,15 @@ public partial class AuthService
             return null;
         }
 
+        var requestedRoleId = request.RoleId;
+        if (IsProtectedSystemUserEmail(email))
+        {
+            requestedRoleId = await GetAdministratorRoleIdAsync();
+        }
+
         var roleExists = await _context.Roles
             .AsNoTracking()
-            .AnyAsync(r => r.Id == request.RoleId);
+            .AnyAsync(r => r.Id == requestedRoleId);
         if (!roleExists)
         {
             throw new InvalidOperationException("RoleNotFound");
@@ -247,8 +259,8 @@ public partial class AuthService
         {
             Email = email,
             FullName = (request.FullName ?? string.Empty).Trim(),
-            RoleId = request.RoleId,
-            IsActive = request.IsActive,
+            RoleId = requestedRoleId,
+            IsActive = IsProtectedSystemUserEmail(email) || request.IsActive,
             IsApproved = true,
             ApprovedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -308,7 +320,7 @@ public partial class AuthService
         };
     }
 
-    public async Task<UserDto?> UpdateUserAsync(int id, UpdateUserRequest request)
+    public async Task<UserDto?> UpdateUserAsync(int id, UpdateUserRequest request, int actorUserId)
     {
         var user = await QueryUsersWithRelations()
             .FirstOrDefaultAsync(u => u.Id == id);
@@ -316,6 +328,8 @@ public partial class AuthService
         {
             return null;
         }
+
+        EnsureProtectedUserManagedBySelf(user, actorUserId);
 
         var previousRoleId = user.RoleId;
         await ApplyUserChangesAsync(user, request, allowAdministrativeFields: true);
@@ -329,13 +343,16 @@ public partial class AuthService
         return MapToDto(user);
     }
 
-    public async Task<bool> DeleteUserAsync(int id)
+    public async Task<bool> DeleteUserAsync(int id, int actorUserId)
     {
         var user = await _context.Users.FindAsync(id);
         if (user == null)
         {
             return false;
         }
+
+        EnsureProtectedUserManagedBySelf(user, actorUserId);
+        EnsureProtectedUserNotDeleted(user);
 
         var hasActUsage = await _context.Acts.AsNoTracking().AnyAsync(a => a.ResponsibleId == id);
         if (hasActUsage)
@@ -352,6 +369,57 @@ public partial class AuthService
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    public async Task<UserDto?> ChangePasswordAsync(
+        int id,
+        string? currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await QueryUsersWithRelations()
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (user is null)
+        {
+            return null;
+        }
+
+        var normalizedNewPassword = (newPassword ?? string.Empty).Trim();
+        if (normalizedNewPassword.Length < 8)
+        {
+            throw new ArgumentException("Новый пароль должен содержать не меньше 8 символов.");
+        }
+
+        var requiresCurrentPassword = !user.ExternalIdentities.Any();
+        var normalizedCurrentPassword = currentPassword ?? string.Empty;
+
+        if (requiresCurrentPassword)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedCurrentPassword))
+            {
+                throw new InvalidOperationException("CurrentPasswordRequired");
+            }
+
+            var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, normalizedCurrentPassword);
+            if (verify == PasswordVerificationResult.Failed)
+            {
+                throw new InvalidOperationException("InvalidCurrentPassword");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(normalizedCurrentPassword))
+        {
+            var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, normalizedCurrentPassword);
+            if (verify == PasswordVerificationResult.Failed)
+            {
+                throw new InvalidOperationException("InvalidCurrentPassword");
+            }
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, normalizedNewPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return MapToDto(user);
     }
 
     public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
@@ -424,15 +492,22 @@ public partial class AuthService
             throw new InvalidOperationException("Registration is currently disabled");
         }
 
+        if (IsProtectedSystemUserEmail(email))
+        {
+            throw new InvalidOperationException("ProtectedUserEmailReserved");
+        }
+
         var defaultRoleId = await GetDefaultUserRoleIdAsync();
+        var roleId = defaultRoleId;
 
         var user = new User
         {
             Email = email,
             FullName = request.FullName,
-            RoleId = defaultRoleId,
+            RoleId = roleId,
             IsActive = true,
             IsApproved = false,
+            ApprovedAt = null,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };

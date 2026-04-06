@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 
@@ -20,7 +21,9 @@ public class UsersController : ControllerBase
     {
         var s = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!int.TryParse(s, out var approverId))
+        {
             return Unauthorized();
+        }
 
         var ok = await _svc.ApproveUserAsync(id, approverId);
         return ok ? Ok(new { approved = true }) : NotFound();
@@ -31,20 +34,30 @@ public class UsersController : ControllerBase
     {
         var dto = await _svc.CreateUserAsync(req);
         return dto is null
-            ? Conflict(new { message = "Пользователь с таким email уже существует." })
+            ? Conflict(new { message = "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј email СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚." })
             : Created($"/api/users/{dto.Id}", dto);
     }
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteUser(int id)
     {
+        var actorUserId = User.GetUserId();
+        if (!actorUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
         try
         {
-            return await _svc.DeleteUserAsync(id) ? NoContent() : NotFound();
+            return await _svc.DeleteUserAsync(id, actorUserId.Value) ? NoContent() : NotFound();
         }
         catch (InvalidOperationException ex) when (ex.Message == "UserInUseAsResponsible")
         {
-            return Conflict(new { message = "Нельзя удалить пользователя: он назначен ответственным в документах." });
+            return Conflict(new { message = "РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: РѕРЅ РЅР°Р·РЅР°С‡РµРЅ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Рј РІ РґРѕРєСѓРјРµРЅС‚Р°С…." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "ProtectedUserCannotBeDeleted")
+        {
+            return Conflict(new { message = "РЎРёСЃС‚РµРјРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ." });
         }
     }
 
@@ -68,14 +81,39 @@ public class UsersController : ControllerBase
 
     [HttpPost("{id:int}/reject")]
     public async Task<IActionResult> RejectUser(int id, [FromBody] RejectUserRequest? request)
-        => await _svc.RejectUserAsync(id, request?.Reason) ? Ok(new { rejected = true }) : NotFound();
+    {
+        var actorUserId = User.GetUserId();
+        if (!actorUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return await _svc.RejectUserAsync(id, actorUserId.Value, request?.Reason)
+                ? Ok(new { rejected = true })
+                : NotFound();
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message == "ProtectedUserManagedOnlyBySelf"
+            || ex.Message == "ProtectedUserCannotBeDeleted")
+        {
+            return Conflict(new { message = "РЎРёСЃС‚РµРјРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµР»СЊР·СЏ РѕС‚РєР»РѕРЅРёС‚СЊ РёР»Рё СѓРґР°Р»РёС‚СЊ." });
+        }
+    }
 
     [HttpPost("merge")]
     public async Task<IActionResult> MergeUsers([FromBody] MergeUsersRequest request, CancellationToken cancellationToken)
     {
+        var actorUserId = User.GetUserId();
+        if (!actorUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
         try
         {
-            return Ok(await _svc.MergeUsersAsync(request, cancellationToken));
+            return Ok(await _svc.MergeUsersAsync(request, actorUserId.Value, cancellationToken));
         }
         catch (InvalidOperationException ex)
         {
@@ -85,5 +123,25 @@ public class UsersController : ControllerBase
 
     [HttpPut("{id:int}")]
     public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest req)
-        => (await _svc.UpdateUserAsync(id, req)) is { } u ? Ok(u) : NotFound();
+    {
+        var actorUserId = User.GetUserId();
+        if (!actorUserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return (await _svc.UpdateUserAsync(id, req, actorUserId.Value)) is { } u ? Ok(u) : NotFound();
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message == "ProtectedUserManagedOnlyBySelf"
+            || ex.Message == "ProtectedUserEmailChangeForbidden"
+            || ex.Message == "ProtectedUserAdministrativeFieldsLocked"
+            || ex.Message == "ProtectedUserEmailReserved")
+        {
+            return Conflict(new { message = "Изменение системного администратора ограничено: этот пользователь управляет собой только самостоятельно, а его email зарезервирован." });
+        }
+    }
 }
+

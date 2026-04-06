@@ -41,6 +41,21 @@ public partial class AuthService
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
+    private async Task<int> GetAdministratorRoleIdAsync(CancellationToken cancellationToken = default)
+    {
+        var roleId = await _context.Roles
+            .Where(x => x.Name == "admin")
+            .Select(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (roleId == 0)
+        {
+            throw new InvalidOperationException("AdministratorRoleNotFound");
+        }
+
+        return roleId;
+    }
+
     private static string BuildFallbackUserFullName(User user)
     {
         var parts = new[] { user.LastName, user.FirstName, user.MiddleName }
@@ -69,6 +84,9 @@ public partial class AuthService
         bool allowAdministrativeFields,
         CancellationToken cancellationToken = default)
     {
+        EnsureProtectedUserEmailUnchanged(user, request.Email);
+        EnsureProtectedEmailReserved(user, request.Email);
+
         if (request.Email is not null)
         {
             var normalizedEmail = NormalizeEmail(request.Email);
@@ -155,6 +173,8 @@ public partial class AuthService
 
         if (allowAdministrativeFields)
         {
+            EnsureProtectedUserAdministrativeFieldsUnchanged(user, request);
+
             if (request.EmploymentStartDate.HasValue)
             {
                 user.EmploymentStartDate = request.EmploymentStartDate;
@@ -201,6 +221,7 @@ public partial class AuthService
             user.FullName = BuildFallbackUserFullName(user);
         }
 
+        ApplyProtectedUserInvariants(user);
         user.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -241,8 +262,27 @@ public partial class AuthService
         return MapToDto(user);
     }
 
+    public async Task<UserDto?> UpdateProfilePhotoAsync(
+        int id,
+        string? photoUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await QueryUsersWithRelations()
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (user is null)
+        {
+            return null;
+        }
+
+        user.PhotoUrl = NormalizeOptionalValue(photoUrl);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        return MapToDto(user);
+    }
+
     public async Task<UserDto> MergeUsersAsync(
         MergeUsersRequest request,
+        int actorUserId,
         CancellationToken cancellationToken = default)
     {
         var sourceUserIds = (request.SourceUserIds ?? new List<int>())
@@ -276,6 +316,12 @@ public partial class AuthService
             throw new InvalidOperationException("Один из выбранных пользователей не найден.");
         }
 
+        EnsureProtectedUserRemainsPrimary(targetUser, sourceUsers);
+        if (IsProtectedSystemUser(targetUser))
+        {
+            EnsureProtectedUserManagedBySelf(targetUser, actorUserId);
+        }
+
         var allIdentities = await _context.UserExternalIdentities
             .Where(x => allUserIds.Contains(x.UserId))
             .ToListAsync(cancellationToken);
@@ -294,6 +340,7 @@ public partial class AuthService
         }
 
         var preferredEmail = ResolveMergedEmailCandidate(request.PrimaryEmail, targetUser, sourceUsers, allIdentities);
+        EnsureProtectedEmailReserved(targetUser, preferredEmail);
         if (!string.IsNullOrWhiteSpace(preferredEmail))
         {
             var normalizedPreferredEmail = NormalizeEmail(preferredEmail);
@@ -312,6 +359,11 @@ public partial class AuthService
 
         var preferredPhone = ResolveMergedPhoneCandidate(request.PrimaryPhoneNumber, targetUser, sourceUsers);
         var mergedRoleId = await ResolveMergedRoleIdAsync(targetUser, sourceUsers, cancellationToken);
+        if (IsProtectedSystemUser(targetUser))
+        {
+            mergedRoleId = await GetAdministratorRoleIdAsync(cancellationToken);
+            preferredEmail = NormalizeEmail(targetUser.Email);
+        }
 
         await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -352,6 +404,7 @@ public partial class AuthService
                 targetUser.FullName = BuildFallbackUserFullName(targetUser);
             }
 
+            ApplyProtectedUserInvariants(targetUser);
             targetUser.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync(cancellationToken);

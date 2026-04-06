@@ -90,6 +90,7 @@ export interface User {
   role: Role;
   isActive: boolean;
   isApproved: boolean;
+  isProtectedUser?: boolean;
   createdAt: string;
   approvedAt?: string | null;
   externalIdentities?: ExternalIdentity[];
@@ -228,6 +229,11 @@ export interface UpdateProfileDto {
   viber?: string;
 }
 
+export interface ChangePasswordDto {
+  currentPassword?: string;
+  newPassword: string;
+}
+
 export interface MergeUsersDto {
   targetUserId: number;
   sourceUserIds: number[];
@@ -270,9 +276,10 @@ class AuthApiService {
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
+    const isFormDataBody = typeof FormData !== 'undefined' && options?.body instanceof FormData;
 
     const headers: Record<string, string> = {
-      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(!isFormDataBody && options?.body ? { 'Content-Type': 'application/json' } : {}),
       ...this.authHeaders(),
       ...(options?.headers as Record<string, string> | undefined),
     };
@@ -555,6 +562,23 @@ class AuthApiService {
     return this.request<User>('/profile', {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  public async changePassword(data: ChangePasswordDto) {
+    return this.request<User>('/profile/password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async uploadProfilePhoto(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.request<User>('/profile/photo', {
+      method: 'POST',
+      body: formData,
     });
   }
 
