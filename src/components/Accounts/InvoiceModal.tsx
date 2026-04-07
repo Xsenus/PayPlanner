@@ -2209,12 +2209,12 @@ export function InvoiceModal({
                   </colgroup>
                   <thead>
                     <tr>
-                      <th className="border border-slate-800 px-2 py-1 text-left">в"–</th>
+                      <th className="border border-slate-800 px-2 py-1 text-left">№</th>
                       <th className="border border-slate-800 px-2 py-1 text-left">Товары (работы, услуги)</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">???-??</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Кол-во</th>
                       <th className="border border-slate-800 px-2 py-1 text-right">Ед.</th>
                       <th className="border border-slate-800 px-2 py-1 text-right">Цена</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">?????</th>
+                      <th className="border border-slate-800 px-2 py-1 text-right">Сумма</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2366,7 +2366,7 @@ export function InvoiceModal({
                               </label>
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
-                                  {t('invoiceAmount') ?? '?????'}
+                                  {t('invoiceAmount') ?? 'Сумма'}
                                   {isIncome && (
                                     <button
                                       type="button"
@@ -2460,7 +2460,7 @@ export function InvoiceModal({
                             {lineItems.map((item) => (
                               <div key={item.id} className="flex items-center gap-2">
                                 <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Наименование" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="???-??" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
+                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
                                 <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                                 <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums" />
 <button type="button" onClick={() => { void removeLineItem(item.id); }} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" aria-label="Удалить" title="Удалить позицию"><X className="h-4 w-4" /></button>
@@ -2846,7 +2846,7 @@ export function InvoiceModal({
                 <input value={draftAct.title} onChange={(e) => setDraftAct((prev) => ({ ...prev, title: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? '?????'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'Сумма'}</span>
                 <input value={draftAct.amount} onChange={(e) => setDraftAct((prev) => ({ ...prev, amount: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
