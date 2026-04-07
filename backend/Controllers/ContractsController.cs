@@ -544,8 +544,11 @@ public class ContractsController : ControllerBase
         if (clientId.HasValue) query = query.Where(c => c.ClientContracts.Any(link => link.ClientId == clientId.Value));
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var pattern = $"%{EscapeLike(search.Trim())}%";
-            query = query.Where(c => EF.Functions.Like(c.Number, pattern, "\\") || (c.Title != null && EF.Functions.Like(c.Title, pattern, "\\")) || (c.Description != null && EF.Functions.Like(c.Description, pattern, "\\")));
+            var term = search.Trim().ToLower();
+            query = query.Where(c =>
+                c.Number.ToLower().Contains(term) ||
+                (c.Title != null && c.Title.ToLower().Contains(term)) ||
+                (c.Description != null && c.Description.ToLower().Contains(term)));
         }
         return query;
     }
@@ -571,5 +574,4 @@ public class ContractsController : ControllerBase
 
     private static List<int> NormalizeIds(IEnumerable<int>? ids) => ids?.Where(x => x > 0).Distinct().ToList() ?? [];
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
 }

@@ -698,13 +698,13 @@ public class LegalEntitiesController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = $"%{search.Trim()}%";
+            var term = search.Trim().ToLower();
             query = query.Where(le =>
-                EF.Functions.Like(le.ShortName, term) ||
-                EF.Functions.Like(le.FullName ?? string.Empty, term) ||
-                EF.Functions.Like(le.Inn ?? string.Empty, term) ||
-                EF.Functions.Like(le.Kpp ?? string.Empty, term) ||
-                EF.Functions.Like(le.Ogrn ?? string.Empty, term));
+                le.ShortName.ToLower().Contains(term) ||
+                (le.FullName ?? string.Empty).ToLower().Contains(term) ||
+                (le.Inn ?? string.Empty).ToLower().Contains(term) ||
+                (le.Kpp ?? string.Empty).ToLower().Contains(term) ||
+                (le.Ogrn ?? string.Empty).ToLower().Contains(term));
         }
 
         var items = await query
@@ -730,15 +730,15 @@ public class LegalEntitiesController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = $"%{search.Trim()}%";
+            var term = search.Trim().ToLower();
             baseQuery = baseQuery.Where(le =>
-                EF.Functions.Like(le.ShortName, term) ||
-                EF.Functions.Like(le.FullName ?? string.Empty, term) ||
-                EF.Functions.Like(le.Inn ?? string.Empty, term) ||
-                EF.Functions.Like(le.Kpp ?? string.Empty, term) ||
-                EF.Functions.Like(le.Ogrn ?? string.Empty, term) ||
-                EF.Functions.Like(le.Director ?? string.Empty, term) ||
-                EF.Functions.Like(le.Address ?? string.Empty, term));
+                le.ShortName.ToLower().Contains(term) ||
+                (le.FullName ?? string.Empty).ToLower().Contains(term) ||
+                (le.Inn ?? string.Empty).ToLower().Contains(term) ||
+                (le.Kpp ?? string.Empty).ToLower().Contains(term) ||
+                (le.Ogrn ?? string.Empty).ToLower().Contains(term) ||
+                (le.Director ?? string.Empty).ToLower().Contains(term) ||
+                (le.Address ?? string.Empty).ToLower().Contains(term));
         }
 
         var total = await baseQuery.CountAsync(ct);

@@ -94,41 +94,74 @@ public class ClientsV2Controller : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            search = search.Trim();
+            search = search.Trim().ToLower();
             q = q.Where(c =>
-                (c.Name != null && EF.Functions.Like(c.Name, $"%{search}%")) ||
-                (c.Email != null && EF.Functions.Like(c.Email, $"%{search}%")) ||
-                (c.Phone != null && EF.Functions.Like(c.Phone, $"%{search}%")) ||
-                (c.Company != null && EF.Functions.Like(c.Company, $"%{search}%")) ||
-                (c.Address != null && EF.Functions.Like(c.Address, $"%{search}%")));
+                (c.Name != null && c.Name.ToLower().Contains(search)) ||
+                (c.Email != null && c.Email.ToLower().Contains(search)) ||
+                (c.Phone != null && c.Phone.ToLower().Contains(search)) ||
+                (c.Company != null && c.Company.ToLower().Contains(search)) ||
+                (c.Address != null && c.Address.ToLower().Contains(search)));
         }
 
         if (id.HasValue)
             q = q.Where(c => c.Id == id.Value);
         if (!string.IsNullOrWhiteSpace(name))
-            q = q.Where(c => c.Name != null && EF.Functions.Like(c.Name, $"%{name.Trim()}%"));
+        {
+            var term = name.Trim().ToLower();
+            q = q.Where(c => c.Name != null && c.Name.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(email))
-            q = q.Where(c => c.Email != null && EF.Functions.Like(c.Email, $"%{email.Trim()}%"));
+        {
+            var term = email.Trim().ToLower();
+            q = q.Where(c => c.Email != null && c.Email.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(phone))
-            q = q.Where(c => c.Phone != null && EF.Functions.Like(c.Phone, $"%{phone.Trim()}%"));
+        {
+            var term = phone.Trim().ToLower();
+            q = q.Where(c => c.Phone != null && c.Phone.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(company))
-            q = q.Where(c => c.Company != null && EF.Functions.Like(c.Company, $"%{company.Trim()}%"));
+        {
+            var term = company.Trim().ToLower();
+            q = q.Where(c => c.Company != null && c.Company.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(address))
-            q = q.Where(c => c.Address != null && EF.Functions.Like(c.Address, $"%{address.Trim()}%"));
+        {
+            var term = address.Trim().ToLower();
+            q = q.Where(c => c.Address != null && c.Address.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(notes))
-            q = q.Where(c => c.Notes != null && EF.Functions.Like(c.Notes, $"%{notes.Trim()}%"));
+        {
+            var term = notes.Trim().ToLower();
+            q = q.Where(c => c.Notes != null && c.Notes.ToLower().Contains(term));
+        }
         if (legalEntityId.HasValue)
             q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
         if (!string.IsNullOrWhiteSpace(legalEntityShortName))
-            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.ShortName, $"%{legalEntityShortName.Trim()}%"));
+        {
+            var term = legalEntityShortName.Trim().ToLower();
+            q = q.Where(c => c.LegalEntity != null && c.LegalEntity.ShortName.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(legalEntityFullName))
-            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.FullName, $"%{legalEntityFullName.Trim()}%"));
+        {
+            var term = legalEntityFullName.Trim().ToLower();
+            q = q.Where(c => c.LegalEntity != null && c.LegalEntity.FullName != null && c.LegalEntity.FullName.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(legalEntityInn))
-            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Inn, $"%{legalEntityInn.Trim()}%"));
+        {
+            var term = legalEntityInn.Trim().ToLower();
+            q = q.Where(c => c.LegalEntity != null && c.LegalEntity.Inn != null && c.LegalEntity.Inn.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(legalEntityOgrn))
-            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Ogrn, $"%{legalEntityOgrn.Trim()}%"));
+        {
+            var term = legalEntityOgrn.Trim().ToLower();
+            q = q.Where(c => c.LegalEntity != null && c.LegalEntity.Ogrn != null && c.LegalEntity.Ogrn.ToLower().Contains(term));
+        }
         if (!string.IsNullOrWhiteSpace(legalEntityKpp))
-            q = q.Where(c => c.LegalEntity != null && EF.Functions.Like(c.LegalEntity.Kpp, $"%{legalEntityKpp.Trim()}%"));
+        {
+            var term = legalEntityKpp.Trim().ToLower();
+            q = q.Where(c => c.LegalEntity != null && c.LegalEntity.Kpp != null && c.LegalEntity.Kpp.ToLower().Contains(term));
+        }
         if (clientStatusId.HasValue)
             q = q.Where(c => c.ClientStatusId == clientStatusId.Value);
         if (!string.IsNullOrWhiteSpace(clientStatus))
@@ -140,7 +173,8 @@ public class ClientsV2Controller : ControllerBase
             }
             else
             {
-                q = q.Where(c => c.ClientStatus != null && EF.Functions.Like(c.ClientStatus.Name, $"%{statusValue}%"));
+                statusValue = statusValue.ToLower();
+                q = q.Where(c => c.ClientStatus != null && c.ClientStatus.Name != null && c.ClientStatus.Name.ToLower().Contains(statusValue));
             }
         }
 

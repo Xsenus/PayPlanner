@@ -23,19 +23,18 @@ namespace PayPlanner.Api.Extensions
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                var term = search.Trim();
-                var like = $"%{term}%";
+                var term = search.Trim().ToLower();
                 q = q.Where(a =>
-                    (a.Number != null && EF.Functions.Like(a.Number, like)) ||
-                    (a.Title != null && EF.Functions.Like(a.Title, like)) ||
-                    (a.InvoiceNumber != null && EF.Functions.Like(a.InvoiceNumber, like)) ||
-                    (a.CounterpartyInn != null && EF.Functions.Like(a.CounterpartyInn, like)) ||
-                    (a.Comment != null && EF.Functions.Like(a.Comment, like)) ||
+                    (a.Number != null && a.Number.ToLower().Contains(term)) ||
+                    (a.Title != null && a.Title.ToLower().Contains(term)) ||
+                    (a.InvoiceNumber != null && a.InvoiceNumber.ToLower().Contains(term)) ||
+                    (a.CounterpartyInn != null && a.CounterpartyInn.ToLower().Contains(term)) ||
+                    (a.Comment != null && a.Comment.ToLower().Contains(term)) ||
                     (a.Client != null &&
-                        ((a.Client.Name != null && EF.Functions.Like(a.Client.Name, like)) ||
-                         (a.Client.Company != null && EF.Functions.Like(a.Client.Company, like)))) ||
+                        ((a.Client.Name != null && a.Client.Name.ToLower().Contains(term)) ||
+                         (a.Client.Company != null && a.Client.Company.ToLower().Contains(term)))) ||
                     (a.Responsible != null &&
-                        (a.Responsible.FullName != null && EF.Functions.Like(a.Responsible.FullName, like)))
+                        (a.Responsible.FullName != null && a.Responsible.FullName.ToLower().Contains(term)))
                 );
             }
 
@@ -103,18 +102,18 @@ namespace PayPlanner.Api.Extensions
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                search = search.Trim();
+                search = search.Trim().ToLower();
                 q = q.Where(p =>
-                    (p.Description != null && EF.Functions.Like(p.Description, $"%{search}%")) ||
-                    (p.Notes != null && EF.Functions.Like(p.Notes, $"%{search}%")) ||
-                    (p.Account != null && EF.Functions.Like(p.Account, $"%{search}%")) ||
+                    (p.Description != null && p.Description.ToLower().Contains(search)) ||
+                    (p.Notes != null && p.Notes.ToLower().Contains(search)) ||
+                    (p.Account != null && p.Account.ToLower().Contains(search)) ||
                     (p.Client != null &&
-                        ((p.Client.Name != null && EF.Functions.Like(p.Client.Name, $"%{search}%")) ||
-                         (p.Client.Company != null && EF.Functions.Like(p.Client.Company, $"%{search}%")))) ||
-                    (p.ClientCase != null && p.ClientCase.Title != null && EF.Functions.Like(p.ClientCase.Title, $"%{search}%")) ||
-                    (p.DealType != null && p.DealType.Name != null && EF.Functions.Like(p.DealType.Name, $"%{search}%")) ||
-                    (p.IncomeType != null && p.IncomeType.Name != null && EF.Functions.Like(p.IncomeType.Name, $"%{search}%")) ||
-                    (p.PaymentSource != null && p.PaymentSource.Name != null && EF.Functions.Like(p.PaymentSource.Name, $"%{search}%")));
+                        ((p.Client.Name != null && p.Client.Name.ToLower().Contains(search)) ||
+                         (p.Client.Company != null && p.Client.Company.ToLower().Contains(search)))) ||
+                    (p.ClientCase != null && p.ClientCase.Title != null && p.ClientCase.Title.ToLower().Contains(search)) ||
+                    (p.DealType != null && p.DealType.Name != null && p.DealType.Name.ToLower().Contains(search)) ||
+                    (p.IncomeType != null && p.IncomeType.Name != null && p.IncomeType.Name.ToLower().Contains(search)) ||
+                    (p.PaymentSource != null && p.PaymentSource.Name != null && p.PaymentSource.Name.ToLower().Contains(search)));
             }
             return q;
         }
@@ -135,13 +134,13 @@ namespace PayPlanner.Api.Extensions
         {
             if (!string.IsNullOrWhiteSpace(search))
             {
-                search = search.Trim();
+                search = search.Trim().ToLower();
                 q = q.Where(c =>
-                    (c.Name != null && EF.Functions.Like(c.Name, $"%{search}%")) ||
-                    (c.Email != null && EF.Functions.Like(c.Email, $"%{search}%")) ||
-                    (c.Phone != null && EF.Functions.Like(c.Phone, $"%{search}%")) ||
-                    (c.Company != null && EF.Functions.Like(c.Company, $"%{search}%")) ||
-                    (c.Address != null && EF.Functions.Like(c.Address, $"%{search}%")));
+                    (c.Name != null && c.Name.ToLower().Contains(search)) ||
+                    (c.Email != null && c.Email.ToLower().Contains(search)) ||
+                    (c.Phone != null && c.Phone.ToLower().Contains(search)) ||
+                    (c.Company != null && c.Company.ToLower().Contains(search)) ||
+                    (c.Address != null && c.Address.ToLower().Contains(search)));
             }
             if (isActive.HasValue) q = q.Where(c => c.IsActive == isActive.Value);
             return q;
@@ -181,10 +180,10 @@ namespace PayPlanner.Api.Extensions
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                search = search.Trim();
+                search = search.Trim().ToLower();
                 q = q.Where(c =>
-                    (c.Title != null && EF.Functions.Like(c.Title, $"%{search}%")) ||
-                    (c.Description != null && EF.Functions.Like(c.Description, $"%{search}%")));
+                    (c.Title != null && c.Title.ToLower().Contains(search)) ||
+                    (c.Description != null && c.Description.ToLower().Contains(search)));
             }
             return q;
         }

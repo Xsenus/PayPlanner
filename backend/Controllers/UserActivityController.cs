@@ -97,13 +97,13 @@ public class UserActivityController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var like = $"%{search.Trim()}%";
+            var term = search.Trim().ToLower();
             query = query.Where(x =>
-                EF.Functions.Like(x.Description!, like) ||
-                EF.Functions.Like(x.ObjectId!, like) ||
-                EF.Functions.Like(x.ObjectType!, like) ||
-                EF.Functions.Like(x.Category!, like) ||
-                EF.Functions.Like(x.Action!, like));
+                x.Description!.ToLower().Contains(term) ||
+                x.ObjectId!.ToLower().Contains(term) ||
+                x.ObjectType!.ToLower().Contains(term) ||
+                x.Category!.ToLower().Contains(term) ||
+                x.Action!.ToLower().Contains(term));
         }
 
         var total = await query.CountAsync(cancellationToken);

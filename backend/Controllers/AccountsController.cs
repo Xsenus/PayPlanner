@@ -453,24 +453,23 @@ public class AccountsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim();
-            var like = $"%{term}%";
+            var term = search.Trim().ToLower();
             query = query.Where(payment =>
-                ((payment.Invoice != null && EF.Functions.Like(payment.Invoice.Number, like)) || (payment.Account != null && EF.Functions.Like(payment.Account, like)))
-                || (payment.Description != null && EF.Functions.Like(payment.Description, like))
-                || (payment.Notes != null && EF.Functions.Like(payment.Notes, like))
-                || (payment.CounterpartyName != null && EF.Functions.Like(payment.CounterpartyName, like))
-                || (payment.Client != null && payment.Client.Name != null && EF.Functions.Like(payment.Client.Name, like))
-                || (payment.Client != null && payment.Client.Company != null && EF.Functions.Like(payment.Client.Company, like))
-                || (payment.ClientCase != null && payment.ClientCase.Title != null && EF.Functions.Like(payment.ClientCase.Title, like))
-                || payment.InvoiceClientCases.Any(link => link.ClientCase != null && EF.Functions.Like(link.ClientCase.Title, like))
+                ((payment.Invoice != null && payment.Invoice.Number.ToLower().Contains(term)) || (payment.Account != null && payment.Account.ToLower().Contains(term)))
+                || (payment.Description != null && payment.Description.ToLower().Contains(term))
+                || (payment.Notes != null && payment.Notes.ToLower().Contains(term))
+                || (payment.CounterpartyName != null && payment.CounterpartyName.ToLower().Contains(term))
+                || (payment.Client != null && payment.Client.Name != null && payment.Client.Name.ToLower().Contains(term))
+                || (payment.Client != null && payment.Client.Company != null && payment.Client.Company.ToLower().Contains(term))
+                || (payment.ClientCase != null && payment.ClientCase.Title != null && payment.ClientCase.Title.ToLower().Contains(term))
+                || payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term))
                 || payment.Acts.Any(act =>
-                    EF.Functions.Like(act.Number, like)
-                    || (act.Title != null && EF.Functions.Like(act.Title, like))
-                    || (act.InvoiceNumber != null && EF.Functions.Like(act.InvoiceNumber, like))
-                    || (act.CounterpartyInn != null && EF.Functions.Like(act.CounterpartyInn, like))
-                    || (act.Comment != null && EF.Functions.Like(act.Comment, like))
-                    || (act.Client != null && act.Client.Name != null && EF.Functions.Like(act.Client.Name, like))));
+                    act.Number.ToLower().Contains(term)
+                    || (act.Title != null && act.Title.ToLower().Contains(term))
+                    || (act.InvoiceNumber != null && act.InvoiceNumber.ToLower().Contains(term))
+                    || (act.CounterpartyInn != null && act.CounterpartyInn.ToLower().Contains(term))
+                    || (act.Comment != null && act.Comment.ToLower().Contains(term))
+                    || (act.Client != null && act.Client.Name != null && act.Client.Name.ToLower().Contains(term))));
         }
 
         return query;
