@@ -1,32 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import Navigation from './components/Navigation/Navigation';
-import { Calendar } from './components/Calendar/Calendar';
-import { Reports } from './components/Reports/Reports';
-import { Calculator } from './components/Calculator/Calculator';
-import { Clients } from './components/Clients/Clients';
-import { LegalEntities } from './components/LegalEntities/LegalEntities';
-import { ClientDetail } from './components/Clients/ClientDetail';
-import { Accounts } from './components/Accounts/Accounts';
-import { Installments } from './components/Accounts/Installments';
-import { Acts } from './components/Acts/Acts';
-import { ActDetailPage } from './components/Acts/ActDetailPage';
-import { Contracts } from './components/Contracts/Contracts';
-import { ContractCreatePage } from './components/Contracts/ContractCreatePage';
-import { ContractDetailPage } from './components/Contracts/ContractDetailPage';
-import { Users } from './components/Users/Users';
-import { UserDetailPage } from './components/Users/UserDetailPage';
-import { Roles } from './components/Roles/Roles';
-import { UserActivity } from './components/UserActivity/UserActivity';
-import { Dictionaries } from './components/Dictionaries/Dictionaries';
-import { Payments } from './components/Payments/Payments';
-import { MoneyOperations } from './components/Money/MoneyOperations';
-import { CompanyProfile } from './components/CompanyProfile/CompanyProfile';
-import { AppSettings } from './components/Settings/AppSettings';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
-import { ProfilePage } from './components/Profile/ProfilePage';
 import TopBar from './components/TopBar/TopBar';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
@@ -38,6 +15,30 @@ import { ToastProvider } from './contexts/ToastContext';
 import type { User as AppUser } from './services/authService';
 
 type AuthView = 'login' | 'register' | 'awaiting';
+
+const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
+const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
+const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
+const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
+const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
+const ClientDetail = lazy(() => import('./components/Clients/ClientDetail').then((module) => ({ default: module.ClientDetail })));
+const Accounts = lazy(() => import('./components/Accounts/Accounts').then((module) => ({ default: module.Accounts })));
+const Installments = lazy(() => import('./components/Accounts/Installments').then((module) => ({ default: module.Installments })));
+const Acts = lazy(() => import('./components/Acts/Acts').then((module) => ({ default: module.Acts })));
+const ActDetailPage = lazy(() => import('./components/Acts/ActDetailPage').then((module) => ({ default: module.ActDetailPage })));
+const Contracts = lazy(() => import('./components/Contracts/Contracts').then((module) => ({ default: module.Contracts })));
+const ContractCreatePage = lazy(() => import('./components/Contracts/ContractCreatePage').then((module) => ({ default: module.ContractCreatePage })));
+const ContractDetailPage = lazy(() => import('./components/Contracts/ContractDetailPage').then((module) => ({ default: module.ContractDetailPage })));
+const Users = lazy(() => import('./components/Users/Users').then((module) => ({ default: module.Users })));
+const UserDetailPage = lazy(() => import('./components/Users/UserDetailPage').then((module) => ({ default: module.UserDetailPage })));
+const Roles = lazy(() => import('./components/Roles/Roles').then((module) => ({ default: module.Roles })));
+const UserActivity = lazy(() => import('./components/UserActivity/UserActivity').then((module) => ({ default: module.UserActivity })));
+const Dictionaries = lazy(() => import('./components/Dictionaries/Dictionaries').then((module) => ({ default: module.Dictionaries })));
+const Payments = lazy(() => import('./components/Payments/Payments').then((module) => ({ default: module.Payments })));
+const MoneyOperations = lazy(() => import('./components/Money/MoneyOperations').then((module) => ({ default: module.MoneyOperations })));
+const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyProfile').then((module) => ({ default: module.CompanyProfile })));
+const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
+const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 
 const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 const ALL_TABS: Tab[] = [
@@ -457,6 +458,15 @@ function AppContent() {
     [],
   );
 
+  const renderPageLoader = () => (
+    <div className="p-8">
+      <div className="mx-auto max-w-4xl rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <div className="mx-auto inline-block h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
+        <p className="mt-4 text-sm text-slate-600">Загружаем раздел...</p>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -786,7 +796,11 @@ function AppContent() {
             onSignOut={signOut}
             onOpenProfile={handleOpenProfile}
           />
-          <main className="flex-1">{renderContent()}</main>
+          <main className="flex-1">
+            <Suspense fallback={renderPageLoader()}>
+              {renderContent()}
+            </Suspense>
+          </main>
         </div>
       </div>
     </TabProvider>
