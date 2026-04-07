@@ -2324,6 +2324,19 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setCaseMode('create');
     setCaseModalOpen(true);
   };
+
+  const blankCaseDraft = useMemo<ClientCase>(
+    () => ({
+      id: 0,
+      clientId,
+      title: '',
+      description: '',
+      status: 'Open',
+      createdAt: new Date().toISOString(),
+    }),
+    [clientId],
+  );
+
   const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
     if (caseMode === 'edit' && editingCase) {
       if (!clientPermissions.canEdit) {
@@ -2848,17 +2861,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <Edit className="h-5 w-5" />
               </button>
             )}
-            {clientPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddCase}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
-                title={addCaseLabel}
-                aria-label={addCaseLabel}
-              >
-                <Plus className="h-5 w-5" />
-              </button>
-            )}
           </div>
         </div>
 
@@ -2884,6 +2886,15 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
             })}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {clientPermissions.canCreate && (
+              <button
+                type="button"
+                onClick={openAddCase}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+              >
+                <Plus size={16} /> {addCaseLabel}
+              </button>
+            )}
             {clientPermissions.canCreate && (
               <button
                 type="button"
@@ -4836,18 +4847,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           <CaseModal
             isOpen={caseModalOpen}
             onClose={() => setCaseModalOpen(false)}
-            caseData={
-              caseMode === 'edit' && editingCase
-                ? editingCase
-                : ({
-                    id: 0,
-                    clientId,
-                    title: '',
-                    description: '',
-                    status: 'Open',
-                    createdAt: new Date().toISOString(),
-                  } as ClientCase)
-            }
+            caseData={caseMode === 'edit' && editingCase ? editingCase : blankCaseDraft}
             onSave={saveCase}
             onDelete={caseMode === 'edit' && clientPermissions.canDelete ? deleteCase : undefined}
           />
