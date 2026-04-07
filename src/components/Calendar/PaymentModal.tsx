@@ -957,33 +957,27 @@ export function PaymentModal({
       setInvoiceCreateError(null);
 
       const created = await apiService.createInvoice(payload);
-      const normalizedCreated: Invoice = created.invoiceEntityId
-        ? created
-        : {
-            ...created,
-            invoiceEntityId: created.id,
-          };
+      const canonicalInvoiceId = created.invoiceEntityId;
+      if (!canonicalInvoiceId || canonicalInvoiceId <= 0) {
+        throw new Error('Backend не вернул идентификатор созданного счета. Обновите страницу и попробуйте еще раз.');
+      }
+
+      const normalizedCreated: Invoice = {
+        ...created,
+        invoiceEntityId: canonicalInvoiceId,
+      };
 
       setInvoiceOptions((prev) => {
         const next = prev.filter((item) => item.invoiceEntityId !== normalizedCreated.invoiceEntityId);
         return [normalizedCreated, ...next];
       });
 
-      
+      applyInvoiceSelection(normalizedCreated);
       setInvoiceCreateOpen(false);
       setInvoiceCreateError(null);
       setInvoicePickerOpen(false);
       setInvoiceCreateSeedContractId('');
-      const finalizeSelection = () => {
-        applyInvoiceSelection(normalizedCreated);
-        toast.success('Счет создан и привязан к платежу.', 'Создание счета');
-      };
-
-      if (typeof window !== 'undefined') {
-        window.setTimeout(finalizeSelection, 0);
-      } else {
-        finalizeSelection();
-      }
+      toast.success('Счет создан и привязан к платежу.', 'Создание счета');
 
       return;
     } catch (error) {
@@ -1917,7 +1911,7 @@ export function PaymentModal({
     </div>
   );
 
-  const createInvoiceModal = (
+  const createInvoiceModal = invoiceCreateOpen ? (
     <InvoiceModal
       open={invoiceCreateOpen}
       mode="create"
@@ -1938,7 +1932,7 @@ export function PaymentModal({
       defaultClientId={formData.clientId ? Number(formData.clientId) : defaultClientId}
       defaultType={formData.type}
     />
-  );
+  ) : null;
 
   if (typeof document === 'undefined') {
     return (
