@@ -1,42 +1,42 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Источник платежа (например, банк, касса).
+    /// РСЃС‚РѕС‡РЅРёРє РїР»Р°С‚РµР¶Р° (РЅР°РїСЂРёРјРµСЂ, Р±Р°РЅРє, РєР°СЃСЃР°).
     /// </summary>
     public class PaymentSource
     {
         /// <summary>
-        /// Цвет в HEX-формате.
+        /// Р¦РІРµС‚ РІ HEX-С„РѕСЂРјР°С‚Рµ.
         /// </summary>
         public string ColorHex { get; set; } = "#6B7280";
 
         /// <summary>
-        /// Дата создания.
+        /// Р”Р°С‚Р° СЃРѕР·РґР°РЅРёСЏ.
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание источника.
+        /// РћРїРёСЃР°РЅРёРµ РёСЃС‚РѕС‡РЅРёРєР°.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Идентификатор источника.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РёСЃС‚РѕС‡РЅРёРєР°.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активности.
+        /// РџСЂРёР·РЅР°Рє Р°РєС‚РёРІРЅРѕСЃС‚Рё.
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Название источника.
+        /// РќР°Р·РІР°РЅРёРµ РёСЃС‚РѕС‡РЅРёРєР°.
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Платежи, относящиеся к данному источнику.
+        /// РџР»Р°С‚РµР¶Рё, РѕС‚РЅРѕСЃСЏС‰РёРµСЃСЏ Рє РґР°РЅРЅРѕРјСѓ РёСЃС‚РѕС‡РЅРёРєСѓ.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }

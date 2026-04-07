@@ -1,32 +1,32 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// <para>Элемент графика платежей за месяц.</para>
+    /// <para>Р­Р»РµРјРµРЅС‚ РіСЂР°С„РёРєР° РїР»Р°С‚РµР¶РµР№ Р·Р° РјРµСЃСЏС†.</para>
     /// </summary>
     public class InstallmentItem
     {
         /// <summary>
-        /// <para>Остаток долга после учёта платежа.</para>
+        /// <para>РћСЃС‚Р°С‚РѕРє РґРѕР»РіР° РїРѕСЃР»Рµ СѓС‡С‘С‚Р° РїР»Р°С‚РµР¶Р°.</para>
         /// </summary>
         public decimal Balance { get; set; }
 
         /// <summary>
-        /// <para>Дата платежа.</para>
+        /// <para>Р”Р°С‚Р° РїР»Р°С‚РµР¶Р°.</para>
         /// </summary>
         public DateTime Date { get; set; }
 
         /// <summary>
-        /// <para>Проценты за месяц.</para>
+        /// <para>РџСЂРѕС†РµРЅС‚С‹ Р·Р° РјРµСЃСЏС†.</para>
         /// </summary>
         public decimal Interest { get; set; }
 
         /// <summary>
-        /// <para>Итоговый платёж за месяц (основной долг + проценты).</para>
+        /// <para>РС‚РѕРіРѕРІС‹Р№ РїР»Р°С‚С‘Р¶ Р·Р° РјРµСЃСЏС† (РѕСЃРЅРѕРІРЅРѕР№ РґРѕР»Рі + РїСЂРѕС†РµРЅС‚С‹).</para>
         /// </summary>
         public decimal Payment { get; set; }
 
         /// <summary>
-        /// <para>Погашение основного долга за месяц.</para>
+        /// <para>РџРѕРіР°С€РµРЅРёРµ РѕСЃРЅРѕРІРЅРѕРіРѕ РґРѕР»РіР° Р·Р° РјРµСЃСЏС†.</para>
         /// </summary>
         public decimal Principal { get; set; }
     }

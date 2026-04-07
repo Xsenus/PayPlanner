@@ -1,42 +1,42 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Тип сделки (категория платежа).
+    /// РўРёРї СЃРґРµР»РєРё (РєР°С‚РµРіРѕСЂРёСЏ РїР»Р°С‚РµР¶Р°).
     /// </summary>
     public class DealType
     {
         /// <summary>
-        /// Цвет в HEX-формате.
+        /// Р¦РІРµС‚ РІ HEX-С„РѕСЂРјР°С‚Рµ.
         /// </summary>
         public string ColorHex { get; set; } = "#3B82F6";
 
         /// <summary>
-        /// Дата создания.
+        /// Р”Р°С‚Р° СЃРѕР·РґР°РЅРёСЏ.
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание типа сделки.
+        /// РћРїРёСЃР°РЅРёРµ С‚РёРїР° СЃРґРµР»РєРё.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Идентификатор типа сделки.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ С‚РёРїР° СЃРґРµР»РєРё.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активности.
+        /// РџСЂРёР·РЅР°Рє Р°РєС‚РёРІРЅРѕСЃС‚Рё.
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Название типа сделки.
+        /// РќР°Р·РІР°РЅРёРµ С‚РёРїР° СЃРґРµР»РєРё.
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Платежи, относящиеся к данному типу сделки.
+        /// РџР»Р°С‚РµР¶Рё, РѕС‚РЅРѕСЃСЏС‰РёРµСЃСЏ Рє РґР°РЅРЅРѕРјСѓ С‚РёРїСѓ СЃРґРµР»РєРё.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }

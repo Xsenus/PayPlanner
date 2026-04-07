@@ -1,42 +1,42 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Справочник статусов платежа.
+    /// РЎРїСЂР°РІРѕС‡РЅРёРє СЃС‚Р°С‚СѓСЃРѕРІ РїР»Р°С‚РµР¶Р°.
     /// </summary>
     public class PaymentStatusEntity
     {
         /// <summary>
-        /// Цвет в HEX-формате.
+        /// Р¦РІРµС‚ РІ HEX-С„РѕСЂРјР°С‚Рµ.
         /// </summary>
         public string ColorHex { get; set; } = "#6B7280";
 
         /// <summary>
-        /// Дата создания.
+        /// Р”Р°С‚Р° СЃРѕР·РґР°РЅРёСЏ.
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание статуса.
+        /// РћРїРёСЃР°РЅРёРµ СЃС‚Р°С‚СѓСЃР°.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Идентификатор статуса.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СЃС‚Р°С‚СѓСЃР°.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активности.
+        /// РџСЂРёР·РЅР°Рє Р°РєС‚РёРІРЅРѕСЃС‚Рё.
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Название статуса.
+        /// РќР°Р·РІР°РЅРёРµ СЃС‚Р°С‚СѓСЃР°.
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Платежи, относящиеся к данному статусу.
+        /// РџР»Р°С‚РµР¶Рё, РѕС‚РЅРѕСЃСЏС‰РёРµСЃСЏ Рє РґР°РЅРЅРѕРјСѓ СЃС‚Р°С‚СѓСЃСѓ.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }

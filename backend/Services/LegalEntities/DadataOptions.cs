@@ -5,19 +5,19 @@ namespace PayPlanner.Api.Services.LegalEntities
         public string? ApiKey { get; set; }
 
         /// <summary
-        /// >Базовый URL для подсказок / поиска компаний.
+        /// >Р‘Р°Р·РѕРІС‹Р№ URL РґР»СЏ РїРѕРґСЃРєР°Р·РѕРє / РїРѕРёСЃРєР° РєРѕРјРїР°РЅРёР№.
         /// </summary>
         public string BaseUrl { get; set; } = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/";
 
         /// <summary>
-        /// Базовый URL для cleaner API.
+        /// Р‘Р°Р·РѕРІС‹Р№ URL РґР»СЏ cleaner API.
         /// </summary>
         public string CleanerUrl { get; set; } = "https://cleaner.dadata.ru/api/v1/clean/";
 
         public string? Secret { get; set; }
 
         /// <summary>
-        /// Глобальный таймаут HTTP-клиента.
+        /// Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ С‚Р°Р№РјР°СѓС‚ HTTP-РєР»РёРµРЅС‚Р°.
         /// </summary>
         public int TimeoutSeconds { get; set; } = 15;
     }

@@ -1,47 +1,47 @@
 namespace PayPlanner.Api.Models
 {
     /// <summary>
-    /// Тип дохода (категория платежа по доходам).
+    /// РўРёРї РґРѕС…РѕРґР° (РєР°С‚РµРіРѕСЂРёСЏ РїР»Р°С‚РµР¶Р° РїРѕ РґРѕС…РѕРґР°Рј).
     /// </summary>
     public class IncomeType
     {
         /// <summary>
-        /// Цвет в HEX-формате.
+        /// Р¦РІРµС‚ РІ HEX-С„РѕСЂРјР°С‚Рµ.
         /// </summary>
         public string ColorHex { get; set; } = "#10B981";
 
         /// <summary>
-        /// Дата создания.
+        /// Р”Р°С‚Р° СЃРѕР·РґР°РЅРёСЏ.
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Описание типа дохода.
+        /// РћРїРёСЃР°РЅРёРµ С‚РёРїР° РґРѕС…РѕРґР°.
         /// </summary>
         public string Description { get; set; } = string.Empty;
 
         /// <summary>
-        /// Идентификатор типа дохода.
+        /// РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ С‚РёРїР° РґРѕС…РѕРґР°.
         /// </summary>
         public int Id { get; set; }
 
         /// <summary>
-        /// Признак активности.
+        /// РџСЂРёР·РЅР°Рє Р°РєС‚РёРІРЅРѕСЃС‚Рё.
         /// </summary>
         public bool IsActive { get; set; } = true;
 
         /// <summary>
-        /// Название типа дохода.
+        /// РќР°Р·РІР°РЅРёРµ С‚РёРїР° РґРѕС…РѕРґР°.
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Платежи, относящиеся к данному типу дохода.
+        /// РџР»Р°С‚РµР¶Рё, РѕС‚РЅРѕСЃСЏС‰РёРµСЃСЏ Рє РґР°РЅРЅРѕРјСѓ С‚РёРїСѓ РґРѕС…РѕРґР°.
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
         /// <summary>
-        /// Тип платежа.
+        /// РўРёРї РїР»Р°С‚РµР¶Р°.
         /// </summary>
         public PaymentType PaymentType { get; set; }
     }
