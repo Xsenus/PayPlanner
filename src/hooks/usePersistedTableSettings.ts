@@ -57,6 +57,12 @@ function safeWrite<T>(key: string, value: T) {
   }
 }
 
+function getColumnsSignature<K extends string>(columns: TableColumnConfig<K>[]): string {
+  return columns
+    .map((column) => `${column.key}:${column.defaultVisible === false ? '0' : '1'}:${column.defaultWidth ?? ''}`)
+    .join('|');
+}
+
 export function usePersistedTableSettings<K extends string>({
   storageKey,
   settingsKey,
@@ -66,20 +72,31 @@ export function usePersistedTableSettings<K extends string>({
   maxPageSize = 100,
   minColumnWidth = 96,
 }: UsePersistedTableSettingsOptions<K>) {
-  const allKeys = useMemo(() => columns.map((column) => column.key), [columns]);
+  const columnsSignature = getColumnsSignature(columns);
+  const stableColumnsRef = useRef<{ signature: string; columns: TableColumnConfig<K>[] } | null>(null);
+
+  if (!stableColumnsRef.current || stableColumnsRef.current.signature !== columnsSignature) {
+    stableColumnsRef.current = {
+      signature: columnsSignature,
+      columns: columns.map(({ key, defaultVisible, defaultWidth }) => ({ key, defaultVisible, defaultWidth })),
+    };
+  }
+
+  const stableColumns = stableColumnsRef.current.columns;
+  const allKeys = useMemo(() => stableColumns.map((column) => column.key), [stableColumns]);
   const defaultVisibleColumns = useMemo(
-    () => columns.filter((column) => column.defaultVisible !== false).map((column) => column.key),
-    [columns],
+    () => stableColumns.filter((column) => column.defaultVisible !== false).map((column) => column.key),
+    [stableColumns],
   );
   const defaultColumnWidths = useMemo(
     () =>
-      columns.reduce<Partial<Record<K, number>>>((acc, column) => {
+      stableColumns.reduce<Partial<Record<K, number>>>((acc, column) => {
         if (typeof column.defaultWidth === 'number') {
           acc[column.key] = Math.max(minColumnWidth, column.defaultWidth);
         }
         return acc;
       }, {}),
-    [columns, minColumnWidth],
+    [stableColumns, minColumnWidth],
   );
 
   const normalizeSettings = useMemo(
