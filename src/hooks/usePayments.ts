@@ -6,6 +6,7 @@ type UsePaymentsOptions = {
   pollInterval?: number;
   clientId?: number;
   caseId?: number;
+  excludeInstallmentParents?: boolean;
 };
 
 type Mode = 'initial' | 'background';
@@ -38,6 +39,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
     to: to ?? '',
     clientId: opts?.clientId ?? null,
     caseId: opts?.caseId ?? null,
+    excludeInstallmentParents: opts?.excludeInstallmentParents ?? false,
   });
 
   const fetchOnce = useCallback(
@@ -70,6 +72,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
           to,
           clientId: opts?.clientId,
           caseId: opts?.caseId,
+          excludeInstallmentParents: opts?.excludeInstallmentParents,
         });
 
         if (!ac.signal.aborted) {
@@ -96,7 +99,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
         }
       }
     },
-    [from, to, opts?.clientId, opts?.caseId],
+    [from, to, opts?.clientId, opts?.caseId, opts?.excludeInstallmentParents],
   );
 
   useEffect(() => {

@@ -906,9 +906,10 @@ export class ApiService {
     to?: string;
     clientId?: number;
     caseId?: number;
+    excludeInstallmentParents?: boolean;
   }): Promise<Payment[]>;
   async getPayments(
-    a?: string | { from?: string; to?: string; clientId?: number; caseId?: number },
+    a?: string | { from?: string; to?: string; clientId?: number; caseId?: number; excludeInstallmentParents?: boolean },
     b?: string,
     c?: number,
   ): Promise<Payment[]> {
@@ -919,6 +920,7 @@ export class ApiService {
         to: a?.to,
         clientId: a?.clientId,
         caseId: a?.caseId,
+        excludeInstallmentParents: a?.excludeInstallmentParents,
       });
     } else {
       // старый сигнатурный стиль: (from?, to?, clientId?)

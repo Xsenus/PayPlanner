@@ -193,7 +193,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     updatePayment,
     deletePayment,
     refresh: refreshPayments,
-  } = usePayments(fromDateStr, toDateStr, { pollInterval });
+  } = usePayments(fromDateStr, toDateStr, { pollInterval, excludeInstallmentParents: true });
 
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
 
