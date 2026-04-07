@@ -271,6 +271,29 @@ export interface UpsertExternalContactRequestDto extends UpdateClientContactRequ
   isActive: boolean;
 }
 
+export interface YealinkContactImportDetailDto {
+  name: string;
+  group?: string | null;
+  phones: string[];
+  action: string;
+  matchedSourceType?: ContactSourceType | string | null;
+  matchedSourceId?: number | null;
+  message?: string | null;
+}
+
+export interface YealinkContactImportResultDto {
+  dryRun: boolean;
+  scanned: number;
+  withPhones: number;
+  created: number;
+  updated: number;
+  skippedExisting: number;
+  skippedNoPhone: number;
+  skippedDuplicateInFile: number;
+  skippedInvalid: number;
+  details: YealinkContactImportDetailDto[];
+}
+
 export interface LegacyAddressMigrationDetail {
   ownerType?: 'legal' | 'client' | string;
   ownerId?: number;
@@ -715,6 +738,18 @@ export class ApiService {
         parseContentDispositionFileName(response.headers.get('content-disposition')) ??
         'RemotePhonebook.xml',
     };
+  }
+
+  async importYealinkContactsXml(file: File, dryRun = false) {
+    const payload = new FormData();
+    payload.append('file', file);
+
+    const query = dryRun ? '?dryRun=true' : '';
+
+    return this.request<YealinkContactImportResultDto>(`/contacts/imports/yealink${query}`, {
+      method: 'POST',
+      body: payload,
+    });
   }
 
   // ===== Invoices =====

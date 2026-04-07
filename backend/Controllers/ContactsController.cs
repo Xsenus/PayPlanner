@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +21,9 @@ namespace PayPlanner.Api.Controllers;
 public class ContactsController : ControllerBase
 {
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
+    private const string YealinkImportNote = "Импортировано из Yealink RemotePhonebook.xml";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Encoding Windows1251Encoding = CreateWindows1251Encoding();
 
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
@@ -379,6 +382,153 @@ public class ContactsController : ControllerBase
         return File(bytes, "text/xml; charset=utf-8", "RemotePhonebook.xml");
     }
 
+    [HttpPost("imports/yealink")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<YealinkContactImportResultDto>> ImportYealinkXml(
+        IFormFile? file,
+        [FromQuery] bool dryRun = false,
+        CancellationToken ct = default)
+    {
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin)
+        {
+            return Forbid();
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("Файл телефонной книги пустой.");
+        }
+
+        XDocument document;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var xml = await reader.ReadToEndAsync(ct);
+            document = XDocument.Parse(xml);
+        }
+        catch
+        {
+            return BadRequest("Не удалось прочитать XML телефонной книги Yealink.");
+        }
+
+        var result = new YealinkContactImportResultDto
+        {
+            DryRun = dryRun,
+        };
+        var existingPhones = await BuildExistingPhoneIndexAsync(ct);
+        var filePhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var now = DateTime.UtcNow;
+
+        foreach (var menu in document.Descendants("Menu"))
+        {
+            var groupName = NormalizeImportedText(menu.Attribute("Name")?.Value);
+            foreach (var unit in menu.Elements("Unit"))
+            {
+                ct.ThrowIfCancellationRequested();
+                result.Scanned++;
+
+                var name = NormalizeImportedText(unit.Attribute("Name")?.Value);
+                var phones = ReadYealinkPhones(unit);
+                var phoneKeys = GetPhoneMatchKeys(phones);
+                var detail = new YealinkContactImportDetailDto
+                {
+                    Name = string.IsNullOrWhiteSpace(name) ? "Контакт без имени" : name,
+                    Group = groupName,
+                    Phones = phones,
+                };
+
+                if (phones.Count == 0 || phoneKeys.Count == 0)
+                {
+                    detail.Action = "SkippedNoPhone";
+                    detail.Message = "Контакт пропущен: в XML нет телефонов.";
+                    result.SkippedNoPhone++;
+                    result.Details.Add(detail);
+                    continue;
+                }
+
+                result.WithPhones++;
+
+                (string SourceType, int SourceId)? existingMatch = null;
+                foreach (var key in phoneKeys)
+                {
+                    if (existingPhones.TryGetValue(key, out var match))
+                    {
+                        existingMatch = match;
+                        break;
+                    }
+                }
+                if (existingMatch is not null)
+                {
+                    detail.Action = "SkippedExisting";
+                    detail.MatchedSourceType = existingMatch.Value.SourceType;
+                    detail.MatchedSourceId = existingMatch.Value.SourceId;
+                    detail.Message = "Телефон уже есть в CRM.";
+                    result.SkippedExisting++;
+                    result.Details.Add(detail);
+                    continue;
+                }
+
+                if (phoneKeys.Any(key => filePhones.Contains(key)))
+                {
+                    detail.Action = "SkippedDuplicateInFile";
+                    detail.Message = "Контакт пропущен: такой телефон уже был обработан в этом XML.";
+                    result.SkippedDuplicateInFile++;
+                    result.Details.Add(detail);
+                    continue;
+                }
+
+                var contactName = string.IsNullOrWhiteSpace(name)
+                    ? $"Контакт {phones[0]}"
+                    : name;
+
+                var entityId = 0;
+                if (!dryRun)
+                {
+                    var entity = new ExternalContact
+                    {
+                        FullName = contactName,
+                        Phone = phones.FirstOrDefault(),
+                        PhonesJson = SerializeStringList(phones),
+                        Notes = string.IsNullOrWhiteSpace(groupName)
+                            ? YealinkImportNote
+                            : $"{YealinkImportNote}. Группа: {groupName}",
+                        ResponsibleUserId = access.UserId.Value,
+                        IsActive = true,
+                        SyncToPhonebook = true,
+                        CreatedAt = now,
+                        UpdatedAt = now,
+                    };
+
+                    _db.ExternalContacts.Add(entity);
+                    await _db.SaveChangesAsync(ct);
+                    entityId = entity.Id;
+                }
+
+                foreach (var key in phoneKeys)
+                {
+                    filePhones.Add(key);
+                    existingPhones.TryAdd(key, ("external", entityId));
+                }
+
+                detail.Action = dryRun ? "WouldCreate" : "Created";
+                detail.MatchedSourceType = "external";
+                detail.MatchedSourceId = dryRun ? null : entityId;
+                detail.Message = dryRun ? "Будет создан сторонний контакт." : "Создан сторонний контакт.";
+                result.Created++;
+                result.Details.Add(detail);
+            }
+        }
+
+        return Ok(result);
+    }
+
     private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
     {
         var currentUserId = User.GetUserId();
@@ -438,8 +588,40 @@ public class ContactsController : ControllerBase
         };
     }
 
+    private static Encoding CreateWindows1251Encoding()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding(1251);
+    }
+
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizeImportedText(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        var repaired = RepairUtf8AsWindows1251Mojibake(normalized);
+        return Regex.Replace(repaired, @"\s+", " ").Trim();
+    }
+
+    private static string RepairUtf8AsWindows1251Mojibake(string value)
+    {
+        try
+        {
+            var bytes = Windows1251Encoding.GetBytes(value);
+            var repaired = Encoding.UTF8.GetString(bytes);
+            return repaired.Contains('\uFFFD') ? value : repaired;
+        }
+        catch
+        {
+            return value;
+        }
+    }
 
     private static List<string> NormalizeStringList(IEnumerable<string>? items, string? fallback = null)
     {
@@ -649,6 +831,31 @@ public class ContactsController : ControllerBase
         };
     }
 
+    private async Task<Dictionary<string, (string SourceType, int SourceId)>> BuildExistingPhoneIndexAsync(CancellationToken ct)
+    {
+        var index = new Dictionary<string, (string SourceType, int SourceId)>(StringComparer.OrdinalIgnoreCase);
+
+        var clients = await _db.Clients.AsNoTracking().ToListAsync(ct);
+        foreach (var client in clients)
+        {
+            foreach (var key in GetPhoneMatchKeys(MapClientContact(client).Phones))
+            {
+                index.TryAdd(key, ("client", client.Id));
+            }
+        }
+
+        var externalContacts = await _db.ExternalContacts.AsNoTracking().ToListAsync(ct);
+        foreach (var contact in externalContacts)
+        {
+            foreach (var key in GetPhoneMatchKeys(MapExternalContact(contact).Phones))
+            {
+                index.TryAdd(key, ("external", contact.Id));
+            }
+        }
+
+        return index;
+    }
+
     private static List<string> DeserializeStringList(string? rawJson, string? fallback = null)
     {
         if (string.IsNullOrWhiteSpace(rawJson))
@@ -685,6 +892,48 @@ public class ContactsController : ControllerBase
         }
 
         return menu;
+    }
+
+    private static List<string> ReadYealinkPhones(XElement unit)
+    {
+        return Enumerable.Range(1, 6)
+            .Select(index => NormalizePhoneForStorage(unit.Attribute($"Phone{index}")?.Value))
+            .Where(phone => !string.IsNullOrWhiteSpace(phone))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static string? NormalizePhoneForStorage(string? value)
+    {
+        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        return string.IsNullOrWhiteSpace(digits) ? null : digits;
+    }
+
+    private static List<string> GetPhoneMatchKeys(IEnumerable<string> phones)
+    {
+        return phones
+            .Select(NormalizePhoneMatchKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static string? NormalizePhoneMatchKey(string? value)
+    {
+        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(digits))
+        {
+            return null;
+        }
+
+        if (digits.Length == 11 && (digits[0] == '7' || digits[0] == '8'))
+        {
+            return digits[1..];
+        }
+
+        return digits;
     }
 
     private static List<string> ExpandPhoneVariants(IEnumerable<string> phones)

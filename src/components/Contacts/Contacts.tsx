@@ -10,6 +10,7 @@ import {
   Plus,
   Settings2,
   Trash2,
+  Upload,
   Users,
 } from 'lucide-react';
 import { apiService, type ContactDirectoryItemDto, type ContactScope } from '../../services/api';
@@ -83,12 +84,14 @@ export function Contacts() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingXml, setDownloadingXml] = useState(false);
+  const [importingXml, setImportingXml] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [page, setPage] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const {
     columnOrder,
@@ -268,6 +271,45 @@ export function Contacts() {
     }
   };
 
+  const handleImportXmlFile = async (file: File | null | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    setImportingXml(true);
+    try {
+      const preview = await apiService.importYealinkContactsXml(file, true);
+      const shouldImport = window.confirm(
+        [
+          'Импортировать контакты из Yealink XML?',
+          `Будет создано: ${preview.created}`,
+          `Уже есть в CRM: ${preview.skippedExisting}`,
+          `Без телефона: ${preview.skippedNoPhone}`,
+          `Повторы внутри файла: ${preview.skippedDuplicateInFile}`,
+        ].join('\n'),
+      );
+
+      if (!shouldImport) {
+        toast.info('Импорт Yealink XML отменён.', 'Контакты');
+        return;
+      }
+
+      const result = await apiService.importYealinkContactsXml(file);
+      toast.success(
+        `Импорт завершён: создано ${result.created}, уже было ${result.skippedExisting}, без телефона ${result.skippedNoPhone}.`,
+        'Контакты',
+      );
+      void loadDirectory();
+    } catch (nextError) {
+      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать Yealink XML'), 'Контакты');
+    } finally {
+      setImportingXml(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = '';
+      }
+    }
+  };
+
   const renderContactCell = (contact: ContactDirectoryItemDto, column: ContactColumnKey) => {
     switch (column) {
       case 'contact':
@@ -377,15 +419,33 @@ export function Contacts() {
 
           <div className="flex flex-wrap gap-3">
             {isAdmin() ? (
-              <button
-                type="button"
-                onClick={handleDownloadXml}
-                disabled={downloadingXml}
-                className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {downloadingXml ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Скачать Yealink XML
-              </button>
+              <>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".xml,text/xml,application/xml"
+                  className="hidden"
+                  onChange={(event) => void handleImportXmlFile(event.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  onClick={() => importInputRef.current?.click()}
+                  disabled={importingXml}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {importingXml ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Импорт XML
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadXml}
+                  disabled={downloadingXml}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {downloadingXml ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Скачать Yealink XML
+                </button>
+              </>
             ) : null}
 
             <button
