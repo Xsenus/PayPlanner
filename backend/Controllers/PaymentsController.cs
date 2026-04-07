@@ -37,10 +37,12 @@ public class PaymentsController : ControllerBase
         {
             q = q.Where(p =>
                 p.DocumentKind != DocumentKind.Invoice
+                || p.InvoiceId == null
                 || !_db.Payments.Any(child =>
                     child.InvoiceId == p.InvoiceId
                     && child.Id != p.Id
                     && child.DocumentKind != DocumentKind.Invoice
+                    && child.SystemNotes != null
                     && child.SystemNotes.Contains(InstallmentPaymentMarker)));
         }
 
