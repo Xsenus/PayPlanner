@@ -2634,7 +2634,7 @@ export function InvoiceModal({
                                       Ответственный: {selectedClient.responsibleUserName}
                                     </p>
                                   )}
-                                  {selectedClient.clientStatus.description && (
+                                  {selectedClient.clientStatus?.description && (
                                     <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                                   )}
                                 </div>
