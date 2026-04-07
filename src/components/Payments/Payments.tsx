@@ -8,6 +8,7 @@ import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type { Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
@@ -220,6 +221,7 @@ export function Payments({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<Payment['type']>(
@@ -282,7 +284,7 @@ export function Payments({
     status: statusFilter === 'all' ? undefined : statusFilter,
     minAmount: minAmountValue,
     maxAmount: maxAmountValue,
-    search: search.trim() || undefined,
+    search: debouncedSearch || undefined,
     sortBy: 'date',
     sortDir: 'desc',
     page,
@@ -416,7 +418,7 @@ export function Payments({
         : t('paymentsTypeLockedGeneric') ?? 'Фильтр по типу закреплён')
     : null;
 
-  const searchQuery = search.trim().toLowerCase();
+  const searchQuery = debouncedSearch.toLowerCase();
 
   const filterSignature = useMemo(
     () =>

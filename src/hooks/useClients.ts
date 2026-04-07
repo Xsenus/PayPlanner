@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiService } from '../services/api';
 import type {
   Client,
@@ -44,13 +44,23 @@ export type ClientsListOptions = {
 
 export function useClients(options?: ClientsListOptions) {
   const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const hasLoadedRef = useRef(false);
+  const requestIdRef = useRef(0);
 
-  const fetchClients = useCallback(async () => {
+  const fetchClients = useCallback(async (mode?: 'initial' | 'refresh') => {
+    const nextMode = mode ?? (hasLoadedRef.current ? 'refresh' : 'initial');
+    const requestId = ++requestIdRef.current;
+
     try {
-      setLoading(true);
+      if (nextMode === 'initial') {
+        setLoadingInitial(true);
+      } else {
+        setRefreshing(true);
+      }
       setError(null);
 
       if (options?.mode === 'paged') {
@@ -63,20 +73,36 @@ export function useClients(options?: ClientsListOptions) {
           pageSize: options.pageSize,
           ...(options.filters ?? {}),
         });
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
         const normalized = (response.items as Client[]).map((c) => normalizeClient(c));
         setClients(normalized);
         setTotal(response.total ?? 0);
       } else {
         const base = await apiService.getClients();
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
         const normalized = (base as Client[]).map((c) => normalizeClient(c));
 
         setClients(normalized);
         setTotal(normalized.length);
       }
     } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Failed to fetch clients');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        hasLoadedRef.current = true;
+        if (nextMode === 'initial') {
+          setLoadingInitial(false);
+        } else {
+          setRefreshing(false);
+        }
+      }
     }
   }, [options]);
 
@@ -154,7 +180,8 @@ export function useClients(options?: ClientsListOptions) {
 
   return {
     clients,
-    loading,
+    loading: loadingInitial,
+    refreshing,
     error,
     total,
     createClient,

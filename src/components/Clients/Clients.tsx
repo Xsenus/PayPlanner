@@ -14,11 +14,13 @@ import {
   LayoutGrid,
   List,
   Ban,
+  Loader2,
   SlidersHorizontal,
   GripVertical,
   Filter,
 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
@@ -343,6 +345,7 @@ export function Clients() {
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
 
   const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query.trim(), 400);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
     try {
       return (localStorage.getItem('pp.clients_view') as 'cards' | 'table') || 'cards';
@@ -429,7 +432,7 @@ export function Clients() {
   const clientsQueryOptions = useMemo(
     () => ({
       mode: 'paged' as const,
-      search: query.trim() || undefined,
+      search: debouncedQuery || undefined,
       isActive: activityFilter === 'all' ? undefined : activityFilter === 'active',
       sortBy: 'name' as const,
       sortDir: 'asc' as const,
@@ -444,10 +447,10 @@ export function Clients() {
         ...activeFilters,
       },
     }),
-    [query, activityFilter, page, pageSize, statusFilter, activeFilters],
+    [debouncedQuery, activityFilter, page, pageSize, statusFilter, activeFilters],
   );
 
-  const { clients, loading, total, createClient, updateClient, setClients, refresh } =
+  const { clients, loading, refreshing, total, createClient, updateClient, setClients, refresh } =
     useClients(clientsQueryOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -903,7 +906,7 @@ export function Clients() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, statusFilter, activityFilter, activeFilters, pageSize]);
+  }, [debouncedQuery, statusFilter, activityFilter, activeFilters, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -1005,7 +1008,7 @@ export function Clients() {
                 className="font-medium text-gray-900 text-left truncate hover:underline"
                 title="Открыть карточку клиента"
               >
-                {highlight(client.name ?? '', query)}
+                {highlight(client.name ?? '', debouncedQuery)}
               </button>
             </div>
           </div>
@@ -1021,13 +1024,13 @@ export function Clients() {
       case 'company':
         return (
           <span className="text-sm text-gray-700 block truncate">
-            {highlight(client.company ?? '', query)}
+            {highlight(client.company ?? '', debouncedQuery)}
           </span>
         );
       case 'email':
         return client.email ? (
           <span className="text-sm text-gray-700 block truncate">
-            {highlight(client.email ?? '', query)}
+            {highlight(client.email ?? '', debouncedQuery)}
           </span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
@@ -1035,7 +1038,7 @@ export function Clients() {
       case 'phone':
         return client.phone ? (
           <span className="text-sm text-gray-700 block truncate">
-            {highlightPhone(client.phone ?? '', query)}
+            {highlightPhone(client.phone ?? '', debouncedQuery)}
           </span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
@@ -1073,7 +1076,7 @@ export function Clients() {
       case 'legalEntityShortName':
         return client.legalEntity ? (
           <span className="text-sm text-gray-700 block truncate">
-            {highlight(client.legalEntity.shortName ?? '', query)}
+            {highlight(client.legalEntity.shortName ?? '', debouncedQuery)}
           </span>
         ) : (
           <span className="text-xs text-gray-400">{t('legalEntityNotAssigned') || 'Не указано'}</span>
@@ -1214,8 +1217,14 @@ export function Clients() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={t('search') || 'Поиск по имени, телефону, компании или email'}
-                  className="pl-9 pr-8 py-2 w-full rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="pl-9 pr-14 py-2 w-full rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {refreshing && (
+                  <Loader2
+                    className="absolute right-8 top-1/2 -translate-y-1/2 animate-spin text-gray-400"
+                    size={14}
+                  />
+                )}
                 {query && (
                   <button
                     type="button"
@@ -1623,7 +1632,7 @@ export function Clients() {
                             className="font-semibold text-gray-900 block max-w-full truncate hover:underline text-left"
                             title="Открыть карточку клиента"
                           >
-                            {highlight(client.name ?? '', query)}
+                            {highlight(client.name ?? '', debouncedQuery)}
                           </button>
                           {client.responsibleUserName && (
                             <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
@@ -1634,7 +1643,7 @@ export function Clients() {
                         </div>
                         {client.company && (
                           <p className="text-sm text-gray-500 block max-w-full truncate">
-                            {highlight(client.company ?? '', query)}
+                            {highlight(client.company ?? '', debouncedQuery)}
                           </p>
                         )}
                       </div>
@@ -1664,14 +1673,14 @@ export function Clients() {
                       {client.email && (
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Mail size={14} />
-                          <span className="truncate">{highlight(client.email ?? '', query)}</span>
+                          <span className="truncate">{highlight(client.email ?? '', debouncedQuery)}</span>
                         </div>
                       )}
                       {client.phone && (
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Phone size={14} />
                           <span className="truncate">
-                            {highlightPhone(client.phone ?? '', query)}
+                            {highlightPhone(client.phone ?? '', debouncedQuery)}
                           </span>
                         </div>
                       )}
@@ -1679,7 +1688,7 @@ export function Clients() {
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Building2 size={14} className="text-blue-500" />
                           <span className="truncate">
-                            {highlight(client.legalEntity.shortName ?? '', query)}
+                            {highlight(client.legalEntity.shortName ?? '', debouncedQuery)}
                           </span>
                         </div>
                       )}
