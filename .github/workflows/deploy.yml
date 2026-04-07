@@ -138,8 +138,9 @@ jobs:
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
             echo "[6/10] Rsync frontend"
-            sudo rsync -a --delete "$STAGE/fe/" "$FE_APP_DIR/"
-            sudo rsync -a --delete "$STAGE/fe/" "$FE_PUBLIC_DIR/"
+            # Keep previous hashed chunks so already-open browser tabs can switch lazy-loaded sections after a deploy.
+            sudo rsync -a "$STAGE/fe/" "$FE_APP_DIR/"
+            sudo rsync -a "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
             echo "[7/10] Cleanup temp artifacts"
             cleanup

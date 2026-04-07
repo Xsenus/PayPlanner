@@ -1,10 +1,11 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import Navigation from './components/Navigation/Navigation';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
+import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions } from './hooks/useRolePermissions';
@@ -100,6 +101,10 @@ function isInvoicesListPath(): boolean {
   }
 
   return /^\/invoices\/?$/i.test(window.location.pathname);
+}
+
+function ActiveTabContent({ render }: { render: () => ReactNode }) {
+  return <>{render()}</>;
 }
 
 function getInitialTab(): Tab {
@@ -805,9 +810,14 @@ function AppContent() {
             onOpenProfile={handleOpenProfile}
           />
           <main className="flex-1">
-            <Suspense fallback={renderPageLoader()}>
-              {renderContent()}
-            </Suspense>
+            <RouteErrorBoundary
+              resetKey={activeTab}
+              onGoHome={() => handleTabChange('calendar')}
+            >
+              <Suspense fallback={renderPageLoader()}>
+                <ActiveTabContent render={renderContent} />
+              </Suspense>
+            </RouteErrorBoundary>
           </main>
         </div>
       </div>
