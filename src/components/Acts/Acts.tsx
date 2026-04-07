@@ -120,6 +120,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     columnOrder,
     orderedVisibleColumns: orderedVisibleColumnKeys,
     visibleColumns,
+    draggingColumn,
     pageSize,
     setPageSize,
     toggleColumn,
