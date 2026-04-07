@@ -1,12 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Download, Loader2, Mail, Pencil, Phone, Plus, Trash2, Users } from 'lucide-react';
+import {
+  Building2,
+  Download,
+  GripVertical,
+  Loader2,
+  Mail,
+  Pencil,
+  Phone,
+  Plus,
+  Settings2,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import { apiService, type ContactDirectoryItemDto, type ContactScope } from '../../services/api';
 import type { ActResponsible, LegalEntitySummary } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ContactEditorModal } from './ContactEditorModal';
 
@@ -16,6 +30,21 @@ type EditorState =
   | { mode: 'edit-external'; contact: ContactDirectoryItemDto };
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
+const CONTACT_COLUMNS = [
+  { key: 'contact', label: 'Контакт', defaultVisible: true, defaultWidth: 320 },
+  { key: 'organization', label: 'Организация', defaultVisible: true, defaultWidth: 240 },
+  { key: 'phones', label: 'Телефоны', defaultVisible: true, defaultWidth: 220 },
+  { key: 'email', label: 'Email', defaultVisible: true, defaultWidth: 220 },
+  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 180 },
+] as const;
+
+type ContactColumnKey = (typeof CONTACT_COLUMNS)[number]['key'];
+
+const CONTACT_COLUMN_LABELS: Record<ContactColumnKey, string> = CONTACT_COLUMNS.reduce(
+  (acc, column) => ({ ...acc, [column.key]: column.label }),
+  {} as Record<ContactColumnKey, string>,
+);
 
 function formatPhones(contact: ContactDirectoryItemDto) {
   const list = contact.phones.length > 0 ? contact.phones : contact.phone ? [contact.phone] : [];
@@ -48,6 +77,7 @@ export function Contacts() {
   const [syncOnly, setSyncOnly] = useState<'all' | 'only-sync' | 'excluded'>('all');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [contacts, setContacts] = useState<ContactDirectoryItemDto[]>([]);
+  const [summaryContacts, setSummaryContacts] = useState<ContactDirectoryItemDto[]>([]);
   const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,9 +86,39 @@ export function Contacts() {
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
+
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    pageSize,
+    setPageSize,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ContactColumnKey>({
+    storageKey: 'pp.contacts_table_settings.v1',
+    settingsKey: 'contacts_table_settings',
+    columns: CONTACT_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultVisible: column.defaultVisible,
+      defaultWidth: column.defaultWidth,
+    })),
+    defaultPageSize: PAGE_SIZE_OPTIONS[0],
+    minPageSize: 10,
+    maxPageSize: 100,
+    minColumnWidth: 140,
+  });
 
   const loadDirectory = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -72,19 +132,32 @@ export function Contacts() {
       }
       setError(null);
 
-      const data = await apiService.getContacts({
-        scope,
+      const baseParams = {
         search: debouncedSearch.trim() || undefined,
         legalEntityId: legalEntityId ? Number(legalEntityId) : undefined,
         includeInactive,
         syncOnly: syncOnly === 'all' ? undefined : syncOnly === 'only-sync',
+      };
+
+      const dataRequest = apiService.getContacts({
+        ...baseParams,
+        scope,
       });
+      const summaryRequest =
+        scope === 'all'
+          ? dataRequest
+          : apiService.getContacts({
+              ...baseParams,
+              scope: 'all',
+            });
+      const [data, summaryData] = await Promise.all([dataRequest, summaryRequest]);
 
       if (requestId !== requestIdRef.current) {
         return;
       }
 
       setContacts(data);
+      setSummaryContacts(summaryData);
     } catch (nextError) {
       if (requestId !== requestIdRef.current) {
         return;
@@ -127,11 +200,11 @@ export function Contacts() {
 
   const counts = useMemo(
     () => ({
-      all: contacts.length,
-      clients: contacts.filter((item) => item.sourceType === 'client').length,
-      external: contacts.filter((item) => item.sourceType === 'external').length,
+      all: summaryContacts.length,
+      clients: summaryContacts.filter((item) => item.sourceType === 'client').length,
+      external: summaryContacts.filter((item) => item.sourceType === 'external').length,
     }),
-    [contacts],
+    [summaryContacts],
   );
 
   const totalPages = Math.max(1, Math.ceil(contacts.length / pageSize));
@@ -144,19 +217,8 @@ export function Contacts() {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
-  const handleSaved = (saved: ContactDirectoryItemDto) => {
-    setContacts((prev) => {
-      const existingIndex = prev.findIndex(
-        (item) => item.sourceType === saved.sourceType && item.sourceId === saved.sourceId,
-      );
-      if (existingIndex === -1) {
-        return [saved, ...prev].sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru'));
-      }
-
-      const next = [...prev];
-      next[existingIndex] = saved;
-      return next.sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru'));
-    });
+  const handleSaved = () => {
+    void loadDirectory();
   };
 
   const handleDelete = async (contact: ContactDirectoryItemDto) => {
@@ -175,6 +237,9 @@ export function Contacts() {
     try {
       await apiService.deleteExternalContact(contact.sourceId);
       setContacts((prev) =>
+        prev.filter((item) => !(item.sourceType === contact.sourceType && item.sourceId === contact.sourceId)),
+      );
+      setSummaryContacts((prev) =>
         prev.filter((item) => !(item.sourceType === contact.sourceType && item.sourceId === contact.sourceId)),
       );
       toast.success('Контакт удалён', 'Контакты');
@@ -200,6 +265,73 @@ export function Contacts() {
       toast.error(extractDisplayErrorMessage(nextError, 'Не удалось скачать XML'), 'Контакты');
     } finally {
       setDownloadingXml(false);
+    }
+  };
+
+  const renderContactCell = (contact: ContactDirectoryItemDto, column: ContactColumnKey) => {
+    switch (column) {
+      case 'contact':
+        return (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="truncate text-base font-semibold text-slate-900">{contact.fullName}</div>
+              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sourceBadge(contact.sourceType)}`}>
+                {sourceLabel(contact.sourceType)}
+              </span>
+            </div>
+            {contact.position ? <div className="truncate text-sm text-slate-600">{contact.position}</div> : null}
+            {contact.powerOfAttorney ? (
+              <div className="truncate text-sm text-slate-500">Доверенность: {contact.powerOfAttorney}</div>
+            ) : null}
+            {contact.responsibleUserName ? (
+              <div className="truncate text-sm text-slate-500">Ответственный: {contact.responsibleUserName}</div>
+            ) : null}
+          </div>
+        );
+      case 'organization':
+        return (
+          <div className="flex items-start gap-2 text-sm text-slate-700">
+            <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+            <span className="truncate">{contact.organizationName || 'Без привязки'}</span>
+          </div>
+        );
+      case 'phones':
+        return (
+          <div className="flex items-start gap-2 text-sm text-slate-700">
+            <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+            <span className="truncate">{formatPhones(contact) || '—'}</span>
+          </div>
+        );
+      case 'email':
+        return (
+          <div className="flex items-start gap-2 text-sm text-slate-700">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+            <span className="truncate">{formatEmails(contact) || '—'}</span>
+          </div>
+        );
+      case 'status':
+        return (
+          <div className="space-y-2">
+            <span
+              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                contact.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              {contact.isActive ? 'Активен' : 'Неактивен'}
+            </span>
+            <div>
+              <span
+                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  contact.syncToPhonebook ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                }`}
+              >
+                {contact.syncToPhonebook ? 'В телефонии' : 'Без синхронизации'}
+              </span>
+            </div>
+          </div>
+        );
+      default:
+        return null;
     }
   };
 
@@ -333,14 +465,61 @@ export function Contacts() {
                 Клиентские контакты редактируются поверх карточек клиентов, сторонние живут как отдельные записи.
               </p>
             </div>
-            {refreshing ? (
-              <div className="inline-flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Обновляем список…
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {refreshing ? (
+                <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Обновляем список…
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setSettingsOpen((value) => !value)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                <Settings2 className="h-4 w-4" />
+                {settingsOpen ? 'Скрыть настройки' : 'Настроить таблицу'}
+              </button>
+            </div>
           </div>
         </div>
+
+        {settingsOpen ? (
+          <div className="border-b border-slate-200 px-6 py-4">
+            <TableColumnSettings
+              columns={CONTACT_COLUMNS.map((column) => ({
+                key: column.key,
+                label: column.label,
+              }))}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              draggingColumn={draggingColumn}
+              onToggleColumn={toggleColumn}
+              onMoveColumn={moveColumn}
+              onDragStart={handleColumnDragStart}
+              onDragOver={handleColumnDragOver}
+              onDrop={handleColumnDrop}
+              onDragEnd={handleColumnDragEnd}
+              onReset={resetTableSettings}
+              footer={
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Строк на странице</span>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+            />
+          </div>
+        ) : null}
 
         {loading ? (
           <div className="flex items-center justify-center px-6 py-20 text-slate-500">
@@ -356,77 +535,61 @@ export function Contacts() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
+              <table className="w-full min-w-[1120px] table-fixed divide-y divide-slate-200">
+                <colgroup>
+                  {orderedVisibleColumns.map((columnKey) => (
+                    <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
+                  ))}
+                  <col style={{ width: 140 }} />
+                </colgroup>
                 <thead className="bg-slate-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    <th className="px-6 py-4">Контакт</th>
-                    <th className="px-6 py-4">Организация</th>
-                    <th className="px-6 py-4">Телефоны</th>
-                    <th className="px-6 py-4">Email</th>
-                    <th className="px-6 py-4">Статус</th>
-                    <th className="px-6 py-4">Действия</th>
+                    {orderedVisibleColumns.map((columnKey) => (
+                      <th
+                        key={columnKey}
+                        style={{ width: getColumnWidth(columnKey) }}
+                        className={`relative px-6 py-4 ${
+                          draggingColumn === columnKey ? 'bg-blue-50 text-blue-700' : 'text-slate-500'
+                        }`}
+                        onDragOver={handleColumnDragOver}
+                        onDrop={(event) => handleColumnDrop(columnKey, event)}
+                      >
+                        <div
+                          className="inline-flex min-w-0 cursor-grab select-none items-center gap-2 active:cursor-grabbing"
+                          draggable
+                          onDragStart={(event) => handleColumnDragStart(columnKey, event)}
+                          onDragEnd={handleColumnDragEnd}
+                          title="Перетащите, чтобы изменить порядок"
+                        >
+                          <GripVertical className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">{CONTACT_COLUMN_LABELS[columnKey]}</span>
+                        </div>
+                        <div
+                          role="separator"
+                          aria-label={`Изменить ширину колонки ${CONTACT_COLUMN_LABELS[columnKey]}`}
+                          className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                          onMouseDown={(event) => handleResizeStart(columnKey, event)}
+                          onDragStart={(event) => event.preventDefault()}
+                        />
+                      </th>
+                    ))}
+                    <th className="px-6 py-4 text-right text-slate-500">Действия</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {pagedContacts.map((contact) => (
-                    <tr key={`${contact.sourceType}-${contact.sourceId}`} className="align-top">
+                    <tr key={`${contact.sourceType}-${contact.sourceId}`} className="align-top hover:bg-slate-50">
+                      {orderedVisibleColumns.map((columnKey) => (
+                        <td
+                          key={columnKey}
+                          style={{ width: getColumnWidth(columnKey) }}
+                          className="max-w-0 overflow-hidden px-6 py-4 align-top"
+                        >
+                          {renderContactCell(contact, columnKey)}
+                        </td>
+                      ))}
                       <td className="px-6 py-4">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="text-base font-semibold text-slate-900">{contact.fullName}</div>
-                            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sourceBadge(contact.sourceType)}`}>
-                              {sourceLabel(contact.sourceType)}
-                            </span>
-                          </div>
-                          {contact.position ? <div className="text-sm text-slate-600">{contact.position}</div> : null}
-                          {contact.powerOfAttorney ? (
-                            <div className="text-sm text-slate-500">Доверенность: {contact.powerOfAttorney}</div>
-                          ) : null}
-                          {contact.responsibleUserName ? (
-                            <div className="text-sm text-slate-500">Ответственный: {contact.responsibleUserName}</div>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-start gap-2 text-sm text-slate-700">
-                          <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                          <span>{contact.organizationName || 'Без привязки'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-start gap-2 text-sm text-slate-700">
-                          <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                          <span>{formatPhones(contact) || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-start gap-2 text-sm text-slate-700">
-                          <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                          <span>{formatEmails(contact) || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-2">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              contact.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                            }`}
-                          >
-                            {contact.isActive ? 'Активен' : 'Неактивен'}
-                          </span>
-                          <div>
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                contact.syncToPhonebook ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
-                              }`}
-                            >
-                              {contact.syncToPhonebook ? 'В телефонии' : 'Без синхронизации'}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() =>
@@ -447,9 +610,9 @@ export function Contacts() {
                               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50"
                               aria-label="Удалить"
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          ) : null}
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
                         </div>
                       </td>
                     </tr>
