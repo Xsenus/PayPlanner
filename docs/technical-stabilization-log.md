@@ -1,4 +1,4 @@
-# Журнал стабилизации проекта
+# Журнал технической стабилизации проекта
 
 Дата старта: 7 апреля 2026
 
@@ -7,170 +7,161 @@
 Этот документ фиксирует технические исправления и доработки, которые выполняются для стабилизации PayPlanner после серии функциональных изменений.
 
 Документ нужен для того, чтобы:
-- понимать, что именно уже исправлено;
+- понимать, что уже исправлено;
 - видеть, какие проблемы были найдены;
-- не потерять контекст между сессиями;
-- иметь понятный план следующих технических работ.
+- не терять контекст между сессиями;
+- держать в одном месте результаты проверок и следующий технический план.
 
 ## Стартовое состояние
 
-На момент старта работ:
+На момент начала этого этапа:
 - `git status` был чистым;
 - `npm run build` проходил успешно;
 - `dotnet build backend/PayPlanner.Api.csproj` проходил успешно;
-- `npm run lint` падал с ошибками и предупреждениями;
-- в рабочих файлах были очаги битой кодировки;
-- часть проблем не ломала сборку, но создавала дефекты в интерфейсе и сообщениях API.
+- `npm run lint` ранее падал из-за ошибок и предупреждений;
+- в рабочих файлах были реальные очаги битой кодировки;
+- тестового контура для frontend и backend практически не было;
+- основной frontend bundle был слишком тяжелым для стартовой загрузки.
 
 ## Найденные проблемы
 
-### 1. Кодировка
+### 1. Очаги битой кодировки
 
-Реальные очаги битой кодировки были найдены не только в generated-коде, но и в рабочих файлах:
+Реальные дефекты кодировки были найдены не только в generated-файлах, но и в рабочих местах приложения. В первую очередь были затронуты:
 - `src/components/Calendar/PaymentModal.tsx`
 - `backend/Controllers/UsersController.cs`
 - `backend/Controllers/AdminUsersController.cs`
 - `backend/Controllers/V2/PaymentsV2Controller.cs`
+- `backend/Services/LegalEntities/DadataLegalEntityEnrichmentService.cs`
 
-Дополнительно в ходе прохода затронуты и очищены связанные пользовательские строки в ряде фронтовых файлов.
+### 2. Ошибки линтера
 
-### 2. Красные lint-ошибки
-
-На старте `npm run lint` падал из-за:
+На старте были зафиксированы ошибки категорий:
 - `no-constant-binary-expression`
 - `@typescript-eslint/no-unused-vars`
 - `no-unsafe-finally`
 - `no-useless-escape`
 - `no-empty`
 
-### 3. Warnings по hooks и fast refresh
+Также были warnings по hooks и fast refresh.
 
-Также были предупреждения:
-- `react-hooks/exhaustive-deps`
-- `react-refresh/only-export-components`
-
-### 4. Недостаток тестового контура
+### 3. Отсутствие тестового контура
 
 На момент аудита:
-- frontend не имеет собственного `test`-script;
-- backend не имеет отдельного test-проекта;
-- контроль качества в основном опирается на `build`, `lint` и ручную проверку.
+- во frontend не было собственного `test`-script;
+- в backend не было отдельного test-проекта;
+- контроль качества держался в основном на `build`, `lint` и ручной проверке.
 
-## План работ
+### 4. Слишком тяжелый стартовый frontend chunk
 
-### Этап 1. Исправление кодировки
+До начала оптимизации основной frontend bundle был около `1.62 MB`, из-за чего Vite предупреждал о large chunks, а начальная загрузка тянула почти все разделы сразу.
 
-Цель:
-- убрать битые пользовательские строки из рабочих файлов;
-- не трогать без необходимости generated/migration-файлы, чтобы не создавать шумные diff.
+## Выполненные работы
 
-### Этап 2. Исправление lint errors
-
-Цель:
-- довести проект до зелёного `npm run lint`;
-- убрать мёртвый код, пустые блоки и небезопасные конструкции.
-
-### Этап 3. Повторная проверка
-
-После исправлений повторяются:
-- `npm run lint`
-- `npm run build`
-- `dotnet build backend/PayPlanner.Api.csproj`
-
-## Журнал выполнения
-
-### 7 апреля 2026
-
-#### Шаг 1. Старт документирования
+### Шаг 1. Исправление кодировки в рабочих файлах
 
 Сделано:
-- создан журнал стабилизации;
-- зафиксировано стартовое состояние проекта;
-- зафиксированы приоритетные технические проблемы.
-
-Статус:
-- выполнено
-
-#### Шаг 2. Исправление кодировки в рабочих файлах
-
-Сделано:
-- исправлены пользовательские строки и сообщения в:
-  - `src/components/Calendar/PaymentModal.tsx`
-  - `backend/Controllers/UsersController.cs`
-  - `backend/Controllers/AdminUsersController.cs`
-  - `backend/Controllers/V2/PaymentsV2Controller.cs`
-- дополнительно нормализованы сообщения и fallback-строки в:
-  - `src/components/Contracts/ContractCreatePage.tsx`
-  - `src/components/Contracts/ContractModal.tsx`
-  - `src/hooks/useAccountsRegistry.ts`
-  - `src/hooks/usePaymentsPaged.ts`
-
-Проверка:
-- контрольный прогон `ftfy.badness` по изменённым рабочим файлам показал `0`.
-
-Статус:
-- выполнено
-
-#### Шаг 3. Очистка lint-ошибок и технического долга
-
-Сделано:
-- удалён мёртвый JSX и отключённые блоки из:
-  - `src/components/Accounts/Accounts.tsx`
-  - `src/components/Acts/Acts.tsx`
-  - `src/components/Calendar/PaymentModal.tsx`
-- удалены неиспользуемые переменные и вычисления из:
-  - `src/components/Accounts/InstallmentPlanner.tsx`
-  - `src/components/Accounts/InvoiceModal.tsx`
-  - `src/components/Clients/ClientDetail.tsx`
-  - `src/components/Auth/ExternalAuthPanel.tsx`
-- убраны пустые `catch`-блоки в:
-  - `src/components/Contracts/ContractCreatePage.tsx`
-  - `src/components/Contracts/ContractModal.tsx`
-- исправлены небезопасные `finally` в:
-  - `src/hooks/useAccountsRegistry.ts`
-  - `src/hooks/usePaymentsPaged.ts`
-- исправлен regex в:
-  - `src/services/api.ts`
-- исправлены warnings по hook dependencies и cleanup в:
-  - `src/components/Settings/AppSettings.tsx`
-  - `src/components/Settings/AuthProviderSettings.tsx`
-  - `src/components/Settings/DatabaseMaintenanceSettings.tsx`
-  - `src/components/Auth/ExternalAuthPanel.tsx`
-  - `src/components/Clients/ClientDetail.tsx`
-  - `src/contexts/ToastContext.tsx`
-- для `src/contexts/AuthContext.tsx` добавлено явное подавление warning `react-refresh/only-export-components`, чтобы зафиксировать текущее решение до возможного последующего разбиения файла.
+- исправлены пользовательские строки и сообщения в backend и frontend;
+- дополнительно вычищены связанные fallback-строки и комментарии в сервисных файлах;
+- проведен контрольный прогон по кодировке для измененных рабочих файлов.
 
 Результат:
-- `npm run lint` проходит без ошибок и предупреждений.
+- `ftfy.badness` по измененным рабочим файлам показал `0`.
 
-Статус:
-- выполнено
+### Шаг 2. Очистка lint-ошибок и технического долга
 
-#### Шаг 4. Повторная сборка и контроль
+Сделано:
+- убран мертвый JSX;
+- удалены неиспользуемые переменные;
+- очищены пустые `catch` и небезопасные `finally`;
+- нормализованы предупреждения по hooks там, где это было уместно в текущем проходе.
 
-Проверено:
-- `npm run lint` — успешно
-- `npm run build` — успешно
-- `dotnet build backend/PayPlanner.Api.csproj -o backend/.codex-build/stabilization-check /p:UseAppHost=false` — успешно
+Результат:
+- `npm run lint` переведен в зеленое состояние.
+
+### Шаг 3. Оптимизация frontend bundle
+
+Сделано:
+- корневой `App.tsx` переведен на lazy-loading крупных верхнеуровневых экранов;
+- добавлен общий fallback загрузки раздела через `Suspense`;
+- стартовый импорт перестал затягивать все крупные модули сразу.
+
+Затронутые разделы:
+- календарь;
+- клиенты и карточка клиента;
+- счета;
+- акты;
+- договоры;
+- пользователи;
+- роли;
+- настройки;
+- платежи;
+- деньги;
+- профиль;
+- отчеты и другие тяжелые административные экраны.
+
+Результат:
+- основной entry bundle уменьшился примерно с `1.62 MB` до `264 KB`;
+- тяжелые разделы начали собираться в отдельные чанки;
+- предупреждение про large chunk для главного entry-файла ушло.
+
+### Шаг 4. Добавление базового frontend test-контура
+
+Сделано:
+- добавлен `vitest` как минимальный тестовый раннер;
+- добавлен `npm test`;
+- добавлены первые unit-тесты для `src/utils/errorUtils.ts`.
+
+Покрытые сценарии:
+- чтение validation payload из backend error envelope;
+- корректный fallback для голого HTTP-сообщения;
+- возврат plain-text сообщения после stripping envelope.
+
+Результат:
+- `npm test` проходит успешно.
+
+### Шаг 5. Добавление базового backend test-контура
+
+Сделано:
+- создан проект `backend/PayPlanner.Api.Tests`;
+- проект добавлен в `backend/PayPlanner.Api.sln`;
+- добавлены первые unit-тесты для `DatabaseProviderResolver`.
+
+Покрытые сценарии:
+- явное определение PostgreSQL по `configuredProvider`;
+- определение PostgreSQL по форме строки подключения;
+- нормализация SQLite connection string и безопасных defaults.
 
 Дополнительно:
-- временная папка `backend/.codex-build/stabilization-check` удалена после проверки.
+- основной `PayPlanner.Api.csproj` защищен от случайного включения служебных каталогов и тестовых файлов;
+- временные build-артефакты вынесены и очищены.
 
-Статус:
-- выполнено
+Результат:
+- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj -p:OutputPath=.codex-build/tests/bin/` проходит успешно.
 
-## Текущее состояние после прохода
+Примечание:
+- локально `dotnet build` в `Debug` может упираться в работающий `.NET Host`, поэтому для контрольных прогонов безопаснее использовать `Release` и внешний `OutputPath`.
 
-Сейчас подтверждено:
-- рабочие файлы, затронутые стабилизацией, не содержат обнаруживаемых очагов битой кодировки;
-- `npm run lint` зелёный;
-- frontend и backend собираются успешно;
-- исправления задокументированы.
+## Проверки
 
-## Что ещё остаётся на будущее
+Текущее подтвержденное состояние:
+- `npm run lint` — успешно
+- `npm run build` — успешно
+- `npm test` — успешно
+- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj -p:OutputPath=.codex-build/tests/bin/` — успешно
+- `dotnet build backend/PayPlanner.Api.csproj -c Release -o .codex-build/backend-release-out /p:UseAppHost=false` — успешно
 
-Это уже не блокирующие ошибки текущего прохода, а следующий слой технических задач:
-- добавить тестовый контур для frontend и backend;
-- отдельно пройтись по крупным страницам и компонентам на предмет bundle splitting;
-- при необходимости сделать отдельный спокойный проход по generated/migration-файлам, если понадобится выравнивать кодировку и там;
-- провести более широкий аудит логики доступа по ролям в остальных разделах, не только там, где уже был явный инцидент.
+## Остаточные наблюдения
+
+Некритичные, но полезные замечания:
+- `npm test` показывает предупреждение Vite о deprecated `esbuild` option внутри plugin chain, но сами тесты проходят;
+- `Browserslist: caniuse-lite is outdated` остается как необязательная сервисная задача;
+- тестовый контур пока минимальный и покрывает только чистые unit-сценарии, без UI- и integration-level проверки.
+
+## Следующий этап
+
+Следующие разумные шаги:
+- вынести еще часть тяжелых вложенных модалок и detail-экранов в более тонкий code-splitting;
+- добавить frontend smoke-тесты для ключевых пользовательских потоков;
+- добавить backend integration-тесты для auth / clients / invoices;
+- обновить `browserslist`-базу и отдельно проверить влияние на сборку.

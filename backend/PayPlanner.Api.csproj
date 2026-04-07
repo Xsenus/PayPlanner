@@ -25,4 +25,19 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="PayPlanner.Api.Tests\**\*.cs" />
+    <Compile Remove=".codex-build\**\*.cs" />
+    <Compile Remove="backend\**\*.cs" />
+    <Content Remove="PayPlanner.Api.Tests\**\*" />
+    <Content Remove=".codex-build\**\*" />
+    <Content Remove="backend\**\*" />
+    <EmbeddedResource Remove="PayPlanner.Api.Tests\**\*" />
+    <EmbeddedResource Remove=".codex-build\**\*" />
+    <EmbeddedResource Remove="backend\**\*" />
+    <None Remove="PayPlanner.Api.Tests\**\*" />
+    <None Remove=".codex-build\**\*" />
+    <None Remove="backend\**\*" />
+  </ItemGroup>
+
 </Project>
