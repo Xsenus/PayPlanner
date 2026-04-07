@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
@@ -6,6 +7,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using System.IdentityModel.Tokens.Jwt;
+using System.IO;
 using System.Security.Claims;
 using System.Text;
 
@@ -16,17 +18,20 @@ public partial class AuthService
     private readonly IConfiguration _configuration;
     private readonly PaymentContext _context;
     private readonly IEmailService _emailService;
+    private readonly IWebHostEnvironment _environment;
     private readonly IPasswordHasher<User> _passwordHasher;
 
     public AuthService(
         PaymentContext context,
         IConfiguration configuration,
         IEmailService emailService,
+        IWebHostEnvironment environment,
         IPasswordHasher<User> passwordHasher)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
+        _environment = environment;
         _passwordHasher = passwordHasher;
     }
 
@@ -69,7 +74,42 @@ public partial class AuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static UserDto MapToDto(User user) => new()
+    private string? ResolvePhotoUrl(string? photoUrl)
+    {
+        if (string.IsNullOrWhiteSpace(photoUrl))
+        {
+            return null;
+        }
+
+        var photoPath = photoUrl.Trim();
+        if (Uri.TryCreate(photoPath, UriKind.Absolute, out var absoluteUri))
+        {
+            photoPath = absoluteUri.AbsolutePath;
+        }
+
+        if (!photoPath.StartsWith("/user-photos/", StringComparison.OrdinalIgnoreCase))
+        {
+            return photoUrl;
+        }
+
+        if (string.IsNullOrWhiteSpace(_environment.WebRootPath))
+        {
+            return photoUrl;
+        }
+
+        var relativePath = photoPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var rootPath = Path.GetFullPath(_environment.WebRootPath);
+        var fullPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+
+        if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return File.Exists(fullPath) ? photoUrl : null;
+    }
+
+    private UserDto MapToDto(User user) => new()
     {
         Id = user.Id,
         Email = user.Email,
@@ -78,7 +118,7 @@ public partial class AuthService
         LastName = user.LastName,
         MiddleName = user.MiddleName,
         DateOfBirth = user.DateOfBirth,
-        PhotoUrl = user.PhotoUrl,
+        PhotoUrl = ResolvePhotoUrl(user.PhotoUrl),
         PhoneNumber = user.PhoneNumber,
         WhatsApp = user.WhatsApp,
         Telegram = user.Telegram,

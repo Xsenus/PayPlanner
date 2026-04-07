@@ -166,6 +166,7 @@ export function ProfilePage() {
   const [unlinkingProvider, setUnlinkingProvider] = useState<ProviderId | null>(null);
   const [pendingLink, setPendingLink] = useState<{ provider: ProviderId; state: string } | null>(null);
   const [pendingPhotoCrop, setPendingPhotoCrop] = useState<PendingPhotoCropState | null>(null);
+  const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
 
   const popupRef = useRef<Window | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -220,6 +221,10 @@ export function ProfilePage() {
     () => getInitials(form.fullName || profile?.fullName || profile?.email),
     [form.fullName, profile?.email, profile?.fullName],
   );
+
+  useEffect(() => {
+    setProfilePhotoFailed(false);
+  }, [profile?.photoUrl]);
 
   const closePopup = useCallback(() => {
     if (popupRef.current && !popupRef.current.closed) {
@@ -502,11 +507,12 @@ export function ProfilePage() {
                 </div>
 
                 <div className="flex items-start gap-4 self-start rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  {profile?.photoUrl ? (
+                  {profile?.photoUrl && !profilePhotoFailed ? (
                     <img
                       src={profile.photoUrl}
                       alt={profile.fullName ?? 'Профиль'}
                       className="h-24 w-24 rounded-full object-cover shadow-sm ring-2 ring-white"
+                      onError={() => setProfilePhotoFailed(true)}
                     />
                   ) : (
                     <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm ring-2 ring-white">

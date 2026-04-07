@@ -142,6 +142,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
     const rolesPromise = authService.getRoles();
@@ -191,6 +192,10 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
     () => getInitials(form.fullName || user?.fullName || user?.email),
     [form.fullName, user?.email, user?.fullName],
   );
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [user?.photoUrl]);
 
   const handleSave = async () => {
     if (!form.email.trim()) {
@@ -337,11 +342,12 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                   </div>
 
                   <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-center">
-                    {user?.photoUrl ? (
+                    {user?.photoUrl && !avatarLoadFailed ? (
                       <img
                         src={user.photoUrl}
                         alt={form.fullName || user.email || 'Профиль'}
                         className="h-24 w-24 rounded-3xl object-cover shadow-sm"
+                        onError={() => setAvatarLoadFailed(true)}
                       />
                     ) : (
                       <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm">

@@ -25,10 +25,15 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
   const { confirm } = useDialog();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const initials = useMemo(() => getInitials(user?.fullName), [user?.fullName]);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [user?.photoUrl]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -90,11 +95,12 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
               className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1.5 text-slate-700 transition-colors hover:border-slate-300"
               aria-label="Меню пользователя"
             >
-              {user?.photoUrl ? (
+              {user?.photoUrl && !avatarLoadFailed ? (
                 <img
                   src={user.photoUrl}
                   alt={user.fullName ?? 'Профиль'}
                   className="h-8 w-8 rounded-full object-cover"
+                  onError={() => setAvatarLoadFailed(true)}
                 />
               ) : (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-xs font-semibold text-white">
