@@ -98,6 +98,7 @@ type NormalizedStatus = 'completed' | 'pending' | 'overdue';
 
 type ClientDetailSection =
   | 'profile'
+  | 'cases'
   | 'payments'
   | 'accounts'
   | 'acts'
@@ -156,6 +157,7 @@ type ContractTableColumnKey =
 
 const SECTION_ORDER: ClientDetailSection[] = [
   'profile',
+  'cases',
   'payments',
   'accounts',
   'acts',
@@ -287,6 +289,13 @@ const SECTION_META: Record<
     label: 'Карточка клиента',
     actionLabel: 'Сохранить',
   },
+  cases: {
+    label: 'Дела',
+    actionLabel: 'Добавить дело',
+    placeholderTitle: 'Дела клиента',
+    placeholderDescription: 'Здесь отображаются все дела, связанные с этим клиентом.',
+    icon: FileCheck2,
+  },
   payments: {
     label: 'Платежи',
     actionLabel: 'Добавить платёж',
@@ -323,6 +332,7 @@ const SECTION_META: Record<
 
 const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
   profile: 'clients',
+  cases: 'clients',
   payments: 'clients',
   accounts: 'accounts',
   acts: 'acts',
@@ -2320,6 +2330,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       showPermissionWarning('Недостаточно прав для добавления дел.');
       return;
     }
+    setActiveSection('cases');
     setEditingCase(null);
     setCaseMode('create');
     setCaseModalOpen(true);
@@ -2362,12 +2373,16 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       );
       setCaseModalOpen(false);
       setEditingCase(updated);
+      setActiveSection('cases');
+      toast.success('Дело обновлено.', 'Дела');
     } else {
       const created = await apiService.createCase(base);
       setCasesLocal((prev) => [created, ...(prev ?? [])]);
       setSelectedCaseId(created.id);
       setCaseModalOpen(false);
       setEditingCase(null);
+      setActiveSection('cases');
+      toast.success('Дело создано.', 'Дела');
     }
   };
 
@@ -2382,6 +2397,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setCaseModalOpen(false);
     setEditingCase(null);
     setSelectedCaseId('all');
+    toast.success('Дело удалено.', 'Дела');
   };
 
   const notFound = !clientData && clientName === `Client #${clientId}`;
@@ -3580,7 +3596,120 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           </div>
 
           <div className="p-6">
-            {activeSection === 'payments' ? (
+            {activeSection === 'cases' ? (
+              <div className="space-y-4">
+                {cases.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                    <FileCheck2 className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+                    <h3 className="text-lg font-semibold text-slate-900">Дела пока не добавлены</h3>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Создайте первое дело, чтобы связывать с ним платежи, счета, акты и договоры клиента.
+                    </p>
+                    {clientPermissions.canCreate ? (
+                      <button
+                        type="button"
+                        onClick={openAddCase}
+                        className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+                      >
+                        <Plus size={16} /> Добавить дело
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4">
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-900">Всего дел: {cases.length}</p>
+                        <p className="mt-1 text-sm text-emerald-700">
+                          Здесь можно быстро выбрать дело для фильтрации платежей или открыть его редактирование.
+                        </p>
+                      </div>
+                      {selectedCaseId !== 'all' ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCaseId('all')}
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                        >
+                          Показать все дела
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3">
+                      {cases.map((caseItem) => {
+                        const isSelected = selectedCaseId === caseItem.id;
+                        const statusValue = (caseItem.status ?? '').toLowerCase();
+                        const statusClass = statusValue.includes('open')
+                          ? 'bg-green-50 text-green-700 border-green-200'
+                          : statusValue.includes('hold')
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : statusValue.includes('closed')
+                          ? 'bg-red-50 text-red-700 border-red-200'
+                          : 'bg-slate-50 text-slate-700 border-slate-200';
+
+                        return (
+                          <article
+                            key={caseItem.id}
+                            className={`rounded-2xl border bg-white p-5 shadow-sm transition-colors ${
+                              isSelected ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-slate-200'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="truncate text-base font-semibold text-slate-900">
+                                    {caseItem.title || `Дело #${caseItem.id}`}
+                                  </h3>
+                                  <span
+                                    className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}
+                                  >
+                                    {caseStatusLabel(caseItem.status)}
+                                  </span>
+                                  {isSelected ? (
+                                    <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                      Выбрано
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-2 text-sm text-slate-500">
+                                  {caseItem.description?.trim() || 'Описание дела пока не заполнено.'}
+                                </p>
+                                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                  <span>Создано: {toRuDate(caseItem.createdAt)}</span>
+                                  <span>Платежей: {caseItem.payments?.length ?? 0}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedCaseId(caseItem.id)}
+                                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                                >
+                                  Выбрать
+                                </button>
+                                {clientPermissions.canEdit ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingCase(caseItem);
+                                      setCaseMode('edit');
+                                      setCaseModalOpen(true);
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                                  >
+                                    <Edit size={16} /> Редактировать
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : activeSection === 'payments' ? (
               <>
                 {paymentTableSettingsOpen ? (
                   <div className="mb-6">
