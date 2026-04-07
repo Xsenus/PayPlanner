@@ -75,7 +75,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 return default;
             }
 
-            // cleaner îæèäàåò ìàññèâ ñòðîê: [ "value" ]
+            // cleaner ожидает массив строк: [ "value" ]
             var url = Combine(_opt.CleanerUrl, kind); // e.g. .../clean/address
             using var req = new HttpRequestMessage(HttpMethod.Post, url)
             {
@@ -187,7 +187,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 resp = await _http.SendAsync(req.Clone(), ct);
                 if (IsTransient(resp) && attempt < maxAttempts)
                 {
-                    var delayMs = 200 * attempt * attempt; // êâàäðàòè÷íàÿ ïàóçà
+                    var delayMs = 200 * attempt * attempt; // квадратичная пауза
                     _logger.LogDebug("Retry {Attempt} for {Url}, status {Code}", attempt, req.RequestUri, (int)resp.StatusCode);
                     await Task.Delay(delayMs, ct);
                     continue;
@@ -676,7 +676,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 clone.Content = new StringContent(sc.ReadAsString(), Encoding.UTF8, sc.Headers.ContentType?.MediaType);
             else if (req.Content != null)
             {
-                // óíèâåðñàëüíàÿ êîïèÿ
+                // универсальная копия
                 var bytes = req.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
                 clone.Content = new ByteArrayContent(bytes);
                 foreach (var h in req.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
