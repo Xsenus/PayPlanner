@@ -21,6 +21,7 @@ import {
   CalendarRange,
   Landmark,
   CircleDollarSign,
+  Phone,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -134,6 +135,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.clients.canView) {
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
+      items.push({ id: 'contacts', tab: 'contacts' as Tab, label: 'Контакты', icon: Phone });
     }
     if (permissions.accounts.canView) {
       const accountChildren: SidebarChild[] = [

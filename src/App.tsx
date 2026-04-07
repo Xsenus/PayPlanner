@@ -20,6 +20,7 @@ const Calendar = lazy(() => import('./components/Calendar/Calendar').then((modul
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
+const Contacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
 const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
 const ClientDetail = lazy(() => import('./components/Clients/ClientDetail').then((module) => ({ default: module.ClientDetail })));
 const Accounts = lazy(() => import('./components/Accounts/Accounts').then((module) => ({ default: module.Accounts })));
@@ -47,6 +48,7 @@ const ALL_TABS: Tab[] = [
   'calculator',
   'legalEntities',
   'clients',
+  'contacts',
   'clientDetail',
   'accounts',
   'accountsIncome',
@@ -160,6 +162,7 @@ function AppContent() {
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
       clients: 'Клиенты',
+      contacts: 'Контакты',
       clientDetail: 'Карточка клиента',
       accounts: 'Счета',
       accountsIncome: 'Доходные счета',
@@ -211,6 +214,7 @@ function AppContent() {
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
+        { tab: 'contacts' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
@@ -244,6 +248,7 @@ function AppContent() {
         case 'legalEntities':
           return permissions.legalEntities.canView;
         case 'clients':
+        case 'contacts':
         case 'clientDetail':
           return permissions.clients.canView;
         case 'accounts':
@@ -539,6 +544,9 @@ function AppContent() {
         return permissions.clients.canView
           ? <Clients />
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
+
+      case 'contacts':
+        return permissions.clients.canView ? <Contacts /> : renderNoAccess('Раздел контактов недоступен для вашей роли.');
 
       case 'clientDetail':
         if (!permissions.clients.canView || !selectedClientId) {

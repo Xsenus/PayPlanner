@@ -4,6 +4,7 @@ export type Tab =
   | 'calculator'
   | 'legalEntities'
   | 'clients'
+  | 'contacts'
   | 'accounts'
   | 'accountsIncome'
   | 'accountsExpense'

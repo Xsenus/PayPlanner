@@ -228,6 +228,49 @@ export interface FormRequirementSectionMetadataDto {
   fields: FormRequirementFieldMetadataDto[];
 }
 
+export type ContactSourceType = 'client' | 'external';
+export type ContactScope = 'all' | 'clients' | 'external';
+
+export interface ContactDirectoryItemDto {
+  sourceType: ContactSourceType;
+  category: ContactScope;
+  sourceId: number;
+  fullName: string;
+  organizationName?: string | null;
+  legalEntityId?: number | null;
+  position?: string | null;
+  powerOfAttorney?: string | null;
+  notes?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  phones: string[];
+  emails: string[];
+  isActive: boolean;
+  syncToPhonebook: boolean;
+  responsibleUserId?: number | null;
+  responsibleUserName?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpdateClientContactRequestDto {
+  fullName: string;
+  phone?: string | null;
+  email?: string | null;
+  phones: string[];
+  emails: string[];
+  position?: string | null;
+  powerOfAttorney?: string | null;
+  notes?: string | null;
+  legalEntityId?: number | null;
+  syncToPhonebook: boolean;
+}
+
+export interface UpsertExternalContactRequestDto extends UpdateClientContactRequestDto {
+  responsibleUserId?: number | null;
+  isActive: boolean;
+}
+
 export interface LegacyAddressMigrationDetail {
   ownerType?: 'legal' | 'client' | string;
   ownerId?: number;
@@ -615,6 +658,63 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  // ===== Contacts =====
+  async getContacts(params?: {
+    scope?: ContactScope;
+    search?: string;
+    legalEntityId?: number;
+    includeInactive?: boolean;
+    syncOnly?: boolean;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<ContactDirectoryItemDto[]>(`/contacts${q}`);
+  }
+
+  async updateClientContact(id: number, payload: UpdateClientContactRequestDto) {
+    return this.request<ContactDirectoryItemDto>(`/contacts/clients/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createExternalContact(payload: UpsertExternalContactRequestDto) {
+    return this.request<ContactDirectoryItemDto>('/contacts/external', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateExternalContact(id: number, payload: UpsertExternalContactRequestDto) {
+    return this.request<ContactDirectoryItemDto>(`/contacts/external/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteExternalContact(id: number) {
+    return this.request<void>(`/contacts/external/${id}`, { method: 'DELETE' });
+  }
+
+  async downloadYealinkContactsXml() {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/contacts/exports/yealink`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'RemotePhonebook.xml',
+    };
   }
 
   // ===== Invoices =====

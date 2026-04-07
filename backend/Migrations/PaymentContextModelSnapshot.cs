@@ -738,6 +738,85 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ExternalAuthRequests");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalContact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EmailsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PhonesJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Position")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PowerOfAttorney")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SyncToPhonebook")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FullName")
+                        .HasDatabaseName("IX_ExternalContacts_FullName");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_ExternalContacts_IsActive");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_ExternalContacts_LegalEntityId");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_ExternalContacts_ResponsibleUserId");
+
+                    b.HasIndex("SyncToPhonebook")
+                        .HasDatabaseName("IX_ExternalContacts_SyncToPhonebook");
+
+                    b.ToTable("ExternalContacts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.FormFieldRequirement", b =>
                 {
                     b.Property<int>("Id")
@@ -2721,6 +2800,23 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalContact", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("LegalEntity");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>

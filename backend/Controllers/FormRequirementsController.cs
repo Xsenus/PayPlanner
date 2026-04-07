@@ -196,6 +196,34 @@ public class FormRequirementsController : ControllerBase
                 new("TerminationDate", "Дата расторжения"),
                 new("Clients", "Клиенты"),
             }),
+        new(
+            "contacts-client",
+            "Контакты: клиенты",
+            new List<FieldDef>
+            {
+                new("FullName", "ФИО", "Основные"),
+                new("Phones", "Телефоны", "Контакты"),
+                new("Emails", "Email", "Контакты"),
+                new("LegalEntityId", "Организация", "Связи"),
+                new("Position", "Должность", "Связи"),
+                new("PowerOfAttorney", "Доверенность", "Связи"),
+                new("SyncToPhonebook", "Участвует в синхронизации", "Телефония"),
+            }),
+        new(
+            "contacts-external",
+            "Контакты: сторонние",
+            new List<FieldDef>
+            {
+                new("FullName", "ФИО", "Основные"),
+                new("Phones", "Телефоны", "Контакты"),
+                new("Emails", "Email", "Контакты"),
+                new("LegalEntityId", "Организация", "Связи"),
+                new("Position", "Должность", "Связи"),
+                new("PowerOfAttorney", "Доверенность", "Связи"),
+                new("ResponsibleUserId", "Ответственный", "Связи"),
+                new("IsActive", "Активен", "Статус"),
+                new("SyncToPhonebook", "Участвует в синхронизации", "Телефония"),
+            }),
     };
 
     public FormRequirementsController(PaymentContext db) => _db = db;

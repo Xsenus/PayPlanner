@@ -269,6 +269,37 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
         });
 
+        // ------------------ ExternalContact ------------------
+        modelBuilder.Entity<ExternalContact>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Phone).HasMaxLength(100);
+            entity.Property(e => e.Email).HasMaxLength(200);
+            entity.Property(e => e.Position).HasMaxLength(200);
+            entity.Property(e => e.PowerOfAttorney).HasMaxLength(500);
+            entity.Property(e => e.PhonesJson).HasMaxLength(4000);
+            entity.Property(e => e.EmailsJson).HasMaxLength(4000);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.LegalEntity)
+                .WithMany()
+                .HasForeignKey(e => e.LegalEntityId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ResponsibleUser)
+                .WithMany()
+                .HasForeignKey(e => e.ResponsibleUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.FullName).HasDatabaseName("IX_ExternalContacts_FullName");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_ExternalContacts_LegalEntityId");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_ExternalContacts_ResponsibleUserId");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ExternalContacts_IsActive");
+            entity.HasIndex(e => e.SyncToPhonebook).HasDatabaseName("IX_ExternalContacts_SyncToPhonebook");
+        });
+
         // ------------------ Payment ------------------
         modelBuilder.Entity<Payment>(entity =>
         {
@@ -990,6 +1021,8 @@ public class PaymentContext : DbContext
     /// Юридические лица, связанные с клиентами.
     /// </summary>
     public DbSet<LegalEntity> LegalEntities { get; set; }
+
+    public DbSet<ExternalContact> ExternalContacts { get; set; }
 
     public DbSet<AddressRecord> AddressRecords { get; set; }
 
