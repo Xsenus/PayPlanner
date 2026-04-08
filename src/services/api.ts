@@ -272,12 +272,15 @@ export interface UpsertExternalContactRequestDto extends UpdateClientContactRequ
 }
 
 export interface YealinkContactImportDetailDto {
+  rowId: number;
   name: string;
   group?: string | null;
   phones: string[];
   action: string;
   matchedSourceType?: ContactSourceType | string | null;
   matchedSourceId?: number | null;
+  matchedName?: string | null;
+  matchedPhones: string[];
   message?: string | null;
 }
 
@@ -290,8 +293,16 @@ export interface YealinkContactImportResultDto {
   skippedExisting: number;
   skippedNoPhone: number;
   skippedDuplicateInFile: number;
+  skippedByUser: number;
   skippedInvalid: number;
   details: YealinkContactImportDetailDto[];
+}
+
+export type YealinkContactImportDecisionAction = 'skip' | 'createExternal' | 'createClient' | 'updateExisting';
+
+export interface YealinkContactImportDecisionDto {
+  rowId: number;
+  action: YealinkContactImportDecisionAction;
 }
 
 export interface LegacyAddressMigrationDetail {
@@ -740,9 +751,18 @@ export class ApiService {
     };
   }
 
-  async importYealinkContactsXml(file: File, dryRun = false) {
+  async importYealinkContactsXml(
+    file: File,
+    options: boolean | { dryRun?: boolean; decisions?: YealinkContactImportDecisionDto[] } = false,
+  ) {
     const payload = new FormData();
     payload.append('file', file);
+
+    const dryRun = typeof options === 'boolean' ? options : options.dryRun ?? false;
+    const decisions = typeof options === 'boolean' ? undefined : options.decisions;
+    if (decisions?.length) {
+      payload.append('decisionsJson', JSON.stringify(decisions));
+    }
 
     const query = dryRun ? '?dryRun=true' : '';
 

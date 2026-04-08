@@ -13,7 +13,13 @@ import {
   Upload,
   Users,
 } from 'lucide-react';
-import { apiService, type ContactDirectoryItemDto, type ContactScope } from '../../services/api';
+import {
+  apiService,
+  type ContactDirectoryItemDto,
+  type ContactScope,
+  type YealinkContactImportDecisionAction,
+  type YealinkContactImportResultDto,
+} from '../../services/api';
 import type { ActResponsible, LegalEntitySummary } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -24,11 +30,23 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ContactEditorModal } from './ContactEditorModal';
+import { YealinkImportPreviewModal } from './YealinkImportPreviewModal';
 
 type EditorState =
   | { mode: 'create-external'; contact: null }
   | { mode: 'edit-client'; contact: ContactDirectoryItemDto }
   | { mode: 'edit-external'; contact: ContactDirectoryItemDto };
+
+type YealinkImportState = {
+  file: File;
+  preview: YealinkContactImportResultDto;
+  decisions: Record<number, YealinkContactImportDecisionAction>;
+};
+
+interface ContactsProps {
+  initialScope?: ContactScope;
+  onScopeChange?: (scope: ContactScope) => void;
+}
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
@@ -67,11 +85,11 @@ function sourceLabel(sourceType: ContactDirectoryItemDto['sourceType']) {
   return sourceType === 'client' ? 'Клиент' : 'Сторонний';
 }
 
-export function Contacts() {
+export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps) {
   const { isAdmin } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
-  const [scope, setScope] = useState<ContactScope>('all');
+  const [scope, setScope] = useState<ContactScope>(initialScope);
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 450);
   const [legalEntityId, setLegalEntityId] = useState('');
@@ -87,11 +105,17 @@ export function Contacts() {
   const [importingXml, setImportingXml] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
   const [page, setPage] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setScope(initialScope);
+    setPage(1);
+  }, [initialScope]);
 
   const {
     columnOrder,
@@ -174,6 +198,12 @@ export function Contacts() {
       }
     }
   }, [debouncedSearch, includeInactive, legalEntityId, scope, syncOnly]);
+
+  const handleScopeChange = (nextScope: ContactScope) => {
+    setScope(nextScope);
+    setPage(1);
+    onScopeChange?.(nextScope);
+  };
 
   useEffect(() => {
     void loadDirectory();
@@ -278,28 +308,22 @@ export function Contacts() {
 
     setImportingXml(true);
     try {
-      const preview = await apiService.importYealinkContactsXml(file, true);
-      const shouldImport = window.confirm(
-        [
-          'Импортировать контакты из Yealink XML?',
-          `Будет создано: ${preview.created}`,
-          `Уже есть в CRM: ${preview.skippedExisting}`,
-          `Без телефона: ${preview.skippedNoPhone}`,
-          `Повторы внутри файла: ${preview.skippedDuplicateInFile}`,
-        ].join('\n'),
-      );
+      toast.info('Читаю XML и проверяю совпадения по телефонам...', 'Контакты');
+      const preview = await apiService.importYealinkContactsXml(file, { dryRun: true });
+      const decisions = preview.details.reduce<Record<number, YealinkContactImportDecisionAction>>((acc, detail) => {
+        if (detail.action === 'Existing' || detail.action === 'SkippedExisting') {
+          acc[detail.rowId] = 'skip';
+        } else if (detail.action === 'WouldCreateExternal' || detail.action === 'WouldCreate') {
+          acc[detail.rowId] = 'createExternal';
+        }
+        return acc;
+      }, {});
 
-      if (!shouldImport) {
-        toast.info('Импорт Yealink XML отменён.', 'Контакты');
-        return;
-      }
-
-      const result = await apiService.importYealinkContactsXml(file);
+      setYealinkImport({ file, preview, decisions });
       toast.success(
-        `Импорт завершён: создано ${result.created}, уже было ${result.skippedExisting}, без телефона ${result.skippedNoPhone}.`,
+        `Файл прочитан: ${preview.scanned} записей, новых к созданию ${preview.created}, найдено в CRM ${preview.skippedExisting}.`,
         'Контакты',
       );
-      void loadDirectory();
     } catch (nextError) {
       toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать Yealink XML'), 'Контакты');
     } finally {
@@ -307,6 +331,71 @@ export function Contacts() {
       if (importInputRef.current) {
         importInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleChangeImportDecision = (rowId: number, action: YealinkContactImportDecisionAction) => {
+    setYealinkImport((current) =>
+      current
+        ? {
+            ...current,
+            decisions: {
+              ...current.decisions,
+              [rowId]: action,
+            },
+          }
+        : current,
+    );
+  };
+
+  const handleCloseImportPreview = () => {
+    if (importingXml) {
+      return;
+    }
+
+    setYealinkImport(null);
+    toast.info('Импорт Yealink XML отменён.', 'Контакты');
+  };
+
+  const handleConfirmImportPreview = async () => {
+    if (!yealinkImport) {
+      return;
+    }
+
+    const decisions = Object.entries(yealinkImport.decisions).map(([rowId, action]) => ({
+      rowId: Number(rowId),
+      action,
+    }));
+    const createCount = decisions.filter((item) => item.action === 'createExternal' || item.action === 'createClient').length;
+    const updateCount = decisions.filter((item) => item.action === 'updateExisting').length;
+    const skipCount = decisions.filter((item) => item.action === 'skip').length;
+
+    const approved = await confirm({
+      title: 'Импортировать выбранные контакты?',
+      description: `Будет создано: ${createCount}. Обновлено: ${updateCount}. Оставлено без изменений или пропущено: ${skipCount}.`,
+      confirmLabel: 'Импортировать',
+      cancelLabel: 'Отмена',
+      variant: 'default',
+    });
+
+    if (!approved) {
+      toast.info('Импорт Yealink XML отменён.', 'Контакты');
+      return;
+    }
+
+    setImportingXml(true);
+    try {
+      const result = await apiService.importYealinkContactsXml(yealinkImport.file, { decisions });
+      toast.success(
+        `Импорт завершён: создано ${result.created}, обновлено ${result.updated}, оставлено ${result.skippedExisting}, пропущено ${result.skippedByUser}.`,
+        'Контакты',
+      );
+      setYealinkImport(null);
+      void loadDirectory();
+    } catch (nextError) {
+      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать выбранные контакты'), 'Контакты');
+    } finally {
+      setImportingXml(false);
     }
   };
 
@@ -403,7 +492,7 @@ export function Contacts() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => setScope(item.key)}
+                  onClick={() => handleScopeChange(item.key)}
                   className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
                     scope === item.key
                       ? 'border-blue-200 bg-blue-50 text-blue-700'
@@ -704,6 +793,18 @@ export function Contacts() {
         onClose={() => setEditor(null)}
         onSaved={handleSaved}
       />
+
+      {yealinkImport ? (
+        <YealinkImportPreviewModal
+          fileName={yealinkImport.file.name}
+          preview={yealinkImport.preview}
+          decisions={yealinkImport.decisions}
+          importing={importingXml}
+          onChangeDecision={handleChangeImportDecision}
+          onClose={handleCloseImportPreview}
+          onConfirm={() => void handleConfirmImportPreview()}
+        />
+      ) : null}
     </div>
   );
 }

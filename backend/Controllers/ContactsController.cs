@@ -25,6 +25,8 @@ public class ContactsController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Encoding Windows1251Encoding = CreateWindows1251Encoding();
 
+    private sealed record PhoneMatchInfo(string SourceType, int SourceId, string FullName, List<string> Phones);
+
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
 
@@ -387,6 +389,7 @@ public class ContactsController : ControllerBase
     public async Task<ActionResult<YealinkContactImportResultDto>> ImportYealinkXml(
         IFormFile? file,
         [FromQuery] bool dryRun = false,
+        [FromForm] string? decisionsJson = null,
         CancellationToken ct = default)
     {
         var access = await GetCurrentAccessAsync(ct);
@@ -422,9 +425,11 @@ public class ContactsController : ControllerBase
         {
             DryRun = dryRun,
         };
+        var decisions = ParseYealinkImportDecisions(decisionsJson);
         var existingPhones = await BuildExistingPhoneIndexAsync(ct);
         var filePhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var now = DateTime.UtcNow;
+        var rowId = 0;
 
         foreach (var menu in document.Descendants("Menu"))
         {
@@ -432,6 +437,7 @@ public class ContactsController : ControllerBase
             foreach (var unit in menu.Elements("Unit"))
             {
                 ct.ThrowIfCancellationRequested();
+                rowId++;
                 result.Scanned++;
 
                 var name = NormalizeImportedText(unit.Attribute("Name")?.Value);
@@ -439,6 +445,7 @@ public class ContactsController : ControllerBase
                 var phoneKeys = GetPhoneMatchKeys(phones);
                 var detail = new YealinkContactImportDetailDto
                 {
+                    RowId = rowId,
                     Name = string.IsNullOrWhiteSpace(name) ? "Контакт без имени" : name,
                     Group = groupName,
                     Phones = phones,
@@ -455,7 +462,7 @@ public class ContactsController : ControllerBase
 
                 result.WithPhones++;
 
-                (string SourceType, int SourceId)? existingMatch = null;
+                PhoneMatchInfo? existingMatch = null;
                 foreach (var key in phoneKeys)
                 {
                     if (existingPhones.TryGetValue(key, out var match))
@@ -466,11 +473,46 @@ public class ContactsController : ControllerBase
                 }
                 if (existingMatch is not null)
                 {
-                    detail.Action = "SkippedExisting";
-                    detail.MatchedSourceType = existingMatch.Value.SourceType;
-                    detail.MatchedSourceId = existingMatch.Value.SourceId;
-                    detail.Message = "Телефон уже есть в CRM.";
-                    result.SkippedExisting++;
+                    detail.MatchedSourceType = existingMatch.SourceType;
+                    detail.MatchedSourceId = existingMatch.SourceId;
+                    detail.MatchedName = existingMatch.FullName;
+                    detail.MatchedPhones = existingMatch.Phones;
+
+                    var decision = decisions.GetValueOrDefault(rowId);
+                    if (!dryRun && string.Equals(decision, "updateExisting", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var updatedMatch = await UpdateExistingContactFromYealinkAsync(existingMatch, name, phones, ct);
+                        if (updatedMatch is null)
+                        {
+                            detail.Action = "SkippedInvalid";
+                            detail.Message = "Контакт найден, но обновить его не удалось.";
+                            result.SkippedInvalid++;
+                        }
+                        else
+                        {
+                            detail.Action = "Updated";
+                            detail.MatchedSourceType = updatedMatch.SourceType;
+                            detail.MatchedSourceId = updatedMatch.SourceId;
+                            detail.MatchedName = updatedMatch.FullName;
+                            detail.MatchedPhones = updatedMatch.Phones;
+                            detail.Message = "Существующий контакт обновлён: телефоны объединены, синхронизация включена.";
+                            result.Updated++;
+                        }
+                    }
+                    else
+                    {
+                        detail.Action = dryRun ? "Existing" : "SkippedExisting";
+                        detail.Message = dryRun
+                            ? "Телефон уже есть в CRM. По умолчанию контакт останется без изменений."
+                            : "Контакт оставлен без изменений.";
+                        result.SkippedExisting++;
+                    }
+
+                    foreach (var key in phoneKeys)
+                    {
+                        filePhones.Add(key);
+                    }
+
                     result.Details.Add(detail);
                     continue;
                 }
@@ -487,40 +529,82 @@ public class ContactsController : ControllerBase
                 var contactName = string.IsNullOrWhiteSpace(name)
                     ? $"Контакт {phones[0]}"
                     : name;
+                var decisionAction = decisions.GetValueOrDefault(rowId);
+                if (!dryRun && string.Equals(decisionAction, "skip", StringComparison.OrdinalIgnoreCase))
+                {
+                    detail.Action = "SkippedByUser";
+                    detail.Message = "Контакт пропущен по выбору пользователя.";
+                    result.SkippedByUser++;
+                    result.Details.Add(detail);
+                    continue;
+                }
 
                 var entityId = 0;
+                var createdSourceType = "external";
                 if (!dryRun)
                 {
-                    var entity = new ExternalContact
+                    if (string.Equals(decisionAction, "createClient", StringComparison.OrdinalIgnoreCase))
                     {
-                        FullName = contactName,
-                        Phone = phones.FirstOrDefault(),
-                        PhonesJson = SerializeStringList(phones),
-                        Notes = string.IsNullOrWhiteSpace(groupName)
-                            ? YealinkImportNote
-                            : $"{YealinkImportNote}. Группа: {groupName}",
-                        ResponsibleUserId = access.UserId.Value,
-                        IsActive = true,
-                        SyncToPhonebook = true,
-                        CreatedAt = now,
-                        UpdatedAt = now,
-                    };
+                        var profile = new JsonObject
+                        {
+                            ["syncToPhonebook"] = true,
+                            ["contactNotes"] = string.IsNullOrWhiteSpace(groupName)
+                                ? YealinkImportNote
+                                : $"{YealinkImportNote}. Группа: {groupName}",
+                        };
+                        SetStringArray(profile, "phones", phones);
 
-                    _db.ExternalContacts.Add(entity);
-                    await _db.SaveChangesAsync(ct);
-                    entityId = entity.Id;
+                        var client = new Client
+                        {
+                            Name = contactName,
+                            Phone = phones.FirstOrDefault() ?? string.Empty,
+                            Email = string.Empty,
+                            Notes = SerializeClientProfileObject(profile),
+                            ResponsibleUserId = access.UserId.Value,
+                            IsActive = true,
+                            CreatedAt = now,
+                        };
+
+                        _db.Clients.Add(client);
+                        await _db.SaveChangesAsync(ct);
+                        entityId = client.Id;
+                        createdSourceType = "client";
+                    }
+                    else
+                    {
+                        var entity = new ExternalContact
+                        {
+                            FullName = contactName,
+                            Phone = phones.FirstOrDefault(),
+                            PhonesJson = SerializeStringList(phones),
+                            Notes = string.IsNullOrWhiteSpace(groupName)
+                                ? YealinkImportNote
+                                : $"{YealinkImportNote}. Группа: {groupName}",
+                            ResponsibleUserId = access.UserId.Value,
+                            IsActive = true,
+                            SyncToPhonebook = true,
+                            CreatedAt = now,
+                            UpdatedAt = now,
+                        };
+
+                        _db.ExternalContacts.Add(entity);
+                        await _db.SaveChangesAsync(ct);
+                        entityId = entity.Id;
+                    }
                 }
 
                 foreach (var key in phoneKeys)
                 {
                     filePhones.Add(key);
-                    existingPhones.TryAdd(key, ("external", entityId));
+                    existingPhones.TryAdd(key, new PhoneMatchInfo(createdSourceType, entityId, contactName, phones));
                 }
 
-                detail.Action = dryRun ? "WouldCreate" : "Created";
-                detail.MatchedSourceType = "external";
+                detail.Action = dryRun ? "WouldCreateExternal" : createdSourceType == "client" ? "CreatedClient" : "CreatedExternal";
+                detail.MatchedSourceType = createdSourceType;
                 detail.MatchedSourceId = dryRun ? null : entityId;
-                detail.Message = dryRun ? "Будет создан сторонний контакт." : "Создан сторонний контакт.";
+                detail.Message = dryRun
+                    ? "По умолчанию будет создан сторонний контакт. В предпросмотре можно переключить на клиента или пропустить."
+                    : createdSourceType == "client" ? "Создан клиент." : "Создан сторонний контакт.";
                 result.Created++;
                 result.Details.Add(detail);
             }
@@ -641,6 +725,105 @@ public class ContactsController : ControllerBase
 
         return normalized;
     }
+
+    private static Dictionary<int, string> ParseYealinkImportDecisions(string? decisionsJson)
+    {
+        if (string.IsNullOrWhiteSpace(decisionsJson))
+        {
+            return new Dictionary<int, string>();
+        }
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<YealinkContactImportDecisionDto>>(decisionsJson, JsonOptions)
+                ?? new List<YealinkContactImportDecisionDto>();
+
+            return items
+                .Where(item => item.RowId > 0 && IsAllowedYealinkImportDecision(item.Action))
+                .GroupBy(item => item.RowId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Last().Action.Trim(),
+                    EqualityComparer<int>.Default);
+        }
+        catch
+        {
+            return new Dictionary<int, string>();
+        }
+    }
+
+    private static bool IsAllowedYealinkImportDecision(string? action)
+        => string.Equals(action, "skip", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(action, "createExternal", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(action, "createClient", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(action, "updateExisting", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<PhoneMatchInfo?> UpdateExistingContactFromYealinkAsync(
+        PhoneMatchInfo match,
+        string? importedName,
+        IReadOnlyCollection<string> importedPhones,
+        CancellationToken ct)
+    {
+        if (string.Equals(match.SourceType, "client", StringComparison.OrdinalIgnoreCase))
+        {
+            var client = await _db.Clients.FirstOrDefaultAsync(x => x.Id == match.SourceId, ct);
+            if (client is null)
+            {
+                return null;
+            }
+
+            var profile = GetOrCreateClientProfileObject(client.Notes);
+            var mergedPhones = MergeStringLists(ReadProfileStringArray(profile, "phones", client.Phone), importedPhones);
+
+            if (string.IsNullOrWhiteSpace(client.Name) && !string.IsNullOrWhiteSpace(importedName))
+            {
+                client.Name = importedName.Trim();
+            }
+
+            client.Phone = mergedPhones.FirstOrDefault() ?? client.Phone;
+            SetStringArray(profile, "phones", mergedPhones);
+            profile["syncToPhonebook"] = true;
+            client.Notes = SerializeClientProfileObject(profile);
+            await _db.SaveChangesAsync(ct);
+
+            return new PhoneMatchInfo("client", client.Id, client.Name, mergedPhones);
+        }
+
+        if (string.Equals(match.SourceType, "external", StringComparison.OrdinalIgnoreCase))
+        {
+            var contact = await _db.ExternalContacts.FirstOrDefaultAsync(x => x.Id == match.SourceId, ct);
+            if (contact is null)
+            {
+                return null;
+            }
+
+            var mergedPhones = MergeStringLists(DeserializeStringList(contact.PhonesJson, contact.Phone), importedPhones);
+            if (string.IsNullOrWhiteSpace(contact.FullName) && !string.IsNullOrWhiteSpace(importedName))
+            {
+                contact.FullName = importedName.Trim();
+            }
+
+            contact.Phone = mergedPhones.FirstOrDefault();
+            contact.PhonesJson = SerializeStringList(mergedPhones);
+            contact.SyncToPhonebook = true;
+            contact.IsActive = true;
+            contact.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+
+            return new PhoneMatchInfo("external", contact.Id, contact.FullName, mergedPhones);
+        }
+
+        return null;
+    }
+
+    private static List<string> MergeStringLists(IEnumerable<string> current, IEnumerable<string> incoming)
+        => current
+            .Concat(incoming)
+            .Select(NormalizeOptional)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
 
     private static string? SerializeStringList(IReadOnlyCollection<string> items)
         => items.Count == 0 ? null : JsonSerializer.Serialize(items, JsonOptions);
@@ -831,25 +1014,29 @@ public class ContactsController : ControllerBase
         };
     }
 
-    private async Task<Dictionary<string, (string SourceType, int SourceId)>> BuildExistingPhoneIndexAsync(CancellationToken ct)
+    private async Task<Dictionary<string, PhoneMatchInfo>> BuildExistingPhoneIndexAsync(CancellationToken ct)
     {
-        var index = new Dictionary<string, (string SourceType, int SourceId)>(StringComparer.OrdinalIgnoreCase);
+        var index = new Dictionary<string, PhoneMatchInfo>(StringComparer.OrdinalIgnoreCase);
 
         var clients = await _db.Clients.AsNoTracking().ToListAsync(ct);
         foreach (var client in clients)
         {
-            foreach (var key in GetPhoneMatchKeys(MapClientContact(client).Phones))
+            var contact = MapClientContact(client);
+            var match = new PhoneMatchInfo("client", client.Id, contact.FullName, contact.Phones);
+            foreach (var key in GetPhoneMatchKeys(contact.Phones))
             {
-                index.TryAdd(key, ("client", client.Id));
+                index.TryAdd(key, match);
             }
         }
 
         var externalContacts = await _db.ExternalContacts.AsNoTracking().ToListAsync(ct);
         foreach (var contact in externalContacts)
         {
-            foreach (var key in GetPhoneMatchKeys(MapExternalContact(contact).Phones))
+            var directoryItem = MapExternalContact(contact);
+            var match = new PhoneMatchInfo("external", contact.Id, directoryItem.FullName, directoryItem.Phones);
+            foreach (var key in GetPhoneMatchKeys(directoryItem.Phones))
             {
-                index.TryAdd(key, ("external", contact.Id));
+                index.TryAdd(key, match);
             }
         }
 
