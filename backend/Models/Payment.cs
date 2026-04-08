@@ -55,6 +55,8 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public ICollection<InvoiceClientCase> InvoiceClientCases { get; set; } = new List<InvoiceClientCase>();
 
+        public ICollection<InvoiceLineItem> InvoiceLineItems { get; set; } = new List<InvoiceLineItem>();
+
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
         /// </summary>

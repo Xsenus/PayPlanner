@@ -194,6 +194,22 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Number, e.Date }).HasDatabaseName("IX_Invoices_Number_Date");
         });
 
+        modelBuilder.Entity<InvoiceLineItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Price).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(e => e.Payment)
+                .WithMany(e => e.InvoiceLineItems)
+                .HasForeignKey(e => e.PaymentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_InvoiceLineItems_PaymentId");
+            entity.HasIndex(e => new { e.PaymentId, e.SortOrder }).HasDatabaseName("IX_InvoiceLineItems_PaymentId_SortOrder");
+        });
+
         // ------------------ LegalEntity ------------------
         modelBuilder.Entity<LegalEntity>(entity =>
         {
@@ -1082,6 +1098,8 @@ public class PaymentContext : DbContext
     /// Счета.
     /// </summary>
     public DbSet<Invoice> Invoices { get; set; }
+
+    public DbSet<InvoiceLineItem> InvoiceLineItems { get; set; }
 
     /// <summary>
     /// Типы сделок.

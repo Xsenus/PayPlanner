@@ -13,6 +13,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -28,7 +29,6 @@ public class InvoicesController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
-    private const string InvoiceItemsMarker = "[pp:invoice-items]";
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
 
     public InvoicesController(PaymentContext db, IEmailService emailService, IFormRequirementsService formRequirements)
@@ -314,7 +314,7 @@ public class InvoicesController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
-        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
+        payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
 
         var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
@@ -335,6 +335,7 @@ public class InvoicesController : ControllerBase
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
+        await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct);
         var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
@@ -457,7 +458,7 @@ public class InvoicesController : ControllerBase
         payment.DealTypeId = request.DealTypeId;
         payment.PaymentStatusId = request.PaymentStatusEntityId;
         payment.CounterpartyName = null;
-        payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
+        payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
 
         var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
@@ -497,6 +498,7 @@ public class InvoicesController : ControllerBase
                 actor);
         }
 
+        await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
         var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
@@ -1059,7 +1061,7 @@ public class InvoicesController : ControllerBase
         }
 
         var normalizedFormat = NormalizeDocumentFormat(format);
-        var lineItems = ExtractInvoiceItems(payment.SystemNotes);
+        var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
         var documentHtml = BuildInvoiceHtml(payment, lineItems);
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
         var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
@@ -1107,7 +1109,7 @@ public class InvoicesController : ControllerBase
             return BadRequest("PDF export is not configured on server yet. Use format=word.");
         }
 
-        var lineItems = ExtractInvoiceItems(payment.SystemNotes);
+        var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
         var documentHtml = BuildInvoiceHtml(payment, lineItems);
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
@@ -1704,7 +1706,7 @@ public class InvoicesController : ControllerBase
             PaymentStatusName = raw.PaymentStatusName,
             CreatedAt = raw.CreatedAt,
             DocumentKind = raw.DocumentKind,
-            LineItems = ExtractInvoiceItems(raw.SystemNotes),
+            LineItems = InvoiceLineItemStorage.ExtractFromSystemNotes(raw.SystemNotes),
         };
     }
 
@@ -1731,6 +1733,7 @@ public class InvoicesController : ControllerBase
         var responsiblesMap = await LoadResponsiblesMapAsync(ids, ct);
         var actsMap = await LoadActsMapAsync(ids, ct);
         var clientCasesMap = await LoadClientCasesMapAsync(ids, ct);
+        var lineItemsMap = await LoadLineItemsMapAsync(ids, ct);
 
         foreach (var item in items)
         {
@@ -1760,71 +1763,67 @@ public class InvoicesController : ControllerBase
                 item.ClientCaseId = primaryCase.Id;
                 item.ClientCaseTitle = primaryCase.Title;
             }
+
+            if (lineItemsMap.TryGetValue(item.Id, out var storedLineItems) && storedLineItems.Count > 0)
+            {
+                item.LineItems = storedLineItems;
+            }
         }
     }
 
-    private static List<InvoiceLineItemDto> ExtractInvoiceItems(string? systemNotes)
+    private async Task<List<InvoiceLineItemDto>> LoadInvoiceLineItemsAsync(int paymentId, string? systemNotes, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(systemNotes)) return new();
-
-        var markerLine = systemNotes
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault(line => line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal));
-        if (string.IsNullOrWhiteSpace(markerLine)) return new();
-
-        var json = markerLine[InvoiceItemsMarker.Length..].Trim();
-        if (string.IsNullOrWhiteSpace(json)) return new();
-
-        try
-        {
-            var parsed = JsonSerializer.Deserialize<List<InvoiceLineItemDto>>(json);
-            return parsed?
-                .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
-                .Select(item => new InvoiceLineItemDto
-                {
-                    Name = item.Name.Trim(),
-                    Quantity = item.Quantity,
-                    Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
-                    Price = item.Price,
-                })
-                .ToList() ?? new();
-        }
-        catch
-        {
-            return new();
-        }
-    }
-
-    private static string MergeInvoiceItemsIntoSystemNotes(string? existingSystemNotes, List<InvoiceLineItemRequest>? lineItems)
-    {
-        if (lineItems is null)
-        {
-            return existingSystemNotes ?? string.Empty;
-        }
-
-        var baseLines = (existingSystemNotes ?? string.Empty)
-            .Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(InvoiceItemsMarker, StringComparison.Ordinal))
-            .ToList();
-
-        var normalizedItems = lineItems
-            .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
+        var stored = await _db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == paymentId)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
             .Select(item => new InvoiceLineItemDto
             {
-                Name = item.Name!.Trim(),
-                Quantity = Math.Max(item.Quantity, 0),
-                Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
-                Price = Math.Max(item.Price, 0),
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
             })
-            .ToList();
+            .ToListAsync(ct);
 
-        if (normalizedItems.Count > 0)
+        return stored.Count > 0
+            ? stored
+            : InvoiceLineItemStorage.ExtractFromSystemNotes(systemNotes);
+    }
+
+    private async Task<Dictionary<int, List<InvoiceLineItemDto>>> LoadLineItemsMapAsync(IEnumerable<int> paymentIds, CancellationToken ct)
+    {
+        var ids = paymentIds.Distinct().ToList();
+        if (ids.Count == 0)
         {
-            var json = JsonSerializer.Serialize(normalizedItems);
-            baseLines.Add($"{InvoiceItemsMarker} {json}");
+            return new Dictionary<int, List<InvoiceLineItemDto>>();
         }
 
-        return string.Join("\n", baseLines);
+        var rows = await _db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.PaymentId))
+            .OrderBy(item => item.PaymentId)
+            .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.PaymentId,
+                LineItem = new InvoiceLineItemDto
+                {
+                    Name = item.Name,
+                    Quantity = item.Quantity,
+                    Unit = item.Unit,
+                    Price = item.Price,
+                },
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(row => row.PaymentId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(row => row.LineItem).ToList());
     }
 
     private async Task<ActionResult?> SyncInstallmentPaymentsAsync(
@@ -2409,6 +2408,43 @@ public class InvoicesController : ControllerBase
         }
 
         payment.ClientCaseId = targetIds.Count > 0 ? targetIds.First() : null;
+    }
+
+    private async Task SyncInvoiceLineItemsAsync(Payment payment, List<InvoiceLineItemRequest>? lineItems, CancellationToken ct)
+    {
+        if (lineItems is null)
+        {
+            return;
+        }
+
+        var collection = _db.Entry(payment).Collection(x => x.InvoiceLineItems);
+        if (!collection.IsLoaded)
+        {
+            await collection.LoadAsync(ct);
+        }
+
+        foreach (var existing in payment.InvoiceLineItems.ToList())
+        {
+            payment.InvoiceLineItems.Remove(existing);
+        }
+
+        var normalizedItems = InvoiceLineItemStorage.Normalize(lineItems);
+        for (var index = 0; index < normalizedItems.Count; index++)
+        {
+            var item = normalizedItems[index];
+            payment.InvoiceLineItems.Add(new InvoiceLineItem
+            {
+                PaymentId = payment.Id,
+                SortOrder = index,
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+
+        payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
     }
 
     private async Task SyncInvoiceActsAsync(Payment payment, IReadOnlyCollection<int> actIds, string invoiceNumber, CancellationToken ct, string? previousInvoiceNumber = null)

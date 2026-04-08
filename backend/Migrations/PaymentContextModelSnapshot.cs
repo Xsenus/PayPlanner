@@ -1009,6 +1009,53 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("InvoiceItemNames");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceLineItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentId")
+                        .HasDatabaseName("IX_InvoiceLineItems_PaymentId");
+
+                    b.HasIndex("PaymentId", "SortOrder")
+                        .HasDatabaseName("IX_InvoiceLineItems_PaymentId_SortOrder");
+
+                    b.ToTable("InvoiceLineItems");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceUnitDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -2850,6 +2897,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Payment");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InvoiceLineItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany("InvoiceLineItems")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Payment");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
@@ -3101,6 +3159,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Acts");
 
                     b.Navigation("InvoiceClientCases");
+
+                    b.Navigation("InvoiceLineItems");
 
                     b.Navigation("Responsibles");
                 });
