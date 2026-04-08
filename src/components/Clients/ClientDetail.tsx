@@ -50,6 +50,7 @@ import type {
   ActStatus,
   Client,
   ClientCase,
+  ClientCaseFinanceSummary,
   ClientInput,
   ClientReferenceItem,
   Contract,
@@ -1073,6 +1074,9 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
   const cases = useMemo(() => casesLocal ?? serverCases, [casesLocal, serverCases]);
+  const [caseFinanceSummaries, setCaseFinanceSummaries] = useState<Record<number, ClientCaseFinanceSummary>>({});
+  const [caseFinanceLoading, setCaseFinanceLoading] = useState(false);
+  const [caseFinanceError, setCaseFinanceError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -1449,6 +1453,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         await createClientInvoice(payload);
         toast.success('Счет успешно создан.', 'Счет сохранен');
       }
+      bumpStats();
       closeInvoiceModal();
     } catch (err) {
       setInvoiceModalError(extractDisplayErrorMessage(err, 'Не удалось сохранить счет'));
@@ -1465,6 +1470,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteClientInvoice(invoice.id);
+      bumpStats();
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить счёт'), 'Ошибка удаления');
     }
@@ -1676,6 +1682,44 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
+  const caseIdsKey = useMemo(() => cases.map((item) => item.id).join(','), [cases]);
+
+  useEffect(() => {
+    if (activeSection !== 'cases') {
+      return;
+    }
+
+    if (!caseIdsKey) {
+      setCaseFinanceSummaries({});
+      setCaseFinanceError(null);
+      return;
+    }
+
+    let alive = true;
+    setCaseFinanceLoading(true);
+    setCaseFinanceError(null);
+
+    apiService
+      .getClientCaseFinanceSummaries(clientId)
+      .then((items) => {
+        if (!alive) return;
+        setCaseFinanceSummaries(
+          Object.fromEntries((items ?? []).map((item) => [item.caseId, item])),
+        );
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setCaseFinanceError(extractDisplayErrorMessage(error, 'Не удалось загрузить экономику дел'));
+      })
+      .finally(() => {
+        if (!alive) return;
+        setCaseFinanceLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeSection, caseIdsKey, clientId, statsReloadToken]);
 
   const showPermissionWarning = useCallback((message: string) => {
     toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
@@ -2336,6 +2380,12 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setCaseModalOpen(true);
   };
 
+  const openPaymentsForCase = (caseId: number) => {
+    setSelectedCaseId(caseId);
+    setPaymentPage(1);
+    setActiveSection('payments');
+  };
+
   const blankCaseDraft = useMemo<ClientCase>(
     () => ({
       id: 0,
@@ -2374,6 +2424,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       setCaseModalOpen(false);
       setEditingCase(updated);
       setActiveSection('cases');
+      bumpStats();
       toast.success('Дело обновлено.', 'Дела');
     } else {
       const created = await apiService.createCase(base);
@@ -2382,6 +2433,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       setCaseModalOpen(false);
       setEditingCase(null);
       setActiveSection('cases');
+      bumpStats();
       toast.success('Дело создано.', 'Дела');
     }
   };
@@ -2397,6 +2449,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setCaseModalOpen(false);
     setEditingCase(null);
     setSelectedCaseId('all');
+    bumpStats();
     toast.success('Дело удалено.', 'Дела');
   };
 
@@ -3621,14 +3674,18 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <div>
                         <p className="text-sm font-semibold text-emerald-900">Всего дел: {cases.length}</p>
                         <p className="mt-1 text-sm text-emerald-700">
-                          Здесь собраны дела клиента. Откройте карточку дела через редактирование, если нужно уточнить данные.
+                          Здесь собраны дела клиента. Финансовая сводка помогает видеть доходы, расходы и долги по каждому делу.
                         </p>
+                        {caseFinanceError ? (
+                          <p className="mt-2 text-xs font-medium text-rose-700">{caseFinanceError}</p>
+                        ) : null}
                       </div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       {cases.map((caseItem) => {
                         const statusValue = (caseItem.status ?? '').toLowerCase();
+                        const finance = caseFinanceSummaries[caseItem.id];
                         const statusClass = statusValue.includes('open')
                           ? 'bg-green-50 text-green-700 border-green-200'
                           : statusValue.includes('hold')
@@ -3662,7 +3719,54 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                   <span>Платежей: {caseItem.payments?.length ?? 0}</span>
                                 </div>
                               </div>
-                              <div className="mt-auto flex justify-end">
+                              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                {finance ? (
+                                  <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                      <p className="text-slate-500">Доходы</p>
+                                      <p className="mt-1 font-semibold text-emerald-700">
+                                        {formatCurrencySmart(finance.incomeTotal).full}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-500">Расходы</p>
+                                      <p className="mt-1 font-semibold text-rose-700">
+                                        {formatCurrencySmart(finance.expenseTotal).full}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-500">Маржа</p>
+                                      <p
+                                        className={`mt-1 font-semibold ${
+                                          finance.plannedMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                                        }`}
+                                      >
+                                        {formatCurrencySmart(finance.plannedMargin).full}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-500">Долги</p>
+                                      <p className="mt-1 font-semibold text-amber-700">
+                                        {formatCurrencySmart(finance.incomeOutstanding + finance.expenseOutstanding).full}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-500">
+                                    {caseFinanceLoading
+                                      ? 'Считаем экономику дела...'
+                                      : 'Финансы по делу пока не связаны.'}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="mt-auto flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openPaymentsForCase(caseItem.id)}
+                                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                                >
+                                  <WalletCards size={16} /> Платежи
+                                </button>
                                 {clientPermissions.canEdit ? (
                                   <button
                                     type="button"
