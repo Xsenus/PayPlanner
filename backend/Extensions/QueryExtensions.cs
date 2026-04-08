@@ -97,8 +97,19 @@ namespace PayPlanner.Api.Extensions
                     (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
             }
 
-            if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value);
-            if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
+            if (clientId.HasValue)
+            {
+                q = q.Where(p =>
+                    p.ClientId == clientId.Value ||
+                    p.ExpenseClientId == clientId.Value);
+            }
+
+            if (caseId.HasValue)
+            {
+                q = q.Where(p =>
+                    p.ClientCaseId == caseId.Value ||
+                    p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+            }
 
             if (!string.IsNullOrWhiteSpace(search))
             {

@@ -50,10 +50,19 @@ namespace PayPlanner.Api.Services
                 .Where(x => x.Date >= f && x.Date <= t);
 
             if (clientId.HasValue)
-                qry = qry.Where(x => x.ClientId == clientId.Value);
+            {
+                var selectedClientId = clientId.Value;
+                qry = qry.Where(x =>
+                    (x.Type == PaymentType.Income && x.ClientId == selectedClientId) ||
+                    (x.Type == PaymentType.Expense &&
+                        (x.ExpenseClientId == selectedClientId ||
+                         (x.ExpenseClientId == null && x.ClientId == selectedClientId))));
+            }
 
             if (caseId.HasValue)
-                qry = qry.Where(x => x.ClientCaseId == caseId.Value);
+                qry = qry.Where(x =>
+                    x.ClientCaseId == caseId.Value ||
+                    x.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
 
             if (type.HasValue)
                 qry = qry.Where(x => x.Type == type.Value);

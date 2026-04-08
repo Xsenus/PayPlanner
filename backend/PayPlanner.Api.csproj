@@ -29,15 +29,19 @@
   <ItemGroup>
     <Compile Remove="PayPlanner.Api.Tests\**\*.cs" />
     <Compile Remove=".codex-build\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
     <Compile Remove="backend\**\*.cs" />
     <Content Remove="PayPlanner.Api.Tests\**\*" />
     <Content Remove=".codex-build\**\*" />
+    <Content Remove="obj\**\*" />
     <Content Remove="backend\**\*" />
     <EmbeddedResource Remove="PayPlanner.Api.Tests\**\*" />
     <EmbeddedResource Remove=".codex-build\**\*" />
+    <EmbeddedResource Remove="obj\**\*" />
     <EmbeddedResource Remove="backend\**\*" />
     <None Remove="PayPlanner.Api.Tests\**\*" />
     <None Remove=".codex-build\**\*" />
+    <None Remove="obj\**\*" />
     <None Remove="backend\**\*" />
   </ItemGroup>
 

@@ -48,7 +48,9 @@ public class PaymentsV2Controller : ControllerBase
         var clientIdList = ParseIntList(clientIds);
         if (clientIdList.Count > 0)
         {
-            query = query.Where(payment => payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value));
+            query = query.Where(payment =>
+                (payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value))
+                || (payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value)));
         }
 
         if (type.HasValue)

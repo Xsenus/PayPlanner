@@ -15,11 +15,16 @@ public class InvoiceDto
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }
+    public int? ExpenseClientId { get; set; }
     public int? ContractId { get; set; }
     public string? ClientName { get; set; }
     public string? ClientCompany { get; set; }
     public int? ClientStatusId { get; set; }
     public ClientStatusDto? ClientStatus { get; set; }
+    public string? ExpenseClientName { get; set; }
+    public string? ExpenseClientCompany { get; set; }
+    public int? ExpenseClientStatusId { get; set; }
+    public ClientStatusDto? ExpenseClientStatus { get; set; }
     public int? ClientCaseId { get; set; }
     public string? ClientCaseTitle { get; set; }
     public List<int> ClientCaseIds { get; set; } = new();

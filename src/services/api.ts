@@ -1059,6 +1059,10 @@ export class ApiService {
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
+  async getClientCaseFinanceSummaries(id: number) {
+    return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries`);
+  }
+
   async createClient(client: ClientInput) {
     return this.request<Client>('/clients', { method: 'POST', body: JSON.stringify(client) });
   }
@@ -1740,6 +1744,7 @@ import type {
   PaymentStatus,
   Client,
   ClientInput,
+  ClientCaseFinanceSummary,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntityDadataDetails,

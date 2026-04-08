@@ -1643,6 +1643,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("ExpenseClientId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("integer");
 
@@ -1726,6 +1729,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("DocumentKind")
                         .HasDatabaseName("IX_Payments_DocumentKind");
 
+                    b.HasIndex("ExpenseClientId")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId");
+
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
 
@@ -1762,6 +1768,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId", "Date")
                         .HasDatabaseName("IX_Payments_ClientId_Date");
 
+                    b.HasIndex("ExpenseClientId", "Date")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId_Date");
+
                     b.HasIndex("IsPaid", "Date")
                         .HasDatabaseName("IX_Payments_IsPaid_Date");
 
@@ -1779,6 +1788,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ClientId", "Date", "Type", "Status")
                         .HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
+
+                    b.HasIndex("ExpenseClientId", "Date", "Type", "Status")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId_Date_Type_Status");
 
                     b.ToTable("Payments");
                 });
@@ -2954,6 +2966,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("DealTypeId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Client", "ExpenseClient")
+                        .WithMany()
+                        .HasForeignKey("ExpenseClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.IncomeType", "IncomeType")
                         .WithMany("Payments")
                         .HasForeignKey("IncomeTypeId")
@@ -2986,6 +3003,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Contract");
 
                     b.Navigation("DealType");
+
+                    b.Navigation("ExpenseClient");
 
                     b.Navigation("IncomeType");
 

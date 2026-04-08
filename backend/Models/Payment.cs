@@ -66,6 +66,16 @@ namespace PayPlanner.Api.Models
         public int? ClientId { get; set; }
 
         /// <summary>
+        /// Клиент, к которому относится расходный счет. Для доходных счетов обычно не заполняется.
+        /// </summary>
+        public int? ExpenseClientId { get; set; }
+
+        /// <summary>
+        /// Навигация на клиента, к которому относится расходный счет.
+        /// </summary>
+        public Client? ExpenseClient { get; set; }
+
+        /// <summary>
         /// Каноническая ссылка на договор (если документ относится к договору).
         /// </summary>
         public int? ContractId { get; set; }

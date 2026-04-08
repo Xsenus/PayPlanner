@@ -601,6 +601,7 @@ export interface Payment {
   delayDays?: number | null;
   createdAt: string;
   clientId?: number | null;
+  expenseClientId?: number | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
   clientCaseId?: number | null;
@@ -665,12 +666,17 @@ export interface Invoice {
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;
+  expenseClientId?: number | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
   clientName?: string | null;
   clientCompany?: string | null;
   clientStatusId?: number | null;
   clientStatus?: ClientStatus | null;
+  expenseClientName?: string | null;
+  expenseClientCompany?: string | null;
+  expenseClientStatusId?: number | null;
+  expenseClientStatus?: ClientStatus | null;
   clientCaseId?: number | null;
   clientCaseTitle?: string | null;
   clientCaseIds?: number[];
@@ -712,6 +718,7 @@ export interface InvoiceInput {
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   clientId: number;
+  expenseClientId?: number | null;
   contractId?: number | null;
   clientCaseId?: number | null;
   clientCaseIds?: number[];
@@ -799,6 +806,21 @@ export interface ClientStats {
   outstandingExpenses: number;
   outstandingTotal: number;
   recentPayments: Payment[];
+}
+
+export interface ClientCaseFinanceSummary {
+  caseId: number;
+  incomeTotal: number;
+  incomePaid: number;
+  incomeOutstanding: number;
+  incomeCount: number;
+  expenseTotal: number;
+  expensePaid: number;
+  expenseOutstanding: number;
+  expenseCount: number;
+  plannedMargin: number;
+  paidMargin: number;
+  outstandingBalance: number;
 }
 
 export interface MonthlyStats {

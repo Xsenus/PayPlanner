@@ -61,7 +61,7 @@ public class PaymentsController : ControllerBase
                 p.Date <= toDate ||
                 (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
         }
-        if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value);
+        if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
         var list = await q.AsNoTracking().OrderBy(p => p.Date).ToListAsync(ct);
         return Ok(list);

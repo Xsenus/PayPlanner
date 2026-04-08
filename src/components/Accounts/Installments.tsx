@@ -27,7 +27,7 @@ const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Proce
 const INSTALLMENT_COLUMNS = [
   { key: 'date', label: 'Дата', defaultVisible: true, defaultWidth: 140, sortKey: 'date' as const },
   { key: 'number', label: 'Номер счета', defaultVisible: true, defaultWidth: 170, sortKey: 'number' as const },
-  { key: 'counterparty', label: 'Поставщик услуг', defaultVisible: true, defaultWidth: 320, sortKey: 'client' as const },
+  { key: 'counterparty', label: 'Клиент / поставщик', defaultVisible: true, defaultWidth: 320, sortKey: 'client' as const },
   { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150, sortKey: 'amount' as const },
   { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 180, sortKey: 'status' as const },
   { key: 'responsible', label: 'Ответственный', defaultVisible: true, defaultWidth: 190, sortKey: 'responsible' as const },

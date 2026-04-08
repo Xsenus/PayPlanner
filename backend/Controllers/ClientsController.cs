@@ -6,6 +6,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
@@ -148,11 +149,19 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
-        var q = _db.Payments.Where(p => p.ClientId == id)
+        var q = _db.Payments.Where(p =>
+                (p.Type == PaymentType.Income && p.ClientId == id) ||
+                (p.Type == PaymentType.Expense &&
+                    (p.ExpenseClientId == id || (p.ExpenseClientId == null && p.ClientId == id))))
             .Include(p => p.DealType).Include(p => p.IncomeType)
             .Include(p => p.PaymentSource).Include(p => p.PaymentStatusEntity).AsQueryable();
 
-        if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
+        if (caseId.HasValue)
+        {
+            q = q.Where(p =>
+                p.ClientCaseId == caseId.Value ||
+                p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+        }
 
         var payments = await q
             .OrderByDescending(p => p.Date)
@@ -190,6 +199,86 @@ public class ClientsController : ControllerBase
         };
         stats.NetAmount = stats.TotalIncome - stats.TotalExpenses;
         return Ok(stats);
+    }
+
+    [HttpGet("{id:int}/case-finance-summaries")]
+    public async Task<IActionResult> GetCaseFinanceSummaries(int id, CancellationToken ct)
+    {
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var client = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is null) return NotFound();
+
+        var caseIds = await _db.ClientCases
+            .AsNoTracking()
+            .Where(c => c.ClientId == id)
+            .OrderByDescending(c => c.CreatedAt)
+            .Select(c => c.Id)
+            .ToListAsync(ct);
+
+        var summaries = caseIds.ToDictionary(
+            caseId => caseId,
+            caseId => new ClientCaseFinanceSummaryDto { CaseId = caseId });
+
+        if (caseIds.Count == 0)
+        {
+            return Ok(Array.Empty<ClientCaseFinanceSummaryDto>());
+        }
+
+        var caseIdSet = caseIds.ToHashSet();
+
+        var payments = await _db.Payments
+            .AsNoTracking()
+            .Include(p => p.InvoiceClientCases)
+            .Where(p => p.Status != PaymentStatus.Cancelled)
+            .Where(p =>
+                (p.Type == PaymentType.Income && p.ClientId == id) ||
+                (p.Type == PaymentType.Expense &&
+                    (p.ExpenseClientId == id || (p.ExpenseClientId == null && p.ClientId == id))))
+            .Where(p =>
+                (p.ClientCaseId.HasValue && caseIds.Contains(p.ClientCaseId.Value)) ||
+                p.InvoiceClientCases.Any(link => caseIds.Contains(link.ClientCaseId)))
+            .ToListAsync(ct);
+
+        foreach (var payment in payments)
+        {
+            var linkedCaseIds = payment.InvoiceClientCases
+                .Select(link => link.ClientCaseId)
+                .Concat(payment.ClientCaseId.HasValue ? new[] { payment.ClientCaseId.Value } : Array.Empty<int>())
+                .Where(caseIdSet.Contains)
+                .Distinct();
+
+            foreach (var caseId in linkedCaseIds)
+            {
+                var summary = summaries[caseId];
+                var outstanding = payment.Amount > payment.PaidAmount
+                    ? Math.Round(payment.Amount - payment.PaidAmount, 2)
+                    : 0m;
+
+                if (payment.Type == PaymentType.Income)
+                {
+                    summary.IncomeTotal += payment.Amount;
+                    summary.IncomePaid += payment.PaidAmount;
+                    summary.IncomeOutstanding += outstanding;
+                    summary.IncomeCount += 1;
+                }
+                else
+                {
+                    summary.ExpenseTotal += payment.Amount;
+                    summary.ExpensePaid += payment.PaidAmount;
+                    summary.ExpenseOutstanding += outstanding;
+                    summary.ExpenseCount += 1;
+                }
+            }
+        }
+
+        return Ok(caseIds.Select(caseId => summaries[caseId]).ToList());
     }
 
 
@@ -727,7 +816,7 @@ public class ClientsController : ControllerBase
     {
         var usage = new List<string>();
 
-        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ClientId == clientId))
+        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ClientId == clientId || p.ExpenseClientId == clientId))
             usage.Add("платежи");
 
         if (await _db.Acts.AsNoTracking().AnyAsync(a => a.ClientId == clientId))

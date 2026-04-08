@@ -42,6 +42,7 @@ type FormState = {
   type: PaymentKind;
   status: PaymentStatus;
   clientId: string;
+  expenseClientId: string;
   contractId: string;
   clientCaseReference: string;
   description: string;
@@ -197,6 +198,7 @@ function normalizeInvoiceToForm(
       type: resolvedType,
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
+      expenseClientId: '',
       contractId: '',
       clientCaseReference: '',
       description: '',
@@ -214,6 +216,7 @@ function normalizeInvoiceToForm(
     type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
+    expenseClientId: invoice.expenseClientId ? String(invoice.expenseClientId) : '',
     contractId: invoice.contractId ? String(invoice.contractId) : '',
     clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
@@ -690,9 +693,36 @@ export function InvoiceModal({
     setPageViewMode(false);
   }, [mode, presentation, invoice?.id]);
 
+  const isIncome = form.type === 'Income';
+  const isPageMode = presentation === 'page';
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
+  );
+  const selectedExpenseClient = useMemo(
+    () => clients.find((client) => String(client.id) === form.expenseClientId) ?? null,
+    [clients, form.expenseClientId],
+  );
+  const caseOwnerClientId = isIncome ? form.clientId : form.expenseClientId;
+  const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
+  const selectedResponsibleSourceClient = selectedCaseOwnerClient ?? selectedClient;
+  const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
+  const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
+  const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
+  const counterpartyOpenCardLabel = isIncome ? 'Открыть карточку клиента' : 'Открыть карточку поставщика';
+  const clientLookupOptions = useMemo(
+    () =>
+      clients.map((client) => ({
+        value: String(client.id),
+        label: client.name,
+        description: [
+          client.company,
+          client.clientStatus?.name,
+          client.responsibleUserName ? `Ответственный: ${client.responsibleUserName}` : null,
+        ].filter(Boolean).join(' · '),
+        keywords: [client.company ?? '', client.clientStatus?.name ?? '', client.phone ?? '', client.email ?? ''],
+      })),
+    [clients],
   );
   const relatedInstallmentPlan = useMemo(
     () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)),
@@ -728,9 +758,9 @@ export function InvoiceModal({
       const fallbackLabel =
         invoice?.responsibles?.find((responsible) => String(responsible.id) === selectedResponsibleId)
           ?.fullName
-        ?? (selectedClient?.responsibleUserId
-          && String(selectedClient.responsibleUserId) === selectedResponsibleId
-            ? selectedClient.responsibleUserName
+        ?? (selectedResponsibleSourceClient?.responsibleUserId
+          && String(selectedResponsibleSourceClient.responsibleUserId) === selectedResponsibleId
+            ? selectedResponsibleSourceClient.responsibleUserName
             : null)
         ?? `#${selectedResponsibleId}`;
 
@@ -749,8 +779,8 @@ export function InvoiceModal({
   }, [
     invoice?.responsibles,
     responsibles,
-    selectedClient?.responsibleUserId,
-    selectedClient?.responsibleUserName,
+    selectedResponsibleSourceClient?.responsibleUserId,
+    selectedResponsibleSourceClient?.responsibleUserName,
     selectedResponsibleId,
   ]);
   const selectedClientCasesSummary = useMemo(() => {
@@ -758,10 +788,10 @@ export function InvoiceModal({
     return selectedClientCaseIds
       .map((id) => {
         const match = clientCaseOptions.find((item) => item.id === id) ?? null;
-        return clientCaseLabel(match ?? { id, clientId: selectedClient?.id ?? 0, title: '', status: '', createdAt: '' });
+        return clientCaseLabel(match ?? { id, clientId: selectedCaseOwnerClient?.id ?? 0, title: '', status: '', createdAt: '' });
       })
       .join(', ');
-  }, [clientCaseOptions, selectedClient?.id, selectedClientCaseIds]);
+  }, [clientCaseOptions, selectedCaseOwnerClient?.id, selectedClientCaseIds]);
   const selectedActsSummary = useMemo(
     () => selectedActs.map((item) => actLabel(item)).filter(Boolean).join(', '),
     [selectedActs],
@@ -778,10 +808,6 @@ export function InvoiceModal({
         .includes(query);
     });
   }, [clientPickerSearch, clients]);
-
-  const isIncome = form.type === 'Income';
-  const isPageMode = presentation === 'page';
-
   useEffect(() => {
     if (!open) {
       return;
@@ -916,13 +942,13 @@ export function InvoiceModal({
     let cancelled = false;
 
     async function loadClientCasesByClient() {
-      if (!open || !form.clientId) {
+      if (!open || !caseOwnerClientId) {
         setClientCaseOptions([]);
         setClientCasesError(null);
         return;
       }
 
-      const clientId = Number.parseInt(form.clientId, 10);
+      const clientId = Number.parseInt(caseOwnerClientId, 10);
       if (!Number.isFinite(clientId) || clientId <= 0) {
         setClientCaseOptions([]);
         setClientCasesError(null);
@@ -953,7 +979,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [open, form.clientId]);
+  }, [open, caseOwnerClientId]);
 
   useEffect(() => {
     if (open) {
@@ -1005,8 +1031,8 @@ export function InvoiceModal({
   useEffect(() => {
     if (!open || mode !== 'create') return;
 
-    const nextAutoResponsibleId = selectedClient?.responsibleUserId
-      ? String(selectedClient.responsibleUserId)
+    const nextAutoResponsibleId = selectedResponsibleSourceClient?.responsibleUserId
+      ? String(selectedResponsibleSourceClient.responsibleUserId)
       : defaultResponsibleId
         ? String(defaultResponsibleId)
         : '';
@@ -1031,7 +1057,7 @@ export function InvoiceModal({
         responsibleIds: nextAutoResponsibleId ? [nextAutoResponsibleId] : [],
       };
     });
-  }, [defaultResponsibleId, mode, open, selectedClient?.id, selectedClient?.responsibleUserId]);
+  }, [defaultResponsibleId, mode, open, selectedResponsibleSourceClient?.id, selectedResponsibleSourceClient?.responsibleUserId]);
 
   useEffect(() => {
     if (!errorMessage) {
@@ -1210,9 +1236,16 @@ export function InvoiceModal({
 
   const handleTypeSelect = (nextType: PaymentKind) => {
     if (isTypeLocked) return;
+    if (nextType !== form.type) {
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+    }
     setForm((prev) => ({
       ...prev,
       type: nextType,
+      expenseClientId: nextType === 'Income' ? '' : prev.expenseClientId,
     }));
   };
 
@@ -1228,8 +1261,10 @@ export function InvoiceModal({
       lastAutoContractClientIdRef.current = '';
       setSelectedActs([]);
       setActOptions([]);
-      setSelectedClientCaseIds([]);
-      setClientCaseOptions([]);
+      if (form.type === 'Income') {
+        setSelectedClientCaseIds([]);
+        setClientCaseOptions([]);
+      }
       setCaseDropdownOpen(false);
       setActDropdownOpen(false);
     }
@@ -1239,6 +1274,20 @@ export function InvoiceModal({
       contractId: clientChanged ? '' : prev.contractId,
     }));
     setClientPickerOpen(false);
+  };
+
+  const handleExpenseClientChange = (nextClientId: string) => {
+    if (form.expenseClientId !== nextClientId) {
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      expenseClientId: nextClientId,
+    }));
   };
 
   const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
@@ -1267,12 +1316,12 @@ export function InvoiceModal({
   };
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
-    if (!form.clientId) {
-      throw new Error('Сначала выберите поставщика услуг');
+    if (!caseOwnerClientId) {
+      throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
     }
 
     const created = await apiService.createCase({
-      clientId: Number(form.clientId),
+      clientId: Number(caseOwnerClientId),
       title: patch.title?.trim() ?? '',
       description: patch.description?.trim(),
       status: patch.status ?? 'Open',
@@ -1407,6 +1456,7 @@ export function InvoiceModal({
       type: form.type,
       status: statusOverride ?? form.status,
       clientId: Number(form.clientId),
+      expenseClientId: form.type === 'Expense' && form.expenseClientId ? Number(form.expenseClientId) : null,
       contractId: form.contractId ? Number(form.contractId) : undefined,
       clientCaseId: clientCaseIds[0] ?? null,
       clientCaseIds,
@@ -1462,7 +1512,12 @@ export function InvoiceModal({
       return;
     }
     if (!form.clientId) {
-      setLocalError(t('invoiceClientPlaceholder') ?? 'Выберите клиента');
+      setLocalError(`Выберите ${counterpartyLabel.toLocaleLowerCase('ru')}`);
+      return;
+    }
+
+    if (!isIncome && selectedClientCaseIds.length > 0 && !form.expenseClientId) {
+      setLocalError('Выберите клиента, к делу которого относится расход');
       return;
     }
 
@@ -1816,7 +1871,7 @@ export function InvoiceModal({
             <div>
               <span className="font-medium text-slate-700">{t('cases') ?? 'Дела'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите дело поставщика услуг из списка или создайте новое.
+                Выберите дело клиента, к которому относится счёт.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1828,7 +1883,7 @@ export function InvoiceModal({
                   setCaseDropdownOpen((prev) => !prev);
                   setActDropdownOpen(false);
                 }}
-                disabled={!form.clientId}
+                disabled={!caseOwnerClientId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <List className="h-4 w-4" />
@@ -1838,7 +1893,7 @@ export function InvoiceModal({
                 title="Создать дело"
                 aria-label="Создать дело"
                 onClick={() => setCreateCaseOpen(true)}
-                disabled={!form.clientId}
+                disabled={!caseOwnerClientId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" />
@@ -1847,9 +1902,9 @@ export function InvoiceModal({
           </div>
 
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            {!form.clientId ? (
+            {!caseOwnerClientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите поставщика услуг.
+                {isIncome ? 'Сначала выберите клиента.' : 'Сначала выберите клиента, к которому относится расход.'}
               </div>
             ) : selectedClientCaseIds.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
@@ -1866,7 +1921,7 @@ export function InvoiceModal({
                     >
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-slate-900">
-                          {clientCaseLabel(selectedCase ?? { id, clientId: selectedClient?.id ?? 0, title: '', status: '', createdAt: '' })}
+                          {clientCaseLabel(selectedCase ?? { id, clientId: selectedCaseOwnerClient?.id ?? 0, title: '', status: '', createdAt: '' })}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">{clientCaseStatusLabel(selectedCase?.status)}</div>
                       </div>
@@ -1907,7 +1962,7 @@ export function InvoiceModal({
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{clientCasesError}</div>
                 ) : clientCaseOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У поставщика услуг пока нет дел.
+                    У выбранного клиента пока нет дел.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1957,7 +2012,7 @@ export function InvoiceModal({
             <div>
               <span className="font-medium text-slate-700">{t('acts') ?? 'Акты'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите акт поставщика услуг из списка или создайте новый.
+                Выберите акт {isIncome ? 'клиента' : 'поставщика'} из списка или создайте новый.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1998,7 +2053,7 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!form.clientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите поставщика услуг.
+                Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}.
               </div>
             ) : selectedActs.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
@@ -2014,7 +2069,7 @@ export function InvoiceModal({
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{actLabel(act)}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {formatDate(act.date)} Р'В· {formatCurrencySmart(act.amount ?? 0).full}
+                        {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
                       </div>
                     </div>
                     <button
@@ -2053,7 +2108,7 @@ export function InvoiceModal({
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{actsError}</div>
                 ) : actOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У поставщика услуг пока нет актов.
+                    У выбранного {counterpartyLabel.toLocaleLowerCase('ru')} пока нет актов.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2076,7 +2131,7 @@ export function InvoiceModal({
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-slate-900">{actLabel(act)}</span>
                             <span className="mt-1 block text-xs text-slate-500">
-                              {formatDate(act.date)} Р'В· {formatCurrencySmart(act.amount ?? 0).full}
+                              {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
                             </span>
                           </span>
                         </button>
@@ -2188,12 +2243,15 @@ export function InvoiceModal({
 
               <div className="border border-slate-800 p-3 text-sm text-slate-900">
                 <div className="grid grid-cols-2 border border-slate-800">
-                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || (t('invoiceClient') ?? 'Поставщик услуг')}</div>
+                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || counterpartyLabel}</div>
                   <div className="p-2">БИК / Счёт</div>
                 </div>
                 <h3 className="my-4 text-center text-2xl font-bold">Счёт № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
                 <div className="space-y-1 border-t border-slate-800 pt-3 text-xs sm:text-sm">
-                  <p><span className="font-semibold">{t('invoiceClient') ?? 'Поставщик услуг'}:</span> {selectedClient?.name || '—'}</p>
+                  <p><span className="font-semibold">{counterpartyLabel}:</span> {selectedClient?.name || '—'}</p>
+                  {!isIncome && (
+                    <p><span className="font-semibold">Клиент расхода:</span> {selectedExpenseClient?.name || '—'}</p>
+                  )}
                   <p><span className="font-semibold">Договор:</span> {contractLabel(selectedContract)}</p>
                   <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
                 </div>
@@ -2258,7 +2316,7 @@ export function InvoiceModal({
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
                 <p>
-                  <span className="text-slate-500">{t('invoiceClient') ?? 'Поставщик услуг'}:</span>{' '}
+                  <span className="text-slate-500">{counterpartyLabel}:</span>{' '}
                   {selectedClient && onOpenClient ? (
                     <button
                       type="button"
@@ -2271,6 +2329,22 @@ export function InvoiceModal({
                     selectedClient?.name || '—'
                   )}
                 </p>
+                {!isIncome && (
+                  <p>
+                    <span className="text-slate-500">Клиент расхода:</span>{' '}
+                    {selectedExpenseClient && onOpenClient ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenClientCard(selectedExpenseClient.id)}
+                        className="text-blue-600 underline hover:text-blue-700"
+                      >
+                        {selectedExpenseClient.name}
+                      </button>
+                    ) : (
+                      selectedExpenseClient?.name || '—'
+                    )}
+                  </p>
+                )}
                 <p><span className="text-slate-500">Договор:</span> {contractLabel(selectedContract)}</p>
                 <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
                 <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
@@ -2595,20 +2669,20 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoicePartiesTitle') ?? 'Поставщик услуг и договор'}
+                              {counterpartyBlockTitle}
                             </span>
               
                           </header>
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceClient') ?? 'Поставщик услуг'}</span>
+                              <span className="font-medium text-slate-700">{counterpartyLabel}</span>
                               <div className="flex gap-2">
                                 <input
                                   type="text"
                                   value={selectedClient?.name ?? ''}
                                   readOnly
                                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50"
-                                  placeholder={t('invoiceClientPlaceholder') ?? 'Выберите поставщика услуг'}
+                                  placeholder={counterpartyPlaceholder}
                                 />
                                 <button
                                   type="button"
@@ -2645,10 +2719,45 @@ export function InvoiceModal({
                                   onClick={() => handleOpenClientCard(selectedClient.id)}
                                   className="inline-flex w-fit items-center text-xs font-medium text-blue-700 hover:text-blue-800 hover:underline"
                                 >
-                                  Открыть карточку поставщика услуг
+                                  {counterpartyOpenCardLabel}
                                 </button>
                               )}
                             </label>
+
+                            {!isIncome && (
+                              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                                <LookupSelect
+                                  label="Клиент и дело расхода"
+                                  value={form.expenseClientId}
+                                  onChange={handleExpenseClientChange}
+                                  options={clientLookupOptions}
+                                  placeholder="Выберите клиента, к делу которого относится расход"
+                                  title="Выбор клиента для расхода"
+                                  dictionaryLabel="Справочник"
+                                  searchPlaceholder="Поиск клиента"
+                                  emptyOptionLabel="Без привязки к клиенту"
+                                  emptyOptionDescription="Использовать для общих расходов без конкретного дела"
+                                  helperText="Эта привязка нужна для аналитики расходов, долгов и рентабельности дела."
+                                  disabled={lookupsLoading}
+                                  buttonClassName="bg-white"
+                                />
+                                {(selectedExpenseClient?.clientStatus || selectedExpenseClient?.responsibleUserName) && (
+                                  <div className="mt-2 space-y-1 rounded-xl border border-amber-100 bg-white/80 p-2">
+                                    {selectedExpenseClient.clientStatus && (
+                                      <ClientStatusBadge status={selectedExpenseClient.clientStatus} />
+                                    )}
+                                    {selectedExpenseClient.responsibleUserName && (
+                                      <p className="text-xs text-slate-600">
+                                        Ответственный: {selectedExpenseClient.responsibleUserName}
+                                      </p>
+                                    )}
+                                    {selectedExpenseClient.clientStatus?.description && (
+                                      <p className="text-xs text-slate-500">{selectedExpenseClient.clientStatus.description}</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
 
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">Договор</span>
@@ -2682,7 +2791,11 @@ export function InvoiceModal({
                               </div>
                               {contractsLoading && <span className="text-xs text-slate-500">Загрузка договоров...</span>}
                               {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
-                              {!form.clientId && <span className="text-xs text-slate-500">Сначала выберите клиента, затем можно будет быстро создать договор.</span>}
+                              {!form.clientId && (
+                                <span className="text-xs text-slate-500">
+                                  Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}, затем можно будет быстро создать договор.
+                                </span>
+                              )}
                             </label>
 
                           </div>
@@ -2766,7 +2879,7 @@ export function InvoiceModal({
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-base font-semibold text-slate-900">
-                {t('invoicePickClientTitle') ?? 'Выбор поставщика услуг'}
+                Выбор {counterpartyLabel.toLocaleLowerCase('ru')}
               </h3>
               <button type="button" onClick={() => setClientPickerOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
@@ -2776,7 +2889,7 @@ export function InvoiceModal({
               type="text"
               value={clientPickerSearch}
               onChange={(event) => setClientPickerSearch(event.target.value)}
-              placeholder={t('search') ?? 'РџРѕРёСЃРє'}
+              placeholder={t('search') ?? 'Поиск'}
               className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
             <div className="max-h-72 overflow-auto rounded-lg border border-slate-200">

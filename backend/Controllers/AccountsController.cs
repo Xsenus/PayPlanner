@@ -62,6 +62,21 @@ public class AccountsController : ControllerBase
                         CreatedAt = payment.Client.ClientStatus.CreatedAt,
                     }
                     : null,
+                ExpenseClientId = payment.ExpenseClientId,
+                ExpenseClientName = payment.ExpenseClient != null ? payment.ExpenseClient.Name : null,
+                ExpenseClientCompany = payment.ExpenseClient != null ? payment.ExpenseClient.Company : null,
+                ExpenseClientStatusId = payment.ExpenseClient != null ? payment.ExpenseClient.ClientStatusId : null,
+                ExpenseClientStatus = payment.ExpenseClient != null && payment.ExpenseClient.ClientStatus != null
+                    ? new ClientStatusDto
+                    {
+                        Id = payment.ExpenseClient.ClientStatus.Id,
+                        Name = payment.ExpenseClient.ClientStatus.Name,
+                        Description = payment.ExpenseClient.ClientStatus.Description,
+                        ColorHex = payment.ExpenseClient.ClientStatus.ColorHex,
+                        IsActive = payment.ExpenseClient.ClientStatus.IsActive,
+                        CreatedAt = payment.ExpenseClient.ClientStatus.CreatedAt,
+                    }
+                    : null,
                 ClientCaseId = payment.ClientCaseId,
                 ClientCaseTitle = payment.ClientCase != null ? payment.ClientCase.Title : null,
                 ClientCaseReference = payment.ClientCaseReference,
@@ -367,7 +382,7 @@ public class AccountsController : ControllerBase
 
         if (clientId.HasValue)
         {
-            query = query.Where(payment => payment.ClientId == clientId.Value);
+            query = query.Where(payment => payment.ClientId == clientId.Value || payment.ExpenseClientId == clientId.Value);
         }
 
         if (caseId.HasValue)
@@ -461,6 +476,8 @@ public class AccountsController : ControllerBase
                 || (payment.CounterpartyName != null && payment.CounterpartyName.ToLower().Contains(term))
                 || (payment.Client != null && payment.Client.Name != null && payment.Client.Name.ToLower().Contains(term))
                 || (payment.Client != null && payment.Client.Company != null && payment.Client.Company.ToLower().Contains(term))
+                || (payment.ExpenseClient != null && payment.ExpenseClient.Name != null && payment.ExpenseClient.Name.ToLower().Contains(term))
+                || (payment.ExpenseClient != null && payment.ExpenseClient.Company != null && payment.ExpenseClient.Company.ToLower().Contains(term))
                 || (payment.ClientCase != null && payment.ClientCase.Title != null && payment.ClientCase.Title.ToLower().Contains(term))
                 || payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term))
                 || payment.Acts.Any(act =>
@@ -574,6 +591,11 @@ public class AccountsController : ControllerBase
             ClientCompany = representative.ClientCompany,
             ClientStatusId = representative.ClientStatusId,
             ClientStatus = representative.ClientStatus,
+            ExpenseClientId = representative.ExpenseClientId,
+            ExpenseClientName = representative.ExpenseClientName,
+            ExpenseClientCompany = representative.ExpenseClientCompany,
+            ExpenseClientStatusId = representative.ExpenseClientStatusId,
+            ExpenseClientStatus = representative.ExpenseClientStatus,
             ClientCaseId = representative.ClientCaseId,
             ClientCaseTitle = representative.ClientCaseTitle,
             ClientCaseReference = representative.ClientCaseReference,
@@ -877,6 +899,11 @@ public class AccountsController : ControllerBase
         public string? ClientCompany { get; init; }
         public int? ClientStatusId { get; init; }
         public ClientStatusDto? ClientStatus { get; init; }
+        public int? ExpenseClientId { get; init; }
+        public string? ExpenseClientName { get; init; }
+        public string? ExpenseClientCompany { get; init; }
+        public int? ExpenseClientStatusId { get; init; }
+        public ClientStatusDto? ExpenseClientStatus { get; init; }
         public int? ClientCaseId { get; init; }
         public string? ClientCaseTitle { get; init; }
         public string? ClientCaseReference { get; init; }

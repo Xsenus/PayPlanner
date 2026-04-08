@@ -234,6 +234,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var expenseClientValidationError = await ValidateExpenseClientAsync(request, ct);
+        if (expenseClientValidationError is not null)
+        {
+            return expenseClientValidationError;
+        }
+
         var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
         if (contractValidationError is not null)
         {
@@ -262,7 +268,8 @@ public class InvoicesController : ControllerBase
             }
         }
 
-        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(request.ClientId, request, ct);
+        var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwnerClientId, request, ct);
         if (clientCaseValidation.Error is not null)
         {
             return clientCaseValidation.Error;
@@ -295,6 +302,7 @@ public class InvoicesController : ControllerBase
             ClientCaseReference = Normalize(request.ClientCaseReference),
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
+            ExpenseClientId = ResolveInvoiceExpenseClientId(request),
             ContractId = request.ContractId,
             ClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0 ? clientCaseValidation.ClientCaseIds[0] : null,
             PaymentSourceId = request.PaymentSourceId,
@@ -308,7 +316,7 @@ public class InvoicesController : ControllerBase
 
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
-        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(request.ClientId, request.ResponsibleIds, ct);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -367,6 +375,12 @@ public class InvoicesController : ControllerBase
             return BadRequest($"Unknown clientId {request.ClientId}");
         }
 
+        var expenseClientValidationError = await ValidateExpenseClientAsync(request, ct);
+        if (expenseClientValidationError is not null)
+        {
+            return expenseClientValidationError;
+        }
+
         var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
         if (contractValidationError is not null)
         {
@@ -395,7 +409,8 @@ public class InvoicesController : ControllerBase
             }
         }
 
-        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(request.ClientId, request, ct);
+        var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwnerClientId, request, ct);
         if (clientCaseValidation.Error is not null)
         {
             return clientCaseValidation.Error;
@@ -433,6 +448,7 @@ public class InvoicesController : ControllerBase
         payment.ClientCaseReference = Normalize(request.ClientCaseReference);
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
+        payment.ExpenseClientId = ResolveInvoiceExpenseClientId(request);
         payment.ContractId = request.ContractId;
         payment.ClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0 ? clientCaseValidation.ClientCaseIds[0] : null;
         payment.PaymentSourceId = request.PaymentSourceId;
@@ -443,7 +459,7 @@ public class InvoicesController : ControllerBase
         payment.CounterpartyName = null;
         payment.SystemNotes = MergeInvoiceItemsIntoSystemNotes(payment.SystemNotes, request.LineItems);
 
-        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(request.ClientId, request.ResponsibleIds, ct);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -1174,11 +1190,13 @@ public class InvoicesController : ControllerBase
 
         if (clientId.HasValue)
         {
-            query = query.Where(x => x.Payment.ClientId == clientId.Value);
+            query = query.Where(x => x.Payment.ClientId == clientId.Value || x.Payment.ExpenseClientId == clientId.Value);
         }
         else if (clientIds is { Count: > 0 })
         {
-            query = query.Where(x => x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value));
+            query = query.Where(x =>
+                (x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value))
+                || (x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value)));
         }
 
         if (caseId.HasValue)
@@ -1203,6 +1221,8 @@ public class InvoicesController : ControllerBase
                 (x.Payment.CounterpartyName != null && x.Payment.CounterpartyName.ToLower().Contains(term)) ||
                 (x.Payment.Client != null && x.Payment.Client.Name != null && x.Payment.Client.Name.ToLower().Contains(term)) ||
                 (x.Payment.Client != null && x.Payment.Client.Company != null && x.Payment.Client.Company.ToLower().Contains(term)) ||
+                (x.Payment.ExpenseClient != null && x.Payment.ExpenseClient.Name != null && x.Payment.ExpenseClient.Name.ToLower().Contains(term)) ||
+                (x.Payment.ExpenseClient != null && x.Payment.ExpenseClient.Company != null && x.Payment.ExpenseClient.Company.ToLower().Contains(term)) ||
                 (x.Payment.ClientCase != null && x.Payment.ClientCase.Title != null && x.Payment.ClientCase.Title.ToLower().Contains(term)) ||
                 x.Payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term)) ||
                 x.Payment.Acts.Any(act =>
@@ -1461,6 +1481,25 @@ public class InvoicesController : ControllerBase
         return null;
     }
 
+    private async Task<ActionResult?> ValidateExpenseClientAsync(UpsertInvoiceRequest request, CancellationToken ct)
+    {
+        if (request.Type != PaymentType.Expense || !request.ExpenseClientId.HasValue)
+        {
+            return null;
+        }
+
+        var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == request.ExpenseClientId.Value, ct);
+        return exists ? null : BadRequest($"Unknown expenseClientId {request.ExpenseClientId.Value}");
+    }
+
+    private static int? ResolveInvoiceExpenseClientId(UpsertInvoiceRequest request)
+        => request.Type == PaymentType.Expense && request.ExpenseClientId.HasValue && request.ExpenseClientId.Value > 0
+            ? request.ExpenseClientId.Value
+            : null;
+
+    private static int ResolveInvoiceCaseOwnerClientId(UpsertInvoiceRequest request)
+        => ResolveInvoiceExpenseClientId(request) ?? request.ClientId;
+
     private async Task<(ActionResult? Error, List<int> ClientCaseIds)> ValidateInvoiceClientCasesAsync(int clientId, UpsertInvoiceRequest request, CancellationToken ct)
     {
         var clientCaseIds = NormalizeInvoiceClientCaseIds(request);
@@ -1567,6 +1606,7 @@ public class InvoicesController : ControllerBase
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
+        ExpenseClientId = x.Payment.ExpenseClientId,
         ContractId = x.Payment.ContractId,
         ClientName = x.Payment.Client != null ? x.Payment.Client.Name : null,
         ClientCompany = x.Payment.Client != null ? x.Payment.Client.Company : null,
@@ -1580,6 +1620,20 @@ public class InvoicesController : ControllerBase
                 ColorHex = x.Payment.Client.ClientStatus.ColorHex,
                 IsActive = x.Payment.Client.ClientStatus.IsActive,
                 CreatedAt = x.Payment.Client.ClientStatus.CreatedAt,
+            }
+            : null,
+        ExpenseClientName = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.Name : null,
+        ExpenseClientCompany = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.Company : null,
+        ExpenseClientStatusId = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.ClientStatusId : null,
+        ExpenseClientStatus = x.Payment.ExpenseClient != null && x.Payment.ExpenseClient.ClientStatus != null
+            ? new ClientStatusDto
+            {
+                Id = x.Payment.ExpenseClient.ClientStatus.Id,
+                Name = x.Payment.ExpenseClient.ClientStatus.Name,
+                Description = x.Payment.ExpenseClient.ClientStatus.Description,
+                ColorHex = x.Payment.ExpenseClient.ClientStatus.ColorHex,
+                IsActive = x.Payment.ExpenseClient.ClientStatus.IsActive,
+                CreatedAt = x.Payment.ExpenseClient.ClientStatus.CreatedAt,
             }
             : null,
         ClientCaseId = x.Payment.ClientCaseId,
@@ -1622,11 +1676,16 @@ public class InvoicesController : ControllerBase
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
+            ExpenseClientId = raw.ExpenseClientId,
             ContractId = raw.ContractId,
             ClientName = raw.ClientName,
             ClientCompany = raw.ClientCompany,
             ClientStatusId = raw.ClientStatusId,
             ClientStatus = raw.ClientStatus,
+            ExpenseClientName = raw.ExpenseClientName,
+            ExpenseClientCompany = raw.ExpenseClientCompany,
+            ExpenseClientStatusId = raw.ExpenseClientStatusId,
+            ExpenseClientStatus = raw.ExpenseClientStatus,
             ClientCaseId = raw.ClientCaseId,
             ClientCaseTitle = raw.ClientCaseTitle,
             ClientCaseReference = raw.ClientCaseReference,
@@ -1930,6 +1989,7 @@ public class InvoicesController : ControllerBase
         payment.Description = BuildInstallmentDescription(invoicePayment.Account, item.Sequence, plan.Items.Count);
         payment.Notes = BuildInstallmentNotes(item);
         payment.ClientId = request.ClientId;
+        payment.ExpenseClientId = invoicePayment.ExpenseClientId;
         payment.ContractId = request.ContractId;
         payment.ClientCaseId = invoicePayment.ClientCaseId;
         payment.ClientCaseReference = invoicePayment.ClientCaseReference;
@@ -2000,9 +2060,10 @@ public class InvoicesController : ControllerBase
         var sameDate = payment.Date.Date == item.Date.Date;
         var sameAmount = Math.Abs(payment.Amount - item.Payment) <= 0.01m;
         var sameClient = payment.ClientId == request.ClientId;
+        var sameExpenseClient = payment.ExpenseClientId == invoicePayment.ExpenseClientId;
         var sameCase = payment.ClientCaseId == invoicePayment.ClientCaseId;
         var sameContract = payment.ContractId == request.ContractId;
-        return sameDate && sameAmount && sameClient && sameCase && sameContract;
+        return sameDate && sameAmount && sameClient && sameExpenseClient && sameCase && sameContract;
     }
 
     private static string BuildInstallmentDescription(string? invoiceNumber, int sequence, int totalCount)
@@ -2827,11 +2888,16 @@ public class InvoicesController : ControllerBase
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }
+        public int? ExpenseClientId { get; init; }
         public int? ContractId { get; init; }
         public string? ClientName { get; init; }
         public string? ClientCompany { get; init; }
         public int? ClientStatusId { get; init; }
         public ClientStatusDto? ClientStatus { get; init; }
+        public string? ExpenseClientName { get; init; }
+        public string? ExpenseClientCompany { get; init; }
+        public int? ExpenseClientStatusId { get; init; }
+        public ClientStatusDto? ExpenseClientStatus { get; init; }
         public int? ClientCaseId { get; init; }
         public string? ClientCaseTitle { get; init; }
         public string? ClientCaseReference { get; init; }

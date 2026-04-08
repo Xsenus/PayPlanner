@@ -330,6 +330,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ExpenseClient)
+                  .WithMany()
+                  .HasForeignKey(e => e.ExpenseClientId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.Contract)
                   .WithMany()
                   .HasForeignKey(e => e.ContractId)
@@ -403,14 +408,17 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ServiceId).HasDatabaseName("IX_Payments_ServiceId");
             entity.HasIndex(e => e.PaymentStatusId).HasDatabaseName("IX_Payments_PaymentStatusId");
             entity.HasIndex(e => e.ContractId).HasDatabaseName("IX_Payments_ContractId");
+            entity.HasIndex(e => e.ExpenseClientId).HasDatabaseName("IX_Payments_ExpenseClientId");
             entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
             entity.HasIndex(e => new { e.ClientId, e.Date }).HasDatabaseName("IX_Payments_ClientId_Date");
+            entity.HasIndex(e => new { e.ExpenseClientId, e.Date }).HasDatabaseName("IX_Payments_ExpenseClientId_Date");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date }).HasDatabaseName("IX_Payments_ClientCaseId_Date");
             entity.HasIndex(e => new { e.IsPaid, e.Date }).HasDatabaseName("IX_Payments_IsPaid_Date");
             entity.HasIndex(e => new { e.IsPaid, e.Status }).HasDatabaseName("IX_Payments_IsPaid_Status");
             entity.HasIndex(e => new { e.Type, e.Status, e.Date }).HasDatabaseName("IX_Payments_Type_Status_Date");
             entity.HasIndex(e => new { e.ClientId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
+            entity.HasIndex(e => new { e.ExpenseClientId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ExpenseClientId_Date_Type_Status");
             entity.HasIndex(e => new { e.ClientCaseId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientCaseId_Date_Type_Status");
         });
 

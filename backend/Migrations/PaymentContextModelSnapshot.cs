@@ -1590,6 +1590,9 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ExpenseClientId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("INTEGER");
 
@@ -1673,6 +1676,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("DocumentKind")
                         .HasDatabaseName("IX_Payments_DocumentKind");
 
+                    b.HasIndex("ExpenseClientId")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId");
+
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
 
@@ -1709,6 +1715,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ClientId", "Date")
                         .HasDatabaseName("IX_Payments_ClientId_Date");
 
+                    b.HasIndex("ExpenseClientId", "Date")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId_Date");
+
                     b.HasIndex("IsPaid", "Date")
                         .HasDatabaseName("IX_Payments_IsPaid_Date");
 
@@ -1726,6 +1735,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ClientId", "Date", "Type", "Status")
                         .HasDatabaseName("IX_Payments_ClientId_Date_Type_Status");
+
+                    b.HasIndex("ExpenseClientId", "Date", "Type", "Status")
+                        .HasDatabaseName("IX_Payments_ExpenseClientId_Date_Type_Status");
 
                     b.ToTable("Payments");
                 });
@@ -2870,6 +2882,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("DealTypeId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Client", "ExpenseClient")
+                        .WithMany()
+                        .HasForeignKey("ExpenseClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.IncomeType", "IncomeType")
                         .WithMany("Payments")
                         .HasForeignKey("IncomeTypeId")
@@ -2902,6 +2919,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("DealType");
+
+                    b.Navigation("ExpenseClient");
 
                     b.Navigation("IncomeType");
 
