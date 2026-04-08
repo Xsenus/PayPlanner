@@ -14,6 +14,7 @@ import { useActivityLogger } from './hooks/useActivityLogger';
 import { DialogProvider } from './contexts/DialogContext';
 import { ToastProvider } from './contexts/ToastContext';
 import type { User as AppUser } from './services/authService';
+import type { ContactScope } from './services/api';
 
 type AuthView = 'login' | 'register' | 'awaiting';
 
@@ -50,6 +51,8 @@ const ALL_TABS: Tab[] = [
   'legalEntities',
   'clients',
   'contacts',
+  'contactsClients',
+  'contactsExternal',
   'clientDetail',
   'accounts',
   'accountsIncome',
@@ -168,6 +171,8 @@ function AppContent() {
       legalEntities: 'Юр. лица',
       clients: 'Клиенты',
       contacts: 'Контакты',
+      contactsClients: 'Контакты: клиенты',
+      contactsExternal: 'Контакты: сторонние',
       clientDetail: 'Карточка клиента',
       accounts: 'Счета',
       accountsIncome: 'Доходные счета',
@@ -220,6 +225,8 @@ function AppContent() {
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'contacts' as Tab, allowed: permissions.clients.canView },
+        { tab: 'contactsClients' as Tab, allowed: permissions.clients.canView },
+        { tab: 'contactsExternal' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsExpense' as Tab, allowed: permissions.accounts.canView },
@@ -254,6 +261,8 @@ function AppContent() {
           return permissions.legalEntities.canView;
         case 'clients':
         case 'contacts':
+        case 'contactsClients':
+        case 'contactsExternal':
         case 'clientDetail':
           return permissions.clients.canView;
         case 'accounts':
@@ -551,7 +560,18 @@ function AppContent() {
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
 
       case 'contacts':
-        return permissions.clients.canView ? <Contacts /> : renderNoAccess('Раздел контактов недоступен для вашей роли.');
+      case 'contactsClients':
+      case 'contactsExternal': {
+        const contactScope: ContactScope =
+          activeTab === 'contactsClients' ? 'clients' : activeTab === 'contactsExternal' ? 'external' : 'all';
+        const handleContactScopeChange = (nextScope: ContactScope) => {
+          setActiveTab(nextScope === 'clients' ? 'contactsClients' : nextScope === 'external' ? 'contactsExternal' : 'contacts');
+        };
+
+        return permissions.clients.canView
+          ? <Contacts initialScope={contactScope} onScopeChange={handleContactScopeChange} />
+          : renderNoAccess('Раздел контактов недоступен для вашей роли.');
+      }
 
       case 'clientDetail':
         if (!permissions.clients.canView || !selectedClientId) {

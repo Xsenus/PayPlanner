@@ -5,6 +5,8 @@ export type Tab =
   | 'legalEntities'
   | 'clients'
   | 'contacts'
+  | 'contactsClients'
+  | 'contactsExternal'
   | 'accounts'
   | 'accountsIncome'
   | 'accountsExpense'

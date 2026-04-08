@@ -135,7 +135,19 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.clients.canView) {
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
-      items.push({ id: 'contacts', tab: 'contacts' as Tab, label: 'Контакты', icon: Phone });
+      const contactChildren: SidebarChild[] = [
+        { id: 'contacts' as Tab, label: 'Все', icon: Phone },
+        { id: 'contactsClients' as Tab, label: 'Клиенты', icon: Users },
+        { id: 'contactsExternal' as Tab, label: 'Сторонние', icon: Users },
+      ];
+
+      items.push({
+        id: 'contacts',
+        tab: 'contacts' as Tab,
+        label: 'Контакты',
+        icon: Phone,
+        children: contactChildren,
+      });
     }
     if (permissions.accounts.canView) {
       const accountChildren: SidebarChild[] = [
@@ -379,9 +391,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               const childItems = item.children ?? [];
               const hasChildren = childItems.length > 0;
               const isParentActive = item.tab ? activeTab === item.tab : false;
-              const isChildActive =
-                childItems.some((child) => child.id === activeTab) ||
-                (item.id === 'acts' && activeTab === 'payments');
+              const isChildActive = childItems.some((child) => child.id === activeTab);
               const isActive = isParentActive || isChildActive;
               const isExpanded = expandedSections[item.id] ?? false;
 
