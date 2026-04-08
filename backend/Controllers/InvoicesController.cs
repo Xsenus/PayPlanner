@@ -878,23 +878,18 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var invoiceId = payment.InvoiceId;
-        _db.Payments.Remove(payment);
+        var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(new[] { payment });
+        var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(new[] { payment }, ct);
 
-        if (invoiceId.HasValue)
+        _db.Payments.RemoveRange(paymentsToDelete);
+
+        if (invoiceIdsToDelete.Count > 0)
         {
-            var hasOtherPayments = await _db.Payments
-                .AsNoTracking()
-                .AnyAsync(p => p.Id != id && p.InvoiceId == invoiceId.Value, ct);
+            var invoices = await _db.Invoices
+                .Where(invoice => invoiceIdsToDelete.Contains(invoice.Id))
+                .ToListAsync(ct);
 
-            if (!hasOtherPayments)
-            {
-                var invoice = await _db.Invoices.FindAsync(new object[] { invoiceId.Value }, ct);
-                if (invoice is not null)
-                {
-                    _db.Invoices.Remove(invoice);
-                }
-            }
+            _db.Invoices.RemoveRange(invoices);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -938,29 +933,15 @@ public class InvoicesController : ControllerBase
             });
         }
 
-        var deletedPaymentIds = payments.Select(payment => payment.Id).ToHashSet();
-        var orphanedInvoiceIds = new List<int>();
-        foreach (var invoiceId in payments
-                     .Where(payment => payment.InvoiceId.HasValue)
-                     .Select(payment => payment.InvoiceId!.Value)
-                     .Distinct())
-        {
-            var hasOtherPayments = await _db.Payments
-                .AsNoTracking()
-                .AnyAsync(payment => !deletedPaymentIds.Contains(payment.Id) && payment.InvoiceId == invoiceId, ct);
+        var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(payments);
+        var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(payments, ct);
 
-            if (!hasOtherPayments)
-            {
-                orphanedInvoiceIds.Add(invoiceId);
-            }
-        }
+        _db.Payments.RemoveRange(paymentsToDelete);
 
-        _db.Payments.RemoveRange(payments);
-
-        if (orphanedInvoiceIds.Count > 0)
+        if (invoiceIdsToDelete.Count > 0)
         {
             var invoices = await _db.Invoices
-                .Where(invoice => orphanedInvoiceIds.Contains(invoice.Id))
+                .Where(invoice => invoiceIdsToDelete.Contains(invoice.Id))
                 .ToListAsync(ct);
 
             _db.Invoices.RemoveRange(invoices);
@@ -968,7 +949,43 @@ public class InvoicesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new { deleted = payments.Count });
+        return Ok(new { deleted = paymentsToDelete.Count });
+    }
+
+    private static List<int> GetInvoiceEntityIdsToDelete(IEnumerable<Payment> payments)
+    {
+        return payments
+            .Where(IsInvoiceDocumentPayment)
+            .Select(payment => payment.InvoiceId!.Value)
+            .Distinct()
+            .ToList();
+    }
+
+    private async Task<List<Payment>> ExpandInvoiceAggregatePaymentsAsync(IEnumerable<Payment> payments, CancellationToken ct)
+    {
+        var paymentsById = payments.ToDictionary(payment => payment.Id);
+        var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(paymentsById.Values);
+
+        if (invoiceIdsToDelete.Count == 0)
+        {
+            return paymentsById.Values.ToList();
+        }
+
+        var linkedPayments = await _db.Payments
+            .Where(payment => payment.InvoiceId.HasValue && invoiceIdsToDelete.Contains(payment.InvoiceId.Value))
+            .ToListAsync(ct);
+
+        foreach (var linkedPayment in linkedPayments)
+        {
+            paymentsById[linkedPayment.Id] = linkedPayment;
+        }
+
+        return paymentsById.Values.ToList();
+    }
+
+    private static bool IsInvoiceDocumentPayment(Payment payment)
+    {
+        return payment.DocumentKind == DocumentKind.Invoice && payment.InvoiceId.HasValue;
     }
 
     [HttpPost("change-responsible")]
