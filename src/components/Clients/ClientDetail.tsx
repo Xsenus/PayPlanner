@@ -3621,23 +3621,13 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       <div>
                         <p className="text-sm font-semibold text-emerald-900">Всего дел: {cases.length}</p>
                         <p className="mt-1 text-sm text-emerald-700">
-                          Здесь можно быстро выбрать дело для фильтрации платежей или открыть его редактирование.
+                          Здесь собраны дела клиента. Откройте карточку дела через редактирование, если нужно уточнить данные.
                         </p>
                       </div>
-                      {selectedCaseId !== 'all' ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCaseId('all')}
-                          className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
-                        >
-                          Показать все дела
-                        </button>
-                      ) : null}
                     </div>
 
-                    <div className="grid gap-3">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       {cases.map((caseItem) => {
-                        const isSelected = selectedCaseId === caseItem.id;
                         const statusValue = (caseItem.status ?? '').toLowerCase();
                         const statusClass = statusValue.includes('open')
                           ? 'bg-green-50 text-green-700 border-green-200'
@@ -3650,11 +3640,9 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         return (
                           <article
                             key={caseItem.id}
-                            className={`rounded-2xl border bg-white p-5 shadow-sm transition-colors ${
-                              isSelected ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-slate-200'
-                            }`}
+                            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-colors hover:border-emerald-200 hover:shadow-md"
                           >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex h-full flex-col gap-4">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <h3 className="truncate text-base font-semibold text-slate-900">
@@ -3665,11 +3653,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                   >
                                     {caseStatusLabel(caseItem.status)}
                                   </span>
-                                  {isSelected ? (
-                                    <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                      Выбрано
-                                    </span>
-                                  ) : null}
                                 </div>
                                 <p className="mt-2 text-sm text-slate-500">
                                   {caseItem.description?.trim() || 'Описание дела пока не заполнено.'}
@@ -3679,25 +3662,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                   <span>Платежей: {caseItem.payments?.length ?? 0}</span>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedCaseId(caseItem.id)}
-                                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                                >
-                                  Выбрать
-                                </button>
+                              <div className="mt-auto flex justify-end">
                                 {clientPermissions.canEdit ? (
                                   <button
                                     type="button"
+                                    title="Редактировать дело"
+                                    aria-label={`Редактировать дело ${caseItem.title || caseItem.id}`}
                                     onClick={() => {
                                       setEditingCase(caseItem);
                                       setCaseMode('edit');
                                       setCaseModalOpen(true);
                                     }}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
                                   >
-                                    <Edit size={16} /> Редактировать
+                                    <Edit size={16} />
                                   </button>
                                 ) : null}
                               </div>
