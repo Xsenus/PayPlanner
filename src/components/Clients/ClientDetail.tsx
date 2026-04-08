@@ -79,7 +79,8 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
-import { INSTALLMENT_PAYMENT_MARKER, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
+import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
+import { getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
   ClientAddressEntriesForm,
   type AddressTypeOption,
@@ -212,14 +213,6 @@ function isPaymentLinkedToInvoice(payment: Payment, invoice: Invoice): boolean {
   const invoiceKey = invoiceLegacyKey(invoice.number, invoice.date);
   const paymentKey = paymentLegacyKey(payment);
   return Boolean(invoiceKey && paymentKey && invoiceKey === paymentKey);
-}
-
-function cleanInstallmentSystemNotes(systemNotes?: string | null): string {
-  return (systemNotes ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith(INSTALLMENT_PAYMENT_MARKER))
-    .join('\n');
 }
 
 const PAYMENT_TABLE_COLUMNS: Array<{
@@ -3921,7 +3914,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         const hasProgress = payment.hasPartialPayment && payment.paidAmount > 0;
                         const paidProgress = payment.amount > 0 ? Math.min(payment.paidAmount / payment.amount, 1) : 0;
                         const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
-                        const visibleSystemNotes = cleanInstallmentSystemNotes(payment.systemNotes);
+                        const visibleSystemNotes = getVisibleSystemNotes(payment.systemNotes);
 
                         return (
                           <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">

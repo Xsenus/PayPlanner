@@ -14,6 +14,7 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
+import { getVisibleSystemNoteLines } from '../../utils/systemNotes';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -119,12 +120,7 @@ export function PaymentModal({
     rescheduleCount: 0,
   });
   const systemNotesEntries = useMemo(() => {
-    if (!formData.systemNotes) return [] as string[];
-    return formData.systemNotes
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => (line.startsWith('• ') ? line.slice(2) : line));
+    return getVisibleSystemNoteLines(formData.systemNotes);
   }, [formData.systemNotes]);
   const transferTrail = useMemo(() => {
     if (!systemNotesEntries.length) return [] as string[];
