@@ -32,7 +32,7 @@ public class PaymentsController : ControllerBase
         [FromQuery] bool excludeInstallmentParents = false,
         CancellationToken ct = default)
     {
-        var q = _db.Payments.AsQueryable().WithPaymentIncludes();
+        var q = _db.Payments.AsQueryable();
         if (excludeInstallmentParents)
         {
             q = q.Where(p =>
@@ -63,24 +63,22 @@ public class PaymentsController : ControllerBase
         }
         if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
-        var list = await q.OrderBy(p => p.Date).ToListAsync(ct);
-        foreach (var payment in list)
-        {
-            PopulateAuditMetadata(_db, payment);
-        }
+        var list = await ProjectPaymentsForRead(q)
+            .OrderBy(p => p.Date)
+            .ToListAsync(ct);
         return Ok(list);
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var item = await _db.Payments.WithPaymentIncludes().FirstOrDefaultAsync(p => p.Id == id, ct);
+        var item = await ProjectPaymentsForRead(_db.Payments.Where(p => p.Id == id))
+            .FirstOrDefaultAsync(ct);
         if (item is null)
         {
             return NotFound();
         }
 
-        PopulateAuditMetadata(_db, item);
         return Ok(item);
     }
 
@@ -505,6 +503,140 @@ public class PaymentsController : ControllerBase
         payment.AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue;
         payment.AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue;
         payment.AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue;
+    }
+
+    private static IQueryable<Payment> ProjectPaymentsForRead(IQueryable<Payment> query)
+    {
+        return query
+            .AsNoTracking()
+            .Select(payment => new Payment
+            {
+                Id = payment.Id,
+                Account = payment.Account,
+                AccountDate = payment.AccountDate,
+                Amount = payment.Amount,
+                ClientCaseId = payment.ClientCaseId,
+                ClientCaseReference = payment.ClientCaseReference,
+                ClientId = payment.ClientId,
+                ContractId = payment.ContractId,
+                CounterpartyName = payment.CounterpartyName,
+                CreatedAt = payment.CreatedAt,
+                Date = payment.Date,
+                DealTypeId = payment.DealTypeId,
+                Description = payment.Description,
+                DocumentKind = payment.DocumentKind,
+                ExpenseClientId = payment.ExpenseClientId,
+                IncomeTypeId = payment.IncomeTypeId,
+                InvoiceId = payment.InvoiceId,
+                IsPaid = payment.IsPaid,
+                LastPaymentDate = payment.LastPaymentDate,
+                LegacyAccountDate = payment.LegacyAccountDate,
+                LegacyAccountNumber = payment.LegacyAccountNumber,
+                Notes = payment.Notes,
+                PaidAmount = payment.PaidAmount,
+                PaidDate = payment.PaidDate,
+                PaymentSourceId = payment.PaymentSourceId,
+                PaymentStatusId = payment.PaymentStatusId,
+                PlannedDate = payment.PlannedDate,
+                RescheduleCount = payment.RescheduleCount,
+                ServiceId = payment.ServiceId,
+                Status = payment.Status,
+                SystemNotes = payment.SystemNotes,
+                Type = payment.Type,
+                AuditCreatedByUserId = EF.Property<int?>(payment, "CreatedByUserId"),
+                AuditCreatedByUserName = EF.Property<string?>(payment, "CreatedByUserName"),
+                AuditUpdatedAt = EF.Property<DateTime?>(payment, "UpdatedAt"),
+                AuditUpdatedByUserId = EF.Property<int?>(payment, "UpdatedByUserId"),
+                AuditUpdatedByUserName = EF.Property<string?>(payment, "UpdatedByUserName"),
+                AuditIsDeleted = EF.Property<bool>(payment, "IsDeleted"),
+                AuditDeletedAt = EF.Property<DateTime?>(payment, "DeletedAt"),
+                AuditDeletedByUserId = EF.Property<int?>(payment, "DeletedByUserId"),
+                AuditDeletedByUserName = EF.Property<string?>(payment, "DeletedByUserName"),
+                Client = payment.Client == null
+                    ? null
+                    : new Client
+                    {
+                        Id = payment.Client.Id,
+                        Name = payment.Client.Name,
+                        Email = payment.Client.Email,
+                        Phone = payment.Client.Phone,
+                        Company = payment.Client.Company,
+                        Address = payment.Client.Address,
+                        Notes = payment.Client.Notes,
+                        CreatedAt = payment.Client.CreatedAt,
+                        IsActive = payment.Client.IsActive,
+                        LegalEntityId = payment.Client.LegalEntityId,
+                        ClientStatusId = payment.Client.ClientStatusId,
+                        ResponsibleUserId = payment.Client.ResponsibleUserId,
+                        ClientStatus = payment.Client.ClientStatus == null
+                            ? null
+                            : new ClientStatusEntity
+                            {
+                                Id = payment.Client.ClientStatus.Id,
+                                Name = payment.Client.ClientStatus.Name,
+                                Description = payment.Client.ClientStatus.Description,
+                                ColorHex = payment.Client.ClientStatus.ColorHex,
+                                IsActive = payment.Client.ClientStatus.IsActive,
+                                CreatedAt = payment.Client.ClientStatus.CreatedAt,
+                            },
+                    },
+                ClientCase = payment.ClientCase == null
+                    ? null
+                    : new ClientCase
+                    {
+                        Id = payment.ClientCase.Id,
+                        ClientId = payment.ClientCase.ClientId,
+                        Title = payment.ClientCase.Title,
+                        Description = payment.ClientCase.Description,
+                        Status = payment.ClientCase.Status,
+                        CreatedAt = payment.ClientCase.CreatedAt,
+                    },
+                DealType = payment.DealType == null
+                    ? null
+                    : new DealType
+                    {
+                        Id = payment.DealType.Id,
+                        Name = payment.DealType.Name,
+                        Description = payment.DealType.Description,
+                        ColorHex = payment.DealType.ColorHex,
+                        IsActive = payment.DealType.IsActive,
+                        CreatedAt = payment.DealType.CreatedAt,
+                    },
+                IncomeType = payment.IncomeType == null
+                    ? null
+                    : new IncomeType
+                    {
+                        Id = payment.IncomeType.Id,
+                        Name = payment.IncomeType.Name,
+                        Description = payment.IncomeType.Description,
+                        ColorHex = payment.IncomeType.ColorHex,
+                        IsActive = payment.IncomeType.IsActive,
+                        CreatedAt = payment.IncomeType.CreatedAt,
+                        PaymentType = payment.IncomeType.PaymentType,
+                    },
+                PaymentSource = payment.PaymentSource == null
+                    ? null
+                    : new PaymentSource
+                    {
+                        Id = payment.PaymentSource.Id,
+                        Name = payment.PaymentSource.Name,
+                        Description = payment.PaymentSource.Description,
+                        ColorHex = payment.PaymentSource.ColorHex,
+                        IsActive = payment.PaymentSource.IsActive,
+                        CreatedAt = payment.PaymentSource.CreatedAt,
+                    },
+                PaymentStatusEntity = payment.PaymentStatusEntity == null
+                    ? null
+                    : new PaymentStatusEntity
+                    {
+                        Id = payment.PaymentStatusEntity.Id,
+                        Name = payment.PaymentStatusEntity.Name,
+                        Description = payment.PaymentStatusEntity.Description,
+                        ColorHex = payment.PaymentStatusEntity.ColorHex,
+                        IsActive = payment.PaymentStatusEntity.IsActive,
+                        CreatedAt = payment.PaymentStatusEntity.CreatedAt,
+                    },
+            });
     }
 
     [HttpDelete("{id:int}")]
