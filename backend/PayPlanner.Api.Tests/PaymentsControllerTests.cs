@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -101,6 +102,72 @@ public class PaymentsControllerTests
 
         var json = JsonSerializer.Serialize(payments);
         Assert.StartsWith("[", json);
+    }
+
+    [Fact]
+    public async Task Get_FiltersOnlyByPaymentDateRange_AndIgnoresAccountDate()
+    {
+        await using var db = await CreateContextAsync();
+
+        var marchPayment = CreatePayment(new DateTime(2026, 3, 31), 5_000m, "Платеж до периода");
+        marchPayment.AccountDate = new DateTime(2026, 4, 10);
+
+        var aprilPayment = CreatePayment(new DateTime(2026, 4, 15), 7_500m, "Платеж внутри периода");
+        aprilPayment.AccountDate = new DateTime(2025, 12, 20);
+
+        var mayPayment = CreatePayment(new DateTime(2026, 5, 1), 9_000m, "Платеж после периода");
+        mayPayment.AccountDate = new DateTime(2025, 8, 13);
+
+        db.Payments.AddRange(marchPayment, aprilPayment, mayPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Get(
+            new DateTime(2026, 4, 1),
+            new DateTime(2026, 4, 30),
+            null,
+            null,
+            excludeInstallmentParents: false,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var payments = Assert.IsAssignableFrom<List<Payment>>(ok.Value);
+
+        var paymentIds = payments.Select(payment => payment.Id).ToList();
+        Assert.Equal(new[] { aprilPayment.Id }, paymentIds);
+    }
+
+    [Fact]
+    public async Task ApplyPaymentFilters_FiltersOnlyByPaymentDateRange_AndIgnoresAccountDate()
+    {
+        await using var db = await CreateContextAsync();
+
+        var marchPayment = CreatePayment(new DateTime(2026, 3, 31), 5_000m, "Платеж до периода");
+        marchPayment.AccountDate = new DateTime(2026, 4, 10);
+
+        var aprilPayment = CreatePayment(new DateTime(2026, 4, 15), 7_500m, "Платеж внутри периода");
+        aprilPayment.AccountDate = new DateTime(2025, 12, 20);
+
+        var mayPayment = CreatePayment(new DateTime(2026, 5, 1), 9_000m, "Платеж после периода");
+        mayPayment.AccountDate = new DateTime(2025, 8, 13);
+
+        db.Payments.AddRange(marchPayment, aprilPayment, mayPayment);
+        await db.SaveChangesAsync();
+
+        var paymentIds = await db.Payments
+            .AsNoTracking()
+            .ApplyPaymentFilters(
+                new DateTime(2026, 4, 1),
+                new DateTime(2026, 4, 30),
+                null,
+                null,
+                null)
+            .OrderBy(payment => payment.Date)
+            .Select(payment => payment.Id)
+            .ToListAsync();
+
+        Assert.Equal(new[] { aprilPayment.Id }, paymentIds);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

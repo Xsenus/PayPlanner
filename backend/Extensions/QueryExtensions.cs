@@ -84,17 +84,13 @@ namespace PayPlanner.Api.Extensions
             if (from.HasValue)
             {
                 var fromDate = from.Value.Date;
-                q = q.Where(p =>
-                    p.Date >= fromDate ||
-                    (p.AccountDate.HasValue && p.AccountDate.Value >= fromDate));
+                q = q.Where(p => p.Date >= fromDate);
             }
 
             if (to.HasValue)
             {
                 var toDate = to.Value.Date;
-                q = q.Where(p =>
-                    p.Date <= toDate ||
-                    (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
+                q = q.Where(p => p.Date <= toDate);
             }
 
             if (clientId.HasValue)

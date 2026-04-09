@@ -49,17 +49,13 @@ public class PaymentsController : ControllerBase
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            q = q.Where(p =>
-                p.Date >= fromDate ||
-                (p.AccountDate.HasValue && p.AccountDate.Value >= fromDate));
+            q = q.Where(p => p.Date >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            q = q.Where(p =>
-                p.Date <= toDate ||
-                (p.AccountDate.HasValue && p.AccountDate.Value <= toDate));
+            q = q.Where(p => p.Date <= toDate);
         }
         if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
