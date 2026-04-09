@@ -407,6 +407,17 @@ export interface InvoiceCounterpartyCleanupResultDto {
   removedRequirements: number;
 }
 
+export interface InvoiceOrphanCleanupItemDto {
+  id: number;
+  number: string;
+  date: string;
+}
+
+export interface InvoiceOrphanCleanupResultDto {
+  deleted: number;
+  items: InvoiceOrphanCleanupItemDto[];
+}
+
 export interface SimpleDictionaryDuplicateItem {
   id: number;
   name: string;
@@ -925,6 +936,12 @@ export class ApiService {
 
   async cleanupInvoiceCounterpartyNames() {
     return this.request<InvoiceCounterpartyCleanupResultDto>('/invoices/cleanup-counterparty-names', {
+      method: 'POST',
+    });
+  }
+
+  async cleanupOrphanInvoices() {
+    return this.request<InvoiceOrphanCleanupResultDto>('/invoices/cleanup-orphan-invoices', {
       method: 'POST',
     });
   }

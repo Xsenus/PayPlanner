@@ -867,6 +867,48 @@ public class InvoicesController : ControllerBase
         });
     }
 
+    [HttpPost("cleanup-orphan-invoices")]
+    public async Task<ActionResult<object>> CleanupOrphanInvoices(CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Forbid();
+        }
+
+        var orphanInvoices = await _db.Invoices
+            .Where(invoice => !invoice.Payments.Any())
+            .OrderByDescending(invoice => invoice.Date)
+            .ThenByDescending(invoice => invoice.Id)
+            .ToListAsync(ct);
+
+        var deletedItems = orphanInvoices
+            .Select(invoice => new
+            {
+                invoice.Id,
+                invoice.Number,
+                invoice.Date,
+            })
+            .ToList();
+
+        if (orphanInvoices.Count == 0)
+        {
+            return Ok(new
+            {
+                deleted = 0,
+                items = deletedItems,
+            });
+        }
+
+        _db.Invoices.RemoveRange(orphanInvoices);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            deleted = orphanInvoices.Count,
+            items = deletedItems,
+        });
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
@@ -2674,73 +2716,6 @@ public class InvoicesController : ControllerBase
         return BadRequest($"Номер счета '{number}' уже занят в {accountDate.Year} году.");
     }
 
-    private async Task<string> BuildDuplicateInvoiceNumberMessageAsync(
-        string number,
-        DateTime yearStart,
-        DateTime yearEnd,
-        int year,
-        int? excludeId,
-        CancellationToken ct)
-    {
-        var baseMessage = $"Номер счета '{number}' уже занят в {year} году. Система проверяет уникальность по всем счетам за год, а не только по текущему списку.";
-        var visibleDuplicate = await FindVisibleDuplicateInvoiceAsync(number, yearStart, yearEnd, excludeId, ct);
-        if (visibleDuplicate is null)
-        {
-            return $"{baseMessage} Совпадающий счет может быть скрыт текущими фильтрами, типом счета или правами доступа.";
-        }
-
-        var typeLabel = visibleDuplicate.Type == PaymentType.Expense ? "расходный" : "доходный";
-        var clientPart = string.IsNullOrWhiteSpace(visibleDuplicate.ClientName)
-            ? string.Empty
-            : $" Клиент: {visibleDuplicate.ClientName}.";
-
-        return $"{baseMessage} Совпадающий {typeLabel} счет: №{visibleDuplicate.Number} от {visibleDuplicate.Date:dd.MM.yyyy}.{clientPart}";
-    }
-
-    private async Task<VisibleDuplicateInvoiceInfo?> FindVisibleDuplicateInvoiceAsync(
-        string number,
-        DateTime yearStart,
-        DateTime yearEnd,
-        int? excludeId,
-        CancellationToken ct)
-    {
-        var normalized = number.Trim().ToLowerInvariant();
-        var visibleResponsibleId = ResolveVisibleResponsibleId(null);
-
-        var query = BuildVisibleInvoicePaymentsQuery(trackChanges: false)
-            .Where(payment =>
-                payment.InvoiceId.HasValue
-                && payment.Invoice != null
-                && payment.Invoice.Date >= yearStart
-                && payment.Invoice.Date < yearEnd
-                && (excludeId == null || payment.Id != excludeId.Value)
-                && payment.Invoice.Number.Trim().ToLower() == normalized);
-
-        if (!User.IsInRole("admin"))
-        {
-            if (!visibleResponsibleId.HasValue)
-            {
-                return null;
-            }
-
-            query = query.Where(payment => payment.Responsibles.Any(row => row.UserId == visibleResponsibleId.Value));
-        }
-
-        return await query
-            .OrderByDescending(payment => payment.Invoice!.Date)
-            .ThenByDescending(payment => payment.Id)
-            .Select(payment => new VisibleDuplicateInvoiceInfo
-            {
-                Number = payment.Invoice!.Number,
-                Date = payment.Invoice.Date,
-                ClientName = payment.Type == PaymentType.Expense
-                    ? (payment.ExpenseClient != null ? payment.ExpenseClient.Name : payment.CounterpartyName)
-                    : (payment.Client != null ? payment.Client.Name : payment.CounterpartyName),
-                Type = payment.Type,
-            })
-            .FirstOrDefaultAsync(ct);
-    }
-
     private IQueryable<Invoice> BuildActiveInvoiceEntitiesQuery()
     {
         return _db.Invoices
@@ -3033,14 +3008,6 @@ public class InvoicesController : ControllerBase
         public decimal Interest { get; init; }
         public decimal Payment { get; init; }
         public decimal Balance { get; init; }
-    }
-
-    private sealed class VisibleDuplicateInvoiceInfo
-    {
-        public string Number { get; init; } = string.Empty;
-        public DateTime Date { get; init; }
-        public string? ClientName { get; init; }
-        public PaymentType Type { get; init; }
     }
 
     private sealed class InvoiceProjectionRaw

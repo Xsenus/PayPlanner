@@ -5,6 +5,7 @@ import type {
   DatabaseBackupOverviewDto,
   DatabaseStatusDto,
   InvoiceCounterpartyCleanupResultDto,
+  InvoiceOrphanCleanupResultDto,
   UserActivityCleanupResultDto,
   UserActivityCompactionResultDto,
   UserActivityMaintenanceDto,
@@ -99,6 +100,10 @@ export function DatabaseMaintenanceSettings() {
   const [invoiceCounterpartyCleanupMessage, setInvoiceCounterpartyCleanupMessage] = useState<string | null>(null);
   const [invoiceCounterpartyCleanupResult, setInvoiceCounterpartyCleanupResult] =
     useState<InvoiceCounterpartyCleanupResultDto | null>(null);
+  const [invoiceOrphanCleanupLoading, setInvoiceOrphanCleanupLoading] = useState(false);
+  const [invoiceOrphanCleanupMessage, setInvoiceOrphanCleanupMessage] = useState<string | null>(null);
+  const [invoiceOrphanCleanupResult, setInvoiceOrphanCleanupResult] =
+    useState<InvoiceOrphanCleanupResultDto | null>(null);
 
   const [databaseBackupOverview, setDatabaseBackupOverview] = useState<DatabaseBackupOverviewDto | null>(null);
   const [databaseBackupAutomaticEnabled, setDatabaseBackupAutomaticEnabled] = useState(true);
@@ -289,6 +294,33 @@ export function DatabaseMaintenanceSettings() {
       setInvoiceCounterpartyCleanupMessage(getErrorMessage(error, 'Не удалось очистить legacy-поле счета.'));
     } finally {
       setInvoiceCounterpartyCleanupLoading(false);
+    }
+  };
+
+  const runInvoiceOrphanCleanup = async () => {
+    const approved = await confirm({
+      title: 'Очистить сиротские счета',
+      description: 'Будут удалены записи счетов без единого живого платежа. Такие счета не видны в реестре, но могут мешать нумерации.',
+      confirmLabel: 'Очистить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setInvoiceOrphanCleanupLoading(true);
+    setInvoiceOrphanCleanupMessage(null);
+    try {
+      const response = await apiService.cleanupOrphanInvoices();
+      setInvoiceOrphanCleanupResult(response);
+      setInvoiceOrphanCleanupMessage(
+        response.deleted > 0
+          ? 'Сиротские счета удалены.'
+          : 'Сиротских счетов не найдено.',
+      );
+    } catch (error) {
+      setInvoiceOrphanCleanupMessage(getErrorMessage(error, 'Не удалось очистить сиротские счета.'));
+    } finally {
+      setInvoiceOrphanCleanupLoading(false);
     }
   };
 
@@ -658,6 +690,38 @@ export function DatabaseMaintenanceSettings() {
 
         {activeTab === 'operations' && (
           <div className="space-y-6">
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900">Очистка сиротских счетов</h4>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Удаляет записи счетов без единого живого платежа. Такие счета не видны в реестре, но могут блокировать номер счета.
+                  </p>
+                </div>
+                <StatusBadge value="Операция доступна" tone="success" />
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={runInvoiceOrphanCleanup}
+                  disabled={invoiceOrphanCleanupLoading}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  <Trash2 size={16} />
+                  {invoiceOrphanCleanupLoading ? 'Очищаем...' : 'Очистить сиротские счета'}
+                </button>
+                {invoiceOrphanCleanupMessage ? <span className="text-sm text-gray-600">{invoiceOrphanCleanupMessage}</span> : null}
+              </div>
+
+              {invoiceOrphanCleanupResult ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                  Удалено сиротских счетов: {invoiceOrphanCleanupResult.deleted}.
+                  {invoiceOrphanCleanupResult.items.length > 0 ? ` Номера: ${invoiceOrphanCleanupResult.items.map((item) => item.number).join(', ')}.` : ''}
+                </div>
+              ) : null}
+            </div>
+
             <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>

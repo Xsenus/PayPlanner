@@ -64,6 +64,26 @@ public class InvoicesControllerValidationTests
         Assert.Equal("25", nextNumber);
     }
 
+    [Fact]
+    public async Task CleanupOrphanInvoices_DeletesOnlyInvoicesWithoutLivePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+        await CreateActiveInvoiceAsync(db, "24", new DateTime(2026, 4, 6), clientId);
+        await CreateOrphanInvoiceAsync(db, "25", new DateTime(2026, 4, 7));
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var action = await controller.CleanupOrphanInvoices(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var deleted = GetAnonymousProperty<int>(ok.Value, "deleted");
+        Assert.Equal(1, deleted);
+
+        var remainingNumbers = await db.Invoices.AsNoTracking().OrderBy(x => x.Number).Select(x => x.Number).ToListAsync();
+        Assert.Equal(new[] { "24" }, remainingNumbers);
+    }
+
     private static UpsertInvoiceRequest CreateRequest(string number, int clientId, DateTime date)
     {
         return new UpsertInvoiceRequest
