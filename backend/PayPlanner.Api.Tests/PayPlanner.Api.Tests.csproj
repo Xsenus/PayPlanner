@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +20,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\\PayPlanner.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove=".codex-build\\**\\*.cs" />
+    <EmbeddedResource Remove=".codex-build\\**\\*" />
+    <None Remove=".codex-build\\**\\*" />
   </ItemGroup>
 
 </Project>

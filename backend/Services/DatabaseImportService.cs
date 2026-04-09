@@ -89,7 +89,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             }.ToString())
             .Options;
 
-        await using var source = new PaymentContext(sourceOptions);
+        await using var source = new PaymentContext(sourceOptions, useObjectAuditModel: false);
         await using var target = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var maps = new ImportMaps();
 

@@ -52,6 +52,33 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        [NotMapped]
+        public int? AuditCreatedByUserId { get; set; }
+
+        [NotMapped]
+        public string? AuditCreatedByUserName { get; set; }
+
+        [NotMapped]
+        public DateTime? AuditUpdatedAt { get; set; }
+
+        [NotMapped]
+        public int? AuditUpdatedByUserId { get; set; }
+
+        [NotMapped]
+        public string? AuditUpdatedByUserName { get; set; }
+
+        [NotMapped]
+        public bool AuditIsDeleted { get; set; }
+
+        [NotMapped]
+        public DateTime? AuditDeletedAt { get; set; }
+
+        [NotMapped]
+        public int? AuditDeletedByUserId { get; set; }
+
+        [NotMapped]
+        public string? AuditDeletedByUserName { get; set; }
+
         /// <summary>
         /// Электронная почта клиента.
         /// </summary>

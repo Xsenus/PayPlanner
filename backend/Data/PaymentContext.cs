@@ -1,7 +1,13 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayPlanner.Api.Models;
+using System.Globalization;
+using System.Linq.Expressions;
+using System.Security.Claims;
+using System.Text.Json;
 
 namespace PayPlanner.Api.Data;
 
@@ -11,6 +17,82 @@ namespace PayPlanner.Api.Data;
 /// </summary>
 public class PaymentContext : DbContext
 {
+    private static readonly HashSet<string> AuditSystemPropertyNames = new(StringComparer.Ordinal)
+    {
+        "CreatedAt",
+        "CreatedByUserId",
+        "CreatedByUserName",
+        "UpdatedAt",
+        "UpdatedByUserId",
+        "UpdatedByUserName",
+        "IsDeleted",
+        "DeletedAt",
+        "DeletedByUserId",
+        "DeletedByUserName",
+    };
+
+    private static readonly HashSet<string> AuditDetailedDiffExcludedPropertyNames = new(StringComparer.Ordinal)
+    {
+        "SystemNotes",
+        "MetadataJson",
+        "PhonesJson",
+        "EmailsJson",
+        "ContactPhonesJson",
+        "ContactEmailsJson",
+        "BankAccountsJson",
+        "CashRegistersJson",
+        "CardsJson",
+        "RequisitesEnglishJson",
+        "LogoDataUrl",
+        "SealDataUrl",
+        "DirectorSignatureDataUrl",
+    };
+
+    private static readonly JsonSerializerOptions AuditMetadataJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private static readonly HashSet<Type> AuditedEntityTypes = new()
+    {
+        typeof(Act),
+        typeof(AddressRecord),
+        typeof(Client),
+        typeof(ClientCase),
+        typeof(ClientPassport),
+        typeof(Contract),
+        typeof(ExternalContact),
+        typeof(Invoice),
+        typeof(InvoiceLineItem),
+        typeof(LegalEntity),
+        typeof(MoneyOperation),
+        typeof(Payment),
+        typeof(PowerOfAttorney)
+    };
+
+    private sealed record PendingAuditEvent(
+        object Entity,
+        string ObjectType,
+        string Action,
+        string? Description,
+        int? ActorUserId,
+        string? ActorUserName,
+        string? MetadataJson,
+        DateTime CreatedAt);
+
+    private sealed record AuditFieldChange(
+        string Field,
+        string? OldValue,
+        string? NewValue);
+
+    private sealed record AuditUpdateMetadata(
+        IReadOnlyCollection<string> ChangedFields,
+        IReadOnlyCollection<AuditFieldChange> Changes);
+
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    internal bool UseObjectAuditModel { get; }
+
     private static DateTime NormalizePostgreSqlTimestamp(DateTime value)
         => value.Kind == DateTimeKind.Unspecified
             ? value
@@ -19,7 +101,21 @@ public class PaymentContext : DbContext
     /// <summary>
     /// Создает новый экземпляр контекста базы данных.
     /// </summary>
-    public PaymentContext(DbContextOptions options) : base(options) { }
+    public PaymentContext(
+        DbContextOptions options,
+        IHttpContextAccessor? httpContextAccessor = null,
+        bool useObjectAuditModel = true)
+        : base(options)
+    {
+        _httpContextAccessor = httpContextAccessor;
+        UseObjectAuditModel = useObjectAuditModel;
+    }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.ReplaceService<IModelCacheKeyFactory, PaymentContextModelCacheKeyFactory>();
+        base.OnConfiguring(optionsBuilder);
+    }
 
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
 
@@ -46,6 +142,45 @@ public class PaymentContext : DbContext
             entity.HasIndex("IsActive").HasDatabaseName($"IX_{baseIndexName}_IsActive");
             entity.HasIndex("Name").HasDatabaseName($"IX_{baseIndexName}_Name");
             entity.HasIndex("IsActive", "Name").HasDatabaseName($"IX_{baseIndexName}_IsActive_Name");
+        }
+
+        static void ConfigureAudit<TEntity>(ModelBuilder builder)
+            where TEntity : class
+        {
+            var entity = builder.Entity<TEntity>();
+            var name = typeof(TEntity).Name;
+
+            if (entity.Metadata.FindProperty("CreatedAt") is null)
+            {
+                entity.Property<DateTime?>("CreatedAt");
+            }
+
+            entity.Property<int?>("CreatedByUserId");
+            entity.Property<string>("CreatedByUserName").HasMaxLength(256);
+            entity.Property<DateTime?>("UpdatedAt");
+            entity.Property<int?>("UpdatedByUserId");
+            entity.Property<string>("UpdatedByUserName").HasMaxLength(256);
+            entity.Property<bool>("IsDeleted").HasDefaultValue(false);
+            entity.Property<DateTime?>("DeletedAt");
+            entity.Property<int?>("DeletedByUserId");
+            entity.Property<string>("DeletedByUserName").HasMaxLength(256);
+
+            entity.HasIndex("IsDeleted").HasDatabaseName($"IX_{name}_IsDeleted");
+            entity.HasIndex("UpdatedAt").HasDatabaseName($"IX_{name}_UpdatedAt_Audit");
+            entity.HasIndex("DeletedAt").HasDatabaseName($"IX_{name}_DeletedAt_Audit");
+
+            var parameter = Expression.Parameter(typeof(TEntity), "entity");
+            var isDeleted = Expression.Call(
+                typeof(EF),
+                nameof(EF.Property),
+                new[] { typeof(bool) },
+                parameter,
+                Expression.Constant("IsDeleted"));
+            var filter = Expression.Lambda<Func<TEntity, bool>>(
+                Expression.Equal(isDeleted, Expression.Constant(false)),
+                parameter);
+
+            entity.HasQueryFilter(filter);
         }
 
         // ------------------ Act ------------------
@@ -965,6 +1100,22 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_UserActivityLogs_Status");
         });
 
+        modelBuilder.Entity<ObjectAuditEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ObjectType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Action).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.ActorUserName).HasMaxLength(256);
+            entity.Property(e => e.MetadataJson).HasColumnType("text");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.ObjectType, e.ObjectId, e.CreatedAt })
+                .HasDatabaseName("IX_ObjectAuditEvents_Object_CreatedAt");
+            entity.HasIndex(e => e.CreatedAt)
+                .HasDatabaseName("IX_ObjectAuditEvents_CreatedAt");
+        });
+
         // ------------------ UserSettings ------------------
         modelBuilder.Entity<UserSetting>(entity =>
         {
@@ -1005,6 +1156,23 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Section, e.FieldKey }).IsUnique().HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
         });
 
+        if (UseObjectAuditModel)
+        {
+            ConfigureAudit<Act>(modelBuilder);
+            ConfigureAudit<AddressRecord>(modelBuilder);
+            ConfigureAudit<Client>(modelBuilder);
+            ConfigureAudit<ClientCase>(modelBuilder);
+            ConfigureAudit<ClientPassport>(modelBuilder);
+            ConfigureAudit<Contract>(modelBuilder);
+            ConfigureAudit<ExternalContact>(modelBuilder);
+            ConfigureAudit<Invoice>(modelBuilder);
+            ConfigureAudit<InvoiceLineItem>(modelBuilder);
+            ConfigureAudit<LegalEntity>(modelBuilder);
+            ConfigureAudit<MoneyOperation>(modelBuilder);
+            ConfigureAudit<Payment>(modelBuilder);
+            ConfigureAudit<PowerOfAttorney>(modelBuilder);
+        }
+
         if (Database.IsNpgsql())
         {
             foreach (var entityType in modelBuilder.Model.GetEntityTypes())
@@ -1038,6 +1206,389 @@ public class PaymentContext : DbContext
             modelBuilder.Entity<Client>()
                 .Property(e => e.Notes)
                 .HasColumnType("text");
+        }
+    }
+
+    public override int SaveChanges()
+    {
+        var pendingAuditEvents = ApplyAuditMetadata();
+        var result = base.SaveChanges();
+        PersistAuditEvents(pendingAuditEvents);
+        return result;
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        var pendingAuditEvents = ApplyAuditMetadata();
+        var result = base.SaveChanges(acceptAllChangesOnSuccess);
+        PersistAuditEvents(pendingAuditEvents, acceptAllChangesOnSuccess);
+        return result;
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        return SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        return SaveChangesCoreAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private async Task<int> SaveChangesCoreAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+    {
+        var pendingAuditEvents = ApplyAuditMetadata();
+        var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        await PersistAuditEventsAsync(pendingAuditEvents, acceptAllChangesOnSuccess, cancellationToken);
+        return result;
+    }
+
+    private List<PendingAuditEvent> ApplyAuditMetadata()
+    {
+        var pendingAuditEvents = new List<PendingAuditEvent>();
+
+        if (!UseObjectAuditModel)
+        {
+            return pendingAuditEvents;
+        }
+
+        var now = DateTime.UtcNow;
+        var actor = GetCurrentAuditActor();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (!AuditedEntityTypes.Contains(entry.Metadata.ClrType))
+            {
+                continue;
+            }
+
+            if (entry.State == EntityState.Added)
+            {
+                SetDateTimeIfDefault(entry, "CreatedAt", now);
+                SetAuditActor(entry, "CreatedByUserId", "CreatedByUserName", actor);
+                SetNullableDateTime(entry, "UpdatedAt", now);
+                SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
+                SetBoolean(entry, "IsDeleted", false);
+                QueueAuditEvent(pendingAuditEvents, entry, "Created", "Объект создан", actor, now);
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                var isDeletedProperty = entry.Metadata.FindProperty("IsDeleted") is not null
+                    ? entry.Property("IsDeleted")
+                    : null;
+                var isRestored =
+                    isDeletedProperty?.IsModified == true
+                    && isDeletedProperty.OriginalValue is bool originalDeleted
+                    && isDeletedProperty.CurrentValue is bool currentDeleted
+                    && originalDeleted
+                    && !currentDeleted;
+
+                SetNullableDateTime(entry, "UpdatedAt", now);
+                SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
+
+                if (isRestored)
+                {
+                    QueueAuditEvent(pendingAuditEvents, entry, "Restored", "Объект восстановлен", actor, now);
+                    continue;
+                }
+
+                var changedFields = GetChangedBusinessPropertyNames(entry);
+                if (changedFields.Count > 0)
+                {
+                    var description = changedFields.Count == 1
+                        ? $"Изменено поле: {changedFields[0]}"
+                        : $"Изменено полей: {changedFields.Count}";
+
+                    var metadata = new AuditUpdateMetadata(
+                        changedFields,
+                        GetChangedBusinessPropertyDiffs(entry));
+
+                    QueueAuditEvent(
+                        pendingAuditEvents,
+                        entry,
+                        "Updated",
+                        description,
+                        actor,
+                        now,
+                        JsonSerializer.Serialize(metadata, AuditMetadataJsonOptions));
+                }
+            }
+            else if (entry.State == EntityState.Deleted)
+            {
+                entry.State = EntityState.Modified;
+                SetBoolean(entry, "IsDeleted", true);
+                SetNullableDateTime(entry, "DeletedAt", now);
+                SetAuditActor(entry, "DeletedByUserId", "DeletedByUserName", actor);
+                SetNullableDateTime(entry, "UpdatedAt", now);
+                SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
+                QueueAuditEvent(pendingAuditEvents, entry, "Deleted", "Объект помечен удаленным", actor, now);
+            }
+        }
+
+        return pendingAuditEvents;
+    }
+
+    private void PersistAuditEvents(IReadOnlyCollection<PendingAuditEvent> pendingAuditEvents, bool acceptAllChangesOnSuccess = true)
+    {
+        if (pendingAuditEvents.Count == 0)
+        {
+            return;
+        }
+
+        var materializedEvents = MaterializeAuditEvents(pendingAuditEvents);
+        if (materializedEvents.Count == 0)
+        {
+            return;
+        }
+
+        Set<ObjectAuditEvent>().AddRange(materializedEvents);
+        base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    private async Task PersistAuditEventsAsync(
+        IReadOnlyCollection<PendingAuditEvent> pendingAuditEvents,
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken)
+    {
+        if (pendingAuditEvents.Count == 0)
+        {
+            return;
+        }
+
+        var materializedEvents = MaterializeAuditEvents(pendingAuditEvents);
+        if (materializedEvents.Count == 0)
+        {
+            return;
+        }
+
+        Set<ObjectAuditEvent>().AddRange(materializedEvents);
+        await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private static List<ObjectAuditEvent> MaterializeAuditEvents(IReadOnlyCollection<PendingAuditEvent> pendingAuditEvents)
+    {
+        var result = new List<ObjectAuditEvent>(pendingAuditEvents.Count);
+
+        foreach (var pendingEvent in pendingAuditEvents)
+        {
+            var objectId = TryReadEntityId(pendingEvent.Entity);
+            if (!objectId.HasValue)
+            {
+                continue;
+            }
+
+            result.Add(new ObjectAuditEvent
+            {
+                ObjectType = pendingEvent.ObjectType,
+                ObjectId = objectId.Value,
+                Action = pendingEvent.Action,
+                Description = pendingEvent.Description,
+                ActorUserId = pendingEvent.ActorUserId,
+                ActorUserName = pendingEvent.ActorUserName,
+                MetadataJson = pendingEvent.MetadataJson,
+                CreatedAt = pendingEvent.CreatedAt,
+            });
+        }
+
+        return result;
+    }
+
+    private static void QueueAuditEvent(
+        ICollection<PendingAuditEvent> pendingAuditEvents,
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        string action,
+        string? description,
+        (int? UserId, string? UserName) actor,
+        DateTime createdAt,
+        string? metadataJson = null)
+    {
+        var objectType = ResolveAuditObjectType(entry.Metadata.ClrType);
+        if (objectType is null)
+        {
+            return;
+        }
+
+        pendingAuditEvents.Add(new PendingAuditEvent(
+            entry.Entity,
+            objectType,
+            action,
+            description,
+            actor.UserId,
+            actor.UserName,
+            metadataJson,
+            createdAt));
+    }
+
+    private static List<string> GetChangedBusinessPropertyNames(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+    {
+        return entry.Properties
+            .Where(property => property.IsModified)
+            .Select(property => property.Metadata.Name)
+            .Where(name => !AuditSystemPropertyNames.Contains(name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static List<AuditFieldChange> GetChangedBusinessPropertyDiffs(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+    {
+        return entry.Properties
+            .Where(property => property.IsModified)
+            .Where(property => !AuditSystemPropertyNames.Contains(property.Metadata.Name))
+            .Where(property => !AuditDetailedDiffExcludedPropertyNames.Contains(property.Metadata.Name))
+            .Select(property => new AuditFieldChange(
+                property.Metadata.Name,
+                FormatAuditValue(property.OriginalValue),
+                FormatAuditValue(property.CurrentValue)))
+            .Where(change =>
+                !string.Equals(change.OldValue, change.NewValue, StringComparison.Ordinal)
+                && (!string.IsNullOrWhiteSpace(change.OldValue) || !string.IsNullOrWhiteSpace(change.NewValue)))
+            .OrderBy(change => change.Field, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string? FormatAuditValue(object? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string stringValue => NormalizeAuditString(stringValue),
+            DateTime dateTime => dateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            bool boolValue => boolValue ? "Да" : "Нет",
+            Enum enumValue => enumValue.ToString(),
+            decimal decimalValue => decimalValue.ToString(CultureInfo.InvariantCulture),
+            double doubleValue => doubleValue.ToString(CultureInfo.InvariantCulture),
+            float floatValue => floatValue.ToString(CultureInfo.InvariantCulture),
+            Guid guidValue => guidValue.ToString(),
+            _ => NormalizeAuditString(Convert.ToString(value, CultureInfo.InvariantCulture))
+        };
+    }
+
+    private static string? NormalizeAuditString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        const int maxLength = 160;
+
+        return normalized.Length <= maxLength
+            ? normalized
+            : $"{normalized[..maxLength]}…";
+    }
+
+    private static int? TryReadEntityId(object entity)
+    {
+        var property = entity.GetType().GetProperty("Id");
+        if (property?.PropertyType != typeof(int))
+        {
+            return null;
+        }
+
+        var value = property.GetValue(entity);
+        return value is int id && id > 0 ? id : null;
+    }
+
+    private static string? ResolveAuditObjectType(Type clrType)
+    {
+        if (clrType == typeof(Client)) return "client";
+        if (clrType == typeof(ClientCase)) return "client-case";
+        if (clrType == typeof(Payment)) return "payment";
+        if (clrType == typeof(Invoice)) return "invoice";
+        if (clrType == typeof(InvoiceLineItem)) return "invoice-line-item";
+        if (clrType == typeof(Act)) return "act";
+        if (clrType == typeof(Contract)) return "contract";
+        if (clrType == typeof(LegalEntity)) return "legal-entity";
+        if (clrType == typeof(ExternalContact)) return "contact";
+        if (clrType == typeof(AddressRecord)) return "address";
+        if (clrType == typeof(ClientPassport)) return "client-passport";
+        if (clrType == typeof(PowerOfAttorney)) return "power-of-attorney";
+        if (clrType == typeof(MoneyOperation)) return "money-operation";
+
+        return null;
+    }
+
+    private (int? UserId, string? UserName) GetCurrentAuditActor()
+    {
+        var user = _httpContextAccessor?.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            return (null, null);
+        }
+
+        var userId = int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var parsed)
+            ? parsed
+            : (int?)null;
+
+        var userName = user.FindFirstValue(ClaimTypes.Name)
+            ?? user.FindFirstValue(ClaimTypes.Email)
+            ?? user.Identity?.Name;
+
+        return (userId, string.IsNullOrWhiteSpace(userName) ? null : userName);
+    }
+
+    private static void SetDateTimeIfDefault(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        string propertyName,
+        DateTime value)
+    {
+        if (entry.Metadata.FindProperty(propertyName) is null)
+        {
+            return;
+        }
+
+        var property = entry.Property(propertyName);
+        var clrType = Nullable.GetUnderlyingType(property.Metadata.ClrType) ?? property.Metadata.ClrType;
+        if (clrType == typeof(DateTime)
+            && (property.CurrentValue is null || property.CurrentValue is DateTime date && date == default))
+        {
+            property.CurrentValue = value;
+        }
+    }
+
+    private static void SetNullableDateTime(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        string propertyName,
+        DateTime? value)
+    {
+        if (entry.Metadata.FindProperty(propertyName) is not null)
+        {
+            entry.Property(propertyName).CurrentValue = value;
+        }
+    }
+
+    private static void SetBoolean(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        string propertyName,
+        bool value)
+    {
+        if (entry.Metadata.FindProperty(propertyName) is not null)
+        {
+            entry.Property(propertyName).CurrentValue = value;
+        }
+    }
+
+    private static void SetAuditActor(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        string userIdPropertyName,
+        string userNamePropertyName,
+        (int? UserId, string? UserName) actor)
+    {
+        if (entry.Metadata.FindProperty(userIdPropertyName) is not null)
+        {
+            entry.Property(userIdPropertyName).CurrentValue = actor.UserId;
+        }
+
+        if (entry.Metadata.FindProperty(userNamePropertyName) is not null)
+        {
+            entry.Property(userNamePropertyName).CurrentValue = actor.UserName;
         }
     }
 
@@ -1161,6 +1712,7 @@ public class PaymentContext : DbContext
     /// Журнал действий пользователей.
     /// </summary>
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
+    public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
 
     /// <summary>
     /// Пользовательские настройки.

@@ -49,8 +49,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("integer");
@@ -58,6 +75,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("InvoiceNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Number")
                         .IsRequired()
@@ -78,6 +100,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId")
@@ -86,8 +115,14 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_Acts_Date");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_Act_DeletedAt_Audit");
+
                     b.HasIndex("InvoiceId")
                         .HasDatabaseName("IX_Acts_InvoiceId");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Act_IsDeleted");
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Acts_Number");
@@ -97,6 +132,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Acts_Status");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Act_UpdatedAt_Audit");
 
                     b.ToTable("Acts");
                 });
@@ -125,6 +163,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("FiasId")
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)");
@@ -144,6 +199,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("House")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("boolean");
@@ -177,6 +237,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Value")
                         .IsRequired()
                         .HasMaxLength(600)
@@ -187,11 +254,20 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClientId")
                         .HasDatabaseName("IX_AddressRecords_ClientId");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_AddressRecord_DeletedAt_Audit");
+
                     b.HasIndex("FiasId")
                         .HasDatabaseName("IX_AddressRecords_FiasId");
 
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_AddressRecord_IsDeleted");
+
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_AddressRecords_LegalEntityId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_AddressRecord_UpdatedAt_Audit");
 
                     b.HasIndex("ClientId", "Type", "IsPrimary")
                         .HasDatabaseName("IX_AddressRecords_ClientId_Type_IsPrimary");
@@ -272,6 +348,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -279,6 +372,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int?>("LegalEntityId")
                         .HasColumnType("integer");
@@ -301,6 +399,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ResponsibleUserId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientStatusId")
@@ -309,11 +417,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_Clients_CreatedAt");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_Client_DeletedAt_Audit");
+
                     b.HasIndex("Email")
                         .HasDatabaseName("IX_Clients_Email");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_Clients_IsActive");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Client_IsDeleted");
 
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_Clients_LegalEntityId");
@@ -323,6 +437,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ResponsibleUserId")
                         .HasDatabaseName("IX_Clients_ResponsibleUserId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Client_UpdatedAt_Audit");
 
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_Clients_IsActive_Name");
@@ -344,10 +461,32 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -357,13 +496,32 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_ClientCases_CreatedAt");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientCase_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientCase_IsDeleted");
+
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_ClientCases_Status");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientCase_UpdatedAt_Audit");
 
                     b.HasIndex("ClientId", "CreatedAt")
                         .HasDatabaseName("IX_ClientCases_ClientId_CreatedAt");
@@ -418,9 +576,31 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("DepartmentCode")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("boolean");
@@ -443,6 +623,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime?>("ValidFrom")
                         .HasColumnType("timestamp without time zone");
 
@@ -453,6 +640,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ClientId")
                         .HasDatabaseName("IX_ClientPassports_ClientId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientPassport_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientPassport_IsDeleted");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientPassport_UpdatedAt_Audit");
 
                     b.HasIndex("ClientId", "IsPrimary")
                         .HasDatabaseName("IX_ClientPassports_ClientId_IsPrimary");
@@ -522,12 +718,34 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Number")
                         .IsRequired()
@@ -547,6 +765,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime?>("ValidUntil")
                         .HasColumnType("date");
 
@@ -555,8 +780,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_Contracts_Date");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_Contract_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Contract_IsDeleted");
+
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Contracts_Number");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Contract_UpdatedAt_Audit");
 
                     b.ToTable("Contracts");
                 });
@@ -778,6 +1012,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Email")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -793,6 +1044,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int?>("LegalEntityId")
                         .HasColumnType("integer");
@@ -826,13 +1082,26 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ExternalContact_DeletedAt_Audit");
 
                     b.HasIndex("FullName")
                         .HasDatabaseName("IX_ExternalContacts_FullName");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_ExternalContacts_IsActive");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ExternalContact_IsDeleted");
 
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_ExternalContacts_LegalEntityId");
@@ -842,6 +1111,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("SyncToPhonebook")
                         .HasDatabaseName("IX_ExternalContacts_SyncToPhonebook");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ExternalContact_UpdatedAt_Audit");
 
                     b.ToTable("ExternalContacts");
                 });
@@ -953,8 +1225,30 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Number")
                         .IsRequired()
@@ -964,13 +1258,29 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_Invoices_Date");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_Invoice_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Invoice_IsDeleted");
+
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Invoices_Number");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Invoice_UpdatedAt_Audit");
 
                     b.HasIndex("Number", "Date")
                         .HasDatabaseName("IX_Invoices_Number_Date");
@@ -1059,6 +1369,28 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -1084,10 +1416,26 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_InvoiceLineItem_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_InvoiceLineItem_IsDeleted");
 
                     b.HasIndex("PaymentId")
                         .HasDatabaseName("IX_InvoiceLineItems_PaymentId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_InvoiceLineItem_UpdatedAt_Audit");
 
                     b.HasIndex("PaymentId", "SortOrder")
                         .HasDatabaseName("IX_InvoiceLineItems_PaymentId_SortOrder");
@@ -1191,6 +1539,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Director")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -1230,6 +1595,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("Inn")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Kpp")
                         .HasMaxLength(20)
@@ -1370,13 +1740,26 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<bool?>("VatWithoutVat")
                         .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_LegalEntity_DeletedAt_Audit");
+
                     b.HasIndex("Inn")
                         .HasDatabaseName("IX_LegalEntities_Inn");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_LegalEntity_IsDeleted");
 
                     b.HasIndex("Kpp")
                         .HasDatabaseName("IX_LegalEntities_Kpp");
@@ -1386,6 +1769,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ShortName")
                         .HasDatabaseName("IX_LegalEntities_ShortName");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_LegalEntity_UpdatedAt_Audit");
 
                     b.ToTable("LegalEntities");
                 });
@@ -1422,12 +1808,29 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Currency")
                         .HasMaxLength(12)
                         .HasColumnType("character varying(12)");
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Direction")
                         .IsRequired()
@@ -1439,6 +1842,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<bool>("IsAdvancePayment")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("PaidAccountName")
                         .HasMaxLength(200)
@@ -1480,21 +1888,88 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_MoneyOperations_Date");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_MoneyOperation_DeletedAt_Audit");
+
                     b.HasIndex("Direction")
                         .HasDatabaseName("IX_MoneyOperations_Direction");
 
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_MoneyOperation_IsDeleted");
+
                     b.HasIndex("Source")
                         .HasDatabaseName("IX_MoneyOperations_Source");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_MoneyOperation_UpdatedAt_Audit");
 
                     b.HasIndex("Source", "Date")
                         .HasDatabaseName("IX_MoneyOperations_Source_Date");
 
                     b.ToTable("MoneyOperations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ObjectAuditEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ActorUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ObjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ObjectType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_ObjectAuditEvents_CreatedAt");
+
+                    b.HasIndex("ObjectType", "ObjectId", "CreatedAt")
+                        .HasDatabaseName("IX_ObjectAuditEvents_Object_CreatedAt");
+
+                    b.ToTable("ObjectAuditEvents");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.OkinDictionaryItem", b =>
@@ -1677,11 +2152,28 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
                     b.Property<int?>("DealTypeId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -1700,6 +2192,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsPaid")
                         .HasColumnType("boolean");
@@ -1755,6 +2252,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Account")
@@ -1775,6 +2282,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("DealTypeId")
                         .HasDatabaseName("IX_Payments_DealTypeId");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_Payment_DeletedAt_Audit");
+
                     b.HasIndex("DocumentKind")
                         .HasDatabaseName("IX_Payments_DocumentKind");
 
@@ -1786,6 +2296,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("InvoiceId")
                         .HasDatabaseName("IX_Payments_InvoiceId");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Payment_IsDeleted");
 
                     b.HasIndex("LastPaymentDate")
                         .HasDatabaseName("IX_Payments_LastPaymentDate");
@@ -1807,6 +2320,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ServiceId")
                         .HasDatabaseName("IX_Payments_ServiceId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Payment_UpdatedAt_Audit");
 
                     b.HasIndex("Account", "AccountDate")
                         .HasDatabaseName("IX_Payments_Account_AccountDate");
@@ -1962,8 +2478,30 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("IssuedAt")
                         .HasColumnType("timestamp without time zone");
@@ -1984,13 +2522,29 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime?>("ValidUntil")
                         .HasColumnType("timestamp without time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_PowerOfAttorney_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_PowerOfAttorney_IsDeleted");
+
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_PowersOfAttorney_Number");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_PowerOfAttorney_UpdatedAt_Audit");
 
                     b.HasIndex("ClientId", "IsActive")
                         .HasDatabaseName("IX_PowersOfAttorney_ClientId_IsActive");
