@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -109,41 +110,86 @@ public partial class AuthService
         return File.Exists(fullPath) ? photoUrl : null;
     }
 
-    private UserDto MapToDto(User user) => new()
+    private sealed record AuditMetadataDto(
+        int? CreatedByUserId,
+        string? CreatedByUserName,
+        DateTime? UpdatedAt,
+        int? UpdatedByUserId,
+        string? UpdatedByUserName);
+
+    private static AuditMetadataDto ReadAuditMetadata(EntityEntry entry)
+        => new(
+            ReadNullable<int>(entry, "CreatedByUserId"),
+            ReadNullable<string>(entry, "CreatedByUserName"),
+            ReadNullable<DateTime>(entry, "UpdatedAt"),
+            ReadNullable<int>(entry, "UpdatedByUserId"),
+            ReadNullable<string>(entry, "UpdatedByUserName"));
+
+    private static T? ReadNullable<T>(EntityEntry entry, string propertyName)
     {
-        Id = user.Id,
-        Email = user.Email,
-        FullName = user.FullName,
-        FirstName = user.FirstName,
-        LastName = user.LastName,
-        MiddleName = user.MiddleName,
-        DateOfBirth = user.DateOfBirth,
-        PhotoUrl = ResolvePhotoUrl(user.PhotoUrl),
-        PhoneNumber = user.PhoneNumber,
-        WhatsApp = user.WhatsApp,
-        Telegram = user.Telegram,
-        Instagram = user.Instagram,
-        Messenger = user.Messenger,
-        Viber = user.Viber,
-        IsEmployee = user.IsEmployee,
-        EmploymentStartDate = user.EmploymentStartDate,
-        EmploymentEndDate = user.EmploymentEndDate,
-        IsActive = user.IsActive,
-        IsApproved = user.IsApproved,
-        IsProtectedUser = IsProtectedSystemUser(user),
-        ApprovedAt = user.ApprovedAt,
-        CreatedAt = user.CreatedAt,
-        ExternalIdentities = MapExternalIdentities(user.ExternalIdentities),
-        Role = new RoleDto
+        var property = entry.Metadata.FindProperty(propertyName);
+        if (property is null)
         {
-            Id = user.Role?.Id ?? 0,
-            Name = user.Role?.Name ?? "user",
-            Description = user.Role?.Description ?? string.Empty,
-            CreatedAt = user.Role?.CreatedAt,
-            IsSystemRole = user.Role?.Name == "admin",
-            TotalSectionsCount = RolePermissionCatalog.AllSections.Length
+            return default;
         }
-    };
+
+        var value = entry.Property(propertyName).CurrentValue;
+        return value is T typed ? typed : default;
+    }
+
+    private UserDto MapToDto(User user)
+    {
+        var userAudit = ReadAuditMetadata(_context.Entry(user));
+        var roleAudit = user.Role is not null
+            ? ReadAuditMetadata(_context.Entry(user.Role))
+            : null;
+
+        return new UserDto
+        {
+            Id = user.Id,
+            Email = user.Email,
+            FullName = user.FullName,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            MiddleName = user.MiddleName,
+            DateOfBirth = user.DateOfBirth,
+            PhotoUrl = ResolvePhotoUrl(user.PhotoUrl),
+            PhoneNumber = user.PhoneNumber,
+            WhatsApp = user.WhatsApp,
+            Telegram = user.Telegram,
+            Instagram = user.Instagram,
+            Messenger = user.Messenger,
+            Viber = user.Viber,
+            IsEmployee = user.IsEmployee,
+            EmploymentStartDate = user.EmploymentStartDate,
+            EmploymentEndDate = user.EmploymentEndDate,
+            IsActive = user.IsActive,
+            IsApproved = user.IsApproved,
+            IsProtectedUser = IsProtectedSystemUser(user),
+            ApprovedAt = user.ApprovedAt,
+            CreatedAt = user.CreatedAt,
+            CreatedByUserId = userAudit.CreatedByUserId,
+            CreatedByUserName = userAudit.CreatedByUserName,
+            UpdatedAt = userAudit.UpdatedAt,
+            UpdatedByUserId = userAudit.UpdatedByUserId,
+            UpdatedByUserName = userAudit.UpdatedByUserName,
+            ExternalIdentities = MapExternalIdentities(user.ExternalIdentities),
+            Role = new RoleDto
+            {
+                Id = user.Role?.Id ?? 0,
+                Name = user.Role?.Name ?? "user",
+                Description = user.Role?.Description ?? string.Empty,
+                CreatedAt = user.Role?.CreatedAt,
+                CreatedByUserId = roleAudit?.CreatedByUserId,
+                CreatedByUserName = roleAudit?.CreatedByUserName,
+                UpdatedAt = roleAudit?.UpdatedAt,
+                UpdatedByUserId = roleAudit?.UpdatedByUserId,
+                UpdatedByUserName = roleAudit?.UpdatedByUserName,
+                IsSystemRole = user.Role?.Name == "admin",
+                TotalSectionsCount = RolePermissionCatalog.AllSections.Length
+            }
+        };
+    }
 
     public static string NormalizeEmailValue(string email)
         => NormalizeEmail(email);
@@ -327,6 +373,11 @@ public partial class AuthService
                 Name = r.Name,
                 Description = r.Description,
                 CreatedAt = r.CreatedAt,
+                CreatedByUserId = EF.Property<int?>(r, "CreatedByUserId"),
+                CreatedByUserName = EF.Property<string?>(r, "CreatedByUserName"),
+                UpdatedAt = EF.Property<DateTime?>(r, "UpdatedAt"),
+                UpdatedByUserId = EF.Property<int?>(r, "UpdatedByUserId"),
+                UpdatedByUserName = EF.Property<string?>(r, "UpdatedByUserName"),
                 IsSystemRole = r.Name == "admin",
                 AssignedUsersCount = r.Users.Count(),
                 AccessibleSectionsCount = r.Permissions.Count(permission => permission.CanView),
@@ -343,7 +394,7 @@ public partial class AuthService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var query = ApplyUserStatusFilter(QueryUsersWithRelations().AsNoTracking(), status);
+        var query = ApplyUserStatusFilter(QueryUsersWithRelations(), status);
         var total = await query.CountAsync();
         var users = await query
             .OrderByDescending(u => u.CreatedAt)
@@ -464,7 +515,7 @@ public partial class AuthService
 
     public async Task<List<UserDto>> GetAllUsersAsync(string? status = null)
     {
-        var query = ApplyUserStatusFilter(QueryUsersWithRelations().AsNoTracking(), status);
+        var query = ApplyUserStatusFilter(QueryUsersWithRelations(), status);
         var users = await query.OrderByDescending(u => u.CreatedAt).ToListAsync();
         return users.Select(MapToDto).ToList();
     }
@@ -472,7 +523,6 @@ public partial class AuthService
     public async Task<UserDto?> GetUserByIdAsync(int id)
     {
         var user = await QueryUsersWithRelations()
-            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == id);
         return user == null ? null : MapToDto(user);
     }

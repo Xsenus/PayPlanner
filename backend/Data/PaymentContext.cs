@@ -53,7 +53,7 @@ public class PaymentContext : DbContext
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    private static readonly HashSet<Type> AuditedEntityTypes = new()
+    private static readonly HashSet<Type> SoftDeleteAuditedEntityTypes = new()
     {
         typeof(Act),
         typeof(AddressRecord),
@@ -69,6 +69,16 @@ public class PaymentContext : DbContext
         typeof(Payment),
         typeof(PowerOfAttorney)
     };
+
+    private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
+    {
+        typeof(Role),
+        typeof(User),
+    };
+
+    private static readonly HashSet<Type> AuditedEntityTypes = SoftDeleteAuditedEntityTypes
+        .Concat(MetadataOnlyAuditedEntityTypes)
+        .ToHashSet();
 
     private sealed record PendingAuditEvent(
         object Entity,
@@ -144,29 +154,54 @@ public class PaymentContext : DbContext
             entity.HasIndex("IsActive", "Name").HasDatabaseName($"IX_{baseIndexName}_IsActive_Name");
         }
 
-        static void ConfigureAudit<TEntity>(ModelBuilder builder)
+        static void ConfigureAuditDateProperty<TEntity>(
+            Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity,
+            string propertyName)
+            where TEntity : class
+        {
+            var property = entity.Metadata.FindProperty(propertyName);
+
+            if (property?.ClrType == typeof(DateTime))
+            {
+                entity.Property<DateTime>(propertyName);
+                return;
+            }
+
+            if (property?.ClrType == typeof(DateTime?))
+            {
+                entity.Property<DateTime?>(propertyName);
+                return;
+            }
+
+            entity.Property<DateTime?>(propertyName);
+        }
+
+        static void ConfigureAudit<TEntity>(ModelBuilder builder, bool enableSoftDelete = true)
             where TEntity : class
         {
             var entity = builder.Entity<TEntity>();
             var name = typeof(TEntity).Name;
 
-            if (entity.Metadata.FindProperty("CreatedAt") is null)
-            {
-                entity.Property<DateTime?>("CreatedAt");
-            }
+            ConfigureAuditDateProperty(entity, "CreatedAt");
 
             entity.Property<int?>("CreatedByUserId");
             entity.Property<string>("CreatedByUserName").HasMaxLength(256);
-            entity.Property<DateTime?>("UpdatedAt");
+            ConfigureAuditDateProperty(entity, "UpdatedAt");
             entity.Property<int?>("UpdatedByUserId");
             entity.Property<string>("UpdatedByUserName").HasMaxLength(256);
+            entity.HasIndex("UpdatedAt").HasDatabaseName($"IX_{name}_UpdatedAt_Audit");
+
+            if (!enableSoftDelete)
+            {
+                return;
+            }
+
             entity.Property<bool>("IsDeleted").HasDefaultValue(false);
             entity.Property<DateTime?>("DeletedAt");
             entity.Property<int?>("DeletedByUserId");
             entity.Property<string>("DeletedByUserName").HasMaxLength(256);
 
             entity.HasIndex("IsDeleted").HasDatabaseName($"IX_{name}_IsDeleted");
-            entity.HasIndex("UpdatedAt").HasDatabaseName($"IX_{name}_UpdatedAt_Audit");
             entity.HasIndex("DeletedAt").HasDatabaseName($"IX_{name}_DeletedAt_Audit");
 
             var parameter = Expression.Parameter(typeof(TEntity), "entity");
@@ -1171,6 +1206,8 @@ public class PaymentContext : DbContext
             ConfigureAudit<MoneyOperation>(modelBuilder);
             ConfigureAudit<Payment>(modelBuilder);
             ConfigureAudit<PowerOfAttorney>(modelBuilder);
+            ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
+            ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
 
         if (Database.IsNpgsql())
@@ -1268,12 +1305,16 @@ public class PaymentContext : DbContext
                 SetAuditActor(entry, "CreatedByUserId", "CreatedByUserName", actor);
                 SetNullableDateTime(entry, "UpdatedAt", now);
                 SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
-                SetBoolean(entry, "IsDeleted", false);
+                if (HasSoftDeleteAudit(entry))
+                {
+                    SetBoolean(entry, "IsDeleted", false);
+                }
+
                 QueueAuditEvent(pendingAuditEvents, entry, "Created", "Объект создан", actor, now);
             }
             else if (entry.State == EntityState.Modified)
             {
-                var isDeletedProperty = entry.Metadata.FindProperty("IsDeleted") is not null
+                var isDeletedProperty = HasSoftDeleteAudit(entry)
                     ? entry.Property("IsDeleted")
                     : null;
                 var isRestored =
@@ -1315,13 +1356,20 @@ public class PaymentContext : DbContext
             }
             else if (entry.State == EntityState.Deleted)
             {
-                entry.State = EntityState.Modified;
-                SetBoolean(entry, "IsDeleted", true);
-                SetNullableDateTime(entry, "DeletedAt", now);
-                SetAuditActor(entry, "DeletedByUserId", "DeletedByUserName", actor);
-                SetNullableDateTime(entry, "UpdatedAt", now);
-                SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
-                QueueAuditEvent(pendingAuditEvents, entry, "Deleted", "Объект помечен удаленным", actor, now);
+                if (HasSoftDeleteAudit(entry))
+                {
+                    entry.State = EntityState.Modified;
+                    SetBoolean(entry, "IsDeleted", true);
+                    SetNullableDateTime(entry, "DeletedAt", now);
+                    SetAuditActor(entry, "DeletedByUserId", "DeletedByUserName", actor);
+                    SetNullableDateTime(entry, "UpdatedAt", now);
+                    SetAuditActor(entry, "UpdatedByUserId", "UpdatedByUserName", actor);
+                    QueueAuditEvent(pendingAuditEvents, entry, "Deleted", "Объект помечен удаленным", actor, now);
+                }
+                else
+                {
+                    QueueAuditEvent(pendingAuditEvents, entry, "Deleted", "Объект удален", actor, now);
+                }
             }
         }
 
@@ -1500,6 +1548,8 @@ public class PaymentContext : DbContext
     {
         if (clrType == typeof(Client)) return "client";
         if (clrType == typeof(ClientCase)) return "client-case";
+        if (clrType == typeof(User)) return "user";
+        if (clrType == typeof(Role)) return "role";
         if (clrType == typeof(Payment)) return "payment";
         if (clrType == typeof(Invoice)) return "invoice";
         if (clrType == typeof(InvoiceLineItem)) return "invoice-line-item";
@@ -1514,6 +1564,9 @@ public class PaymentContext : DbContext
 
         return null;
     }
+
+    private static bool HasSoftDeleteAudit(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+        => entry.Metadata.FindProperty("IsDeleted") is not null;
 
     private (int? UserId, string? UserName) GetCurrentAuditActor()
     {

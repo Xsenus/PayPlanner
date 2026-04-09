@@ -63,6 +63,55 @@ public class PaymentContextAuditTests
     }
 
     [Fact]
+    public async Task SaveChanges_FillsCreatedAndUpdatedAuditMetadata_ForUserAndRole()
+    {
+        await using var db = await CreateContextAsync(CreateHttpContextAccessor());
+
+        var role = new Role
+        {
+            Name = "auditor",
+            Description = "Audit role",
+            CreatedAt = DateTime.UtcNow,
+            PermissionsUpdatedAt = DateTime.UtcNow
+        };
+
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(42, db.Entry(role).Property<int?>("CreatedByUserId").CurrentValue);
+        Assert.Equal("Audit Tester", db.Entry(role).Property<string?>("CreatedByUserName").CurrentValue);
+        Assert.Equal(42, db.Entry(role).Property<int?>("UpdatedByUserId").CurrentValue);
+        Assert.Equal("Audit Tester", db.Entry(role).Property<string?>("UpdatedByUserName").CurrentValue);
+        Assert.Null(db.Entry(role).Metadata.FindProperty("IsDeleted"));
+
+        role.Description = "Audit role updated";
+        await db.SaveChangesAsync();
+
+        Assert.NotNull(db.Entry(role).Property<DateTime?>("UpdatedAt").CurrentValue);
+
+        var user = new User
+        {
+            Email = "audit-user@example.com",
+            PasswordHash = "hashed-password",
+            FullName = "Audit User",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(42, db.Entry(user).Property<int?>("CreatedByUserId").CurrentValue);
+        Assert.Equal("Audit Tester", db.Entry(user).Property<string?>("CreatedByUserName").CurrentValue);
+        Assert.Equal(42, db.Entry(user).Property<int?>("UpdatedByUserId").CurrentValue);
+        Assert.Equal("Audit Tester", db.Entry(user).Property<string?>("UpdatedByUserName").CurrentValue);
+        Assert.Null(db.Entry(user).Metadata.FindProperty("IsDeleted"));
+    }
+
+    [Fact]
     public async Task SaveChanges_WritesObjectAuditEvents_ForCreateUpdateAndDelete()
     {
         await using var db = await CreateContextAsync(CreateHttpContextAccessor());
@@ -181,6 +230,35 @@ public class PaymentContextAuditTests
 
         Assert.Equal("Audit Tester", restoredEvent.ActorUserName);
         Assert.Equal("Объект восстановлен", restoredEvent.Description);
+    }
+
+    [Fact]
+    public async Task Delete_MetadataOnlyAuditedRole_WritesDeletedEvent_AndRemovesRow()
+    {
+        await using var db = await CreateContextAsync(CreateHttpContextAccessor());
+
+        var role = new Role
+        {
+            Name = "temporary-role",
+            Description = "Temporary role",
+            CreatedAt = DateTime.UtcNow,
+            PermissionsUpdatedAt = DateTime.UtcNow
+        };
+
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.Roles.Remove(role);
+        await db.SaveChangesAsync();
+
+        Assert.False(await db.Roles.AnyAsync(item => item.Id == role.Id));
+
+        var deletedEvent = await db.ObjectAuditEvents
+            .OrderByDescending(item => item.Id)
+            .FirstAsync(item => item.ObjectType == "role" && item.ObjectId == role.Id && item.Action == "Deleted");
+
+        Assert.Equal("Audit Tester", deletedEvent.ActorUserName);
+        Assert.Equal("Объект удален", deletedEvent.Description);
     }
 
     [Fact]

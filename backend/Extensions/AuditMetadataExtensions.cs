@@ -31,9 +31,15 @@ public static class AuditMetadataExtensions
             entry.Property<DateTime?>("UpdatedAt").CurrentValue,
             entry.Property<int?>("UpdatedByUserId").CurrentValue,
             entry.Property<string?>("UpdatedByUserName").CurrentValue,
-            entry.Property<bool>("IsDeleted").CurrentValue,
-            entry.Property<DateTime?>("DeletedAt").CurrentValue,
-            entry.Property<int?>("DeletedByUserId").CurrentValue,
-            entry.Property<string?>("DeletedByUserName").CurrentValue);
+            entry.Metadata.FindProperty("IsDeleted") is not null && entry.Property<bool>("IsDeleted").CurrentValue,
+            entry.Metadata.FindProperty("DeletedAt") is not null
+                ? entry.Property<DateTime?>("DeletedAt").CurrentValue
+                : null,
+            entry.Metadata.FindProperty("DeletedByUserId") is not null
+                ? entry.Property<int?>("DeletedByUserId").CurrentValue
+                : null,
+            entry.Metadata.FindProperty("DeletedByUserName") is not null
+                ? entry.Property<string?>("DeletedByUserName").CurrentValue
+                : null);
     }
 }

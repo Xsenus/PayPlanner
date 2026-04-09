@@ -2565,6 +2565,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -2585,6 +2592,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
@@ -2593,6 +2610,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("PermissionsUpdatedAt")
                         .HasDatabaseName("IX_Roles_PermissionsUpdatedAt");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_Role_UpdatedAt_Audit");
 
                     b.ToTable("Roles");
                 });
@@ -2989,6 +3009,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime?>("DateOfBirth")
                         .HasColumnType("date");
 
@@ -3063,6 +3090,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Viber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -3098,7 +3132,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("idx_users_role");
 
                     b.HasIndex("UpdatedAt")
-                        .HasDatabaseName("idx_users_updated");
+                        .HasDatabaseName("IX_User_UpdatedAt_Audit");
 
                     b.HasIndex("EmploymentStartDate", "EmploymentEndDate")
                         .HasDatabaseName("idx_users_employment_range");

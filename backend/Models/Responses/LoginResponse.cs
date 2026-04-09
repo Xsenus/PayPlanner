@@ -31,6 +31,11 @@ namespace PayPlanner.Api.Models.Responses
         public bool IsProtectedUser { get; set; }
         public DateTime? ApprovedAt { get; set; }
         public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string? CreatedByUserName { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string? UpdatedByUserName { get; set; }
         public List<ExternalIdentityDto> ExternalIdentities { get; set; } = new();
     }
 
@@ -40,6 +45,11 @@ namespace PayPlanner.Api.Models.Responses
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public DateTime? CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string? CreatedByUserName { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string? UpdatedByUserName { get; set; }
         public bool IsSystemRole { get; set; }
         public int AssignedUsersCount { get; set; }
         public int AccessibleSectionsCount { get; set; }
