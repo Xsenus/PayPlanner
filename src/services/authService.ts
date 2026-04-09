@@ -45,6 +45,11 @@ export interface Role {
   name: string;
   description?: string | null;
   createdAt?: string | null;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
   isSystemRole?: boolean;
   assignedUsersCount?: number;
   accessibleSectionsCount?: number;
@@ -92,6 +97,11 @@ export interface User {
   isApproved: boolean;
   isProtectedUser?: boolean;
   createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
   approvedAt?: string | null;
   externalIdentities?: ExternalIdentity[];
 }

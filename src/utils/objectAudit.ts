@@ -10,6 +10,16 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Email: 'Email',
   Phone: 'Телефон',
   Phones: 'Телефоны',
+  FirstName: 'Имя',
+  LastName: 'Фамилия',
+  MiddleName: 'Отчество',
+  DateOfBirth: 'Дата рождения',
+  PhoneNumber: 'Телефон',
+  WhatsApp: 'WhatsApp',
+  Telegram: 'Telegram',
+  Instagram: 'Instagram',
+  Messenger: 'Messenger',
+  Viber: 'Viber',
   Address: 'Адрес',
   AddressLine: 'Адрес',
   ResponsibleUserId: 'Ответственный',
@@ -26,6 +36,21 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   PaidDate: 'Дата оплаты',
   StartDate: 'Дата начала',
   EndDate: 'Дата окончания',
+  CreatedAt: 'Дата создания',
+  CreatedByUserId: 'Создал',
+  CreatedByUserName: 'Создал',
+  UpdatedAt: 'Дата изменения',
+  UpdatedByUserId: 'Изменил',
+  UpdatedByUserName: 'Изменил',
+  RoleId: 'Роль',
+  IsEmployee: 'Сотрудник',
+  IsActive: 'Активность',
+  IsApproved: 'Одобрение',
+  EmploymentStartDate: 'Дата начала работы',
+  EmploymentEndDate: 'Дата окончания работы',
+  PhotoUrl: 'Фото',
+  PermissionsUpdatedAt: 'Изменение прав',
+  PermissionsUpdatedByUserName: 'Изменил права',
   IsDeleted: 'Состояние удаления',
 };
 
@@ -65,6 +90,14 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
   },
   contact: {
     FullName: 'ФИО контакта',
+  },
+  user: {
+    FullName: 'ФИО пользователя',
+    Name: 'Пользователь',
+  },
+  role: {
+    Name: 'Название роли',
+    Description: 'Описание роли',
   },
 };
 

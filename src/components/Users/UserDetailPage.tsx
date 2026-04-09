@@ -4,6 +4,8 @@ import { authService, type Role, type UpdateUserDto, type User } from '../../ser
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 type UserDetailSection = 'main' | 'contacts' | 'employment' | 'access';
 
@@ -328,6 +330,19 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                 </div>
               ))}
             </div>
+
+            {!isCreateMode && user ? (
+              <div className="space-y-3">
+                <AuditInfoCard
+                  createdAt={user.createdAt}
+                  createdByUserName={user.createdByUserName}
+                  updatedAt={user.updatedAt}
+                  updatedByUserName={user.updatedByUserName}
+                  compact
+                />
+                <ObjectAuditHistoryCard objectType="user" objectId={user.id} compact />
+              </div>
+            ) : null}
           </aside>
 
           <div className="space-y-6">

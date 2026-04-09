@@ -12,6 +12,8 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ProfilePhotoCropModal } from './ProfilePhotoCropModal';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 type ProviderId = 'google' | 'vk' | 'yandex' | 'telegram';
 
@@ -825,6 +827,19 @@ export function ProfilePage() {
                 </button>
               </div>
             </div>
+
+            {profile ? (
+              <div className="space-y-4">
+                <AuditInfoCard
+                  createdAt={profile.createdAt}
+                  createdByUserName={profile.createdByUserName}
+                  updatedAt={profile.updatedAt}
+                  updatedByUserName={profile.updatedByUserName}
+                  compact
+                />
+                <ObjectAuditHistoryCard objectType="user" objectId={profile.id} compact />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

@@ -29,13 +29,18 @@ describe('objectAudit utilities', () => {
   it('maps known field labels with object-specific overrides', () => {
     expect(getObjectAuditFieldLabel('payment', 'CounterpartyName')).toBe('Клиент / поставщик');
     expect(getObjectAuditFieldLabel('client-case', 'Name')).toBe('Название дела');
-    expect(getObjectAuditFieldLabel('unknown', 'UpdatedByUserName')).toBe('Updated By User Name');
+    expect(getObjectAuditFieldLabel('unknown', 'UpdatedByUserName')).toBe('Изменил');
+    expect(getObjectAuditFieldLabel('user', 'FullName')).toBe('ФИО пользователя');
+    expect(getObjectAuditFieldLabel('role', 'Name')).toBe('Название роли');
   });
 
   it('builds readable change summary', () => {
     expect(formatAuditChangeSummary('payment', '["Status"]')).toBe('Изменено поле: Статус платежа');
     expect(formatAuditChangeSummary('payment', '["Status","ExpenseClientId","ClientCaseId","Amount"]')).toBe(
       'Изменены поля: Статус платежа, Клиент расхода, Дело и ещё 1',
+    );
+    expect(formatAuditChangeSummary('user', '["FullName","RoleId"]')).toBe(
+      'Изменены поля: ФИО пользователя, Роль',
     );
   });
 
