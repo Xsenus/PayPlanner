@@ -43,6 +43,7 @@ public class AccountsController : ControllerBase
                 Date = payment.Invoice != null ? payment.Invoice.Date : (payment.AccountDate ?? payment.Date),
                 DueDate = payment.Date,
                 Amount = payment.Amount,
+                PaidAmount = payment.PaidAmount,
                 Type = payment.Type,
                 Status = payment.Status,
                 IsPaid = payment.IsPaid,
@@ -132,6 +133,7 @@ public class AccountsController : ControllerBase
                     LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.ClientCaseId, representative.Type),
                     FallbackAmount = orderedGroup.Sum(item => item.Amount),
                     InvoicePaymentIds = orderedGroup.Select(item => item.Id).ToHashSet(),
+                    StatusSeedPayments = orderedGroup.Select(CreateStatusSourcePayment).ToList(),
                     Type = representative.Type,
                 };
             })
@@ -166,6 +168,7 @@ public class AccountsController : ControllerBase
                 PlannedDate = payment.PlannedDate,
                 PaidDate = payment.PaidDate,
                 Amount = payment.Amount,
+                PaidAmount = payment.PaidAmount,
                 Status = payment.Status,
                 DocumentKind = payment.DocumentKind,
                 ClientId = payment.ClientId,
@@ -210,6 +213,12 @@ public class AccountsController : ControllerBase
                 .Select(grouped => grouped.First())
                 .ToList();
 
+            var statusPayments = group.StatusSeedPayments
+                .Concat(groupPayments.Select(CreateStatusSourcePayment))
+                .GroupBy(item => item.Id)
+                .Select(grouped => grouped.First())
+                .ToList();
+
             group.RelatedPaymentIds = group.InvoicePaymentIds
                 .Concat(groupPayments.Select(item => item.Id))
                 .Distinct()
@@ -228,8 +237,8 @@ public class AccountsController : ControllerBase
 
             var totalAmount = groupPayments.Sum(item => item.Amount);
             group.TotalAmount = totalAmount > 0m ? totalAmount : group.FallbackAmount;
-            group.Status = DeriveAccountStatus(groupPayments, group.Representative.Status);
-            group.IsOverdue = groupPayments.Any(item => item.Status == PaymentStatus.Overdue);
+            group.Status = DeriveAccountStatus(statusPayments, group.Representative.Status, group.Representative.PaidAmount);
+            group.IsOverdue = statusPayments.Any(item => item.Status == PaymentStatus.Overdue);
         }
 
         var normalizedStatus = NormalizeAccountStatus(status);
@@ -784,11 +793,37 @@ public class AccountsController : ControllerBase
         return result;
     }
 
-    private static string DeriveAccountStatus(IEnumerable<PaymentAggregateItem> payments, PaymentStatus fallbackStatus)
+    private static StatusSourcePayment CreateStatusSourcePayment(AccountInvoiceCandidate payment)
+        => new()
+        {
+            Id = payment.Id,
+            Amount = payment.Amount,
+            PaidAmount = payment.PaidAmount,
+            Status = payment.Status,
+        };
+
+    private static StatusSourcePayment CreateStatusSourcePayment(PaymentAggregateItem payment)
+        => new()
+        {
+            Id = payment.Id,
+            Amount = payment.Amount,
+            PaidAmount = payment.PaidAmount,
+            Status = payment.Status,
+        };
+
+    private static string DeriveAccountStatus(
+        IEnumerable<StatusSourcePayment> payments,
+        PaymentStatus fallbackStatus,
+        decimal fallbackPaidAmount = 0m)
     {
         var paymentList = payments.ToList();
         if (paymentList.Count == 0)
         {
+            if (fallbackPaidAmount > 0m)
+            {
+                return "partial";
+            }
+
             return fallbackStatus switch
             {
                 PaymentStatus.Completed => "paid",
@@ -809,16 +844,17 @@ public class AccountsController : ControllerBase
             return "paid";
         }
 
+        if (paymentList.Any(payment =>
+                payment.Status == PaymentStatus.Completed
+                || payment.Status == PaymentStatus.Processing
+                || payment.PaidAmount > 0m))
+        {
+            return "partial";
+        }
+
         if (paymentList.Any(payment => payment.Status == PaymentStatus.Overdue))
         {
             return "overdue";
-        }
-
-        if (paymentList.Any(payment =>
-                payment.Status == PaymentStatus.Completed
-                || payment.Status == PaymentStatus.Processing))
-        {
-            return "partial";
         }
 
         return "created";
@@ -890,6 +926,7 @@ public class AccountsController : ControllerBase
         public DateTime Date { get; init; }
         public DateTime? DueDate { get; init; }
         public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
         public bool IsPaid { get; init; }
@@ -929,11 +966,20 @@ public class AccountsController : ControllerBase
         public DateTime PlannedDate { get; init; }
         public DateTime? PaidDate { get; init; }
         public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
         public PaymentStatus Status { get; init; }
         public DocumentKind DocumentKind { get; init; }
         public int? ClientId { get; init; }
         public int? ClientCaseId { get; init; }
         public PaymentType Type { get; init; }
+    }
+
+    private sealed class StatusSourcePayment
+    {
+        public int Id { get; init; }
+        public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
+        public PaymentStatus Status { get; init; }
     }
 
     private sealed class WorkingAccountGroup
@@ -943,6 +989,7 @@ public class AccountsController : ControllerBase
         public int? InvoiceEntityId { get; init; }
         public string? LegacyGroupKey { get; init; }
         public HashSet<int> InvoicePaymentIds { get; init; } = new();
+        public List<StatusSourcePayment> StatusSeedPayments { get; init; } = new();
         public List<int> RelatedPaymentIds { get; set; } = new();
         public decimal FallbackAmount { get; init; }
         public decimal TotalAmount { get; set; }
