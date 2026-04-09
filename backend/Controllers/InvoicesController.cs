@@ -31,13 +31,19 @@ public class InvoicesController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
+    private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
 
-    public InvoicesController(PaymentContext db, IEmailService emailService, IFormRequirementsService formRequirements)
+    public InvoicesController(
+        PaymentContext db,
+        IEmailService emailService,
+        IFormRequirementsService formRequirements,
+        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null)
     {
         _db = db;
         _emailService = emailService;
         _formRequirements = formRequirements;
+        _invoiceDocumentPdfService = invoiceDocumentPdfService;
     }
 
     [HttpGet]
@@ -1173,7 +1179,15 @@ public class InvoicesController : ControllerBase
 
         if (normalizedFormat == "pdf")
         {
-            return BadRequest("PDF export is not configured on server yet. Use format=word.");
+            try
+            {
+                var pdfBytes = await RenderInvoicePdfAsync(documentHtml, ct);
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
         }
 
         return File(bytes, "application/msword", fileName);
@@ -1204,10 +1218,6 @@ public class InvoicesController : ControllerBase
         }
 
         var normalizedFormat = NormalizeDocumentFormat(request.Format);
-        if (normalizedFormat == "pdf")
-        {
-            return BadRequest("PDF export is not configured on server yet. Use format=word.");
-        }
         if (normalizedFormat == "html")
         {
             normalizedFormat = "word";
@@ -1217,8 +1227,29 @@ public class InvoicesController : ControllerBase
         var template = await GetInvoiceDocumentTemplateAsync(null, ct);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, lineItems, mainCompany);
-        var bytes = Encoding.UTF8.GetBytes(documentHtml);
-        var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
+        byte[] bytes;
+        string fileName;
+        string contentType;
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderInvoicePdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+
+            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
+            contentType = "application/msword";
+        }
         var subject = string.IsNullOrWhiteSpace(request.Subject)
             ? $"Счёт №{payment.Invoice?.Number ?? payment.Account} от {(payment.Invoice?.Date ?? payment.AccountDate)?.Date:dd.MM.yyyy}"
             : request.Subject.Trim();
@@ -1232,9 +1263,20 @@ public class InvoicesController : ControllerBase
             body,
             fileName,
             bytes,
-            "application/msword");
+            contentType);
 
         return Ok(new { sent = true, recipient = email, fileName, format = normalizedFormat });
+    }
+
+    private Task<byte[]> RenderInvoicePdfAsync(string documentHtml, CancellationToken ct)
+    {
+        if (_invoiceDocumentPdfService is null)
+        {
+            throw new InvalidOperationException(
+                "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения.");
+        }
+
+        return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
     }
 
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()

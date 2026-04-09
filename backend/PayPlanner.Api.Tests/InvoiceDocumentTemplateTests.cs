@@ -9,6 +9,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -62,6 +63,49 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
         Assert.NotNull(content.Content);
         Assert.Contains("25|Тестовый клиент|Организация не выбрана|[1 Юридические услуги", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsPdf_WhenPdfFormatRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var pdfBytes = "%PDF-test%"u8.ToArray();
+        var controller = CreateController(
+            db,
+            isAdmin: true,
+            pdfService: new FakeInvoiceDocumentPdfService(pdfBytes));
+
+        var result = await controller.GetDocument(paymentId, "pdf", null, CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal(pdfBytes, file.FileContents);
+        Assert.Equal("invoice-25.pdf", file.FileDownloadName);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_SendsPdfAttachment_WhenPdfFormatRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var emailService = new RecordingEmailService();
+        var controller = CreateController(
+            db,
+            isAdmin: true,
+            emailService: emailService,
+            pdfService: new FakeInvoiceDocumentPdfService("%PDF-mail%"u8.ToArray()));
+
+        var result = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest { Format = "pdf" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(ok.Value);
+        Assert.Equal("invoice-25.pdf", emailService.AttachmentFileName);
+        Assert.Equal("application/pdf", emailService.AttachmentContentType);
+        Assert.Equal("%PDF-mail%"u8.ToArray(), emailService.AttachmentBytes);
     }
 
     private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db)
@@ -138,7 +182,11 @@ public class InvoiceDocumentTemplateTests
         return db;
     }
 
-    private static InvoicesController CreateController(PaymentContext db, bool isAdmin)
+    private static InvoicesController CreateController(
+        PaymentContext db,
+        bool isAdmin,
+        IEmailService? emailService = null,
+        IInvoiceDocumentPdfService? pdfService = null)
     {
         var claims = new List<Claim>();
         if (isAdmin)
@@ -146,7 +194,11 @@ public class InvoiceDocumentTemplateTests
             claims.Add(new Claim(ClaimTypes.Role, "admin"));
         }
 
-        var controller = new InvoicesController(db, new NoopEmailService(), new NoopFormRequirementsService());
+        var controller = new InvoicesController(
+            db,
+            emailService ?? new NoopEmailService(),
+            new NoopFormRequirementsService(),
+            pdfService);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -171,5 +223,44 @@ public class InvoiceDocumentTemplateTests
     {
         public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default) => Task.FromResult(new List<string>());
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default) => Task.FromResult(new List<string>());
+    }
+
+    private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
+    {
+        private readonly byte[] _bytes;
+
+        public FakeInvoiceDocumentPdfService(byte[] bytes)
+        {
+            _bytes = bytes;
+        }
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+            => Task.FromResult(_bytes);
+    }
+
+    private sealed class RecordingEmailService : IEmailService
+    {
+        public string? AttachmentFileName { get; private set; }
+        public byte[]? AttachmentBytes { get; private set; }
+        public string? AttachmentContentType { get; private set; }
+
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+        {
+            AttachmentFileName = attachmentFileName;
+            AttachmentBytes = attachmentBytes;
+            AttachmentContentType = attachmentContentType;
+            return Task.CompletedTask;
+        }
     }
 }

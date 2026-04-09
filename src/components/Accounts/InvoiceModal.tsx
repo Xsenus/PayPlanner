@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActStatus,
@@ -648,10 +648,12 @@ export function InvoiceModal({
   const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
   const lastAutoContractClientIdRef = useRef<string>('');
+  const downloadMenuRef = useRef<HTMLDivElement | null>(null);
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
@@ -731,6 +733,30 @@ export function InvoiceModal({
       active = false;
     };
   }, [invoice?.id, invoice?.auditUpdatedAt, pageViewMode, presentation]);
+
+  useEffect(() => {
+    if (!downloadMenuOpen) return undefined;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!downloadMenuRef.current) return;
+      if (!downloadMenuRef.current.contains(event.target as Node)) {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [downloadMenuOpen]);
 
   const isIncome = form.type === 'Income';
   const isPageMode = presentation === 'page';
@@ -1658,32 +1684,55 @@ export function InvoiceModal({
     URL.revokeObjectURL(href);
   };
 
-  const printBlob = (blob: Blob) => {
+  const openBlobInNewWindow = (blob: Blob) => {
     if (typeof window === 'undefined') return;
     const href = URL.createObjectURL(blob);
-    const printWindow = window.open(href, '_blank', 'noopener,noreferrer,width=1024,height=768');
-    if (!printWindow) {
+    const previewWindow = window.open(href, '_blank', 'noopener,noreferrer,width=1180,height=900');
+    if (!previewWindow) {
       URL.revokeObjectURL(href);
-      throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
+      throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
     }
-    const cleanup = () => URL.revokeObjectURL(href);
-    printWindow.addEventListener('load', () => {
-      printWindow.focus();
-      printWindow.print();
-      cleanup();
-    });
+    window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
   };
 
   const deferClose = useCallback((callback: () => void) => {
     window.setTimeout(callback, 160);
   }, []);
 
+  const handlePrintDocument = async () => {
+    if (!invoice?.id) {
+      toast.error('Сначала сохраните счёт, затем можно печатать документ.');
+      return;
+    }
 
-  const handlePageAction = async (action: 'send' | 'print' | 'download' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+    try {
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf');
+      openBlobInNewWindow(blob);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось сформировать PDF документа.');
+    }
+  };
+
+  const handleDownloadDocument = async (format: 'word' | 'pdf') => {
+    if (!invoice?.id) {
+      toast.error('Сначала сохраните счёт, затем можно скачать документ.');
+      return;
+    }
+
+    try {
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, format);
+      const extension = format === 'pdf' ? 'pdf' : 'doc';
+      downloadBlob(`invoice-${form.number || 'export'}.${extension}`, blob);
+      setDownloadMenuOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось скачать документ.');
+    }
+  };
+
+
+  const handlePageAction = async (action: 'send' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
       send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
-      print: { title: 'Печать счёта', message: 'Сформировать документ WORD и отправить его на печать?', confirmLabel: 'Печать' },
-      download: { title: 'Скачать счёт', message: 'Скачать документ счёта в формате WORD?', confirmLabel: 'Скачать' },
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
       cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
@@ -1711,24 +1760,6 @@ export function InvoiceModal({
             : 'Документ WORD отправлен клиенту по email.',
           'Счет отправлен',
         );
-        return;
-      }
-
-      if (action === 'print') {
-        if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно печатать документ.');
-        }
-        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
-        printBlob(blob);
-        return;
-      }
-
-      if (action === 'download') {
-        if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно скачать документ.');
-        }
-        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
-        downloadBlob(`invoice-${form.number || 'export'}.doc`, blob);
         return;
       }
 
@@ -2391,8 +2422,36 @@ export function InvoiceModal({
 
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-7">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
-            <button type="button" onClick={() => void handlePageAction('print')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
-            <button type="button" onClick={() => void handlePageAction('download')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Download className="h-4 w-4" />Скачать</button>
+            <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <div className="relative" ref={downloadMenuRef}>
+              <button
+                type="button"
+                onClick={() => setDownloadMenuOpen((prev) => !prev)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
+              >
+                <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
+              </button>
+              {downloadMenuOpen ? (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[12rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('pdf')}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Скачать PDF</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word')}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Скачать Word</span>
+                    <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
             <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
             <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
