@@ -34,8 +34,44 @@ function safeJsonParse(value: string): unknown | null {
   }
 }
 
+function parseLooseJson(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const direct = safeJsonParse(trimmed);
+  if (direct !== null) {
+    if (typeof direct === 'string') {
+      return safeJsonParse(direct) ?? direct;
+    }
+
+    return direct;
+  }
+
+  if (!trimmed.includes('\\"') && !trimmed.includes('\\\\u')) {
+    return null;
+  }
+
+  const unescaped = trimmed.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  if (unescaped === trimmed) {
+    return null;
+  }
+
+  const reparsed = safeJsonParse(unescaped);
+  if (reparsed !== null) {
+    if (typeof reparsed === 'string') {
+      return safeJsonParse(reparsed) ?? reparsed;
+    }
+
+    return reparsed;
+  }
+
+  return null;
+}
+
 function looksLikeInvoiceItemsPayload(line: string): boolean {
-  const parsed = safeJsonParse(line);
+  const parsed = parseLooseJson(line);
   if (!Array.isArray(parsed) || parsed.length === 0) {
     return false;
   }
@@ -61,7 +97,7 @@ function looksLikeInvoiceItemsPayload(line: string): boolean {
 }
 
 function looksLikeInstallmentPayload(line: string): boolean {
-  const parsed = safeJsonParse(line);
+  const parsed = parseLooseJson(line);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return false;
   }

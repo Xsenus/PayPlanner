@@ -68,4 +68,15 @@ describe('systemNotes helpers', () => {
     expect(getVisibleNoteLines(notes)).toEqual(['Комментарий клиента']);
     expect(getVisibleNotes(notes)).toBe('Комментарий клиента');
   });
+
+  it('hides escaped legacy invoice payloads without explicit marker', () => {
+    const notes = [
+      'Системно: [{\\"Name\\":\\"\\u0421\\u043e\\u0441\\u0442\\u0430\\u0432\\u043b\\u0435\\u043d\\u0438\\u0435 \\u0434\\u043e\\u043a\\u0443\\u043c\\u0435\\u043d\\u0442\\u043e\\u0432\\",\\"Quantity\\":7,\\"Unit\\":\\"\\u0448\\u0442\\",\\"Price\\":1357.14}]',
+      'Комментарий клиента',
+    ].join('\n');
+
+    expect(getVisibleSystemNoteLines(notes)).toEqual(['Комментарий клиента']);
+    expect(getVisibleNoteLines(notes)).toEqual(['Комментарий клиента']);
+    expect(getVisibleNotes(notes)).toBe('Комментарий клиента');
+  });
 });
