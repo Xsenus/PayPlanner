@@ -82,7 +82,7 @@ import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
-import { getVisibleSystemNotes } from '../../utils/systemNotes';
+import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
   ClientAddressEntriesForm,
   type AddressTypeOption,
@@ -3958,6 +3958,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                         const paidProgress = payment.amount > 0 ? Math.min(payment.paidAmount / payment.amount, 1) : 0;
                         const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
                         const visibleSystemNotes = getVisibleSystemNotes(payment.systemNotes);
+                        const visibleNotes = getVisibleNotes(payment.notes);
 
                         return (
                           <tr key={payment.id} className="align-top transition-colors hover:bg-slate-50/70">
@@ -4074,9 +4075,9 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                     ) : (
                                       <div className="text-xs text-slate-400">Без описания</div>
                                     )}
-                                    {payment.notes ? (
-                                      <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={payment.notes}>
-                                        <span className="font-medium text-slate-700">Заметка:</span> {payment.notes}
+                                    {visibleNotes ? (
+                                      <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600" title={visibleNotes}>
+                                        <span className="font-medium text-slate-700">Заметка:</span> {visibleNotes}
                                       </div>
                                     ) : null}
                                     {visibleSystemNotes ? (

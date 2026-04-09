@@ -9,16 +9,12 @@ function stripListPrefix(line: string): string {
   return line.startsWith('\u2022 ') ? line.slice(2) : line;
 }
 
-function safeJsonParse(value: string): unknown | null {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
+function stripBom(line: string): string {
+  return line.replace(/^\uFEFF/, '');
 }
 
-function normalizeSystemNoteLine(line: string): string {
-  let normalized = stripListPrefix(line.trim());
+function stripSystemNotePrefix(line: string): string {
+  let normalized = stripBom(stripListPrefix(line.trim()));
 
   for (const prefix of SYSTEM_NOTE_PREFIXES) {
     if (normalized.toLowerCase().startsWith(prefix)) {
@@ -28,6 +24,14 @@ function normalizeSystemNoteLine(line: string): string {
   }
 
   return normalized;
+}
+
+function safeJsonParse(value: string): unknown | null {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function looksLikeInvoiceItemsPayload(line: string): boolean {
@@ -70,21 +74,35 @@ function looksLikeInstallmentPayload(line: string): boolean {
 }
 
 function isHiddenSystemNoteLine(line: string): boolean {
-  const normalized = line.toLowerCase();
+  const normalized = stripSystemNotePrefix(line);
+  const lowered = normalized.toLowerCase();
+
   return (
-    HIDDEN_SYSTEM_NOTE_MARKERS.some((marker) => normalized.includes(marker.toLowerCase())) ||
-    looksLikeInvoiceItemsPayload(line) ||
-    looksLikeInstallmentPayload(line)
+    HIDDEN_SYSTEM_NOTE_MARKERS.some((marker) => lowered.includes(marker.toLowerCase())) ||
+    looksLikeInvoiceItemsPayload(normalized) ||
+    looksLikeInstallmentPayload(normalized)
   );
 }
 
-export function getVisibleSystemNoteLines(systemNotes?: string | null): string[] {
-  return (systemNotes ?? '')
-    .split('\n')
-    .map((line) => normalizeSystemNoteLine(line))
+function getVisibleLines(value?: string | null): string[] {
+  return (value ?? '')
+    .split(/\r?\n/)
+    .map((line) => stripSystemNotePrefix(line))
     .filter((line) => line && !isHiddenSystemNoteLine(line));
+}
+
+export function getVisibleSystemNoteLines(systemNotes?: string | null): string[] {
+  return getVisibleLines(systemNotes);
 }
 
 export function getVisibleSystemNotes(systemNotes?: string | null): string {
   return getVisibleSystemNoteLines(systemNotes).join('\n');
+}
+
+export function getVisibleNoteLines(notes?: string | null): string[] {
+  return getVisibleLines(notes);
+}
+
+export function getVisibleNotes(notes?: string | null): string {
+  return getVisibleNoteLines(notes).join('\n');
 }

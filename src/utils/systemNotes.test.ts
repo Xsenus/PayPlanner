@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getVisibleSystemNoteLines, getVisibleSystemNotes } from './systemNotes';
+import {
+  getVisibleNoteLines,
+  getVisibleNotes,
+  getVisibleSystemNoteLines,
+  getVisibleSystemNotes,
+} from './systemNotes';
 import { INSTALLMENT_PAYMENT_MARKER } from './installmentPlan';
 
 describe('systemNotes helpers', () => {
@@ -28,7 +33,7 @@ describe('systemNotes helpers', () => {
 
   it('hides technical markers even when they are prefixed for display', () => {
     const notes = [
-      'System: [pp:invoice-items] [{"name":"Составление"}]',
+      'System: [pp:invoice-items] [{"name":"Document preparation"}]',
       'Системно: [pp:installment-payment] {"sequence":1,"months":6}',
       'System: Remaining payment moved to next month',
     ].join('\n');
@@ -38,7 +43,7 @@ describe('systemNotes helpers', () => {
 
   it('hides legacy invoice-items payload even when marker is already stripped', () => {
     const notes = [
-      'Системно: [{"Name":"Составление документов","Quantity":7,"Unit":"шт","Price":1357.14}]',
+      'Системно: [{"Name":"Document preparation","Quantity":7,"Unit":"шт","Price":1357.14}]',
       'Системно: Payment source updated',
     ].join('\n');
 
@@ -52,5 +57,15 @@ describe('systemNotes helpers', () => {
     ].join('\n');
 
     expect(getVisibleSystemNoteLines(notes)).toEqual(['Remaining payment moved']);
+  });
+
+  it('hides invoice item markers from regular notes too', () => {
+    const notes = [
+      'Системно: [pp:invoice-items] [{"Name":"\\u0421\\u043e\\u0441\\u0442\\u0430\\u0432\\u043b\\u0435\\u043d\\u0438\\u0435","Quantity":7,"Unit":"\\u0448\\u0442","Price":1357.14}]',
+      'Комментарий клиента',
+    ].join('\r\n');
+
+    expect(getVisibleNoteLines(notes)).toEqual(['Комментарий клиента']);
+    expect(getVisibleNotes(notes)).toBe('Комментарий клиента');
   });
 });
