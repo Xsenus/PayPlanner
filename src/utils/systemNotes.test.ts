@@ -25,4 +25,32 @@ describe('systemNotes helpers', () => {
 
     expect(getVisibleSystemNotes(notes)).toBe('Remaining payment moved');
   });
+
+  it('hides technical markers even when they are prefixed for display', () => {
+    const notes = [
+      'System: [pp:invoice-items] [{"name":"Составление"}]',
+      'Системно: [pp:installment-payment] {"sequence":1,"months":6}',
+      'System: Remaining payment moved to next month',
+    ].join('\n');
+
+    expect(getVisibleSystemNoteLines(notes)).toEqual(['Remaining payment moved to next month']);
+  });
+
+  it('hides legacy invoice-items payload even when marker is already stripped', () => {
+    const notes = [
+      'Системно: [{"Name":"Составление документов","Quantity":7,"Unit":"шт","Price":1357.14}]',
+      'Системно: Payment source updated',
+    ].join('\n');
+
+    expect(getVisibleSystemNoteLines(notes)).toEqual(['Payment source updated']);
+  });
+
+  it('hides installment payload even without explicit marker', () => {
+    const notes = [
+      'System: {"sequence":2,"months":6,"dueDate":"2026-06-07"}',
+      'System: Remaining payment moved',
+    ].join('\n');
+
+    expect(getVisibleSystemNoteLines(notes)).toEqual(['Remaining payment moved']);
+  });
 });
