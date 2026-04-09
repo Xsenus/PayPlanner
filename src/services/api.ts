@@ -223,6 +223,27 @@ export interface InvoiceRulesSettingsDto {
   maxActsPerInvoice: number;
 }
 
+export interface InvoiceDocumentTemplateDto {
+  key: string;
+  name: string;
+  description?: string | null;
+  html: string;
+}
+
+export interface InvoiceDocumentTemplateTokenDto {
+  key: string;
+  category: string;
+  description: string;
+  isRepeating: boolean;
+}
+
+export interface InvoiceDocumentTemplateSettingsDto {
+  activeTemplateKey: string;
+  templates: InvoiceDocumentTemplateDto[];
+  tokens: InvoiceDocumentTemplateTokenDto[];
+  defaultTemplateHtml: string;
+}
+
 export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
   year: number;
   nextNumber: string;
@@ -923,6 +944,17 @@ export class ApiService {
     });
   }
 
+  async getInvoiceDocumentTemplateSettings() {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings');
+  }
+
+  async updateInvoiceDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates'>) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getNextInvoiceNumber(date?: string) {
     const q = buildQuery({ date });
     return this.request<NextInvoiceNumberDto>(`/invoices/next-number${q}`);
@@ -1000,7 +1032,7 @@ export class ApiService {
     return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(`/accounts/registry${q}`);
   }
 
-  async downloadInvoiceDocument(id: number, format: 'word' | 'pdf' = 'word') {
+  async downloadInvoiceDocument(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/invoices/${id}/document?format=${format}`, {
       method: 'GET',

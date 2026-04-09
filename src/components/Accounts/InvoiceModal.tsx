@@ -1680,7 +1680,7 @@ export function InvoiceModal({
         if (!invoice?.id) {
           throw new Error('Сначала сохраните счёт, затем можно печатать документ.');
         }
-        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'word');
+        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
         printBlob(blob);
         return;
       }

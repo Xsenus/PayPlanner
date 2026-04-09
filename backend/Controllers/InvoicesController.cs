@@ -26,6 +26,8 @@ public class InvoicesController : ControllerBase
     private const string InvoiceNumberStrategySettingKey = "invoices.numbering.strategy";
     private const string InvoiceMaxClientCasesSettingKey = "invoices.rules.maxClientCasesPerInvoice";
     private const string InvoiceMaxActsSettingKey = "invoices.rules.maxActsPerInvoice";
+    private const string InvoiceDocumentTemplatesSettingKey = "invoices.documentTemplates";
+    private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
@@ -617,6 +619,41 @@ public class InvoicesController : ControllerBase
         return Ok(await GetInvoiceRulesSettingsAsync(ct));
     }
 
+    [HttpGet("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateSettings(CancellationToken ct)
+    {
+        return Ok(await GetInvoiceDocumentTemplateSettingsAsync(ct));
+    }
+
+    [HttpPut("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> UpsertDocumentTemplateSettings(
+        [FromBody] InvoiceDocumentTemplateSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Forbid();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var storage = InvoiceDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateInvoiceDocumentTemplateSettings(storage);
+        if (validationError is not null)
+        {
+            return BadRequest(validationError);
+        }
+
+        var now = DateTime.UtcNow;
+        await UpsertSystemSettingAsync(InvoiceDocumentTemplatesSettingKey, InvoiceDocumentTemplateEngine.Serialize(storage), now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(InvoiceDocumentTemplateEngine.CreateResponse(storage));
+    }
+
 
     [HttpPost("migrate-legacy-links")]
     public async Task<ActionResult<InvoiceLegacyMigrationSummaryDto>> MigrateLegacyInvoiceLinks(CancellationToken ct)
@@ -1106,13 +1143,13 @@ public class InvoicesController : ControllerBase
 
 
     [HttpGet("{id:int}/document")]
-    public async Task<IActionResult> GetDocument(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
+    public async Task<IActionResult> GetDocument(
+        int id,
+        [FromQuery] string? format = "word",
+        [FromQuery] string? templateKey = null,
+        CancellationToken ct = default)
     {
-        var payment = await _db.Payments
-            .AsNoTracking()
-            .Include(p => p.Client)
-            .Include(p => p.Invoice)
-            .FirstOrDefaultAsync(p => p.Id == id, ct);
+        var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
 
         if (payment is null)
         {
@@ -1121,7 +1158,15 @@ public class InvoicesController : ControllerBase
 
         var normalizedFormat = NormalizeDocumentFormat(format);
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
-        var documentHtml = BuildInvoiceHtml(payment, lineItems);
+        var template = await GetInvoiceDocumentTemplateAsync(templateKey, ct);
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, lineItems, mainCompany);
+
+        if (normalizedFormat == "html")
+        {
+            return Content(documentHtml, "text/html; charset=utf-8");
+        }
+
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
         var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.{ext}";
@@ -1142,11 +1187,7 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var payment = await _db.Payments
-            .AsNoTracking()
-            .Include(p => p.Client)
-            .Include(p => p.Invoice)
-            .FirstOrDefaultAsync(p => p.Id == id, ct);
+        var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
 
         if (payment is null)
         {
@@ -1167,9 +1208,15 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest("PDF export is not configured on server yet. Use format=word.");
         }
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
 
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
-        var documentHtml = BuildInvoiceHtml(payment, lineItems);
+        var template = await GetInvoiceDocumentTemplateAsync(null, ct);
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, lineItems, mainCompany);
         var bytes = Encoding.UTF8.GetBytes(documentHtml);
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
         var subject = string.IsNullOrWhiteSpace(request.Subject)
@@ -2909,6 +2956,11 @@ public class InvoicesController : ControllerBase
 
     private static string NormalizeDocumentFormat(string? format)
     {
+        if (string.Equals(format, "html", StringComparison.OrdinalIgnoreCase))
+        {
+            return "html";
+        }
+
         if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
         {
             return "pdf";
@@ -2969,6 +3021,112 @@ public class InvoicesController : ControllerBase
         html.AppendLine("</html>");
 
         return html.ToString();
+    }
+
+    private async Task<Payment?> LoadInvoiceDocumentPaymentAsync(int id, CancellationToken ct)
+    {
+        return await _db.Payments
+            .AsNoTracking()
+            .Include(p => p.Invoice)
+            .Include(p => p.Client)
+                .ThenInclude(client => client!.Passports)
+            .Include(p => p.ExpenseClient)
+                .ThenInclude(client => client!.Passports)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+    }
+
+    private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
+    {
+        var rawId = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == MainCompanySettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        if (!int.TryParse(rawId, out var companyId) || companyId <= 0)
+        {
+            return null;
+        }
+
+        return await _db.LegalEntities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(entity => entity.Id == companyId, ct);
+    }
+
+    private async Task<InvoiceDocumentTemplateSettingsDto> GetInvoiceDocumentTemplateSettingsAsync(CancellationToken ct)
+    {
+        var rawJson = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == InvoiceDocumentTemplatesSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        var storage = InvoiceDocumentTemplateEngine.Deserialize(rawJson);
+        return storage is null
+            ? InvoiceDocumentTemplateEngine.CreateDefaultSettings()
+            : InvoiceDocumentTemplateEngine.CreateResponse(storage);
+    }
+
+    private async Task<InvoiceDocumentTemplateDto> GetInvoiceDocumentTemplateAsync(string? preferredTemplateKey, CancellationToken ct)
+    {
+        var settings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        if (!string.IsNullOrWhiteSpace(preferredTemplateKey))
+        {
+            var preferred = settings.Templates.FirstOrDefault(template =>
+                string.Equals(template.Key, preferredTemplateKey.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (preferred is not null)
+            {
+                return preferred;
+            }
+        }
+
+        return settings.Templates.FirstOrDefault(template =>
+                   string.Equals(template.Key, settings.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
+               ?? settings.Templates[0];
+    }
+
+    private static string? ValidateInvoiceDocumentTemplateSettings(InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateSettingsStorage storage)
+    {
+        if (storage.Templates.Count == 0)
+        {
+            return "Добавьте хотя бы один шаблон документа.";
+        }
+
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in storage.Templates)
+        {
+            if (string.IsNullOrWhiteSpace(template.Key))
+            {
+                return "У каждого шаблона должен быть внутренний ключ.";
+            }
+
+            if (!keys.Add(template.Key))
+            {
+                return $"Шаблон с ключом '{template.Key}' уже существует.";
+            }
+
+            if (string.IsNullOrWhiteSpace(template.Name))
+            {
+                return $"Заполните название шаблона '{template.Key}'.";
+            }
+
+            if (string.IsNullOrWhiteSpace(template.Html))
+            {
+                return $"Шаблон '{template.Name}' не может быть пустым.";
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(storage.ActiveTemplateKey))
+        {
+            return "Выберите активный шаблон документа.";
+        }
+
+        if (!storage.Templates.Any(template => string.Equals(template.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Активный шаблон должен присутствовать в списке шаблонов.";
+        }
+
+        return null;
     }
 
     private static string SanitizeFilePart(string? value)

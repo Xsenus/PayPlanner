@@ -9,6 +9,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
+import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
   ContractNumberingSettingsDto,
@@ -897,6 +898,8 @@ export function AppSettings() {
                     </div>
                   </div>
                 )}
+
+                {activeFinancialRulesSubsection === 'invoices' && <InvoiceDocumentTemplateSettings />}
 
                 {activeFinancialRulesSubsection === 'contracts' && (
                   <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
