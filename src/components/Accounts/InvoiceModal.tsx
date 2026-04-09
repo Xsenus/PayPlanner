@@ -645,6 +645,9 @@ export function InvoiceModal({
   const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)));
   const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
   const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
+  const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
+  const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
@@ -693,6 +696,41 @@ export function InvoiceModal({
     }
     setPageViewMode(false);
   }, [mode, presentation, invoice?.id]);
+
+  useEffect(() => {
+    if (presentation !== 'page' || !pageViewMode || !invoice?.id) {
+      setDocumentPreviewHtml('');
+      setDocumentPreviewError(null);
+      setDocumentPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    const loadPreview = async () => {
+      setDocumentPreviewLoading(true);
+      setDocumentPreviewError(null);
+      try {
+        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
+        const html = await blob.text();
+        if (!active) return;
+        setDocumentPreviewHtml(html);
+      } catch (err) {
+        if (!active) return;
+        setDocumentPreviewError(err instanceof Error ? err.message : 'Не удалось загрузить печатный шаблон счета.');
+        setDocumentPreviewHtml('');
+      } finally {
+        if (active) {
+          setDocumentPreviewLoading(false);
+        }
+      }
+    };
+
+    void loadPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [invoice?.id, invoice?.auditUpdatedAt, pageViewMode, presentation]);
 
   const isIncome = form.type === 'Income';
   const isPageMode = presentation === 'page';
@@ -2257,65 +2295,38 @@ export function InvoiceModal({
         <div className="space-y-4 bg-slate-100 px-4 py-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <section className="rounded-xl border border-slate-300 bg-white p-3">
-              <div className="mb-3" />
-
-              <div className="border border-slate-800 p-3 text-sm text-slate-900">
-                <div className="grid grid-cols-2 border border-slate-800">
-                  <div className="border-r border-slate-800 p-2">{selectedClient?.name || counterpartyLabel}</div>
-                  <div className="p-2">БИК / Счёт</div>
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Печатный шаблон счета</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Здесь показывается реальный документ, который используется для печати и скачивания.
+                  </p>
                 </div>
-                <h3 className="my-4 text-center text-2xl font-bold">Счёт № {form.number || '—'} от {formatDate(form.date) || '—'} г.</h3>
-                <div className="space-y-1 border-t border-slate-800 pt-3 text-xs sm:text-sm">
-                  <p><span className="font-semibold">{counterpartyLabel}:</span> {selectedClient?.name || '—'}</p>
-                  {!isIncome && (
-                    <p><span className="font-semibold">Клиент расхода:</span> {selectedExpenseClient?.name || '—'}</p>
-                  )}
-                  <p><span className="font-semibold">Договор:</span> {contractLabel(selectedContract)}</p>
-                  <p><span className="font-semibold">Основание:</span> {form.description || '—'}</p>
-                </div>
+                {documentPreviewLoading ? (
+                  <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Загружаем шаблон…
+                  </span>
+                ) : null}
+              </div>
 
-                <table className="mt-3 w-full table-fixed border-collapse text-xs sm:text-sm">
-                  <colgroup>
-                    <col style={{ width: '8%' }} />
-                    <col style={{ width: '40%' }} />
-                    <col style={{ width: '12%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '15%' }} />
-                    <col style={{ width: '15%' }} />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th className="border border-slate-800 px-2 py-1 text-left">№</th>
-                      <th className="border border-slate-800 px-2 py-1 text-left">Товары (работы, услуги)</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Кол-во</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Ед.</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Цена</th>
-                      <th className="border border-slate-800 px-2 py-1 text-right">Сумма</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lineItems.map((item, index) => {
-                      const qty = parseMoneyInput(item.quantity);
-                      const price = parseMoneyInput(item.price);
-                      const rowTotal = qty * price;
-                      return (
-                        <tr key={item.id}>
-                          <td className="border border-slate-800 px-2 py-1">{index + 1}</td>
-                          <td className="border border-slate-800 px-2 py-1">{item.name || '—'}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{qty.toFixed(2)}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{item.unit || 'шт'}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(price)}</td>
-                          <td className="border border-slate-800 px-2 py-1 text-right">{formatMoneyDisplayValue(rowTotal)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                <div className="mt-3 text-right text-sm">
-                  <p><span className="font-semibold">Итого:</span> {formatMoneyDisplayValue(lineItemsTotal)}</p>
-                  <p><span className="font-semibold">Всего к оплате:</span> {formatMoneyDisplayValue(amountValue)}</p>
-                </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                {documentPreviewError ? (
+                  <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-rose-600">
+                    {documentPreviewError}
+                  </div>
+                ) : documentPreviewHtml ? (
+                  <iframe
+                    title={`Печатный шаблон счета ${form.number || ''}`.trim()}
+                    srcDoc={documentPreviewHtml}
+                    sandbox="allow-same-origin"
+                    className="h-[72rem] w-full bg-white"
+                  />
+                ) : (
+                  <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-slate-500">
+                    Подготовка печатного шаблона…
+                  </div>
+                )}
               </div>
             </section>
 
