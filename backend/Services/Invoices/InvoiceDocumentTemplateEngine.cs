@@ -133,11 +133,14 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "invoice.description", Category = "Счет", Description = "Описание счета", IsRepeating = false },
             new() { Key = "invoice.total", Category = "Счет", Description = "Итого по позициям", IsRepeating = false },
             new() { Key = "invoice.totalWords", Category = "Счет", Description = "Итого прописью", IsRepeating = false },
+            new() { Key = "invoice.itemsCount", Category = "Счет", Description = "Количество наименований в счете", IsRepeating = false },
             new() { Key = "invoice.vatText", Category = "Счет", Description = "Строка по НДС", IsRepeating = false },
+            new() { Key = "invoice.qrCodeHtml", Category = "Счет", Description = "HTML-блок QR-кода для оплаты", IsRepeating = false },
             new() { Key = "seller.shortName", Category = "Продавец", Description = "Краткое название продавца", IsRepeating = false },
             new() { Key = "seller.fullName", Category = "Продавец", Description = "Полное название продавца", IsRepeating = false },
             new() { Key = "seller.inn", Category = "Продавец", Description = "ИНН продавца", IsRepeating = false },
             new() { Key = "seller.kpp", Category = "Продавец", Description = "КПП продавца", IsRepeating = false },
+            new() { Key = "seller.kppOrDash", Category = "Продавец", Description = "КПП или дефис, если значение не заполнено", IsRepeating = false },
             new() { Key = "seller.address", Category = "Продавец", Description = "Адрес продавца", IsRepeating = false },
             new() { Key = "seller.bankName", Category = "Продавец", Description = "Банк продавца", IsRepeating = false },
             new() { Key = "seller.bik", Category = "Продавец", Description = "БИК продавца", IsRepeating = false },
@@ -146,6 +149,7 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "seller.requisites", Category = "Продавец", Description = "Полные реквизиты продавца одной строкой", IsRepeating = false },
             new() { Key = "seller.documentDirectorPosition", Category = "Продавец", Description = "Должность подписанта", IsRepeating = false },
             new() { Key = "seller.documentDirectorFullName", Category = "Продавец", Description = "ФИО подписанта", IsRepeating = false },
+            new() { Key = "seller.documentDirectorShortName", Category = "Продавец", Description = "Краткая подпись подписанта, например Иванов И. И.", IsRepeating = false },
             new() { Key = "seller.logoHtml", Category = "Продавец", Description = "HTML-блок логотипа", IsRepeating = false },
             new() { Key = "seller.sealHtml", Category = "Продавец", Description = "HTML-блок печати", IsRepeating = false },
             new() { Key = "seller.signatureHtml", Category = "Продавец", Description = "HTML-блок подписи", IsRepeating = false },
@@ -188,9 +192,11 @@ public static class InvoiceDocumentTemplateEngine
         var buyer = BuildBuyer(payment);
         var director = ParsePerson(mainCompany?.DocumentDirectorJson);
         var directorFullName = BuildPersonFullName(director, mainCompany?.Director);
+        var directorShortName = BuildPersonShortName(director, directorFullName);
         var directorPosition = !string.IsNullOrWhiteSpace(director?.Position)
             ? director!.Position!
             : "Руководитель";
+        var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
 
         return new InvoiceDocumentRenderModel
         {
@@ -206,11 +212,14 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.description"] = Encode(payment.Description),
                 ["invoice.total"] = Encode(FormatMoney(total)),
                 ["invoice.totalWords"] = Encode(SpellMoney(total)),
+                ["invoice.itemsCount"] = Encode(normalizedLineItems.Count.ToString(CultureInfo.InvariantCulture)),
                 ["invoice.vatText"] = "Без налога (НДС): —",
+                ["invoice.qrCodeHtml"] = qrCodeHtml,
                 ["seller.shortName"] = Encode(seller.ShortName),
                 ["seller.fullName"] = Encode(seller.FullName),
                 ["seller.inn"] = Encode(seller.Inn),
                 ["seller.kpp"] = Encode(seller.Kpp),
+                ["seller.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(seller.Kpp) ? "-" : seller.Kpp),
                 ["seller.address"] = Encode(seller.Address),
                 ["seller.bankName"] = Encode(seller.BankName),
                 ["seller.bik"] = Encode(seller.Bik),
@@ -219,6 +228,7 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.requisites"] = Encode(seller.Requisites),
                 ["seller.documentDirectorPosition"] = Encode(directorPosition),
                 ["seller.documentDirectorFullName"] = Encode(directorFullName),
+                ["seller.documentDirectorShortName"] = Encode(directorShortName),
                 ["seller.logoHtml"] = BuildImageHtml(mainCompany?.LogoDataUrl, "Логотип", "logo"),
                 ["seller.sealHtml"] = BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal"),
                 ["seller.signatureHtml"] = BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature"),
@@ -424,6 +434,50 @@ public static class InvoiceDocumentTemplateEngine
         return string.IsNullOrWhiteSpace(fullName) ? (fallback ?? string.Empty) : fullName;
     }
 
+    private static string BuildPersonShortName(PersonInfo? person, string? fallback)
+    {
+        if (person is not null)
+        {
+            var lastName = person.LastName?.Trim();
+            var firstInitial = string.IsNullOrWhiteSpace(person.FirstName) ? null : $"{char.ToUpperInvariant(person.FirstName.Trim()[0])}.";
+            var middleInitial = person.NoMiddleName || string.IsNullOrWhiteSpace(person.MiddleName)
+                ? null
+                : $"{char.ToUpperInvariant(person.MiddleName.Trim()[0])}.";
+
+            var value = string.Join(" ", new[] { lastName, string.Join(" ", new[] { firstInitial, middleInitial }.Where(static x => !string.IsNullOrWhiteSpace(x))) }
+                .Where(static x => !string.IsNullOrWhiteSpace(x)))
+                .Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(fallback))
+        {
+            return string.Empty;
+        }
+
+        var parts = fallback.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (parts.Length == 1)
+        {
+            return parts[0];
+        }
+
+        var initials = parts
+            .Skip(1)
+            .Take(2)
+            .Select(part => $"{char.ToUpperInvariant(part[0])}.")
+            .ToArray();
+
+        return $"{parts[0]} {string.Join(" ", initials)}".Trim();
+    }
+
     private static string RenderLineItems(string template, IReadOnlyCollection<Dictionary<string, string>> lineItems)
     {
         return LoopRegex.Replace(template, match =>
@@ -457,6 +511,39 @@ public static class InvoiceDocumentTemplateEngine
         }
 
         return $"<img src=\"{dataUrl}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" />";
+    }
+
+    private static string BuildInvoiceQrCodeHtml(
+        Payment payment,
+        SellerInfo seller,
+        decimal total,
+        DateTime invoiceDate,
+        string invoiceNumber)
+    {
+        if (string.IsNullOrWhiteSpace(seller.AccountNumber)
+            || string.IsNullOrWhiteSpace(seller.BankName)
+            || string.IsNullOrWhiteSpace(seller.Bik)
+            || string.IsNullOrWhiteSpace(seller.Inn))
+        {
+            return string.Empty;
+        }
+
+        var purpose = $"Оплата счета №{invoiceNumber} от {invoiceDate:dd.MM.yyyy} на сумму {FormatMoney(total)} руб. (без НДС)";
+        var qrPayload =
+            "ST00012"
+            + $"|Name={seller.FullName}"
+            + $"|PersonalAcc={seller.AccountNumber}"
+            + $"|BankName={seller.BankName}"
+            + $"|BIC={seller.Bik}"
+            + $"|CorrespAcc={seller.CorrAccountNumber}"
+            + $"|PayeeINN={seller.Inn}"
+            + $"|KPP={seller.Kpp}"
+            + $"|Purpose={purpose}"
+            + "|TechCode=15"
+            + $"|Sum={(long)Math.Round(total * 100m, MidpointRounding.AwayFromZero)}";
+
+        var qrUrl = $"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={Uri.EscapeDataString(qrPayload)}";
+        return $"<img src=\"{WebUtility.HtmlEncode(qrUrl)}\" alt=\"QR-код для оплаты\" class=\"invoice-qr\" />";
     }
 
     private static string FormatMoney(decimal value)
@@ -718,122 +805,326 @@ public static class InvoiceDocumentTemplateEngine
   <style>
     @page { size: A4; margin: 14mm; }
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111827; font-family: Arial, sans-serif; font-size: 13px; }
-    .page { width: 100%; }
-    .top { display: grid; grid-template-columns: 1.7fr 0.9fr; gap: 18px; align-items: start; }
-    .seller-heading { font-size: 20px; font-weight: 700; line-height: 1.25; margin-bottom: 12px; }
-    .brand-side { text-align: right; }
-    .brand-side .logo { max-width: 190px; max-height: 92px; object-fit: contain; margin-left: auto; display: block; }
-    .brand-side .seal { max-width: 160px; max-height: 160px; object-fit: contain; margin: 16px 0 0 auto; display: block; opacity: 0.95; }
-    .brand-side .signature { max-width: 180px; max-height: 54px; object-fit: contain; margin-left: auto; display: block; }
-    .bank-table, .items-table { width: 100%; border-collapse: collapse; }
-    .bank-table td, .items-table th, .items-table td { border: 1px solid #111827; padding: 6px 8px; vertical-align: top; }
-    .bank-table td.label { width: 118px; color: #475569; font-size: 12px; }
-    .bank-table td.value { font-weight: 600; }
-    h1 { margin: 18px 0 10px; font-size: 28px; font-weight: 700; text-align: center; }
-    .details { border-top: 2px solid #111827; border-bottom: 2px solid #111827; padding: 10px 0 12px; margin-bottom: 16px; }
-    .details-row { margin: 6px 0; line-height: 1.45; }
-    .details-label { font-weight: 700; }
-    .items-table thead th { text-align: center; font-weight: 700; }
-    .items-table .num { width: 38px; text-align: center; }
-    .items-table .qty { width: 70px; text-align: right; }
-    .items-table .unit { width: 72px; text-align: center; }
-    .items-table .price, .items-table .sum { width: 115px; text-align: right; white-space: nowrap; }
-    .totals { margin-top: 10px; margin-left: auto; width: 330px; }
-    .totals-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 3px 0; }
-    .totals-row strong { font-size: 16px; }
-    .words { margin-top: 14px; font-weight: 700; }
-    .signature-area { margin-top: 32px; display: grid; grid-template-columns: 220px 1fr 240px; gap: 14px; align-items: end; }
-    .signature-line { border-bottom: 1px solid #111827; min-height: 42px; position: relative; }
-    .signature-line .signature { position: absolute; right: 16px; bottom: 4px; }
-    .muted { color: #64748b; font-size: 12px; }
+    body {
+      margin: 0;
+      color: #000000;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: 14px;
+      line-height: 1.25;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .page-content {
+      width: 675px;
+      padding: 0 50px;
+      margin: 0 auto;
+      background: #ffffff;
+    }
+    .document-template,
+    .document-template div,
+    .document-template span,
+    .document-template table,
+    .document-template tbody,
+    .document-template thead,
+    .document-template tfoot,
+    .document-template tr,
+    .document-template th,
+    .document-template td {
+      font-size: 14px;
+    }
+    .document-template table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .text-r { text-align: right; }
+    .text-c { text-align: center; }
+    .font-b { font-weight: 700; }
+    .v-al-t { vertical-align: top; }
+    .v-al-b { vertical-align: bottom; }
+    .pad-t-5 { padding-top: 5px; }
+    .color-line { border-bottom: 2px solid #000000; }
+    .doc-title {
+      font-size: 18px !important;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .logo-wrap {
+      text-align: right;
+    }
+    .logo-wrap .logo {
+      display: block;
+      max-height: 100px;
+      max-width: 100%;
+      margin-left: auto;
+      object-fit: contain;
+    }
+    .invoice-qr {
+      display: block;
+      width: 150px;
+      height: 150px;
+      max-width: 150px;
+      max-height: 150px;
+      margin-left: auto;
+      object-fit: contain;
+    }
+    .bank-grid td {
+      padding: 4px 5px;
+      border: 1px solid #000000;
+      vertical-align: top;
+    }
+    .bank-grid .bor0-b { border-bottom: 0; }
+    .bank-grid .bor0-t { border-top: 0; }
+    .doc-main-title {
+      margin: 12px 0;
+      text-align: center;
+      font-size: 23px !important;
+      font-weight: 700;
+    }
+    .counterparty-table td {
+      padding: 4px 3px;
+      vertical-align: top;
+    }
+    .counterparty-label {
+      width: 14%;
+      color: #222222;
+    }
+    .counterparty-value {
+      font-weight: 700;
+    }
+    .items-table {
+      margin: 8px 0;
+      border: 2px solid #000000;
+    }
+    .items-table th,
+    .items-table td {
+      border: 1px solid #000000;
+      padding: 6px 6px;
+      vertical-align: top;
+    }
+    .items-table th {
+      text-align: center;
+      font-weight: 700;
+    }
+    .items-table .num {
+      width: 5%;
+      text-align: center;
+    }
+    .items-table .name {
+      width: 49%;
+      word-break: break-word;
+    }
+    .items-table .qty {
+      width: 8%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .items-table .unit {
+      width: 7%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .items-table .price,
+    .items-table .sum {
+      width: 15%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .totals-table td {
+      padding: 2px 0;
+    }
+    .totals-label {
+      width: 82%;
+      text-align: right;
+      padding-right: 12px !important;
+    }
+    .totals-value {
+      width: 18%;
+      text-align: right;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+    .summary-line {
+      margin-top: 10px;
+    }
+    .words {
+      font-weight: 700;
+    }
+    .signature-table {
+      margin-top: 10px;
+    }
+    .signature-line {
+      border-bottom: 1px solid #000000;
+      text-align: center;
+      height: 46px;
+      vertical-align: bottom;
+      position: relative;
+    }
+    .signature-line .signature {
+      max-width: 160px;
+      max-height: 42px;
+      object-fit: contain;
+      position: absolute;
+      left: 50%;
+      bottom: 2px;
+      transform: translateX(-50%);
+    }
+    .signature-caption {
+      padding-top: 3px;
+      color: #222222;
+      font-size: 12px !important;
+    }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="top">
-      <div>
-        <div class="seller-heading">{{seller.fullName}}</div>
-        <table class="bank-table">
+  <div class="page-content">
+    <div class="document-template invoice-template">
+      <table style="margin-bottom: 10px;">
+        <tbody>
           <tr>
-            <td class="value">{{seller.bankName}}</td>
-            <td class="label">БИК</td>
-            <td class="value">{{seller.bik}}</td>
+            <td class="doc-title" style="width: 60%; vertical-align: middle; padding: 2px 0;">
+              {{seller.fullName}}
+            </td>
+            <td class="logo-wrap" style="width: 40%; vertical-align: middle;">
+              {{seller.logoHtml}}
+            </td>
           </tr>
+        </tbody>
+      </table>
+
+      <table style="margin: 0 0 10px;">
+        <tbody>
           <tr>
-            <td class="label">Банк получателя</td>
-            <td class="label">Сч. №</td>
-            <td class="value">{{seller.accountNumber}}</td>
+            <td>
+              <table class="bank-grid">
+                <tbody>
+                  <tr>
+                    <td colspan="2" rowspan="2" class="v-al-t bor0-b" style="width: 50%;">
+                      {{seller.bankName}}
+                    </td>
+                    <td style="width: 15%;">БИК</td>
+                    <td class="bor0-b" style="width: 35%;">{{seller.bik}}</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
+                    <td rowspan="2" class="v-al-t bor0-t" style="width: 35%;">{{seller.corrAccountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Банк получателя</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td style="width: 25%;">ИНН {{seller.inn}}</td>
+                    <td style="width: 25%;">КПП {{seller.kppOrDash}}</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
+                    <td rowspan="4" class="v-al-t" style="width: 35%;">{{seller.accountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td rowspan="2" colspan="2" class="v-al-t bor0-b" style="width: 50%;">{{seller.fullName}}</td>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Получатель</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+            <td style="width: 150px; vertical-align: top;">
+              {{invoice.qrCodeHtml}}
+            </td>
           </tr>
-          <tr>
-            <td class="value">ИНН {{seller.inn}} {{seller.kpp}}</td>
-            <td class="label">Корр. сч.</td>
-            <td class="value">{{seller.corrAccountNumber}}</td>
-          </tr>
-          <tr>
-            <td class="value">{{seller.fullName}}</td>
-            <td class="label"></td>
-            <td class="value"></td>
-          </tr>
-          <tr>
-            <td class="label">Получатель</td>
-            <td class="label"></td>
-            <td class="value"></td>
-          </tr>
-        </table>
+        </tbody>
+      </table>
+
+      <div class="doc-main-title text-c">
+        Счет № {{invoice.number}} от {{invoice.dateLong}}
       </div>
-      <div class="brand-side">
-        {{seller.logoHtml}}
-        {{seller.sealHtml}}
+
+      <div class="color-line"></div>
+
+      <table class="counterparty-table" style="margin: 5px 0;">
+        <tbody>
+          <tr>
+            <td class="counterparty-label">Поставщик<br/>(Исполнитель):</td>
+            <td class="counterparty-value">{{seller.requisites}}</td>
+          </tr>
+          <tr>
+            <td class="counterparty-label pad-t-5">Покупатель<br/>(Заказчик):</td>
+            <td class="counterparty-value pad-t-5">{{buyer.requisites}}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th class="num">№</th>
+            <th class="name">Товары (работы, услуги)</th>
+            <th class="qty">Кол-во</th>
+            <th class="unit">Ед.</th>
+            <th class="price">Цена</th>
+            <th class="sum">Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#lineItems}}
+          <tr>
+            <td class="num">{{index}}</td>
+            <td class="name">{{name}}</td>
+            <td class="qty">{{quantity}}</td>
+            <td class="unit">{{unit}}</td>
+            <td class="price">{{price}}</td>
+            <td class="sum">{{total}}</td>
+          </tr>
+          {{/lineItems}}
+        </tbody>
+      </table>
+
+      <table class="totals-table">
+        <tbody>
+          <tr>
+            <td class="totals-label">Итого:</td>
+            <td class="totals-value">{{invoice.total}}</td>
+          </tr>
+          <tr>
+            <td class="totals-label">Без налога (НДС):</td>
+            <td class="totals-value">-</td>
+          </tr>
+          <tr>
+            <td class="totals-label">Всего к оплате:</td>
+            <td class="totals-value">{{invoice.total}}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="summary-line">
+        Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.
       </div>
+      <div class="words">{{invoice.totalWords}}</div>
+
+      <div class="color-line" style="margin: 5px 0;"></div>
+
+      <table class="signature-table">
+        <tbody>
+          <tr>
+            <td class="font-b v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
+            <td style="width: 5%;"></td>
+            <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}</td>
+            <td style="width: 5%;"></td>
+            <td class="signature-line text-c v-al-b" style="width: 35%;">{{seller.documentDirectorShortName}}</td>
+          </tr>
+          <tr>
+            <td colspan="2" style="width: 25%;"></td>
+            <td class="text-c signature-caption" style="width: 35%;">подпись</td>
+            <td style="width: 5%;"></td>
+            <td class="text-c signature-caption" style="width: 35%;">расшифровка подписи</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-
-    <h1>Счет № {{invoice.number}} от {{invoice.dateLong}}</h1>
-
-    <div class="details">
-      <div class="details-row"><span class="details-label">Поставщик (Исполнитель):</span> {{seller.requisites}}</div>
-      <div class="details-row"><span class="details-label">Покупатель (Заказчик):</span> {{buyer.requisites}}</div>
-    </div>
-
-    <table class="items-table">
-      <thead>
-        <tr>
-          <th class="num">№</th>
-          <th>Товары (работы, услуги)</th>
-          <th class="qty">Кол-во</th>
-          <th class="unit">Ед.</th>
-          <th class="price">Цена</th>
-          <th class="sum">Сумма</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{#lineItems}}
-        <tr>
-          <td class="num">{{index}}</td>
-          <td>{{name}}</td>
-          <td class="qty">{{quantity}}</td>
-          <td class="unit">{{unit}}</td>
-          <td class="price">{{price}}</td>
-          <td class="sum">{{total}}</td>
-        </tr>
-        {{/lineItems}}
-      </tbody>
-    </table>
-
-    <div class="totals">
-      <div class="totals-row"><span>Итого:</span><span>{{invoice.total}}</span></div>
-      <div class="totals-row"><span>{{invoice.vatText}}</span><span></span></div>
-      <div class="totals-row"><strong>Всего к оплате:</strong><strong>{{invoice.total}}</strong></div>
-    </div>
-
-    <div class="words">{{invoice.totalWords}}</div>
-
-    <div class="signature-area">
-      <div>{{seller.documentDirectorPosition}}</div>
-      <div class="signature-line">{{seller.signatureHtml}}</div>
-      <div>{{seller.documentDirectorFullName}}</div>
-    </div>
-    <div class="muted" style="margin-top:8px;">Срок оплаты: {{invoice.dueDate}}</div>
   </div>
 </body>
 </html>

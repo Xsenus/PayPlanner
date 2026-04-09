@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, FileText, Plus, RefreshCw, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { Check, Copy, FileSearch, FileText, Plus, RefreshCw, RotateCcw, Save, Search, Trash2 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type { InvoiceDocumentTemplateDto, InvoiceDocumentTemplateSettingsDto } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
@@ -39,7 +39,12 @@ function ensureUniqueTemplateKey(
   return `${base}-${index}`;
 }
 
-const PREVIEW_HTML_TOKEN_KEYS = new Set(['seller.logoHtml', 'seller.sealHtml', 'seller.signatureHtml']);
+const PREVIEW_HTML_TOKEN_KEYS = new Set([
+  'seller.logoHtml',
+  'seller.sealHtml',
+  'seller.signatureHtml',
+  'invoice.qrCodeHtml',
+]);
 
 const PREVIEW_TOKENS: Record<string, string> = {
   'document.title': 'Счет № 25 от 02.04.2026',
@@ -52,11 +57,14 @@ const PREVIEW_TOKENS: Record<string, string> = {
   'invoice.description': 'Оплата юридических услуг',
   'invoice.total': '11 000,00',
   'invoice.totalWords': 'Одиннадцать тысяч рублей 00 копеек',
+  'invoice.itemsCount': '2',
   'invoice.vatText': 'Без налога (НДС): —',
+  'invoice.qrCodeHtml': '<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=demo" alt="QR-код" style="display:block;width:150px;height:150px;margin-left:auto;object-fit:contain;" />',
   'seller.shortName': 'ИП Кожеваткин А.В.',
   'seller.fullName': 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович',
   'seller.inn': '633009620345',
   'seller.kpp': '—',
+  'seller.kppOrDash': '—',
   'seller.address': '446200, Самарская область, г. Новокуйбышевск, ул. Миронова, д. 9',
   'seller.bankName': 'ООО "Банк Точка"',
   'seller.bik': '044525104',
@@ -65,6 +73,7 @@ const PREVIEW_TOKENS: Record<string, string> = {
   'seller.requisites': 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович, ИНН 633009620345, 446200, Самарская область, г. Новокуйбышевск, ул. Миронова, д. 9, р/с 40802810414500006073, в банке ООО "Банк Точка", БИК 044525104',
   'seller.documentDirectorPosition': 'Индивидуальный предприниматель',
   'seller.documentDirectorFullName': 'Кожеваткин Андрей Владимирович',
+  'seller.documentDirectorShortName': 'Кожеваткин А. В.',
   'seller.logoHtml': '<div style="font-size:28px;font-weight:700;letter-spacing:0.08em;color:#111827;text-align:right;">ЭЛИТПРАВО</div>',
   'seller.sealHtml': '<div style="width:132px;height:132px;border:2px dashed #94a3b8;border-radius:9999px;margin-left:auto;margin-top:16px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:12px;">Печать</div>',
   'seller.signatureHtml': '<div style="font-style:italic;color:#334155;font-size:18px;">А. В. Кожеваткин</div>',
@@ -118,6 +127,74 @@ function renderTemplatePreview(templateHtml: string) {
   });
 }
 
+type TemplateValidationResult = {
+  errors: string[];
+  warnings: string[];
+};
+
+function validateTemplateHtml(
+  templateHtml: string,
+  settings: InvoiceDocumentTemplateSettingsDto | null,
+): TemplateValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const source = templateHtml.trim();
+
+  if (!source) {
+    errors.push('HTML шаблона пуст.');
+    return { errors, warnings };
+  }
+
+  const loopOpenCount = (source.match(/\{\{#lineItems\}\}/g) ?? []).length;
+  const loopCloseCount = (source.match(/\{\{\/lineItems\}\}/g) ?? []).length;
+  if (loopOpenCount !== loopCloseCount) {
+    errors.push('Блок {{#lineItems}} ... {{/lineItems}} закрыт не полностью.');
+  }
+
+  const mustacheOpenCount = (source.match(/\{\{/g) ?? []).length;
+  const mustacheCloseCount = (source.match(/\}\}/g) ?? []).length;
+  if (mustacheOpenCount !== mustacheCloseCount) {
+    errors.push('В шаблоне есть незакрытые конструкции {{...}}.');
+  }
+
+  if (!/<html[\s>]/i.test(source)) {
+    warnings.push('В шаблоне нет тега <html>. Документ все равно может работать, но лучше держать полный HTML.');
+  }
+  if (!/<body[\s>]/i.test(source)) {
+    warnings.push('В шаблоне нет тега <body>. Для печатного документа это нежелательно.');
+  }
+  if (!/<title[\s>]/i.test(source)) {
+    warnings.push('В шаблоне нет тега <title>. Файл будет открываться менее понятно.');
+  }
+  if (!/\{\{invoice\.number\}\}/.test(source)) {
+    warnings.push('В шаблоне не используется {{invoice.number}}. Пользователь может не увидеть номер счета.');
+  }
+  if (!/\{\{invoice\.date(Long)?\}\}/.test(source)) {
+    warnings.push('В шаблоне не используется дата счета.');
+  }
+
+  const allowedTokens = new Set<string>((settings?.tokens ?? []).map((token) => token.key));
+  allowedTokens.add('#lineItems');
+  allowedTokens.add('/lineItems');
+
+  const discoveredTokens = Array.from(source.matchAll(/\{\{\s*([a-zA-Z0-9._#/]+)\s*\}\}/g))
+    .map((match) => match[1]?.trim())
+    .filter((token): token is string => Boolean(token));
+
+  const unknownTokens = Array.from(new Set(discoveredTokens.filter((token) => !allowedTokens.has(token))));
+  if (unknownTokens.length > 0) {
+    warnings.push(`Обнаружены неподдерживаемые токены: ${unknownTokens.join(', ')}.`);
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(source, 'text/html');
+  if (!parsed.body) {
+    errors.push('Браузер не смог построить DOM для шаблона.');
+  }
+
+  return { errors, warnings };
+}
+
 export function InvoiceDocumentTemplateSettings() {
   const { confirm } = useDialog();
   const toast = useToast();
@@ -126,6 +203,9 @@ export function InvoiceDocumentTemplateSettings() {
   const [workspaceTab, setWorkspaceTab] = useState<'preview' | 'editor' | 'tokens'>('preview');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [tokenSearch, setTokenSearch] = useState('');
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<TemplateValidationResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,8 +256,27 @@ export function InvoiceDocumentTemplateSettings() {
     });
     return Array.from(groups.entries());
   }, [settings]);
+  const filteredTokenGroups = useMemo(() => {
+    const term = tokenSearch.trim().toLowerCase();
+    if (!term) {
+      return tokenGroups;
+    }
+
+    return tokenGroups
+      .map(([category, items]) => [
+        category,
+        items.filter((token) =>
+          category.toLowerCase().includes(term)
+          || token.key.toLowerCase().includes(term)
+          || token.description.toLowerCase().includes(term)),
+      ] as const)
+      .filter(([, items]) => items.length > 0);
+  }, [tokenGroups, tokenSearch]);
 
   const updateSelectedTemplate = (patch: Partial<InvoiceDocumentTemplateDto>) => {
+    if (patch.html !== undefined) {
+      setValidationResult(null);
+    }
     setSettings((prev) => {
       if (!prev) return prev;
       return {
@@ -190,6 +289,10 @@ export function InvoiceDocumentTemplateSettings() {
       };
     });
   };
+
+  useEffect(() => {
+    setValidationResult(null);
+  }, [selectedTemplateKey]);
 
   const addTemplate = () => {
     setSettings((prev) => {
@@ -210,6 +313,7 @@ export function InvoiceDocumentTemplateSettings() {
     });
     setMessage(null);
     setError(null);
+    setValidationResult(null);
   };
 
   const duplicateSelectedTemplate = () => {
@@ -227,6 +331,7 @@ export function InvoiceDocumentTemplateSettings() {
     setWorkspaceTab('editor');
     setMessage(null);
     setError(null);
+    setValidationResult(null);
   };
 
   const removeSelectedTemplate = async () => {
@@ -259,6 +364,7 @@ export function InvoiceDocumentTemplateSettings() {
     setSelectedTemplateKey(nextSelected.key);
     setMessage(null);
     setError(null);
+    setValidationResult(null);
   };
 
   const activateSelectedTemplate = () => {
@@ -269,6 +375,7 @@ export function InvoiceDocumentTemplateSettings() {
     });
     setMessage(null);
     setError(null);
+    setValidationResult(null);
   };
 
   const resetSelectedTemplateHtml = async () => {
@@ -281,6 +388,7 @@ export function InvoiceDocumentTemplateSettings() {
     });
     if (!approved) return;
     updateSelectedTemplate({ html: settings.defaultTemplateHtml });
+    setValidationResult(null);
   };
 
   const saveTemplates = async () => {
@@ -331,6 +439,37 @@ export function InvoiceDocumentTemplateSettings() {
     previewWindow.document.write(previewHtml);
     previewWindow.document.close();
     previewWindow.focus();
+  };
+
+  const validateSelectedTemplate = () => {
+    if (!selectedTemplate) return;
+    const result = validateTemplateHtml(selectedTemplate.html, settings);
+    setValidationResult(result);
+    if (result.errors.length > 0) {
+      toast.error(`Найдено ошибок: ${result.errors.length}.`, 'Проверка шаблона');
+      return;
+    }
+
+    if (result.warnings.length > 0) {
+      toast.success(`Критичных ошибок нет, но есть предупреждения: ${result.warnings.length}.`, 'Проверка шаблона');
+      return;
+    }
+
+    toast.success('Шаблон прошел базовую проверку без замечаний.', 'Проверка шаблона');
+  };
+
+  const copyTokenToClipboard = async (tokenKey: string) => {
+    const value = tokenKey === 'lineItems'
+      ? '{{#lineItems}}\n  ...\n{{/lineItems}}'
+      : `{{${tokenKey}}}`;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedToken(tokenKey);
+      window.setTimeout(() => setCopiedToken((prev) => (prev === tokenKey ? null : prev)), 1500);
+      toast.success('Токен скопирован в буфер обмена.', 'Шаблоны');
+    } catch {
+      toast.error('Не удалось скопировать токен в буфер обмена.', 'Шаблоны');
+    }
   };
 
   return (
@@ -480,12 +619,21 @@ export function InvoiceDocumentTemplateSettings() {
                   </button>
                   <button
                     type="button"
+                    onClick={validateSelectedTemplate}
+                    disabled={loading || saving}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <FileSearch className="h-4 w-4" />
+                    <span>Проверить HTML</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void resetSelectedTemplateHtml()}
                     disabled={loading || saving}
                     className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    <span>Сбросить HTML</span>
+                    <span>Сбросить к стандартному</span>
                   </button>
                 </div>
               </div>
@@ -586,6 +734,40 @@ export function InvoiceDocumentTemplateSettings() {
                   ))}
                 </div>
 
+                {validationResult ? (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="text-base font-semibold text-gray-900">Результат проверки шаблона</div>
+                    {validationResult.errors.length === 0 && validationResult.warnings.length === 0 ? (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        Критичных ошибок не найдено. Шаблон выглядит корректным.
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {validationResult.errors.length > 0 ? (
+                          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                            <div className="font-semibold">Ошибки</div>
+                            <div className="mt-2 space-y-1">
+                              {validationResult.errors.map((item) => (
+                                <div key={item}>• {item}</div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {validationResult.warnings.length > 0 ? (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                            <div className="font-semibold">Предупреждения</div>
+                            <div className="mt-2 space-y-1">
+                              {validationResult.warnings.map((item) => (
+                                <div key={item}>• {item}</div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
                 {workspaceTab === 'preview' && (
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -654,15 +836,41 @@ export function InvoiceDocumentTemplateSettings() {
                       Переменные подставляются автоматически. Повторяемые поля работают только внутри блока <code>{'{{#lineItems}} ... {{/lineItems}}'}</code>.
                     </div>
 
+                    <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <label className="relative block lg:max-w-md lg:flex-1">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={tokenSearch}
+                          onChange={(event) => setTokenSearch(event.target.value)}
+                          placeholder="Поиск по переменным, описанию или категории"
+                          className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-700"
+                        />
+                      </label>
+                      <div className="text-xs text-gray-500">
+                        Найдено токенов: {filteredTokenGroups.reduce((sum, [, items]) => sum + items.length, 0)}
+                      </div>
+                    </div>
+
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      {tokenGroups.map(([category, items]) => (
+                      {filteredTokenGroups.map(([category, items]) => (
                         <div key={category} className="rounded-2xl border border-gray-200 bg-white p-4">
                           <div className="text-sm font-semibold text-gray-900">{category}</div>
                           <div className="mt-3 space-y-3">
                             {items.map((token) => (
                               <div key={token.key} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                                <div className="font-mono text-xs text-blue-700">
-                                  {token.key === 'lineItems' ? '{{#lineItems}} ... {{/lineItems}}' : `{{${token.key}}}`}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="font-mono text-xs text-blue-700">
+                                    {token.key === 'lineItems' ? '{{#lineItems}} ... {{/lineItems}}' : `{{${token.key}}}`}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => void copyTokenToClipboard(token.key)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-100"
+                                  >
+                                    {copiedToken === token.key ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                    {copiedToken === token.key ? 'Скопировано' : 'Копировать'}
+                                  </button>
                                 </div>
                                 <div className="mt-1 text-xs text-gray-600">{token.description}</div>
                               </div>
@@ -671,6 +879,11 @@ export function InvoiceDocumentTemplateSettings() {
                         </div>
                       ))}
                     </div>
+                    {filteredTokenGroups.length === 0 ? (
+                      <div className="mt-4 rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-8 text-center text-sm text-gray-500">
+                        По текущему запросу переменные не найдены.
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
