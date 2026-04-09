@@ -11,15 +11,19 @@ import type {
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSettings';
 
-type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups';
+type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'deleted';
 
 const TABS: Array<{ id: MaintenanceTab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
   { id: 'activity', label: 'Журнал действий' },
   { id: 'operations', label: 'Сервисные операции' },
   { id: 'backups', label: 'Резервные копии' },
+  { id: 'deleted', label: 'Удалённые объекты' },
 ];
 
 function formatBytes(bytes: number) {
@@ -73,6 +77,8 @@ function StatusBadge({ value, tone }: { value: string; tone: 'success' | 'warnin
 export function DatabaseMaintenanceSettings() {
   const toast = useToast();
   const { confirm } = useDialog();
+  const { user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
   const [activeTab, setActiveTab] = useState<MaintenanceTab>('overview');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -105,6 +111,12 @@ export function DatabaseMaintenanceSettings() {
   const [databaseBackupClearing, setDatabaseBackupClearing] = useState(false);
   const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
   const [databaseBackupError, setDatabaseBackupError] = useState<string | null>(null);
+  const canViewDeletedObjects = isAdmin() || permissions.audit.canView;
+  const canRestoreDeletedObjects = isAdmin() || permissions.audit.canEdit;
+  const availableTabs = useMemo(
+    () => TABS.filter((tab) => tab.id !== 'deleted' || canViewDeletedObjects),
+    [canViewDeletedObjects],
+  );
 
   const applyDatabaseBackupOverview = (overview: DatabaseBackupOverviewDto | null) => {
     setDatabaseBackupOverview(overview);
@@ -149,6 +161,12 @@ export function DatabaseMaintenanceSettings() {
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  useEffect(() => {
+    if (activeTab === 'deleted' && !canViewDeletedObjects) {
+      setActiveTab('overview');
+    }
+  }, [activeTab, canViewDeletedObjects]);
 
   const hasUserActivitySettingsChanges = useMemo(
     () =>
@@ -416,7 +434,7 @@ export function DatabaseMaintenanceSettings() {
 
         <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="space-y-2">
-            {TABS.map((tab) => (
+            {availableTabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -933,6 +951,10 @@ export function DatabaseMaintenanceSettings() {
               )}
             </div>
           </div>
+        )}
+
+        {activeTab === 'deleted' && canViewDeletedObjects && (
+          <ObjectAuditDeletedObjectsSettings canRestore={canRestoreDeletedObjects} />
         )}
       </div>
     </div>

@@ -148,6 +148,31 @@ export interface DatabaseImportResultDto {
   tables: DatabaseImportTableResultDto[];
 }
 
+export interface ObjectAuditEventDto {
+  id: number;
+  objectType: string;
+  objectId: number;
+  action: string;
+  description?: string | null;
+  actorUserId?: number | null;
+  actorUserName?: string | null;
+  metadataJson?: string | null;
+  createdAt: string;
+}
+
+export interface DeletedObjectAuditItemDto {
+  objectType: string;
+  objectId: number;
+  displayName: string;
+  subtitle?: string | null;
+  createdAt?: string | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserName?: string | null;
+  deletedAt?: string | null;
+  deletedByUserName?: string | null;
+}
+
 export interface SqliteStorageStatsDto {
   databaseFileSizeBytes: number;
   walFileSizeBytes: number;
@@ -251,6 +276,15 @@ export interface ContactDirectoryItemDto {
   responsibleUserName?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
 }
 
 export interface UpdateClientContactRequestDto {
@@ -692,6 +726,28 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async getObjectAuditHistory(objectType: string, objectId: number) {
+    return this.request<ObjectAuditEventDto[]>(
+      `/object-audit/${encodeURIComponent(objectType.trim().toLowerCase())}/${objectId}`,
+    );
+  }
+
+  async getDeletedObjectAuditItems(objectType: string, search?: string) {
+    const query = buildQuery({ search: search?.trim() || undefined });
+    return this.request<DeletedObjectAuditItemDto[]>(
+      `/object-audit/deleted/${encodeURIComponent(objectType.trim().toLowerCase())}${query}`,
+    );
+  }
+
+  async restoreDeletedObject(objectType: string, objectId: number) {
+    return this.request<void>(
+      `/object-audit/${encodeURIComponent(objectType.trim().toLowerCase())}/${objectId}/restore`,
+      {
+        method: 'POST',
+      },
+    );
   }
 
   // ===== Contacts =====

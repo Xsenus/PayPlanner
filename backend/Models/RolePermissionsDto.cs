@@ -27,4 +27,5 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto Contracts { get; set; } = new();
     public MenuSectionPermissionsDto Dictionaries { get; set; } = new();
     public MenuSectionPermissionsDto Roles { get; set; } = new();
+    public MenuSectionPermissionsDto Audit { get; set; } = new();
 }

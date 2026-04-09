@@ -233,6 +233,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Roles:
                     dto.Roles = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Audit:
+                    dto.Audit = ToSection(permission);
+                    break;
             }
         }
 
@@ -253,6 +256,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Contracts] = ToValues(dto.Contracts),
             [RolePermissionCatalog.Dictionaries] = ToValues(dto.Dictionaries),
             [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
+            [RolePermissionCatalog.Audit] = ToValues(dto.Audit),
         };
 
     private void StampPermissionsAudit(Role role)
@@ -280,12 +284,24 @@ public class RolePermissionsController : ControllerBase
         }
 
         var canExport = string.Equals(section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase)
             ? false
             : values.CanExport;
 
         var canViewAnalytics = string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
             ? values.CanViewAnalytics
             : false;
+
+        if (string.Equals(section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase))
+        {
+            return values with
+            {
+                CanCreate = false,
+                CanDelete = false,
+                CanExport = false,
+                CanViewAnalytics = false,
+            };
+        }
 
         return values with
         {

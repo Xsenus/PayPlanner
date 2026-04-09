@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
@@ -34,6 +36,8 @@ type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organi
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export function AppSettings() {
+  const { user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
   const toast = useToast();
   const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
@@ -89,6 +93,8 @@ export function AppSettings() {
   const [databaseImportResult, setDatabaseImportResult] = useState<DatabaseImportResultDto | null>(null);
   const [detailsPage, setDetailsPage] = useState(1);
   const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
+  const isAdminRole = isAdmin();
+  const auditOnlyMode = !isAdminRole && permissions.audit.canView;
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'general') return 'Финансовые правила';
@@ -100,6 +106,12 @@ export function AppSettings() {
     if (activeSection === 'form-requirements') return 'Правила заполнения форм';
     return 'Финансовые правила';
   }, [activeSection]);
+
+  useEffect(() => {
+    if (auditOnlyMode && activeSection !== 'db-maintenance') {
+      setActiveSection('db-maintenance');
+    }
+  }, [activeSection, auditOnlyMode]);
 
   const migrationDetails = useMemo(() => result?.details ?? [], [result]);
   const migrationDetailsTotalPages = useMemo(
@@ -610,6 +622,7 @@ export function AppSettings() {
             </div>
 
             <nav aria-label="Разделы настроек" className="mt-4 space-y-3">
+              {!auditOnlyMode && (
               <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
@@ -645,7 +658,9 @@ export function AppSettings() {
                   </button>
                 </div>
               </div>
+              )}
 
+              {!auditOnlyMode && (
               <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
@@ -681,6 +696,7 @@ export function AppSettings() {
                   </button>
                 </div>
               </div>
+              )}
 
               <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white/90 px-3 py-3 shadow-sm">
@@ -704,6 +720,8 @@ export function AppSettings() {
                   >
                     Обслуживание
                   </button>
+                  {!auditOnlyMode && (
+                    <>
                   <button
                     type="button"
                     onClick={() => setActiveSection('db-operations')}
@@ -726,6 +744,8 @@ export function AppSettings() {
                   >
                     Импорт SQLite
                   </button>
+                    </>
+                  )}
                 </div>
               </div>
             </nav>

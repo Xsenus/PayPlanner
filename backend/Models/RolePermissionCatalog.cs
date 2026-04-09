@@ -16,6 +16,7 @@ public static class RolePermissionCatalog
     public const string Contracts = "contracts";
     public const string Dictionaries = "dictionaries";
     public const string Roles = "roles";
+    public const string Audit = "audit";
 
     public static readonly string[] AllSections =
     [
@@ -29,7 +30,8 @@ public static class RolePermissionCatalog
         Payments,
         Contracts,
         Dictionaries,
-        Roles
+        Roles,
+        Audit
     ];
 
     public static IReadOnlyDictionary<string, RolePermissionValues> BuildDefaults(bool allowRoleManagement)
@@ -51,6 +53,13 @@ public static class RolePermissionCatalog
                 allowRoleManagement,
                 allowRoleManagement,
                 false,
+                false),
+            [Audit] = new(
+                allowRoleManagement,
+                false,
+                allowRoleManagement,
+                false,
+                false,
                 false)
         };
 
@@ -70,7 +79,8 @@ public static class RolePermissionCatalog
             Payments = ToSection(defaults[Payments]),
             Contracts = ToSection(defaults[Contracts]),
             Dictionaries = ToSection(defaults[Dictionaries]),
-            Roles = ToSection(defaults[Roles])
+            Roles = ToSection(defaults[Roles]),
+            Audit = ToSection(defaults[Audit])
         };
     }
 

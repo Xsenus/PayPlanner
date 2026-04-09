@@ -129,6 +129,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Доступ к списку ролей и настройке правил доступа.',
     icon: Shield,
   },
+  audit: {
+    key: 'audit',
+    title: 'Аудит объектов',
+    description: 'Просмотр удалённых объектов и восстановление записей.',
+    icon: ShieldCheck,
+  },
 };
 
 const GROUPS: GroupConfig[] = [
@@ -154,7 +160,7 @@ const GROUPS: GroupConfig[] = [
     key: 'administration',
     title: 'Администрирование прав',
     description: 'Просмотр ролей и делегирование управления правилами.',
-    sections: ['roles'],
+    sections: ['roles', 'audit'],
   },
 ];
 
@@ -206,6 +212,19 @@ const ROLES_PERMISSION_META: PermissionMeta[] = [
     key: 'canDelete',
     label: 'Удаление ролей',
     description: 'Удалять пользовательские роли, если они никому не назначены.',
+  },
+];
+
+const AUDIT_PERMISSION_META: PermissionMeta[] = [
+  {
+    key: 'canView',
+    label: 'Просмотр корзины',
+    description: 'Открывать удалённые объекты и читать аудит по ним.',
+  },
+  {
+    key: 'canEdit',
+    label: 'Восстановление',
+    description: 'Возвращать удалённые объекты в рабочие списки.',
   },
 ];
 
@@ -269,6 +288,18 @@ function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSect
 
 function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: RolePermissions) {
   const section = permissions[sectionKey];
+
+  if (sectionKey === 'audit') {
+    let count = 0;
+    if (section.canView) {
+      count += 1;
+    }
+    if (section.canEdit) {
+      count += 1;
+    }
+    return count;
+  }
+
   let count = MENU_PERMISSION_KEYS.filter((permissionKey) => section[permissionKey]).length;
 
   if (sectionKey === 'calendar' && permissions.calendar.canViewAnalytics) {
@@ -279,7 +310,15 @@ function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: Role
 }
 
 function getTotalPermissionCount(sectionKey: MenuSectionKey) {
-  return sectionKey === 'calendar' ? MENU_PERMISSION_KEYS.length + 1 : MENU_PERMISSION_KEYS.length;
+  if (sectionKey === 'calendar') {
+    return MENU_PERMISSION_KEYS.length + 1;
+  }
+
+  if (sectionKey === 'audit') {
+    return AUDIT_PERMISSION_META.length;
+  }
+
+  return MENU_PERMISSION_KEYS.length;
 }
 
 export function RolePermissionsModal({
@@ -370,6 +409,17 @@ export function RolePermissionsModal({
 
   const setSectionAll = (sectionKey: MenuSectionKey, value: boolean) => {
     updateSection(sectionKey, (section) => {
+      if (sectionKey === 'audit') {
+        return {
+          ...section,
+          canView: value,
+          canCreate: false,
+          canEdit: value,
+          canDelete: false,
+          canExport: false,
+        } as typeof section;
+      }
+
       const next = {
         ...section,
         canView: value,
@@ -392,6 +442,18 @@ export function RolePermissionsModal({
       const next = { ...prev };
 
       for (const key of Object.keys(prev) as MenuSectionKey[]) {
+        if (key === 'audit') {
+          next.audit = {
+            ...prev.audit,
+            canView: value,
+            canCreate: false,
+            canEdit: value,
+            canDelete: false,
+            canExport: false,
+          };
+          continue;
+        }
+
         next[key] = {
           ...prev[key],
           canView: value,
@@ -629,7 +691,11 @@ export function RolePermissionsModal({
                   const sectionConfig = SECTION_CONFIG[sectionKey];
                   const section = permissions[sectionKey];
                   const permissionMeta =
-                    sectionKey === 'roles' ? ROLES_PERMISSION_META : DEFAULT_PERMISSION_META;
+                    sectionKey === 'roles'
+                      ? ROLES_PERMISSION_META
+                      : sectionKey === 'audit'
+                        ? AUDIT_PERMISSION_META
+                        : DEFAULT_PERMISSION_META;
                   const Icon = sectionConfig.icon;
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);

@@ -162,6 +162,7 @@ function AppContent() {
   const logActivity = useActivityLogger();
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const canManageRoles = isAdminRole || permissions.roles.canView;
+  const canViewSettings = isAdminRole || permissions.audit.canView;
 
   const tabNames: Record<Tab, string> = useMemo(
     () => ({
@@ -241,11 +242,11 @@ function AppContent() {
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
         { tab: 'users' as Tab, allowed: isAdminRole },
         { tab: 'roles' as Tab, allowed: canManageRoles },
-        { tab: 'settings' as Tab, allowed: isAdminRole },
+        { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole, canManageRoles],
+    [permissions, isAdminRole, canManageRoles, canViewSettings],
   );
 
   const canViewTab = useCallback(
@@ -294,8 +295,9 @@ function AppContent() {
         case 'users':
         case 'userDetail':
         case 'userActivity':
-        case 'settings':
           return isAdminRole;
+        case 'settings':
+          return canViewSettings;
         case 'roles':
           return canManageRoles;
         case 'dictionaries':
@@ -304,7 +306,7 @@ function AppContent() {
           return true;
       }
     },
-    [permissions, isAdminRole, canManageRoles],
+    [permissions, isAdminRole, canManageRoles, canViewSettings],
   );
 
   const handleOpenClient = useCallback(
@@ -779,7 +781,7 @@ function AppContent() {
       case 'users':
         return isAdminRole
           ? <Users onCreateUser={handleCreateUser} onEditUser={handleEditUser} />
-          : renderNoAccess('Нужны права администратора.');
+          : renderNoAccess('Недостаточно прав для доступа к настройкам и аудиту.');
 
       case 'userDetail':
         return isAdminRole
@@ -808,7 +810,7 @@ function AppContent() {
           : renderNoAccess('Справочники недоступны для вашей роли.');
 
       case 'settings':
-        return isAdminRole
+        return canViewSettings
           ? <AppSettings />
           : renderNoAccess('Нужны права администратора.');
 
