@@ -101,6 +101,19 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
   },
 };
 
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  client: 'Клиент',
+  'client-case': 'Дело',
+  payment: 'Платеж',
+  invoice: 'Счет',
+  act: 'Акт',
+  contract: 'Договор',
+  'legal-entity': 'Юрлицо',
+  contact: 'Контакт',
+  user: 'Пользователь',
+  role: 'Роль',
+};
+
 export interface ParsedAuditFieldChange {
   field: string;
   oldValue: string | null;
@@ -117,6 +130,41 @@ function prettifyFieldName(fieldName: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .trim();
+}
+
+export function getObjectAuditTypeLabel(objectType: string | null | undefined): string {
+  const normalizedObjectType = objectType?.trim().toLowerCase() ?? '';
+  return OBJECT_TYPE_LABELS[normalizedObjectType] ?? prettifyFieldName(normalizedObjectType || 'object');
+}
+
+export function getObjectAuditActionLabel(action?: string | null): string {
+  switch (action?.toLowerCase()) {
+    case 'created':
+      return 'Создание';
+    case 'updated':
+      return 'Изменение';
+    case 'deleted':
+      return 'Удаление';
+    case 'restored':
+      return 'Восстановление';
+    default:
+      return action || 'Событие';
+  }
+}
+
+export function getObjectAuditActionTone(action?: string | null): string {
+  switch (action?.toLowerCase()) {
+    case 'created':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'updated':
+      return 'border-blue-200 bg-blue-50 text-blue-700';
+    case 'deleted':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'restored':
+      return 'border-teal-200 bg-teal-50 text-teal-700';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
 }
 
 export function getObjectAuditFieldLabel(objectType: string | null | undefined, fieldName: string): string {

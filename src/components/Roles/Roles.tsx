@@ -22,8 +22,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { MENU_SECTION_KEYS } from '../../types/permissions';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -631,16 +630,17 @@ export const Roles = () => {
             </div>
 
             {selectedRole ? (
-              <div className="space-y-3">
-                <AuditInfoCard
-                  createdAt={selectedRole.createdAt}
-                  createdByUserName={selectedRole.createdByUserName}
-                  updatedAt={selectedRole.updatedAt}
-                  updatedByUserName={selectedRole.updatedByUserName}
-                  compact
-                />
-                <ObjectAuditHistoryCard objectType="role" objectId={selectedRole.id} compact />
-              </div>
+              <ObjectAuditLauncher
+                objectType="role"
+                objectId={selectedRole.id}
+                createdAt={selectedRole.createdAt}
+                createdByUserName={selectedRole.createdByUserName}
+                updatedAt={selectedRole.updatedAt}
+                updatedByUserName={selectedRole.updatedByUserName}
+                triggerTitle="Аудит роли"
+                triggerDescription="Паспорт роли и история изменений открываются в отдельном окне."
+                title="История роли"
+              />
             ) : null}
 
             {selectedRole ? (

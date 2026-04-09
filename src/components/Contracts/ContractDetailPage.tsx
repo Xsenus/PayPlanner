@@ -10,8 +10,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 interface Props {
   contractId: number;
@@ -669,19 +668,20 @@ export function ContractDetailPage({
       </div>
 
       <div className="mb-4">
-        <div className="space-y-3">
-          <AuditInfoCard
-            createdAt={contract.createdAt}
-            createdByUserName={contract.auditCreatedByUserName}
-            updatedAt={contract.auditUpdatedAt}
-            updatedByUserName={contract.auditUpdatedByUserName}
-            isDeleted={contract.auditIsDeleted}
-            deletedAt={contract.auditDeletedAt}
-            deletedByUserName={contract.auditDeletedByUserName}
-            compact
-          />
-          <ObjectAuditHistoryCard objectType="contract" objectId={contract.id} compact />
-        </div>
+        <ObjectAuditLauncher
+          objectType="contract"
+          objectId={contract.id}
+          createdAt={contract.createdAt}
+          createdByUserName={contract.auditCreatedByUserName}
+          updatedAt={contract.auditUpdatedAt}
+          updatedByUserName={contract.auditUpdatedByUserName}
+          isDeleted={contract.auditIsDeleted}
+          deletedAt={contract.auditDeletedAt}
+          deletedByUserName={contract.auditDeletedByUserName}
+          triggerTitle="Аудит договора"
+          triggerDescription="Паспорт договора и история изменений открываются в отдельном окне."
+          title="История договора"
+        />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 rounded border bg-white p-4 md:grid-cols-2 lg:grid-cols-4">

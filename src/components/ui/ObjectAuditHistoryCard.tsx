@@ -117,7 +117,7 @@ export function ObjectAuditHistoryCard({
   }, [canLoad, objectId, objectType]);
 
   const visibleItems = useMemo(
-    () => (compact ? items.slice(0, 6) : items.slice(0, 12)),
+    () => (compact ? items.slice(0, 6) : items),
     [compact, items],
   );
 

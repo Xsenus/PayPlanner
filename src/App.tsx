@@ -35,6 +35,7 @@ const ContractDetailPage = lazy(() => import('./components/Contracts/ContractDet
 const Users = lazy(() => import('./components/Users/Users').then((module) => ({ default: module.Users })));
 const UserDetailPage = lazy(() => import('./components/Users/UserDetailPage').then((module) => ({ default: module.UserDetailPage })));
 const Roles = lazy(() => import('./components/Roles/Roles').then((module) => ({ default: module.Roles })));
+const ObjectAuditPage = lazy(() => import('./components/ObjectAudit/ObjectAuditPage').then((module) => ({ default: module.ObjectAuditPage })));
 const UserActivity = lazy(() => import('./components/UserActivity/UserActivity').then((module) => ({ default: module.UserActivity })));
 const Dictionaries = lazy(() => import('./components/Dictionaries/Dictionaries').then((module) => ({ default: module.Dictionaries })));
 const Payments = lazy(() => import('./components/Payments/Payments').then((module) => ({ default: module.Payments })));
@@ -75,6 +76,7 @@ const ALL_TABS: Tab[] = [
   'users',
   'userDetail',
   'roles',
+  'audit',
   'userActivity',
   'dictionaries',
   'settings',
@@ -162,7 +164,8 @@ function AppContent() {
   const logActivity = useActivityLogger();
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const canManageRoles = isAdminRole || permissions.roles.canView;
-  const canViewSettings = isAdminRole || permissions.audit.canView;
+  const canViewAudit = isAdminRole || permissions.audit.canView;
+  const canViewSettings = canViewAudit;
 
   const tabNames: Record<Tab, string> = useMemo(
     () => ({
@@ -196,6 +199,7 @@ function AppContent() {
       users: 'Пользователи',
       userDetail: 'Пользователь',
       roles: 'Роли',
+      audit: 'Аудит объектов',
       userActivity: 'Контроль пользователей',
       dictionaries: 'Справочники',
       settings: 'Настройки',
@@ -242,11 +246,12 @@ function AppContent() {
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
         { tab: 'users' as Tab, allowed: isAdminRole },
         { tab: 'roles' as Tab, allowed: canManageRoles },
+        { tab: 'audit' as Tab, allowed: canViewAudit },
         { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole, canManageRoles, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
   );
 
   const canViewTab = useCallback(
@@ -296,6 +301,8 @@ function AppContent() {
         case 'userDetail':
         case 'userActivity':
           return isAdminRole;
+        case 'audit':
+          return canViewAudit;
         case 'settings':
           return canViewSettings;
         case 'roles':
@@ -306,7 +313,7 @@ function AppContent() {
           return true;
       }
     },
-    [permissions, isAdminRole, canManageRoles, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
   );
 
   const handleOpenClient = useCallback(
@@ -798,6 +805,11 @@ function AppContent() {
         return canManageRoles
           ? <Roles />
           : renderNoAccess('Недостаточно прав для управления ролями и правилами доступа.');
+
+      case 'audit':
+        return canViewAudit
+          ? <ObjectAuditPage />
+          : renderNoAccess('Недостаточно прав для просмотра аудита объектов.');
 
       case 'userActivity':
         return isAdminRole

@@ -15,8 +15,7 @@ import { useToast } from '../../hooks/useToast';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getVisibleSystemNoteLines } from '../../utils/systemNotes';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -1111,19 +1110,21 @@ export function PaymentModal({
   const serviceTabHasContent =
     Boolean(formData.notes.trim()) || systemNotesEntries.length > 0 || transferTrail.length > 0;
   const auditInfoSection = payment ? (
-    <div className="space-y-3">
-      <AuditInfoCard
-        createdAt={payment.createdAt}
-        createdByUserName={payment.auditCreatedByUserName}
-        updatedAt={payment.auditUpdatedAt}
-        updatedByUserName={payment.auditUpdatedByUserName}
-        isDeleted={payment.auditIsDeleted}
-        deletedAt={payment.auditDeletedAt}
-        deletedByUserName={payment.auditDeletedByUserName}
-        compact
-      />
-      <ObjectAuditHistoryCard objectType="payment" objectId={payment.id} compact />
-    </div>
+    <ObjectAuditLauncher
+      objectType="payment"
+      objectId={payment.id}
+      createdAt={payment.createdAt}
+      createdByUserName={payment.auditCreatedByUserName}
+      updatedAt={payment.auditUpdatedAt}
+      updatedByUserName={payment.auditUpdatedByUserName}
+      isDeleted={payment.auditIsDeleted}
+      deletedAt={payment.auditDeletedAt}
+      deletedByUserName={payment.auditDeletedByUserName}
+      triggerTitle="Аудит платежа"
+      triggerDescription="Паспорт платежа и история изменений открываются в отдельном окне."
+      title="История платежа"
+      subtitle="Здесь собраны базовые audit-данные и все изменения по выбранному платежу."
+    />
   ) : null;
 
   const modal = (

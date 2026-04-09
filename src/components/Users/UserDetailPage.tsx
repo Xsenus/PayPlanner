@@ -4,8 +4,7 @@ import { authService, type Role, type UpdateUserDto, type User } from '../../ser
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 type UserDetailSection = 'main' | 'contacts' | 'employment' | 'access';
 
@@ -332,16 +331,17 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
             </div>
 
             {!isCreateMode && user ? (
-              <div className="space-y-3">
-                <AuditInfoCard
-                  createdAt={user.createdAt}
-                  createdByUserName={user.createdByUserName}
-                  updatedAt={user.updatedAt}
-                  updatedByUserName={user.updatedByUserName}
-                  compact
-                />
-                <ObjectAuditHistoryCard objectType="user" objectId={user.id} compact />
-              </div>
+              <ObjectAuditLauncher
+                objectType="user"
+                objectId={user.id}
+                createdAt={user.createdAt}
+                createdByUserName={user.createdByUserName}
+                updatedAt={user.updatedAt}
+                updatedByUserName={user.updatedByUserName}
+                triggerTitle="Аудит пользователя"
+                triggerDescription="Паспорт пользователя и история изменений открываются в отдельном окне."
+                title="История пользователя"
+              />
             ) : null}
           </aside>
 

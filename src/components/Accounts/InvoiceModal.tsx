@@ -33,8 +33,7 @@ import { ContractModal } from '../Contracts/ContractModal';
 import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 type FormState = {
   number: string;
@@ -1861,19 +1860,21 @@ export function InvoiceModal({
     </div>
   );
   const auditInfoSection = mode === 'edit' && invoice ? (
-    <div className="space-y-3">
-      <AuditInfoCard
-        createdAt={invoice.createdAt}
-        createdByUserName={invoice.auditCreatedByUserName}
-        updatedAt={invoice.auditUpdatedAt}
-        updatedByUserName={invoice.auditUpdatedByUserName}
-        isDeleted={invoice.auditIsDeleted}
-        deletedAt={invoice.auditDeletedAt}
-        deletedByUserName={invoice.auditDeletedByUserName}
-        compact
-      />
-      <ObjectAuditHistoryCard objectType="payment" objectId={invoice.id} compact />
-    </div>
+    <ObjectAuditLauncher
+      objectType="payment"
+      objectId={invoice.id}
+      createdAt={invoice.createdAt}
+      createdByUserName={invoice.auditCreatedByUserName}
+      updatedAt={invoice.auditUpdatedAt}
+      updatedByUserName={invoice.auditUpdatedByUserName}
+      isDeleted={invoice.auditIsDeleted}
+      deletedAt={invoice.auditDeletedAt}
+      deletedByUserName={invoice.auditDeletedByUserName}
+      triggerTitle="Аудит счета"
+      triggerDescription="Паспорт счета и история изменений открываются в отдельном окне."
+      title="История счета"
+      subtitle="Здесь собраны базовые audit-данные и все изменения по выбранному счету."
+    />
   ) : null;
   const documentsSection = (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">

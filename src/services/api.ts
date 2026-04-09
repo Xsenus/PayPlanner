@@ -160,6 +160,17 @@ export interface ObjectAuditEventDto {
   createdAt: string;
 }
 
+export interface ObjectAuditFeedQuery {
+  search?: string;
+  objectType?: string;
+  action?: string;
+  actor?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface DeletedObjectAuditItemDto {
   objectType: string;
   objectId: number;
@@ -732,6 +743,15 @@ export class ApiService {
     return this.request<ObjectAuditEventDto[]>(
       `/object-audit/${encodeURIComponent(objectType.trim().toLowerCase())}/${objectId}`,
     );
+  }
+
+  async getObjectAuditEvents(params?: ObjectAuditFeedQuery) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 25,
+    });
+    return this.request<PagedResult<ObjectAuditEventDto>>(`/object-audit${q}`);
   }
 
   async getDeletedObjectAuditItems(objectType: string, search?: string) {

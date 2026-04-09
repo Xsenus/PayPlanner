@@ -5,8 +5,7 @@ import type { ActResponsible, LegalEntitySummary } from '../../types';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 type ContactEditorMode = 'create-external' | 'edit-client' | 'edit-external';
 
@@ -359,23 +358,20 @@ export function ContactEditorModal({
 
           {contact ? (
             <div className="mt-5">
-              <div className="space-y-3">
-                <AuditInfoCard
-                  createdAt={contact.createdAt}
-                  createdByUserName={contact.auditCreatedByUserName}
-                  updatedAt={contact.auditUpdatedAt}
-                  updatedByUserName={contact.auditUpdatedByUserName}
-                  isDeleted={contact.auditIsDeleted}
-                  deletedAt={contact.auditDeletedAt}
-                  deletedByUserName={contact.auditDeletedByUserName}
-                  compact
-                />
-                <ObjectAuditHistoryCard
-                  objectType={contact.sourceType === 'client' ? 'client' : 'contact'}
-                  objectId={contact.sourceId}
-                  compact
-                />
-              </div>
+              <ObjectAuditLauncher
+                objectType={contact.sourceType === 'client' ? 'client' : 'contact'}
+                objectId={contact.sourceId}
+                createdAt={contact.createdAt}
+                createdByUserName={contact.auditCreatedByUserName}
+                updatedAt={contact.auditUpdatedAt}
+                updatedByUserName={contact.auditUpdatedByUserName}
+                isDeleted={contact.auditIsDeleted}
+                deletedAt={contact.auditDeletedAt}
+                deletedByUserName={contact.auditDeletedByUserName}
+                triggerTitle="Аудит контакта"
+                triggerDescription="Паспорт контакта и история изменений открываются в отдельном окне."
+                title="История контакта"
+              />
             </div>
           ) : null}
 

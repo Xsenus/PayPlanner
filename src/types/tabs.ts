@@ -29,6 +29,7 @@ export type Tab =
   | 'users'
   | 'userDetail'
   | 'roles'
+  | 'audit'
   | 'userActivity'
   | 'dictionaries'
   | 'settings';

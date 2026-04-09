@@ -28,8 +28,7 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
 import { TablePagination } from '../ui/TablePagination';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -1349,19 +1348,20 @@ export function LegalEntityModal({
 
         {initial ? (
           <div className="mx-6 mt-4">
-            <div className="space-y-3">
-              <AuditInfoCard
-                createdAt={initial.createdAt}
-                createdByUserName={initial.auditCreatedByUserName}
-                updatedAt={initial.auditUpdatedAt}
-                updatedByUserName={initial.auditUpdatedByUserName}
-                isDeleted={initial.auditIsDeleted}
-                deletedAt={initial.auditDeletedAt}
-                deletedByUserName={initial.auditDeletedByUserName}
-                compact
-              />
-              <ObjectAuditHistoryCard objectType="legal-entity" objectId={initial.id} compact />
-            </div>
+            <ObjectAuditLauncher
+              objectType="legal-entity"
+              objectId={initial.id}
+              createdAt={initial.createdAt}
+              createdByUserName={initial.auditCreatedByUserName}
+              updatedAt={initial.auditUpdatedAt}
+              updatedByUserName={initial.auditUpdatedByUserName}
+              isDeleted={initial.auditIsDeleted}
+              deletedAt={initial.auditDeletedAt}
+              deletedByUserName={initial.auditDeletedByUserName}
+              triggerTitle="Аудит юрлица"
+              triggerDescription="Паспорт юрлица и история изменений открываются в отдельном окне."
+              title="История юрлица"
+            />
           </div>
         ) : null}
 

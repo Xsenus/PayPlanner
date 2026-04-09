@@ -20,6 +20,109 @@ public class ObjectAuditController : ControllerBase
         _db = db;
     }
 
+    [HttpGet]
+    public async Task<ActionResult<PagedResponse<ObjectAuditEventDto>>> GetEvents(
+        [FromQuery] string? search,
+        [FromQuery] string? objectType,
+        [FromQuery] string? action,
+        [FromQuery] string? actor,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        var access = await GetDeletedObjectsAccessAsync(ct);
+        if (!access.CanView)
+        {
+            return Forbid();
+        }
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 10, 200);
+
+        var query = _db.ObjectAuditEvents
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(objectType))
+        {
+            var normalizedObjectType = NormalizeObjectType(objectType);
+            query = query.Where(item => item.ObjectType == normalizedObjectType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var normalizedAction = action.Trim().ToLowerInvariant();
+            query = query.Where(item => item.Action.ToLower() == normalizedAction);
+        }
+
+        if (from.HasValue)
+        {
+            var fromDate = from.Value.Date;
+            query = query.Where(item => item.CreatedAt >= fromDate);
+        }
+
+        if (to.HasValue)
+        {
+            var toExclusive = to.Value.Date.AddDays(1);
+            query = query.Where(item => item.CreatedAt < toExclusive);
+        }
+
+        var actorFilter = actor?.Trim();
+        var searchFilter = search?.Trim();
+        var orderedQuery = query
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id);
+
+        List<ObjectAuditEventDto> items;
+        int total;
+
+        if (!string.IsNullOrWhiteSpace(actorFilter) || !string.IsNullOrWhiteSpace(searchFilter))
+        {
+            var filteredItems = (await orderedQuery.ToListAsync(ct))
+                .Where(item => MatchesActorFilter(item, actorFilter))
+                .Where(item => MatchesSearchFilter(item, searchFilter))
+                .ToList();
+
+            total = filteredItems.Count;
+            items = filteredItems
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(MapAuditEvent)
+                .ToList();
+        }
+        else
+        {
+            total = await query.CountAsync(ct);
+
+            items = await orderedQuery
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(item => new ObjectAuditEventDto
+                {
+                    Id = item.Id,
+                    ObjectType = item.ObjectType,
+                    ObjectId = item.ObjectId,
+                    Action = item.Action,
+                    Description = item.Description,
+                    ActorUserId = item.ActorUserId,
+                    ActorUserName = item.ActorUserName,
+                    MetadataJson = item.MetadataJson,
+                    CreatedAt = item.CreatedAt,
+                })
+                .ToListAsync(ct);
+        }
+
+        return Ok(new PagedResponse<ObjectAuditEventDto>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        });
+    }
+
     [HttpGet("{objectType}/{objectId:int}")]
     public async Task<ActionResult<IReadOnlyCollection<ObjectAuditEventDto>>> GetHistory(
         string objectType,
@@ -156,6 +259,47 @@ public class ObjectAuditController : ControllerBase
 
     private static string NormalizeObjectType(string objectType)
         => objectType.Trim().ToLowerInvariant();
+
+    private static ObjectAuditEventDto MapAuditEvent(ObjectAuditEvent item)
+        => new()
+        {
+            Id = item.Id,
+            ObjectType = item.ObjectType,
+            ObjectId = item.ObjectId,
+            Action = item.Action,
+            Description = item.Description,
+            ActorUserId = item.ActorUserId,
+            ActorUserName = item.ActorUserName,
+            MetadataJson = item.MetadataJson,
+            CreatedAt = item.CreatedAt,
+        };
+
+    private static bool MatchesActorFilter(ObjectAuditEvent item, string? actorFilter)
+    {
+        if (string.IsNullOrWhiteSpace(actorFilter))
+        {
+            return true;
+        }
+
+        return (item.ActorUserName ?? string.Empty)
+            .Contains(actorFilter.Trim(), StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool MatchesSearchFilter(ObjectAuditEvent item, string? searchFilter)
+    {
+        if (string.IsNullOrWhiteSpace(searchFilter))
+        {
+            return true;
+        }
+
+        var term = searchFilter.Trim();
+        var parsedObjectId = int.TryParse(term, out var objectId) ? objectId : (int?)null;
+
+        return item.ObjectType.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+            || (item.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+            || (item.ActorUserName?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+            || (parsedObjectId.HasValue && item.ObjectId == parsedObjectId.Value);
+    }
 
     private async Task<List<DeletedObjectAuditItemDto>> QueryDeletedClientsAsync(string? search, CancellationToken ct)
     {

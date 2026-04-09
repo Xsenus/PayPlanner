@@ -77,8 +77,7 @@ import { FormPromptModal } from '../ui/FormPromptModal';
 import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
@@ -3067,18 +3066,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               </div>
             )}
             <div className="mb-4">
-              <div className="space-y-3">
-                <AuditInfoCard
-                  createdAt={clientData?.createdAt}
-                  createdByUserName={clientData?.auditCreatedByUserName}
-                  updatedAt={clientData?.auditUpdatedAt}
-                  updatedByUserName={clientData?.auditUpdatedByUserName}
-                  isDeleted={clientData?.auditIsDeleted}
-                  deletedAt={clientData?.auditDeletedAt}
-                  deletedByUserName={clientData?.auditDeletedByUserName}
-                />
-                <ObjectAuditHistoryCard objectType="client" objectId={clientData?.id} compact />
-              </div>
+              <ObjectAuditLauncher
+                objectType="client"
+                objectId={clientData?.id ?? 0}
+                createdAt={clientData?.createdAt}
+                createdByUserName={clientData?.auditCreatedByUserName}
+                updatedAt={clientData?.auditUpdatedAt}
+                updatedByUserName={clientData?.auditUpdatedByUserName}
+                isDeleted={clientData?.auditIsDeleted}
+                deletedAt={clientData?.auditDeletedAt}
+                deletedByUserName={clientData?.auditDeletedByUserName}
+                triggerTitle="Аудит клиента"
+                triggerDescription="Паспорт клиента и история изменений открываются в отдельном окне."
+                title="История клиента"
+              />
             </div>
             <form onSubmit={handleClientFormSubmit} className="grid gap-4 md:grid-cols-2">
               <div className="md:col-span-2">

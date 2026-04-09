@@ -22,6 +22,7 @@ import {
   Landmark,
   CircleDollarSign,
   Phone,
+  History,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -257,6 +258,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         : []),
       ...(canManageRoles
         ? [{ id: 'roles', tab: 'roles' as Tab, label: '\u0420\u043e\u043b\u0438', icon: Shield }]
+        : []),
+      ...(canViewSettings
+        ? [{ id: 'audit', tab: 'audit' as Tab, label: 'Аудит объектов', icon: History }]
         : []),
       ...(isAdmin()
         ? [

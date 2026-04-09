@@ -5,8 +5,7 @@ import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
-import { AuditInfoCard } from '../ui/AuditInfoCard';
-import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 
 interface ActDetailPageProps {
   actId: number;
@@ -243,19 +242,20 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
           ) : null}
 
           <div className="mb-4">
-            <div className="space-y-3">
-              <AuditInfoCard
-                createdAt={act.createdAt}
-                createdByUserName={act.auditCreatedByUserName}
-                updatedAt={act.auditUpdatedAt}
-                updatedByUserName={act.auditUpdatedByUserName}
-                isDeleted={act.auditIsDeleted}
-                deletedAt={act.auditDeletedAt}
-                deletedByUserName={act.auditDeletedByUserName}
-                compact
-              />
-              <ObjectAuditHistoryCard objectType="act" objectId={act.id} compact />
-            </div>
+            <ObjectAuditLauncher
+              objectType="act"
+              objectId={act.id}
+              createdAt={act.createdAt}
+              createdByUserName={act.auditCreatedByUserName}
+              updatedAt={act.auditUpdatedAt}
+              updatedByUserName={act.auditUpdatedByUserName}
+              isDeleted={act.auditIsDeleted}
+              deletedAt={act.auditDeletedAt}
+              deletedByUserName={act.auditDeletedByUserName}
+              triggerTitle="Аудит акта"
+              triggerDescription="Паспорт акта и история изменений открываются в отдельном окне."
+              title="История акта"
+            />
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
