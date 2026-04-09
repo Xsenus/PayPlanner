@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiService, type ObjectAuditEventDto } from '../../services/api';
 import {
-  formatAuditValue,
   formatAuditChangeSummary,
+  formatAuditValue,
+  getObjectAuditActionLabel,
+  getObjectAuditActionTone,
   getObjectAuditFieldLabel,
   parseAuditChangedFields,
   parseAuditFieldChanges,
@@ -17,9 +19,15 @@ interface ObjectAuditHistoryCardProps {
 }
 
 function formatDateTime(value?: string | null): string {
-  if (!value) return 'Неизвестно';
+  if (!value) {
+    return 'Неизвестно';
+  }
+
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
   return parsed.toLocaleString('ru-RU', {
     day: '2-digit',
     month: '2-digit',
@@ -27,36 +35,6 @@ function formatDateTime(value?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function getActionLabel(action?: string | null): string {
-  switch (action?.toLowerCase()) {
-    case 'created':
-      return 'Создание';
-    case 'updated':
-      return 'Изменение';
-    case 'deleted':
-      return 'Удаление';
-    case 'restored':
-      return 'Восстановление';
-    default:
-      return action || 'Событие';
-  }
-}
-
-function getActionTone(action?: string | null): string {
-  switch (action?.toLowerCase()) {
-    case 'created':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-    case 'updated':
-      return 'border-blue-200 bg-blue-50 text-blue-700';
-    case 'deleted':
-      return 'border-rose-200 bg-rose-50 text-rose-700';
-    case 'restored':
-      return 'border-teal-200 bg-teal-50 text-teal-700';
-    default:
-      return 'border-slate-200 bg-slate-50 text-slate-700';
-  }
 }
 
 function getEventDescription(item: ObjectAuditEventDto): string {
@@ -68,6 +46,112 @@ function getEventDescription(item: ObjectAuditEventDto): string {
   }
 
   return item.description?.trim() || 'Служебное событие без подробного описания.';
+}
+
+function EmptyState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="mt-5 flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+      <div className="rounded-2xl bg-white p-3 text-slate-400 shadow-sm">
+        <Clock3 className="h-5 w-5" />
+      </div>
+      <div className="mt-4 text-base font-semibold text-slate-900">{title}</div>
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">{description}</p>
+    </div>
+  );
+}
+
+function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
+  return (
+    <div className="space-y-4">
+      {items.map((item) => {
+        const detailedChanges = parseAuditFieldChanges(item.metadataJson);
+        const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
+          getObjectAuditFieldLabel(item.objectType, fieldName),
+        );
+
+        return (
+          <article
+            key={item.id}
+            className="rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getObjectAuditActionTone(
+                      item.action,
+                    )}`}
+                  >
+                    {getObjectAuditActionLabel(item.action)}
+                  </span>
+                  <span className="text-xs text-slate-400">{formatDateTime(item.createdAt)}</span>
+                </div>
+
+                <p className="mt-3 break-words text-sm font-semibold text-slate-900">
+                  {item.actorUserName?.trim() || 'Система'}
+                </p>
+                <p className="mt-1 break-words text-sm leading-6 text-slate-600">
+                  {getEventDescription(item)}
+                </p>
+
+                {detailedChanges.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    {detailedChanges.map((change) => (
+                      <div
+                        key={`${item.id}-${change.field}`}
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                      >
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          {getObjectAuditFieldLabel(item.objectType, change.field)}
+                        </p>
+                        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                          <div className="rounded-xl bg-slate-50 px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Было
+                            </p>
+                            <p className="mt-2 break-words text-sm leading-6 text-slate-700">
+                              {formatAuditValue(change.oldValue)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl bg-emerald-50/80 px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-500">
+                              Стало
+                            </p>
+                            <p className="mt-2 break-words text-sm leading-6 text-slate-900">
+                              {formatAuditValue(change.newValue)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {changedFields.length > 0 && detailedChanges.length === 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {changedFields.map((field) => (
+                      <span
+                        key={`${item.id}-${field}`}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 export function ObjectAuditHistoryCard({
@@ -93,6 +177,7 @@ export function ObjectAuditHistoryCard({
     const load = async () => {
       setLoading(true);
       setError(null);
+
       try {
         const result = await apiService.getObjectAuditHistory(objectType!, objectId!);
         if (!cancelled) {
@@ -100,7 +185,7 @@ export function ObjectAuditHistoryCard({
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить историю');
+          setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить историю.');
         }
       } finally {
         if (!cancelled) {
@@ -123,103 +208,19 @@ export function ObjectAuditHistoryCard({
 
   const hasMoreItems = compact && items.length > visibleItems.length;
 
-  const timeline = (source: ObjectAuditEventDto[]) => (
-    <div className="space-y-3">
-      {source.map((item) => (
-        (() => {
-          const detailedChanges = parseAuditFieldChanges(item.metadataJson);
-          const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
-            getObjectAuditFieldLabel(item.objectType, fieldName),
-          );
-
-          return (
-            <div
-              key={item.id}
-              className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getActionTone(
-                        item.action,
-                      )}`}
-                    >
-                      {getActionLabel(item.action)}
-                    </span>
-                    <span className="text-xs text-slate-400">{formatDateTime(item.createdAt)}</span>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-slate-900">
-                    {item.actorUserName?.trim() || 'Система'}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {getEventDescription(item)}
-                  </p>
-
-                  {detailedChanges.length > 0 ? (
-                    <div className="mt-3 space-y-2">
-                      {detailedChanges.map((change) => (
-                        <div
-                          key={`${item.id}-${change.field}`}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2"
-                        >
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                            {getObjectAuditFieldLabel(item.objectType, change.field)}
-                          </p>
-                          <div className="mt-2 grid gap-2 md:grid-cols-2">
-                            <div className="rounded-lg bg-slate-50 px-3 py-2">
-                              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Было
-                              </p>
-                              <p className="mt-1 break-words text-sm text-slate-700">
-                                {formatAuditValue(change.oldValue)}
-                              </p>
-                            </div>
-                            <div className="rounded-lg bg-emerald-50/70 px-3 py-2">
-                              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-emerald-500">
-                                Стало
-                              </p>
-                              <p className="mt-1 break-words text-sm text-slate-900">
-                                {formatAuditValue(change.newValue)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {changedFields.length > 0 && detailedChanges.length === 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {changedFields.map((field) => (
-                        <span
-                          key={`${item.id}-${field}`}
-                          className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
-                        >
-                          {field}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          );
-        })()
-      ))}
-    </div>
-  );
-
   const refresh = async () => {
-    if (!canLoad) return;
+    if (!canLoad) {
+      return;
+    }
 
     setLoading(true);
     setError(null);
+
     try {
       const result = await apiService.getObjectAuditHistory(objectType!, objectId!);
       setItems(result ?? []);
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : 'Не удалось обновить историю');
+      setError(refreshError instanceof Error ? refreshError.message : 'Не удалось обновить историю.');
     } finally {
       setLoading(false);
     }
@@ -227,62 +228,68 @@ export function ObjectAuditHistoryCard({
 
   return (
     <>
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-slate-100 p-2 text-slate-600">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="rounded-2xl bg-slate-100 p-2.5 text-slate-600">
               <Clock3 className="h-4 w-4" />
             </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-900">История объекта</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Кто и когда создавал, менял или удалял запись.
+            <div className="min-w-0">
+              <p className="text-base font-semibold text-slate-900">История объекта</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Кто и когда создавал, менял, удалял или восстанавливал запись.
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {hasMoreItems ? (
               <button
                 type="button"
                 onClick={() => setIsExpanded(true)}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
               >
                 Показать все
               </button>
             ) : null}
+
             <button
               type="button"
               onClick={() => void refresh()}
               disabled={!canLoad || loading}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Обновить
             </button>
           </div>
         </div>
 
         {!canLoad ? (
-          <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-            История появится после сохранения объекта.
-          </div>
+          <EmptyState
+            title="История появится после сохранения"
+            description="Когда объект будет создан, все изменения начнут фиксироваться в audit-ленте."
+          />
         ) : error ? (
-          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-700">
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700">
             {error}
           </div>
         ) : visibleItems.length === 0 && !loading ? (
-          <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-            Для этого объекта ещё нет записей истории.
-          </div>
+          <EmptyState
+            title="Для этого объекта еще нет записей истории"
+            description="Как только по записи будет зафиксировано действие, оно появится здесь."
+          />
         ) : (
-          <div className="mt-4">{timeline(visibleItems)}</div>
+          <div className="mt-5">
+            <HistoryTimeline items={visibleItems} />
+          </div>
         )}
       </section>
 
       {isExpanded && typeof document !== 'undefined'
         ? createPortal(
             <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/50 p-4">
-              <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+              <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
                   <div>
                     <h3 className="text-lg font-semibold text-slate-900">Полная история объекта</h3>
@@ -299,8 +306,15 @@ export function ObjectAuditHistoryCard({
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="overflow-y-auto px-6 py-5">
-                  {timeline(items)}
+                <div className="overflow-y-auto bg-slate-50/70 px-6 py-5">
+                  {items.length > 0 ? (
+                    <HistoryTimeline items={items} />
+                  ) : (
+                    <EmptyState
+                      title="Записей пока нет"
+                      description="Полная история станет доступна, когда по объекту появятся события."
+                    />
+                  )}
                 </div>
               </div>
             </div>,
