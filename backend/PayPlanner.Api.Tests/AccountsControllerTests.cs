@@ -68,6 +68,35 @@ public class AccountsControllerTests
         Assert.Equal(7, row.Payments.Count);
     }
 
+    [Fact]
+    public async Task GetRegistry_KeepsFullInstallmentSchedule_WhenRegistryFilteredByInvoiceDate()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateInstallmentInvoiceAggregateAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: new DateTime(2026, 1, 1),
+            to: new DateTime(2026, 1, 31),
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("2", row.AccountNumber);
+        Assert.Equal(7, row.Payments.Count);
+        Assert.Equal(new DateTime(2026, 6, 25), row.DueDate);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

@@ -154,7 +154,6 @@ public class AccountsController : ControllerBase
 
         var paymentAggregateItems = await _db.Payments
             .AsNoTracking()
-            .ApplyPaymentFilters(from, to, null, null, null)
             .Where(payment =>
                 (payment.InvoiceId.HasValue && canonicalIds.Contains(payment.InvoiceId.Value))
                 || (!payment.InvoiceId.HasValue && payment.Account != null && payment.Account != string.Empty))
