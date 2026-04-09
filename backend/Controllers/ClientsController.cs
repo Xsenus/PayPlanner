@@ -60,6 +60,34 @@ public class ClientsController : ControllerBase
         }
     }
 
+    private static void PopulateAuditMetadata(PaymentContext db, Client client)
+    {
+        var entry = db.Entry(client);
+        client.AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue;
+        client.AuditCreatedByUserName = entry.Property<string?>("CreatedByUserName").CurrentValue;
+        client.AuditUpdatedAt = entry.Property<DateTime?>("UpdatedAt").CurrentValue;
+        client.AuditUpdatedByUserId = entry.Property<int?>("UpdatedByUserId").CurrentValue;
+        client.AuditUpdatedByUserName = entry.Property<string?>("UpdatedByUserName").CurrentValue;
+        client.AuditIsDeleted = entry.Property<bool>("IsDeleted").CurrentValue;
+        client.AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue;
+        client.AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue;
+        client.AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue;
+    }
+
+    private static void PopulateAuditMetadata(PaymentContext db, ClientCase clientCase)
+    {
+        var entry = db.Entry(clientCase);
+        clientCase.AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue;
+        clientCase.AuditCreatedByUserName = entry.Property<string?>("CreatedByUserName").CurrentValue;
+        clientCase.AuditUpdatedAt = entry.Property<DateTime?>("UpdatedAt").CurrentValue;
+        clientCase.AuditUpdatedByUserId = entry.Property<int?>("UpdatedByUserId").CurrentValue;
+        clientCase.AuditUpdatedByUserName = entry.Property<string?>("UpdatedByUserName").CurrentValue;
+        clientCase.AuditIsDeleted = entry.Property<bool>("IsDeleted").CurrentValue;
+        clientCase.AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue;
+        clientCase.AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue;
+        clientCase.AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue;
+    }
+
     private static T? DeserializeClientProfile<T>(string? raw) where T : class
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
@@ -126,11 +154,15 @@ public class ClientsController : ControllerBase
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
             .Include(c => c.ResponsibleUser)
-            .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is not null)
         {
             client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+            PopulateAuditMetadata(_db, client);
+            foreach (var clientCase in client.Cases)
+            {
+                PopulateAuditMetadata(_db, clientCase);
+            }
         }
         return client is null ? NotFound() : Ok(client);
     }

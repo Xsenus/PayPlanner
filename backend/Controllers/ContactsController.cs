@@ -56,11 +56,10 @@ public class ContactsController : ControllerBase
 
         if (!string.Equals(normalizedScope, "external", StringComparison.Ordinal))
         {
-            var clientsQuery = _db.Clients
+            IQueryable<Client> clientsQuery = _db.Clients
                 .ApplyClientVisibility(access.IsAdmin, access.UserId)
                 .Include(x => x.LegalEntity)
-                .Include(x => x.ResponsibleUser)
-                .AsNoTracking();
+                .Include(x => x.ResponsibleUser);
 
             if (legalEntityId.HasValue)
             {
@@ -78,10 +77,9 @@ public class ContactsController : ControllerBase
 
         if (!string.Equals(normalizedScope, "clients", StringComparison.Ordinal))
         {
-            var externalQuery = BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
+            IQueryable<ExternalContact> externalQuery = BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
                 .Include(x => x.LegalEntity)
-                .Include(x => x.ResponsibleUser)
-                .AsNoTracking();
+                .Include(x => x.ResponsibleUser);
 
             if (legalEntityId.HasValue)
             {
@@ -352,14 +350,12 @@ public class ContactsController : ControllerBase
         var clients = await _db.Clients
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
-            .AsNoTracking()
             .Where(x => x.IsActive)
             .ToListAsync(ct);
 
         var externalContacts = await _db.ExternalContacts
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
-            .AsNoTracking()
             .Where(x => x.IsActive)
             .ToListAsync(ct);
 
@@ -951,11 +947,12 @@ public class ContactsController : ControllerBase
         profile[key] = normalized;
     }
 
-    private static ContactDirectoryItemDto MapClientContact(Client client)
+    private ContactDirectoryItemDto MapClientContact(Client client)
     {
         var profile = GetOrCreateClientProfileObject(client.Notes);
         var phones = ReadProfileStringArray(profile, "phones", client.Phone);
         var emails = ReadProfileStringArray(profile, "emails", client.Email);
+        var audit = _db.ReadAuditSnapshot(client);
 
         return new ContactDirectoryItemDto
         {
@@ -980,13 +977,23 @@ public class ContactsController : ControllerBase
                 : client.ResponsibleUser.FullName,
             CreatedAt = client.CreatedAt,
             UpdatedAt = null,
+            AuditCreatedByUserId = audit?.CreatedByUserId,
+            AuditCreatedByUserName = audit?.CreatedByUserName,
+            AuditUpdatedAt = audit?.UpdatedAt,
+            AuditUpdatedByUserId = audit?.UpdatedByUserId,
+            AuditUpdatedByUserName = audit?.UpdatedByUserName,
+            AuditIsDeleted = audit?.IsDeleted ?? false,
+            AuditDeletedAt = audit?.DeletedAt,
+            AuditDeletedByUserId = audit?.DeletedByUserId,
+            AuditDeletedByUserName = audit?.DeletedByUserName,
         };
     }
 
-    private static ContactDirectoryItemDto MapExternalContact(ExternalContact contact)
+    private ContactDirectoryItemDto MapExternalContact(ExternalContact contact)
     {
         var phones = DeserializeStringList(contact.PhonesJson, contact.Phone);
         var emails = DeserializeStringList(contact.EmailsJson, contact.Email);
+        var audit = _db.ReadAuditSnapshot(contact);
 
         return new ContactDirectoryItemDto
         {
@@ -1011,6 +1018,15 @@ public class ContactsController : ControllerBase
                 : contact.ResponsibleUser.FullName,
             CreatedAt = contact.CreatedAt,
             UpdatedAt = contact.UpdatedAt,
+            AuditCreatedByUserId = audit?.CreatedByUserId,
+            AuditCreatedByUserName = audit?.CreatedByUserName,
+            AuditUpdatedAt = audit?.UpdatedAt,
+            AuditUpdatedByUserId = audit?.UpdatedByUserId,
+            AuditUpdatedByUserName = audit?.UpdatedByUserName,
+            AuditIsDeleted = audit?.IsDeleted ?? false,
+            AuditDeletedAt = audit?.DeletedAt,
+            AuditDeletedByUserId = audit?.DeletedByUserId,
+            AuditDeletedByUserName = audit?.DeletedByUserName,
         };
     }
 
@@ -1018,7 +1034,7 @@ public class ContactsController : ControllerBase
     {
         var index = new Dictionary<string, PhoneMatchInfo>(StringComparer.OrdinalIgnoreCase);
 
-        var clients = await _db.Clients.AsNoTracking().ToListAsync(ct);
+        var clients = await _db.Clients.ToListAsync(ct);
         foreach (var client in clients)
         {
             var contact = MapClientContact(client);
@@ -1029,7 +1045,7 @@ public class ContactsController : ControllerBase
             }
         }
 
-        var externalContacts = await _db.ExternalContacts.AsNoTracking().ToListAsync(ct);
+        var externalContacts = await _db.ExternalContacts.ToListAsync(ct);
         foreach (var contact in externalContacts)
         {
             var directoryItem = MapExternalContact(contact);

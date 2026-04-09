@@ -77,6 +77,8 @@ import { FormPromptModal } from '../ui/FormPromptModal';
 import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
@@ -365,6 +367,30 @@ function caseStatusLabel(s?: string) {
   if (v.includes('hold')) return 'Приостановлено';
   if (v.includes('closed')) return 'Закрыто';
   return s ?? '';
+}
+
+function formatAuditShortDate(value?: string | null): string {
+  if (!value) return 'дата неизвестна';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'дата неизвестна';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function caseAuditSummary(caseItem: ClientCase): string {
+  const createdBy = caseItem.auditCreatedByUserName?.trim() || 'автор неизвестен';
+  const updatedBy = caseItem.auditUpdatedByUserName?.trim();
+
+  if (caseItem.auditUpdatedAt || updatedBy) {
+    return `Изменил: ${updatedBy || 'пользователь неизвестен'}, ${formatAuditShortDate(caseItem.auditUpdatedAt)}`;
+  }
+
+  return `Создал: ${createdBy}, ${formatAuditShortDate(caseItem.createdAt)}`;
 }
 
 function toStatsStatusFilter(
@@ -3040,6 +3066,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 Недостаточно прав для редактирования клиента. Доступен только просмотр.
               </div>
             )}
+            <div className="mb-4">
+              <div className="space-y-3">
+                <AuditInfoCard
+                  createdAt={clientData?.createdAt}
+                  createdByUserName={clientData?.auditCreatedByUserName}
+                  updatedAt={clientData?.auditUpdatedAt}
+                  updatedByUserName={clientData?.auditUpdatedByUserName}
+                  isDeleted={clientData?.auditIsDeleted}
+                  deletedAt={clientData?.auditDeletedAt}
+                  deletedByUserName={clientData?.auditDeletedByUserName}
+                />
+                <ObjectAuditHistoryCard objectType="client" objectId={clientData?.id} compact />
+              </div>
+            </div>
             <form onSubmit={handleClientFormSubmit} className="grid gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Тип карточки</label>
@@ -3710,6 +3750,9 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                 <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                                   <span>Создано: {toRuDate(caseItem.createdAt)}</span>
                                   <span>Платежей: {caseItem.payments?.length ?? 0}</span>
+                                </div>
+                                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                                  {caseAuditSummary(caseItem)}
                                 </div>
                               </div>
                               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">

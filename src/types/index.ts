@@ -142,6 +142,15 @@ export interface LegalEntitySummary {
   clientsCount: number;
   createdAt: string;
   updatedAt?: string | null;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
   clients?: LegalEntityClientLink[];
   addresses?: AddressRecord[];
 }
@@ -272,6 +281,15 @@ export interface Client {
   address: string;
   notes: string;
   createdAt: string;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
   isActive: boolean;
   legalEntityId?: number | null;
   legalEntity?: LegalEntitySummary | null;
@@ -352,6 +370,15 @@ export interface ClientCase {
   description?: string;
   status: string;
   createdAt: string;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
 }
 
 export interface InvoiceClientCaseLink {
@@ -499,6 +526,15 @@ export interface Act {
   comment?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
 }
 
 export interface ActInput {
@@ -556,6 +592,15 @@ export interface Contract {
   terminationDate?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
   invoiceAmountTotal: number;
   actAmountTotal: number;
   paymentAmountTotal: number;
@@ -600,6 +645,15 @@ export interface Payment {
   hasPartialPayment: boolean;
   delayDays?: number | null;
   createdAt: string;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
   clientId?: number | null;
   expenseClientId?: number | null;
   contractId?: number | null;
@@ -624,6 +678,15 @@ export type PaymentPayload = Omit<
   Payment,
   | 'id'
   | 'createdAt'
+  | 'auditCreatedByUserId'
+  | 'auditCreatedByUserName'
+  | 'auditUpdatedAt'
+  | 'auditUpdatedByUserId'
+  | 'auditUpdatedByUserName'
+  | 'auditIsDeleted'
+  | 'auditDeletedAt'
+  | 'auditDeletedByUserId'
+  | 'auditDeletedByUserName'
   | 'client'
   | 'clientCase'
   | 'dealType'
@@ -701,6 +764,15 @@ export interface Invoice {
   lineItems?: InvoiceLineItem[];
   responsibleIds?: number[];
   createdAt: string;
+  auditCreatedByUserId?: number | null;
+  auditCreatedByUserName?: string | null;
+  auditUpdatedAt?: string | null;
+  auditUpdatedByUserId?: number | null;
+  auditUpdatedByUserName?: string | null;
+  auditIsDeleted?: boolean;
+  auditDeletedAt?: string | null;
+  auditDeletedByUserId?: number | null;
+  auditDeletedByUserName?: string | null;
 }
 
 export interface InvoiceLineItem {

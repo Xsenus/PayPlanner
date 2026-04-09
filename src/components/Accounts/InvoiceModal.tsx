@@ -33,6 +33,8 @@ import { ContractModal } from '../Contracts/ContractModal';
 import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 type FormState = {
   number: string;
@@ -1858,6 +1860,21 @@ export function InvoiceModal({
       </div>
     </div>
   );
+  const auditInfoSection = mode === 'edit' && invoice ? (
+    <div className="space-y-3">
+      <AuditInfoCard
+        createdAt={invoice.createdAt}
+        createdByUserName={invoice.auditCreatedByUserName}
+        updatedAt={invoice.auditUpdatedAt}
+        updatedByUserName={invoice.auditUpdatedByUserName}
+        isDeleted={invoice.auditIsDeleted}
+        deletedAt={invoice.auditDeletedAt}
+        deletedByUserName={invoice.auditDeletedByUserName}
+        compact
+      />
+      <ObjectAuditHistoryCard objectType="payment" objectId={invoice.id} compact />
+    </div>
+  ) : null;
   const documentsSection = (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
       <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
@@ -2355,6 +2372,8 @@ export function InvoiceModal({
                 <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
                 <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
               </div>
+
+              {auditInfoSection}
             </aside>
           </div>
 
@@ -2840,6 +2859,7 @@ export function InvoiceModal({
                               />
                             </label>
                           </div>
+                          {auditInfoSection}
                           {statusHistorySection}
                         </section>
 

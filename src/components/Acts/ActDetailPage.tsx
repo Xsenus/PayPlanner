@@ -5,6 +5,8 @@ import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 interface ActDetailPageProps {
   actId: number;
@@ -173,7 +175,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
     }
   };
 
-  if (loading || !form) {
+  if (loading || !form || !act) {
     return (
       <div className="p-8">
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -239,6 +241,22 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
           {error ? (
             <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
           ) : null}
+
+          <div className="mb-4">
+            <div className="space-y-3">
+              <AuditInfoCard
+                createdAt={act.createdAt}
+                createdByUserName={act.auditCreatedByUserName}
+                updatedAt={act.auditUpdatedAt}
+                updatedByUserName={act.auditUpdatedByUserName}
+                isDeleted={act.auditIsDeleted}
+                deletedAt={act.auditDeletedAt}
+                deletedByUserName={act.auditDeletedByUserName}
+                compact
+              />
+              <ObjectAuditHistoryCard objectType="act" objectId={act.id} compact />
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -126,8 +127,10 @@ public class LegalEntitiesController : ControllerBase
         }
     }
 
-    private static LegalEntityDetailDto MapDetail(LegalEntity entity)
-        => new()
+    private LegalEntityDetailDto MapDetail(LegalEntity entity)
+    {
+        var audit = _db.ReadAuditSnapshot(entity);
+        return new()
         {
             Id = entity.Id,
             ShortName = entity.ShortName,
@@ -189,6 +192,15 @@ public class LegalEntitiesController : ControllerBase
             ClientsCount = entity.Clients.Count,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt,
+            AuditCreatedByUserId = audit?.CreatedByUserId,
+            AuditCreatedByUserName = audit?.CreatedByUserName,
+            AuditUpdatedAt = audit?.UpdatedAt,
+            AuditUpdatedByUserId = audit?.UpdatedByUserId,
+            AuditUpdatedByUserName = audit?.UpdatedByUserName,
+            AuditIsDeleted = audit?.IsDeleted ?? false,
+            AuditDeletedAt = audit?.DeletedAt,
+            AuditDeletedByUserId = audit?.DeletedByUserId,
+            AuditDeletedByUserName = audit?.DeletedByUserName,
             Clients = entity.Clients
                 .OrderBy(c => c.Name)
                 .Select(c => new LegalEntityClientDto
@@ -206,6 +218,7 @@ public class LegalEntitiesController : ControllerBase
                 .Select(MapAddress)
                 .ToList(),
         };
+    }
 
     private static AddressRecordDto MapAddress(AddressRecord address)
         => new()
@@ -693,7 +706,6 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
-            .AsNoTracking()
             .AsQueryable(), ct);
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -725,7 +737,6 @@ public class LegalEntitiesController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var baseQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities
-            .AsNoTracking()
             .AsQueryable(), ct);
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -774,7 +785,6 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
-            .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 
         if (entity is null)

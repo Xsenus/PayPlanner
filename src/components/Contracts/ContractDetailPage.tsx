@@ -10,6 +10,8 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 interface Props {
   contractId: number;
@@ -663,6 +665,22 @@ export function ContractDetailPage({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Сохранить
           </button>
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <div className="space-y-3">
+          <AuditInfoCard
+            createdAt={contract.createdAt}
+            createdByUserName={contract.auditCreatedByUserName}
+            updatedAt={contract.auditUpdatedAt}
+            updatedByUserName={contract.auditUpdatedByUserName}
+            isDeleted={contract.auditIsDeleted}
+            deletedAt={contract.auditDeletedAt}
+            deletedByUserName={contract.auditDeletedByUserName}
+            compact
+          />
+          <ObjectAuditHistoryCard objectType="contract" objectId={contract.id} compact />
         </div>
       </div>
 

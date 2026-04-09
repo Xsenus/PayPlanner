@@ -74,6 +74,15 @@ public class LegalEntityListItemDto
     public int ClientsCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public int? AuditCreatedByUserId { get; set; }
+    public string? AuditCreatedByUserName { get; set; }
+    public DateTime? AuditUpdatedAt { get; set; }
+    public int? AuditUpdatedByUserId { get; set; }
+    public string? AuditUpdatedByUserName { get; set; }
+    public bool AuditIsDeleted { get; set; }
+    public DateTime? AuditDeletedAt { get; set; }
+    public int? AuditDeletedByUserId { get; set; }
+    public string? AuditDeletedByUserName { get; set; }
     public List<LegalEntityClientDto> Clients { get; set; } = new();
     public List<AddressRecordDto> Addresses { get; set; } = new();
 }

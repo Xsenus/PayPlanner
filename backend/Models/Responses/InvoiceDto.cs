@@ -47,6 +47,15 @@ public class InvoiceDto
     public string? ServiceName { get; set; }
     public string? PaymentStatusName { get; set; }
     public DateTime CreatedAt { get; set; }
+    public int? AuditCreatedByUserId { get; set; }
+    public string? AuditCreatedByUserName { get; set; }
+    public DateTime? AuditUpdatedAt { get; set; }
+    public int? AuditUpdatedByUserId { get; set; }
+    public string? AuditUpdatedByUserName { get; set; }
+    public bool AuditIsDeleted { get; set; }
+    public DateTime? AuditDeletedAt { get; set; }
+    public int? AuditDeletedByUserId { get; set; }
+    public string? AuditDeletedByUserName { get; set; }
     public DocumentKind DocumentKind { get; set; }
     public List<InvoiceLineItemDto> LineItems { get; set; } = new();
 }

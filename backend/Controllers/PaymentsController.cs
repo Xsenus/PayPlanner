@@ -63,15 +63,25 @@ public class PaymentsController : ControllerBase
         }
         if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
         if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
-        var list = await q.AsNoTracking().OrderBy(p => p.Date).ToListAsync(ct);
+        var list = await q.OrderBy(p => p.Date).ToListAsync(ct);
+        foreach (var payment in list)
+        {
+            PopulateAuditMetadata(_db, payment);
+        }
         return Ok(list);
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var item = await _db.Payments.WithPaymentIncludes().AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
-        return item is null ? NotFound() : Ok(item);
+        var item = await _db.Payments.WithPaymentIncludes().FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        PopulateAuditMetadata(_db, item);
+        return Ok(item);
     }
 
     [HttpPost]
@@ -105,6 +115,7 @@ public class PaymentsController : ControllerBase
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync();
+        PopulateAuditMetadata(_db, model);
         return Created($"/api/payments/{model.Id}", model);
     }
 
@@ -226,6 +237,7 @@ public class PaymentsController : ControllerBase
         e.RescheduleCount = rescheduleCount;
 
         await _db.SaveChangesAsync();
+        PopulateAuditMetadata(_db, e);
         return Ok(e);
     }
 
@@ -474,6 +486,25 @@ public class PaymentsController : ControllerBase
         AppendLines(incoming ?? string.Empty);
 
         return string.Join("\n", lines);
+    }
+
+    private static void PopulateAuditMetadata(PaymentContext db, Payment payment)
+    {
+        var entry = db.Entry(payment);
+        if (entry.Metadata.FindProperty("CreatedByUserId") is null)
+        {
+            return;
+        }
+
+        payment.AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue;
+        payment.AuditCreatedByUserName = entry.Property<string?>("CreatedByUserName").CurrentValue;
+        payment.AuditUpdatedAt = entry.Property<DateTime?>("UpdatedAt").CurrentValue;
+        payment.AuditUpdatedByUserId = entry.Property<int?>("UpdatedByUserId").CurrentValue;
+        payment.AuditUpdatedByUserName = entry.Property<string?>("UpdatedByUserName").CurrentValue;
+        payment.AuditIsDeleted = entry.Property<bool>("IsDeleted").CurrentValue;
+        payment.AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue;
+        payment.AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue;
+        payment.AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue;
     }
 
     [HttpDelete("{id:int}")]

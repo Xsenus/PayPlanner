@@ -5,6 +5,8 @@ import type { ActResponsible, LegalEntitySummary } from '../../types';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 type ContactEditorMode = 'create-external' | 'edit-client' | 'edit-external';
 
@@ -354,6 +356,28 @@ export function ContactEditorModal({
               Участвует в синхронизации Yealink
             </label>
           </div>
+
+          {contact ? (
+            <div className="mt-5">
+              <div className="space-y-3">
+                <AuditInfoCard
+                  createdAt={contact.createdAt}
+                  createdByUserName={contact.auditCreatedByUserName}
+                  updatedAt={contact.auditUpdatedAt}
+                  updatedByUserName={contact.auditUpdatedByUserName}
+                  isDeleted={contact.auditIsDeleted}
+                  deletedAt={contact.auditDeletedAt}
+                  deletedByUserName={contact.auditDeletedByUserName}
+                  compact
+                />
+                <ObjectAuditHistoryCard
+                  objectType={contact.sourceType === 'client' ? 'client' : 'contact'}
+                  objectId={contact.sourceId}
+                  compact
+                />
+              </div>
+            </div>
+          ) : null}
 
           {error ? (
             <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

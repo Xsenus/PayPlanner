@@ -82,6 +82,15 @@ public class ActsController : ControllerBase
                 Comment = a.Comment,
                 CreatedAt = a.CreatedAt,
                 UpdatedAt = a.UpdatedAt,
+                AuditCreatedByUserId = EF.Property<int?>(a, "CreatedByUserId"),
+                AuditCreatedByUserName = EF.Property<string?>(a, "CreatedByUserName"),
+                AuditUpdatedAt = EF.Property<DateTime?>(a, "UpdatedAt"),
+                AuditUpdatedByUserId = EF.Property<int?>(a, "UpdatedByUserId"),
+                AuditUpdatedByUserName = EF.Property<string?>(a, "UpdatedByUserName"),
+                AuditIsDeleted = EF.Property<bool>(a, "IsDeleted"),
+                AuditDeletedAt = EF.Property<DateTime?>(a, "DeletedAt"),
+                AuditDeletedByUserId = EF.Property<int?>(a, "DeletedByUserId"),
+                AuditDeletedByUserName = EF.Property<string?>(a, "DeletedByUserName"),
             })
             .ToListAsync(ct);
 
@@ -126,6 +135,15 @@ public class ActsController : ControllerBase
                 Comment = a.Comment,
                 CreatedAt = a.CreatedAt,
                 UpdatedAt = a.UpdatedAt,
+                AuditCreatedByUserId = EF.Property<int?>(a, "CreatedByUserId"),
+                AuditCreatedByUserName = EF.Property<string?>(a, "CreatedByUserName"),
+                AuditUpdatedAt = EF.Property<DateTime?>(a, "UpdatedAt"),
+                AuditUpdatedByUserId = EF.Property<int?>(a, "UpdatedByUserId"),
+                AuditUpdatedByUserName = EF.Property<string?>(a, "UpdatedByUserName"),
+                AuditIsDeleted = EF.Property<bool>(a, "IsDeleted"),
+                AuditDeletedAt = EF.Property<DateTime?>(a, "DeletedAt"),
+                AuditDeletedByUserId = EF.Property<int?>(a, "DeletedByUserId"),
+                AuditDeletedByUserName = EF.Property<string?>(a, "DeletedByUserName"),
             })
             .FirstOrDefaultAsync(ct);
 
@@ -318,24 +336,36 @@ public class ActsController : ControllerBase
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static ActDto Map(Act act) => new()
+    private ActDto Map(Act act)
     {
-        Id = act.Id,
-        Number = act.Number,
-        Title = act.Title,
-        Date = act.Date,
-        Amount = act.Amount,
-        InvoiceNumber = act.InvoiceNumber,
-        InvoiceId = act.InvoiceId,
-        ContractId = act.Invoice?.ContractId,
-        CounterpartyInn = act.CounterpartyInn,
-        Status = act.Status,
-        ClientId = act.ClientId,
-        ClientName = act.Client?.Name,
-        ResponsibleId = act.ResponsibleId,
-        ResponsibleName = act.Responsible?.FullName,
-        Comment = act.Comment,
-        CreatedAt = act.CreatedAt,
-        UpdatedAt = act.UpdatedAt,
-    };
+        var audit = _db.ReadAuditSnapshot(act);
+        return new ActDto
+        {
+            Id = act.Id,
+            Number = act.Number,
+            Title = act.Title,
+            Date = act.Date,
+            Amount = act.Amount,
+            InvoiceNumber = act.InvoiceNumber,
+            InvoiceId = act.InvoiceId,
+            ContractId = act.Invoice?.ContractId,
+            CounterpartyInn = act.CounterpartyInn,
+            Status = act.Status,
+            ClientId = act.ClientId,
+            ClientName = act.Client?.Name,
+            ResponsibleId = act.ResponsibleId,
+            ResponsibleName = act.Responsible?.FullName,
+            Comment = act.Comment,
+            CreatedAt = act.CreatedAt,
+            UpdatedAt = act.UpdatedAt,
+            AuditCreatedByUserId = audit?.CreatedByUserId,
+            AuditCreatedByUserName = audit?.CreatedByUserName,
+            AuditUpdatedByUserId = audit?.UpdatedByUserId,
+            AuditUpdatedByUserName = audit?.UpdatedByUserName,
+            AuditIsDeleted = audit?.IsDeleted ?? false,
+            AuditDeletedAt = audit?.DeletedAt,
+            AuditDeletedByUserId = audit?.DeletedByUserId,
+            AuditDeletedByUserName = audit?.DeletedByUserName,
+        };
+    }
 }

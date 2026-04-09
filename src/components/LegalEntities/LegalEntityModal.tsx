@@ -28,6 +28,8 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
 import { TablePagination } from '../ui/TablePagination';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -1344,6 +1346,24 @@ export function LegalEntityModal({
             {error}
           </div>
         )}
+
+        {initial ? (
+          <div className="mx-6 mt-4">
+            <div className="space-y-3">
+              <AuditInfoCard
+                createdAt={initial.createdAt}
+                createdByUserName={initial.auditCreatedByUserName}
+                updatedAt={initial.auditUpdatedAt}
+                updatedByUserName={initial.auditUpdatedByUserName}
+                isDeleted={initial.auditIsDeleted}
+                deletedAt={initial.auditDeletedAt}
+                deletedByUserName={initial.auditDeletedByUserName}
+                compact
+              />
+              <ObjectAuditHistoryCard objectType="legal-entity" objectId={initial.id} compact />
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="px-6 pb-6 pt-4 space-y-6">
           <div className="grid gap-6 md:grid-cols-2">

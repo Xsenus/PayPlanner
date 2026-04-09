@@ -15,6 +15,8 @@ import { useToast } from '../../hooks/useToast';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getVisibleSystemNoteLines } from '../../utils/systemNotes';
+import { AuditInfoCard } from '../ui/AuditInfoCard';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -1108,6 +1110,21 @@ export function PaymentModal({
   const statValueClass = 'mt-2 whitespace-nowrap text-[1.9rem] font-semibold leading-none tracking-tight tabular-nums';
   const serviceTabHasContent =
     Boolean(formData.notes.trim()) || systemNotesEntries.length > 0 || transferTrail.length > 0;
+  const auditInfoSection = payment ? (
+    <div className="space-y-3">
+      <AuditInfoCard
+        createdAt={payment.createdAt}
+        createdByUserName={payment.auditCreatedByUserName}
+        updatedAt={payment.auditUpdatedAt}
+        updatedByUserName={payment.auditUpdatedByUserName}
+        isDeleted={payment.auditIsDeleted}
+        deletedAt={payment.auditDeletedAt}
+        deletedByUserName={payment.auditDeletedByUserName}
+        compact
+      />
+      <ObjectAuditHistoryCard objectType="payment" objectId={payment.id} compact />
+    </div>
+  ) : null;
 
   const modal = (
     <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 p-4">
@@ -1660,6 +1677,8 @@ export function PaymentModal({
 
             {detailsTab === 'system' && (
               <div className="space-y-4">
+                {auditInfoSection}
+
                 <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
                   <label className="block text-sm font-medium text-gray-700 mb-2">{t('notes')}</label>
                   <textarea

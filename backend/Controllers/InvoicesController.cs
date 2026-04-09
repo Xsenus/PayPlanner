@@ -1676,6 +1676,15 @@ public class InvoicesController : ControllerBase
         ServiceName = x.Payment.Service != null ? x.Payment.Service.Name : null,
         PaymentStatusName = x.Payment.PaymentStatusEntity != null ? x.Payment.PaymentStatusEntity.Name : null,
         CreatedAt = x.Payment.CreatedAt,
+        AuditCreatedByUserId = EF.Property<int?>(x.Payment, "CreatedByUserId"),
+        AuditCreatedByUserName = EF.Property<string?>(x.Payment, "CreatedByUserName"),
+        AuditUpdatedAt = EF.Property<DateTime?>(x.Payment, "UpdatedAt"),
+        AuditUpdatedByUserId = EF.Property<int?>(x.Payment, "UpdatedByUserId"),
+        AuditUpdatedByUserName = EF.Property<string?>(x.Payment, "UpdatedByUserName"),
+        AuditIsDeleted = EF.Property<bool>(x.Payment, "IsDeleted"),
+        AuditDeletedAt = EF.Property<DateTime?>(x.Payment, "DeletedAt"),
+        AuditDeletedByUserId = EF.Property<int?>(x.Payment, "DeletedByUserId"),
+        AuditDeletedByUserName = EF.Property<string?>(x.Payment, "DeletedByUserName"),
         DocumentKind = x.Payment.DocumentKind,
         SystemNotes = x.Payment.SystemNotes,
     };
@@ -1722,6 +1731,15 @@ public class InvoicesController : ControllerBase
             ServiceName = raw.ServiceName,
             PaymentStatusName = raw.PaymentStatusName,
             CreatedAt = raw.CreatedAt,
+            AuditCreatedByUserId = raw.AuditCreatedByUserId,
+            AuditCreatedByUserName = raw.AuditCreatedByUserName,
+            AuditUpdatedAt = raw.AuditUpdatedAt,
+            AuditUpdatedByUserId = raw.AuditUpdatedByUserId,
+            AuditUpdatedByUserName = raw.AuditUpdatedByUserName,
+            AuditIsDeleted = raw.AuditIsDeleted,
+            AuditDeletedAt = raw.AuditDeletedAt,
+            AuditDeletedByUserId = raw.AuditDeletedByUserId,
+            AuditDeletedByUserName = raw.AuditDeletedByUserName,
             DocumentKind = raw.DocumentKind,
             LineItems = InvoiceLineItemStorage.ExtractFromSystemNotes(raw.SystemNotes),
         };
@@ -2968,6 +2986,15 @@ public class InvoicesController : ControllerBase
         public string? ServiceName { get; init; }
         public string? PaymentStatusName { get; init; }
         public DateTime CreatedAt { get; init; }
+        public int? AuditCreatedByUserId { get; init; }
+        public string? AuditCreatedByUserName { get; init; }
+        public DateTime? AuditUpdatedAt { get; init; }
+        public int? AuditUpdatedByUserId { get; init; }
+        public string? AuditUpdatedByUserName { get; init; }
+        public bool AuditIsDeleted { get; init; }
+        public DateTime? AuditDeletedAt { get; init; }
+        public int? AuditDeletedByUserId { get; init; }
+        public string? AuditDeletedByUserName { get; init; }
         public DocumentKind DocumentKind { get; init; }
         public string? SystemNotes { get; init; }
     }
