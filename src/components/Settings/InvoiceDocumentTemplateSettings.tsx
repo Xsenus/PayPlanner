@@ -123,6 +123,7 @@ export function InvoiceDocumentTemplateSettings() {
   const toast = useToast();
   const [settings, setSettings] = useState<InvoiceDocumentTemplateSettingsDto | null>(null);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
+  const [workspaceTab, setWorkspaceTab] = useState<'preview' | 'editor' | 'tokens'>('preview');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -201,6 +202,7 @@ export function InvoiceDocumentTemplateSettings() {
         html: prev.defaultTemplateHtml || selectedTemplate?.html || '',
       };
       setSelectedTemplateKey(template.key);
+      setWorkspaceTab('editor');
       return {
         ...prev,
         templates: [...prev.templates, template],
@@ -222,6 +224,7 @@ export function InvoiceDocumentTemplateSettings() {
       templates: [...settings.templates, duplicate],
     });
     setSelectedTemplateKey(duplicate.key);
+    setWorkspaceTab('editor');
     setMessage(null);
     setError(null);
   };
@@ -319,14 +322,15 @@ export function InvoiceDocumentTemplateSettings() {
 
   const openPreviewInNewWindow = () => {
     if (!previewHtml || typeof window === 'undefined') return;
-    const previewUrl = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
-    const previewWindow = window.open(previewUrl, '_blank', 'noopener,noreferrer,width=1180,height=900');
+    const previewWindow = window.open('', '_blank', 'width=1180,height=900');
     if (!previewWindow) {
-      URL.revokeObjectURL(previewUrl);
       toast.error('Браузер заблокировал окно предпросмотра. Разрешите всплывающие окна и повторите.');
       return;
     }
-    window.setTimeout(() => URL.revokeObjectURL(previewUrl), 10_000);
+    previewWindow.document.open();
+    previewWindow.document.write(previewHtml);
+    previewWindow.document.close();
+    previewWindow.focus();
   };
 
   return (
@@ -376,11 +380,11 @@ export function InvoiceDocumentTemplateSettings() {
       )}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[320px,minmax(0,1fr)]">
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 xl:sticky xl:top-4 xl:self-start">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-gray-900">Список шаблонов</div>
-              <div className="text-xs text-gray-500">Можно держать несколько вариантов и переключать активный.</div>
+              <div className="text-xs text-gray-500">Выберите шаблон слева, затем работайте с ним справа.</div>
             </div>
             <FileText className="h-5 w-5 text-gray-400" />
           </div>
@@ -458,9 +462,9 @@ export function InvoiceDocumentTemplateSettings() {
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <div className="text-base font-semibold text-gray-900">Редактор шаблона</div>
+                  <div className="text-base font-semibold text-gray-900">Рабочая область шаблона</div>
                   <div className="mt-1 text-sm text-gray-600">
-                    Здесь можно менять верстку документа и подставляемые переменные без правки кода.
+                    Настрой свойства шаблона, затем переключайся между превью, HTML и списком переменных.
                   </div>
                 </div>
 
@@ -486,9 +490,20 @@ export function InvoiceDocumentTemplateSettings() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-6 2xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-                <div className="space-y-4">
-                  <div className="grid gap-4 lg:grid-cols-2">
+              <div className="mt-5 space-y-5">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">HTML + CSS</span>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      settings?.activeTemplateKey === selectedTemplate.key
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {settings?.activeTemplateKey === selectedTemplate.key ? 'Используется в системе' : 'Неактивный шаблон'}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
                     <label className="block">
                       <span className="text-sm font-medium text-gray-700">Название шаблона</span>
                       <input
@@ -528,7 +543,7 @@ export function InvoiceDocumentTemplateSettings() {
                     </label>
                   </div>
 
-                  <label className="block">
+                  <label className="mt-4 block">
                     <span className="text-sm font-medium text-gray-700">Описание</span>
                     <input
                       type="text"
@@ -538,60 +553,126 @@ export function InvoiceDocumentTemplateSettings() {
                     />
                   </label>
 
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    Формат шаблона сейчас один: HTML + CSS. Если понадобится загрузка готовых Word/DOCX-файлов, это
-                    можно будет добавить следующим этапом.
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Пока шаблон редактируется как HTML. Word/DOCX-шаблоны в этот блок еще не подключены.
                   </div>
+                </div>
 
-                  <label className="block">
-                    <span className="text-sm font-medium text-gray-700">HTML шаблона</span>
+                <div
+                  role="tablist"
+                  aria-label="Рабочая зона шаблона"
+                  className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-white p-2 sm:grid-cols-3"
+                >
+                  {[
+                    { key: 'preview', label: 'Превью' },
+                    { key: 'editor', label: 'HTML' },
+                    { key: 'tokens', label: 'Переменные' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={workspaceTab === tab.key}
+                      onClick={() => setWorkspaceTab(tab.key as 'preview' | 'editor' | 'tokens')}
+                      className={[
+                        'rounded-xl px-4 py-2.5 text-sm font-medium transition-colors',
+                        workspaceTab === tab.key
+                          ? 'bg-blue-50 text-blue-700 shadow-sm'
+                          : 'text-gray-600 hover:bg-gray-50',
+                      ].join(' ')}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {workspaceTab === 'preview' && (
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="text-base font-semibold text-gray-900">Живое превью документа</div>
+                        <div className="mt-1 max-w-2xl text-sm text-gray-600">
+                          Здесь показан итоговый документ на демо-данных, близких к твоему образцу. Это именно тот
+                          печатный HTML-шаблон, который будет использоваться системой.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={openPreviewInNewWindow}
+                        disabled={!previewHtml}
+                        className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Открыть отдельно
+                      </button>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 text-xs leading-5 text-gray-500">
+                      Старый встроенный макет счета больше не должен путать это превью: здесь отображается именно
+                      печатный шаблон, а не отдельная ручная верстка.
+                    </div>
+
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner">
+                      {previewHtml ? (
+                        <iframe
+                          title={`Превью шаблона ${selectedTemplate.name}`}
+                          srcDoc={previewHtml}
+                          sandbox="allow-same-origin"
+                          className="h-[72rem] w-full bg-white"
+                        />
+                      ) : (
+                        <div className="flex h-[24rem] items-center justify-center px-6 text-center text-sm text-gray-500">
+                          Введите HTML шаблона, чтобы увидеть итоговый документ.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {workspaceTab === 'editor' && (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-base font-semibold text-gray-900">HTML шаблона</div>
+                      <div className="text-sm text-gray-600">
+                        Здесь редактируется структура документа. После правок переключись на вкладку превью и сразу
+                        посмотри результат.
+                      </div>
+                    </div>
+
                     <textarea
                       value={selectedTemplate.html}
                       onChange={(event) => updateSelectedTemplate({ html: event.target.value })}
                       spellCheck={false}
-                      className="mt-1 min-h-[36rem] w-full rounded-2xl border border-gray-300 bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-100 shadow-inner"
+                      className="mt-4 min-h-[40rem] w-full rounded-2xl border border-gray-300 bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-100 shadow-inner"
                     />
-                  </label>
-                </div>
+                  </div>
+                )}
 
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-base font-semibold text-gray-900">Живое превью</div>
-                      <div className="mt-1 text-sm text-gray-600">
-                        Ниже показан результат шаблона на демо-данных, близких к твоему присланному счету.
-                      </div>
+                {workspaceTab === 'tokens' && (
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                    <div className="text-base font-semibold text-gray-900">Доступные переменные</div>
+                    <div className="mt-1 text-sm text-gray-600">
+                      Переменные подставляются автоматически. Повторяемые поля работают только внутри блока <code>{'{{#lineItems}} ... {{/lineItems}}'}</code>.
                     </div>
-                    <button
-                      type="button"
-                      onClick={openPreviewInNewWindow}
-                      disabled={!previewHtml}
-                      className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Открыть отдельно
-                    </button>
-                  </div>
 
-                  <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 text-xs leading-5 text-gray-500">
-                    Превью использует именно печатный HTML-шаблон. Раньше на карточке счета отображался отдельный старый
-                    макет, поэтому стандартный шаблон визуально не был похож на документ, который ты присылал.
+                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                      {tokenGroups.map(([category, items]) => (
+                        <div key={category} className="rounded-2xl border border-gray-200 bg-white p-4">
+                          <div className="text-sm font-semibold text-gray-900">{category}</div>
+                          <div className="mt-3 space-y-3">
+                            {items.map((token) => (
+                              <div key={token.key} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                                <div className="font-mono text-xs text-blue-700">
+                                  {token.key === 'lineItems' ? '{{#lineItems}} ... {{/lineItems}}' : `{{${token.key}}}`}
+                                </div>
+                                <div className="mt-1 text-xs text-gray-600">{token.description}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-
-                  <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner">
-                    {previewHtml ? (
-                      <iframe
-                        title={`Превью шаблона ${selectedTemplate.name}`}
-                        srcDoc={previewHtml}
-                        sandbox="allow-same-origin"
-                        className="h-[58rem] w-full bg-white"
-                      />
-                    ) : (
-                      <div className="flex h-[22rem] items-center justify-center px-6 text-center text-sm text-gray-500">
-                        Введите HTML шаблона, чтобы увидеть итоговый документ.
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           ) : (
@@ -599,31 +680,6 @@ export function InvoiceDocumentTemplateSettings() {
               Выберите шаблон слева или создайте новый.
             </div>
           )}
-
-          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
-            <div className="text-base font-semibold text-gray-900">Доступные переменные</div>
-            <div className="mt-1 text-sm text-gray-600">
-              Переменные подставляются автоматически. Повторяемые поля работают только внутри блока <code>{'{{#lineItems}} ... {{/lineItems}}'}</code>.
-            </div>
-
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              {tokenGroups.map(([category, items]) => (
-                <div key={category} className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="text-sm font-semibold text-gray-900">{category}</div>
-                  <div className="mt-3 space-y-3">
-                    {items.map((token) => (
-                      <div key={token.key} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                        <div className="font-mono text-xs text-blue-700">
-                          {token.key === 'lineItems' ? '{{#lineItems}} ... {{/lineItems}}' : `{{${token.key}}}`}
-                        </div>
-                        <div className="mt-1 text-xs text-gray-600">{token.description}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
