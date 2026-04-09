@@ -15,55 +15,75 @@ namespace PayPlanner.Api.Tests;
 public class InvoicesControllerValidationTests
 {
     [Fact]
-    public async Task Create_ReturnsHelpfulDuplicateMessage_WhenMatchingInvoiceIsHiddenByAccess()
+    public async Task Create_IgnoresOrphanInvoiceRecord_WhenCheckingDuplicateNumber()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "Скрытый дубль");
-        await CreateUserAsync(db, 2, "owner@example.com", "Ответственный владелец");
-        await CreateInvoiceAsync(db, "25", new DateTime(2026, 4, 2), clientId, responsibleUserId: 2);
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+        await CreateOrphanInvoiceAsync(db, "25", new DateTime(2026, 4, 7));
 
-        var controller = CreateController(db, isAdmin: false, userId: 1);
-        var request = CreateRequest("25", clientId);
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("25", clientId, new DateTime(2026, 4, 8));
 
         var action = await controller.Create(request, CancellationToken.None);
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
-        var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Contains("Система проверяет уникальность по всем счетам за год", message);
-        Assert.Contains("может быть скрыт текущими фильтрами", message);
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        Assert.NotNull(created.Value);
     }
 
     [Fact]
-    public async Task Create_ReturnsDuplicateDetails_WhenMatchingInvoiceIsVisibleToCurrentUser()
+    public async Task Create_ReturnsShortDuplicateMessage_WhenActiveInvoiceExists()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "Видимый дубль");
-        await CreateUserAsync(db, 2, "owner@example.com", "Ответственный владелец");
-        await CreateInvoiceAsync(db, "25", new DateTime(2026, 4, 2), clientId, responsibleUserId: 2);
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+        await CreateActiveInvoiceAsync(db, "25", new DateTime(2026, 4, 7), clientId);
 
-        var controller = CreateController(db, isAdmin: false, userId: 2);
-        var request = CreateRequest("25", clientId);
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("25", clientId, new DateTime(2026, 4, 8));
 
         var action = await controller.Create(request, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Contains("Совпадающий доходный счет: №25 от 02.04.2026.", message);
-        Assert.Contains("Клиент: Видимый дубль.", message);
+        Assert.Equal("Номер счета '25' уже занят в 2026 году.", message);
     }
 
-    private static UpsertInvoiceRequest CreateRequest(string number, int clientId)
+    [Fact]
+    public async Task GetNextNumber_IgnoresOrphanInvoiceRecord()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+        await CreateActiveInvoiceAsync(db, "24", new DateTime(2026, 4, 6), clientId);
+        await CreateOrphanInvoiceAsync(db, "25", new DateTime(2026, 4, 7));
+
+        var controller = CreateController(db, isAdmin: true, userId: 1);
+
+        var action = await controller.GetNextNumber(new DateTime(2026, 4, 9), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var nextNumber = GetAnonymousProperty<string>(ok.Value, "nextNumber");
+        Assert.Equal("25", nextNumber);
+    }
+
+    private static UpsertInvoiceRequest CreateRequest(string number, int clientId, DateTime date)
     {
         return new UpsertInvoiceRequest
         {
             Number = number,
-            Date = new DateTime(2026, 4, 8),
-            DueDate = new DateTime(2026, 4, 10),
+            Date = date,
+            DueDate = date.AddDays(2),
             Amount = 11_000m,
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
             ClientId = clientId,
         };
+    }
+
+    private static T GetAnonymousProperty<T>(object? source, string name)
+    {
+        Assert.NotNull(source);
+        var property = source!.GetType().GetProperty(name);
+        Assert.NotNull(property);
+        return Assert.IsType<T>(property!.GetValue(source));
     }
 
     private static async Task<int> CreateClientAsync(PaymentContext db, string name)
@@ -79,36 +99,18 @@ public class InvoicesControllerValidationTests
         return client.Id;
     }
 
-    private static async Task CreateUserAsync(PaymentContext db, int id, string email, string fullName)
+    private static async Task CreateOrphanInvoiceAsync(PaymentContext db, string number, DateTime date)
     {
-        var role = await db.Roles.FirstOrDefaultAsync();
-        if (role is null)
+        db.Invoices.Add(new Invoice
         {
-            role = new Role
-            {
-                Name = "user",
-                Description = "Test role",
-            };
-
-            db.Roles.Add(role);
-            await db.SaveChangesAsync();
-        }
-
-        db.Users.Add(new User
-        {
-            Id = id,
-            Email = email,
-            FullName = fullName,
-            PasswordHash = "hash",
-            RoleId = role.Id,
-            IsActive = true,
-            IsApproved = true,
+            Number = number,
+            Date = date,
         });
 
         await db.SaveChangesAsync();
     }
 
-    private static async Task CreateInvoiceAsync(PaymentContext db, string number, DateTime date, int clientId, int? responsibleUserId)
+    private static async Task CreateActiveInvoiceAsync(PaymentContext db, string number, DateTime date, int clientId)
     {
         var invoice = new Invoice
         {
@@ -119,7 +121,7 @@ public class InvoicesControllerValidationTests
         db.Invoices.Add(invoice);
         await db.SaveChangesAsync();
 
-        var payment = new Payment
+        db.Payments.Add(new Payment
         {
             Account = number,
             AccountDate = date,
@@ -132,17 +134,8 @@ public class InvoicesControllerValidationTests
             Status = PaymentStatus.Pending,
             Type = PaymentType.Income,
             Description = "Тестовый счет",
-        };
+        });
 
-        if (responsibleUserId.HasValue)
-        {
-            payment.Responsibles.Add(new PaymentResponsible
-            {
-                UserId = responsibleUserId.Value,
-            });
-        }
-
-        db.Payments.Add(payment);
         await db.SaveChangesAsync();
     }
 

@@ -2593,8 +2593,7 @@ public class InvoicesController : ControllerBase
         var yearStart = new DateTime(targetDate.Year, 1, 1);
         var yearEnd = yearStart.AddYears(1);
 
-        var numbers = await _db.Invoices
-            .AsNoTracking()
+        var numbers = await BuildActiveInvoiceEntitiesQuery()
             .Where(x => x.Date >= yearStart && x.Date < yearEnd)
             .Select(x => x.Number)
             .ToListAsync(ct);
@@ -2662,8 +2661,7 @@ public class InvoicesController : ControllerBase
         var yearEnd = yearStart.AddYears(1);
         var normalized = number.Trim();
 
-        var duplicateExists = await _db.Invoices
-            .AsNoTracking()
+        var duplicateExists = await BuildActiveInvoiceEntitiesQuery()
             .Where(x => x.Date >= yearStart && x.Date < yearEnd)
             .Where(x => excludeId == null || !x.Payments.Any(p => p.Id == excludeId.Value))
             .AnyAsync(x => x.Number.Trim().ToLower() == normalized.ToLower(), ct);
@@ -2673,8 +2671,7 @@ public class InvoicesController : ControllerBase
             return null;
         }
 
-        var message = await BuildDuplicateInvoiceNumberMessageAsync(normalized, yearStart, yearEnd, accountDate.Year, excludeId, ct);
-        return BadRequest(message);
+        return BadRequest($"Номер счета '{number}' уже занят в {accountDate.Year} году.");
     }
 
     private async Task<string> BuildDuplicateInvoiceNumberMessageAsync(
@@ -2742,6 +2739,13 @@ public class InvoicesController : ControllerBase
                 Type = payment.Type,
             })
             .FirstOrDefaultAsync(ct);
+    }
+
+    private IQueryable<Invoice> BuildActiveInvoiceEntitiesQuery()
+    {
+        return _db.Invoices
+            .AsNoTracking()
+            .Where(invoice => invoice.Payments.Any());
     }
 
     private async Task<InvoiceRulesSettingsDto> GetInvoiceRulesSettingsAsync(CancellationToken ct)
