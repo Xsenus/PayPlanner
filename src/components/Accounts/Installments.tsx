@@ -201,7 +201,6 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     } catch (err) {
       const message = extractDisplayErrorMessage(err, 'Не удалось сохранить счет.');
       setModalError(message);
-      toast.error(message);
     } finally {
       setSubmitting(false);
     }
