@@ -30,13 +30,13 @@ public class InvoiceDeletionTests
     }
 
     [Fact]
-    public async Task Delete_RemovesOnlyLinkedPayment_WhenTargetIsNotInvoiceDocument()
+    public async Task Delete_RemovesWholeInvoiceAggregate_WhenTargetIsInstallmentPayment()
     {
         await using var db = await CreateContextAsync();
         var invoice = await CreateInvoiceAggregateAsync(db);
         var installmentPaymentId = invoice.InstallmentPaymentIds[0];
-        var parentPaymentId = invoice.ParentPaymentId;
         var invoiceEntityId = invoice.InvoiceEntityId;
+        var unrelatedPaymentId = invoice.UnrelatedPaymentId;
 
         var controller = new InvoicesController(db, new NoopEmailService(), new NoopFormRequirementsService());
 
@@ -44,9 +44,9 @@ public class InvoiceDeletionTests
         db.ChangeTracker.Clear();
 
         Assert.Null(await db.Payments.FindAsync(installmentPaymentId));
-        Assert.NotNull(await db.Payments.FindAsync(parentPaymentId));
-        Assert.NotNull(await db.Invoices.FindAsync(invoiceEntityId));
-        Assert.Single(await db.Payments.Where(payment => payment.InvoiceId == invoiceEntityId && payment.DocumentKind != DocumentKind.Invoice).ToListAsync());
+        Assert.Empty(await db.Payments.Where(payment => payment.InvoiceId == invoiceEntityId).ToListAsync());
+        Assert.Null(await db.Invoices.FindAsync(invoiceEntityId));
+        Assert.NotNull(await db.Payments.FindAsync(unrelatedPaymentId));
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

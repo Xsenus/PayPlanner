@@ -955,7 +955,7 @@ public class InvoicesController : ControllerBase
     private static List<int> GetInvoiceEntityIdsToDelete(IEnumerable<Payment> payments)
     {
         return payments
-            .Where(IsInvoiceDocumentPayment)
+            .Where(payment => payment.InvoiceId.HasValue && payment.InvoiceId.Value > 0)
             .Select(payment => payment.InvoiceId!.Value)
             .Distinct()
             .ToList();
@@ -1150,9 +1150,7 @@ public class InvoicesController : ControllerBase
 
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
     {
-        var payments = _db.Payments.AsNoTracking()
-            .Where(p => (p.InvoiceId != null && p.Invoice != null)
-                        || (p.DocumentKind == DocumentKind.Invoice && p.Account != null && p.Account != ""));
+        var payments = BuildVisibleInvoicePaymentsQuery(trackChanges: false);
 
         return payments.Select(payment => new InvoiceQueryItem
         {
@@ -1168,9 +1166,28 @@ public class InvoicesController : ControllerBase
 
     private IQueryable<Payment> BuildEditableInvoicePaymentsQuery()
     {
-        return _db.Payments
-            .Where(payment => (payment.InvoiceId != null && payment.Invoice != null)
-                || (payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != ""));
+        return BuildVisibleInvoicePaymentsQuery(trackChanges: true);
+    }
+
+    private IQueryable<Payment> BuildVisibleInvoicePaymentsQuery(bool trackChanges)
+    {
+        var payments = trackChanges
+            ? _db.Payments
+            : _db.Payments.AsNoTracking();
+
+        return payments.Where(payment =>
+            (payment.InvoiceId.HasValue
+                && payment.Invoice != null
+                && payment.Id == _db.Payments
+                    .Where(candidate => candidate.InvoiceId == payment.InvoiceId)
+                    .OrderByDescending(candidate => candidate.DocumentKind == DocumentKind.Invoice)
+                    .ThenBy(candidate => candidate.Id)
+                    .Select(candidate => candidate.Id)
+                    .FirstOrDefault())
+            || (!payment.InvoiceId.HasValue
+                && payment.DocumentKind == DocumentKind.Invoice
+                && payment.Account != null
+                && payment.Account != ""));
     }
 
     private static IQueryable<InvoiceQueryItem> ApplyFilters(

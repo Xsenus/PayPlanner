@@ -1,0 +1,219 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
+using System.Security.Claims;
+using Xunit;
+
+namespace PayPlanner.Api.Tests;
+
+public class InvoicesControllerListTests
+{
+    [Fact]
+    public async Task Get_ReturnsSingleInvoiceRow_WhenInvoiceHasInstallmentPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+        var controller = CreateController(db);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var items = ExtractInvoiceItems(ok);
+        var invoice = Assert.Single(items);
+
+        Assert.Equal(aggregate.InvoicePaymentId, invoice.Id);
+        Assert.Equal(DocumentKind.Invoice, invoice.DocumentKind);
+        Assert.Equal("25", invoice.Number);
+    }
+
+    [Fact]
+    public async Task Get_ReturnsFallbackRepresentative_WhenLegacyInvoiceHasNoInvoiceDocument()
+    {
+        await using var db = await CreateContextAsync();
+        var legacyRepresentativeId = await CreateLegacyInvoiceAggregateWithoutInvoiceDocumentAsync(db);
+        var controller = CreateController(db);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var items = ExtractInvoiceItems(ok);
+        var invoice = Assert.Single(items);
+
+        Assert.Equal(legacyRepresentativeId, invoice.Id);
+        Assert.Equal("LEG-7", invoice.Number);
+    }
+
+    private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
+    {
+        var itemsProperty = ok.Value?.GetType().GetProperty("items");
+        Assert.NotNull(itemsProperty);
+
+        var rawItems = itemsProperty!.GetValue(ok.Value);
+        var items = Assert.IsAssignableFrom<IEnumerable<InvoiceDto>>(rawItems);
+        return items.ToList();
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        var db = new PaymentContext(options);
+        await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
+    private static InvoicesController CreateController(PaymentContext db)
+    {
+        var controller = new InvoicesController(db, new NoopEmailService(), new NoopFormRequirementsService());
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[]
+                    {
+                        new Claim(ClaimTypes.Role, "admin"),
+                    },
+                    authenticationType: "Test")),
+            },
+        };
+
+        return controller;
+    }
+
+    private static async Task<(int InvoicePaymentId, int InvoiceEntityId)> CreateInstallmentInvoiceAggregateAsync(PaymentContext db)
+    {
+        var invoice = new Invoice
+        {
+            Number = "25",
+            Date = new DateTime(2026, 4, 7),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = CreatePayment(invoice.Date, 25_000m, "Счёт с рассрочкой");
+        invoicePayment.DocumentKind = DocumentKind.Invoice;
+        invoicePayment.InvoiceId = invoice.Id;
+        invoicePayment.Account = invoice.Number;
+        invoicePayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(invoice.Date, 4_100m, "Рассрочка по счёту №25 · платёж 1/2");
+        firstInstallment.InvoiceId = invoice.Id;
+
+        var secondInstallment = CreatePayment(invoice.Date.AddMonths(1), 4_100m, "Рассрочка по счёту №25 · платёж 2/2");
+        secondInstallment.InvoiceId = invoice.Id;
+
+        db.Payments.AddRange(invoicePayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        return (invoicePayment.Id, invoice.Id);
+    }
+
+    private static async Task<int> CreateLegacyInvoiceAggregateWithoutInvoiceDocumentAsync(PaymentContext db)
+    {
+        var invoice = new Invoice
+        {
+            Number = "LEG-7",
+            Date = new DateTime(2025, 12, 29),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var firstPayment = CreatePayment(new DateTime(2025, 12, 29), 10_000m, "Старый счёт без отдельного документа");
+        firstPayment.InvoiceId = invoice.Id;
+        firstPayment.Account = invoice.Number;
+        firstPayment.AccountDate = invoice.Date;
+
+        var secondPayment = CreatePayment(new DateTime(2026, 1, 29), 10_000m, "Второй платёж по старому счёту");
+        secondPayment.InvoiceId = invoice.Id;
+        secondPayment.Account = invoice.Number;
+        secondPayment.AccountDate = invoice.Date;
+
+        db.Payments.AddRange(firstPayment, secondPayment);
+        await db.SaveChangesAsync();
+
+        return firstPayment.Id;
+    }
+
+    private static Payment CreatePayment(DateTime date, decimal amount, string description)
+    {
+        return new Payment
+        {
+            Amount = amount,
+            CounterpartyName = "Тестовый клиент",
+            Date = date,
+            PlannedDate = date,
+            Description = description,
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+        };
+    }
+
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType) => Task.CompletedTask;
+    }
+
+    private sealed class NoopFormRequirementsService : IFormRequirementsService
+    {
+        public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default) => Task.FromResult(new List<string>());
+
+        public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default) => Task.FromResult(new List<string>());
+    }
+}
