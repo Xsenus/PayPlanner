@@ -10,6 +10,7 @@ import {
 import type { Payment } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { getVisibleNotes } from '../../utils/systemNotes';
 
 export type PaymentTableColumnKey =
   | 'date'
@@ -147,6 +148,7 @@ export function PaymentsTable({
       const isIncome = payment.type === 'Income';
       const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
       const amountText = formatCurrencySmart(payment.amount).full;
+      const visibleNotes = getVisibleNotes(payment.notes);
       const category =
         payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
       const statusLabel = statusLabels[payment.status] ?? payment.status;
@@ -182,9 +184,9 @@ export function PaymentsTable({
               <div className="truncate" title={payment.description || undefined}>
                 {payment.description || t('noDescription') || 'Без описания'}
               </div>
-              {payment.notes ? (
-                <div className="truncate text-xs text-gray-500" title={payment.notes}>
-                  {payment.notes}
+              {visibleNotes ? (
+                <div className="truncate text-xs text-gray-500" title={visibleNotes}>
+                  {visibleNotes}
                 </div>
               ) : null}
             </>
