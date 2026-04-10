@@ -52,13 +52,21 @@ export function isPaymentLinkedToInvoice(
 }
 
 export function filterRelatedPaymentsForInvoice(payments: Payment[], invoice?: Invoice | null): Payment[] {
+  return filterRelatedPaymentsForInvoiceWithOptions(payments, invoice);
+}
+
+export function filterRelatedPaymentsForInvoiceWithOptions(
+  payments: Payment[],
+  invoice?: Invoice | null,
+  options?: { includeCurrentInvoiceRecord?: boolean },
+): Payment[] {
   if (!invoice) {
     return [];
   }
 
   const uniquePayments = new Map<number, Payment>();
   payments.forEach((payment) => {
-    if (isPaymentLinkedToInvoice(payment, invoice)) {
+    if (isPaymentLinkedToInvoice(payment, invoice, options)) {
       uniquePayments.set(payment.id, payment);
     }
   });

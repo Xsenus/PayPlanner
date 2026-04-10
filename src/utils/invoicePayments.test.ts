@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Invoice, Payment } from '../types';
-import { filterRelatedPaymentsForInvoice, getInvoiceLegacyKey, isPaymentLinkedToInvoice } from './invoicePayments';
+import {
+  filterRelatedPaymentsForInvoice,
+  filterRelatedPaymentsForInvoiceWithOptions,
+  getInvoiceLegacyKey,
+  isPaymentLinkedToInvoice,
+} from './invoicePayments';
 
 function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -93,5 +98,26 @@ describe('invoicePayments utilities', () => {
     );
 
     expect(result.map((payment) => payment.id)).toEqual([901, 902]);
+  });
+
+  it('can include the current invoice record when UI needs the same operations view as the registry', () => {
+    const invoice = createInvoice({ id: 547, invoiceEntityId: 30 });
+    const currentInvoiceRecord = createPayment({
+      id: 547,
+      invoiceId: 30,
+      documentKind: 'Payment',
+      status: 'Completed',
+      isPaid: true,
+      paidAmount: 18_000,
+      paidDate: '2026-04-09',
+    });
+
+    const result = filterRelatedPaymentsForInvoiceWithOptions(
+      [currentInvoiceRecord],
+      invoice,
+      { includeCurrentInvoiceRecord: true },
+    );
+
+    expect(result.map((payment) => payment.id)).toEqual([547]);
   });
 });

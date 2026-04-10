@@ -80,7 +80,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
-import { filterRelatedPaymentsForInvoice } from '../../utils/invoicePayments';
+import { filterRelatedPaymentsForInvoiceWithOptions } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
@@ -1251,6 +1251,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
   const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(null);
   const [invoiceModalRelatedPayments, setInvoiceModalRelatedPayments] = useState<Payment[]>([]);
+  const [invoiceModalPaymentsLoading, setInvoiceModalPaymentsLoading] = useState(false);
 
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [contractModalMode, setContractModalMode] = useState<'create' | 'edit'>('create');
@@ -1394,6 +1395,8 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setInvoiceModalOpen(false);
     setSelectedInvoice(null);
     setInvoiceModalError(null);
+    setInvoiceModalRelatedPayments([]);
+    setInvoiceModalPaymentsLoading(false);
   };
 
   const ensureInvoiceClients = useCallback(async () => {
@@ -1833,6 +1836,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   const loadInvoiceRelatedPayments = useCallback(async (invoiceSnapshot: Invoice | null) => {
     if (!invoiceSnapshot) {
       setInvoiceModalRelatedPayments([]);
+      setInvoiceModalPaymentsLoading(false);
       return;
     }
 
@@ -1840,6 +1844,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       ? invoiceSnapshot.clientCaseIds[0]
       : invoiceSnapshot.clientCaseId ?? undefined;
 
+    setInvoiceModalPaymentsLoading(true);
     try {
       const paymentPool = await apiService.getPayments({
         from: MIN_DATE,
@@ -1848,9 +1853,19 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         caseId: selectedCaseId,
       });
 
-      setInvoiceModalRelatedPayments(filterRelatedPaymentsForInvoice(paymentPool, invoiceSnapshot));
+      setInvoiceModalRelatedPayments(
+        filterRelatedPaymentsForInvoiceWithOptions(paymentPool, invoiceSnapshot, {
+          includeCurrentInvoiceRecord: true,
+        }),
+      );
     } catch {
-      setInvoiceModalRelatedPayments(filterRelatedPaymentsForInvoice(visiblePayments, invoiceSnapshot));
+      setInvoiceModalRelatedPayments(
+        filterRelatedPaymentsForInvoiceWithOptions(visiblePayments, invoiceSnapshot, {
+          includeCurrentInvoiceRecord: true,
+        }),
+      );
+    } finally {
+      setInvoiceModalPaymentsLoading(false);
     }
   }, [clientId, visiblePayments]);
   const refreshInvoiceModalData = useCallback(async () => {
@@ -1858,6 +1873,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
 
     if (!selectedInvoice?.id) {
       setInvoiceModalRelatedPayments([]);
+      setInvoiceModalPaymentsLoading(false);
       return;
     }
 
@@ -1872,6 +1888,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   useEffect(() => {
     if (!invoiceModalOpen || invoiceModalMode !== 'edit') {
       setInvoiceModalRelatedPayments([]);
+      setInvoiceModalPaymentsLoading(false);
       return;
     }
 
@@ -5021,6 +5038,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           defaultClientId={clientId}
           defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
           relatedPayments={invoiceModalRelatedPayments}
+          paymentsLoading={invoiceModalPaymentsLoading}
           onRefreshRequested={refreshInvoiceModalData}
         />
 
