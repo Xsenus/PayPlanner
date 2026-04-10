@@ -17,6 +17,7 @@ namespace PayPlanner.Api.Controllers;
 public class LegalEntitiesController : ControllerBase
 {
     private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichmentService;
@@ -442,6 +443,18 @@ public class LegalEntitiesController : ControllerBase
             {
                 Type = Enum.IsDefined(typeof(AddressType), a.Type) ? (AddressType)a.Type : AddressType.Other,
                 Value = a.Value!.Trim(),
+                UnrestrictedValue = NormalizeOptional(a.UnrestrictedValue),
+                PostalCode = NormalizeOptional(a.PostalCode),
+                Country = NormalizeOptional(a.Country),
+                RegionWithType = NormalizeOptional(a.RegionWithType),
+                CityWithType = NormalizeOptional(a.CityWithType),
+                StreetWithType = NormalizeOptional(a.StreetWithType),
+                House = NormalizeOptional(a.House),
+                Flat = NormalizeOptional(a.Flat),
+                FiasId = NormalizeOptional(a.FiasId),
+                KladrId = NormalizeOptional(a.KladrId),
+                GeoLat = NormalizeOptional(a.GeoLat),
+                GeoLon = NormalizeOptional(a.GeoLon),
                 IsPrimary = a.IsPrimary,
                 LegalEntityId = entity.Id,
             })
@@ -460,12 +473,15 @@ public class LegalEntitiesController : ControllerBase
             {
                 normalized[0].IsPrimary = true;
             }
-            _db.AddressRecords.AddRange(normalized);
-            foreach (var item in normalized) entity.Addresses.Add(item);
+            foreach (var item in normalized)
+            {
+                entity.Addresses.Add(item);
+            }
         }
     }
 
     [HttpPost]
+    [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
@@ -825,6 +841,7 @@ public class LegalEntitiesController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Update(int id, [FromBody] LegalEntityRequest request, CancellationToken ct)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);

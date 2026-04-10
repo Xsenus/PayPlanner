@@ -179,8 +179,44 @@ public class LegalEntityAddressRequest
 {
     public int Type { get; set; }
 
-    [MaxLength(500)]
+    [MaxLength(600)]
     public string? Value { get; set; }
+
+    [MaxLength(600)]
+    public string? UnrestrictedValue { get; set; }
+
+    [MaxLength(20)]
+    public string? PostalCode { get; set; }
+
+    [MaxLength(120)]
+    public string? Country { get; set; }
+
+    [MaxLength(200)]
+    public string? RegionWithType { get; set; }
+
+    [MaxLength(200)]
+    public string? CityWithType { get; set; }
+
+    [MaxLength(200)]
+    public string? StreetWithType { get; set; }
+
+    [MaxLength(50)]
+    public string? House { get; set; }
+
+    [MaxLength(50)]
+    public string? Flat { get; set; }
+
+    [MaxLength(60)]
+    public string? FiasId { get; set; }
+
+    [MaxLength(60)]
+    public string? KladrId { get; set; }
+
+    [MaxLength(32)]
+    public string? GeoLat { get; set; }
+
+    [MaxLength(32)]
+    public string? GeoLon { get; set; }
 
     public bool IsPrimary { get; set; }
 }

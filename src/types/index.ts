@@ -209,6 +209,18 @@ export interface LegalEntityDadataDetails {
 export interface LegalEntityAddressInput {
   type: string | number;
   value: string;
+  unrestrictedValue?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  regionWithType?: string | null;
+  cityWithType?: string | null;
+  streetWithType?: string | null;
+  house?: string | null;
+  flat?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
   isPrimary?: boolean;
 }
 

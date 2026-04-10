@@ -144,6 +144,7 @@ type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' 
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
 const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
+const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 15_500_000;
 
 const EMPTY_PERSON_DOC: PersonDocInfo = {
   position: '',
@@ -222,17 +223,17 @@ const createEmptyLegalEntityAddressEntry = (): ClientAddressEntryFormValue => ({
 });
 
 const mapAddressTypeToForm = (type: number): string => {
-  if (type == 0) return 'registration';
-  if (type == 1) return 'actual';
-  if (type == 2) return 'legal';
+  if (type == 1) return 'registration';
+  if (type == 2) return 'actual';
+  if (type == 3) return 'legal';
   return 'other';
 };
 
 const mapAddressTypeFromForm = (type: string): number => {
-  if (type == 'registration') return 0;
-  if (type == 'actual') return 1;
-  if (type == 'legal') return 2;
-  return 3;
+  if (type == 'registration') return 1;
+  if (type == 'actual') return 2;
+  if (type == 'legal') return 3;
+  return 9;
 };
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -1035,9 +1036,28 @@ export function LegalEntityModal({
         contactPhonesJson: JSON.stringify(contactPhones.filter((x) => x.trim())),
         contactEmailsJson: JSON.stringify(contactEmails.filter((x) => x.trim())),
         notes: normalize(formState.notes),
-        addresses: addressEntries.filter((a) => a.fullAddress.trim()).map((a, idx) => ({ type: mapAddressTypeFromForm(a.type), value: a.fullAddress.trim(), isPrimary: idx === 0 })),
+        addresses: addressEntries
+          .filter((a) => a.fullAddress.trim())
+          .map((a, idx) => ({
+            type: mapAddressTypeFromForm(a.type),
+            value: a.fullAddress.trim(),
+            unrestrictedValue: a.fullAddress.trim(),
+            postalCode: normalize(a.postalCode),
+            regionWithType: normalize(a.region),
+            cityWithType: normalize(a.city || a.settlement),
+            streetWithType: normalize(a.street),
+            house: normalize(a.house),
+            flat: normalize(a.flat),
+            isPrimary: idx === 0,
+          })),
         clientIds,
       };
+      const serializedPayload = JSON.stringify(payload);
+      if (serializedPayload.length > LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH) {
+        setError('Данные юридического лица слишком большие для сохранения одним запросом. Уменьшите размер картинок или лишних вложенных данных.');
+        setLoading(false);
+        return;
+      }
       if (!payload.shortName) {
         setError(t('legalEntityShortNameRequired') || 'Укажите краткое название');
         setLoading(false);
