@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -6,6 +6,7 @@ import {
   Loader2,
   Search,
   Plus,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -42,6 +43,7 @@ import {
   type LegalEntityImageKind,
   type LegalEntityImageUploadProfile,
 } from './legalEntityImageUtils';
+import { getLegalEntityImageFieldState } from './legalEntityImageFieldUtils';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -55,6 +57,18 @@ interface LegalEntityModalProps {
   allowDelete: boolean;
   mode?: 'modal' | 'page';
   onBack?: () => void;
+}
+
+interface LegalEntityImageFieldProps {
+  title: string;
+  alt: string;
+  value: string;
+  persistedValue: string;
+  changed: boolean;
+  readOnly: boolean;
+  onUpload: (file: File | null) => Promise<void>;
+  onRemove: () => Promise<void>;
+  onRestore: () => void;
 }
 
 type ClientAssociationItem = Pick<
@@ -187,6 +201,104 @@ const ADDRESS_TYPE_OPTIONS = [
 
 const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2';
 const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
+function LegalEntityImageField({
+  title,
+  alt,
+  value,
+  persistedValue,
+  changed,
+  readOnly,
+  onUpload,
+  onRemove,
+  onRestore,
+}: LegalEntityImageFieldProps) {
+  const inputId = useId();
+  const { hasImage, removalPending, canUpload, canRemove, showReplaceHint, showMissingPlaceholder } =
+    getLegalEntityImageFieldState({
+      value,
+      persistedValue,
+      changed,
+      readOnly,
+    });
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-sm font-semibold text-slate-700">{title}</div>
+      <div
+        className={`relative mt-4 flex min-h-[220px] items-center justify-center overflow-hidden rounded-2xl px-4 py-5 ${
+          hasImage
+            ? 'border border-slate-200 bg-slate-50/80'
+            : 'border border-dashed border-slate-300 bg-slate-50/40'
+        }`}>
+        {hasImage ? (
+          <>
+            {canRemove ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onRemove();
+                }}
+                className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-rose-200 bg-white text-rose-500 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
+                title="Удалить изображение"
+                aria-label="Удалить изображение">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            ) : null}
+            <div className="flex w-full flex-col items-center justify-center gap-4">
+              <img
+                src={value}
+                alt={alt}
+                className="max-h-28 max-w-full rounded-2xl border border-slate-200 bg-white p-2 object-contain shadow-sm"
+              />
+              {showReplaceHint ? (
+                <p className="text-center text-xs text-slate-500">
+                  Чтобы заменить файл, сначала удалите текущее изображение.
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : showMissingPlaceholder ? (
+          <div className="text-center text-sm text-slate-400">Изображение не загружено.</div>
+        ) : canUpload ? (
+          <div className="flex w-full flex-col items-center gap-3 text-center">
+            <input
+              id={inputId}
+              type="file"
+              accept="image/png,image/jpeg"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                void onUpload(file).finally(() => {
+                  event.currentTarget.value = '';
+                });
+              }}
+            />
+            <label
+              htmlFor={inputId}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100">
+              <Plus className="h-4 w-4" />
+              Выбрать файл
+            </label>
+            <p className="max-w-xs text-xs leading-5 text-slate-500">
+              {removalPending
+                ? 'Изображение помечено на удаление. Сохраните карточку, чтобы удалить его, или выберите новый файл вместо него.'
+                : 'Загрузите изображение в формате JPG, JPEG или PNG.'}
+            </p>
+            {removalPending ? (
+              <button
+                type="button"
+                onClick={onRestore}
+                className="text-xs font-medium text-slate-600 transition hover:text-slate-900">
+                Вернуть текущее изображение
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function toClientAssociationItem(
   client: Partial<ClientAssociationItem> & Pick<ClientAssociationItem, 'id' | 'name'>,
@@ -508,6 +620,9 @@ export function LegalEntityModal({
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
   const [sealDataUrl, setSealDataUrl] = useState<string>('');
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
+  const [persistedLogoDataUrl, setPersistedLogoDataUrl] = useState<string>('');
+  const [persistedSealDataUrl, setPersistedSealDataUrl] = useState<string>('');
+  const [persistedDirectorSignatureDataUrl, setPersistedDirectorSignatureDataUrl] = useState<string>('');
   const [logoChanged, setLogoChanged] = useState(false);
   const [sealChanged, setSealChanged] = useState(false);
   const [directorSignatureChanged, setDirectorSignatureChanged] = useState(false);
@@ -607,6 +722,9 @@ export function LegalEntityModal({
       setLogoDataUrl(initial.logoDataUrl ?? "");
       setSealDataUrl(initial.sealDataUrl ?? "");
       setDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
+      setPersistedLogoDataUrl(initial.logoDataUrl ?? "");
+      setPersistedSealDataUrl(initial.sealDataUrl ?? "");
+      setPersistedDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
       setLogoChanged(false);
       setSealChanged(false);
       setDirectorSignatureChanged(false);
@@ -647,6 +765,9 @@ export function LegalEntityModal({
       setLogoDataUrl("");
       setSealDataUrl("");
       setDirectorSignatureDataUrl("");
+      setPersistedLogoDataUrl("");
+      setPersistedSealDataUrl("");
+      setPersistedDirectorSignatureDataUrl("");
       setLogoChanged(false);
       setSealChanged(false);
       setDirectorSignatureChanged(false);
@@ -827,6 +948,45 @@ export function LegalEntityModal({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить изображение.');
     }
+  };
+
+  const restoreImageValue = (
+    persistedValue: string,
+    setter: (value: string) => void,
+    markChanged: (value: boolean) => void,
+  ) => {
+    setter(persistedValue);
+    markChanged(false);
+  };
+
+  const requestImageRemoval = async (
+    title: string,
+    hasPersistedValue: boolean,
+    setter: (value: string) => void,
+    markChanged: (value: boolean) => void,
+  ) => {
+    const approved = await confirm({
+      title: 'Удалить изображение',
+      description: hasPersistedValue
+        ? 'Изображение будет удалено только после сохранения карточки. Продолжить?'
+        : 'Изображение будет убрано из формы. Продолжить?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!approved) {
+      return;
+    }
+
+    setter('');
+    markChanged(true);
+    toast.info(
+      hasPersistedValue
+        ? 'Изображение помечено на удаление. Сохраните карточку, чтобы применить изменение.'
+        : 'Изображение убрано из формы. Сохраните карточку, чтобы применить изменение.',
+      title,
+    );
   };
 
   const clearImageValue = (
@@ -1250,6 +1410,9 @@ export function LegalEntityModal({
       setLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
       setSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
       setDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
+      setPersistedLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
+      setPersistedSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
+      setPersistedDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
       setLogoChanged(false);
       setSealChanged(false);
       setDirectorSignatureChanged(false);
@@ -1843,6 +2006,64 @@ export function LegalEntityModal({
           {clientsSection}
 
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            <LegalEntityImageField
+              title="Логотип компании"
+              alt="Логотип компании"
+              value={logoDataUrl}
+              persistedValue={persistedLogoDataUrl}
+              changed={logoChanged}
+              readOnly={readOnly}
+              onUpload={async (file) => {
+                await handleImageUpload(file, setLogoDataUrl, setLogoChanged, 'logo');
+              }}
+              onRemove={async () => {
+                await requestImageRemoval('Логотип компании', persistedLogoDataUrl.trim().length > 0, setLogoDataUrl, setLogoChanged);
+              }}
+              onRestore={() => restoreImageValue(persistedLogoDataUrl, setLogoDataUrl, setLogoChanged)}
+            />
+            <LegalEntityImageField
+              title="Печать компании"
+              alt="Печать компании"
+              value={sealDataUrl}
+              persistedValue={persistedSealDataUrl}
+              changed={sealChanged}
+              readOnly={readOnly}
+              onUpload={async (file) => {
+                await handleImageUpload(file, setSealDataUrl, setSealChanged, 'seal');
+              }}
+              onRemove={async () => {
+                await requestImageRemoval('Печать компании', persistedSealDataUrl.trim().length > 0, setSealDataUrl, setSealChanged);
+              }}
+              onRestore={() => restoreImageValue(persistedSealDataUrl, setSealDataUrl, setSealChanged)}
+            />
+            <LegalEntityImageField
+              title="Подпись руководителя"
+              alt="Подпись руководителя"
+              value={directorSignatureDataUrl}
+              persistedValue={persistedDirectorSignatureDataUrl}
+              changed={directorSignatureChanged}
+              readOnly={readOnly}
+              onUpload={async (file) => {
+                await handleImageUpload(file, setDirectorSignatureDataUrl, setDirectorSignatureChanged, 'signature');
+              }}
+              onRemove={async () => {
+                await requestImageRemoval(
+                  'Подпись руководителя',
+                  persistedDirectorSignatureDataUrl.trim().length > 0,
+                  setDirectorSignatureDataUrl,
+                  setDirectorSignatureChanged,
+                );
+              }}
+              onRestore={() =>
+                restoreImageValue(
+                  persistedDirectorSignatureDataUrl,
+                  setDirectorSignatureDataUrl,
+                  setDirectorSignatureChanged,
+                )
+              }
+            />
+            {false ? (
+              <>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Логотип компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
@@ -1867,6 +2088,8 @@ export function LegalEntityModal({
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG.</div>
             </div>
+              </>
+            ) : null}
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
