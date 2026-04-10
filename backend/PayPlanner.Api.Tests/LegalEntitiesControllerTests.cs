@@ -34,9 +34,9 @@ public class LegalEntitiesControllerTests
         var dto = Assert.IsType<LegalEntityDetailDto>(created.Value);
 
         Assert.Equal(request.ShortName, dto.ShortName);
-        Assert.Equal(request.LogoDataUrl, dto.LogoDataUrl);
-        Assert.Equal(request.SealDataUrl, dto.SealDataUrl);
-        Assert.Equal(request.DirectorSignatureDataUrl, dto.DirectorSignatureDataUrl);
+        Assert.Null(dto.LogoDataUrl);
+        Assert.Null(dto.SealDataUrl);
+        Assert.Null(dto.DirectorSignatureDataUrl);
         Assert.Equal(request.DocumentDirectorJson, dto.DocumentDirectorJson);
         Assert.Equal(request.ChiefAccountantJson, dto.ChiefAccountantJson);
         Assert.Equal(2, dto.Clients.Count);
@@ -261,9 +261,14 @@ public class LegalEntitiesControllerTests
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
 
-        Assert.Equal("data:image/png;base64,AAAA", dto.LogoDataUrl);
-        Assert.Equal("data:image/png;base64,BBBB", dto.SealDataUrl);
-        Assert.Equal("data:image/png;base64,CCCC", dto.DirectorSignatureDataUrl);
+        Assert.Null(dto.LogoDataUrl);
+        Assert.Null(dto.SealDataUrl);
+        Assert.Null(dto.DirectorSignatureDataUrl);
+
+        var stored = await db.LegalEntities.AsNoTracking().SingleAsync(item => item.Id == entity.Id);
+        Assert.Equal("data:image/png;base64,AAAA", stored.LogoDataUrl);
+        Assert.Equal("data:image/png;base64,BBBB", stored.SealDataUrl);
+        Assert.Equal("data:image/png;base64,CCCC", stored.DirectorSignatureDataUrl);
     }
 
     [Fact]
@@ -300,6 +305,37 @@ public class LegalEntitiesControllerTests
         Assert.Null(dto.LogoDataUrl);
         Assert.Null(dto.SealDataUrl);
         Assert.Null(dto.DirectorSignatureDataUrl);
+
+        var stored = await db.LegalEntities.AsNoTracking().SingleAsync(item => item.Id == entity.Id);
+        Assert.Null(stored.LogoDataUrl);
+        Assert.Null(stored.SealDataUrl);
+        Assert.Null(stored.DirectorSignatureDataUrl);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOversizedInlineAssetPayload()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "РџРµСЂРµРіСЂСѓР¶РµРЅРЅРѕРµ СЋСЂР»РёС†Рѕ",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 11);
+        var request = BuildRequest();
+        request.LogoDataUrl = "data:image/png;base64," + new string('A', 360_000);
+        request.LogoChanged = true;
+
+        var action = await controller.Update(entity.Id, request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        var message = Assert.IsType<string>(badRequest.Value);
+        Assert.Contains("Логотип", message);
     }
 
     private static LegalEntityRequest BuildRequest()

@@ -20,6 +20,8 @@ public class LegalEntitiesController : ControllerBase
 {
     private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
     private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
+    private const int MaxInlineLegalEntityAssetDataUrlLength = 350_000;
+    private const int MaxInlineLegalEntityAssetsTotalLength = 800_000;
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichmentService;
@@ -130,7 +132,7 @@ public class LegalEntitiesController : ControllerBase
         }
     }
 
-    private LegalEntityDetailDto MapDetail(LegalEntity entity)
+    private LegalEntityDetailDto MapDetail(LegalEntity entity, bool includeInlineAssets = true)
     {
         var audit = _db.ReadAuditSnapshot(entity);
         return new()
@@ -184,9 +186,9 @@ public class LegalEntitiesController : ControllerBase
             CashRegistersJson = entity.CashRegistersJson,
             CardsJson = entity.CardsJson,
             RequisitesEnglishJson = entity.RequisitesEnglishJson,
-            LogoDataUrl = entity.LogoDataUrl,
-            SealDataUrl = entity.SealDataUrl,
-            DirectorSignatureDataUrl = entity.DirectorSignatureDataUrl,
+            LogoDataUrl = includeInlineAssets ? entity.LogoDataUrl : null,
+            SealDataUrl = includeInlineAssets ? entity.SealDataUrl : null,
+            DirectorSignatureDataUrl = includeInlineAssets ? entity.DirectorSignatureDataUrl : null,
             DocumentDirectorJson = entity.DocumentDirectorJson,
             ChiefAccountantJson = entity.ChiefAccountantJson,
             ContactPhonesJson = entity.ContactPhonesJson,
@@ -250,6 +252,36 @@ public class LegalEntitiesController : ControllerBase
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static int SumInlineAssetPayloadLength(LegalEntityRequest request)
+        => (request.LogoDataUrl?.Length ?? 0)
+        + (request.SealDataUrl?.Length ?? 0)
+        + (request.DirectorSignatureDataUrl?.Length ?? 0);
+
+    private static string? ValidateInlineAssetPayload(LegalEntityRequest request)
+    {
+        if ((request.LogoDataUrl?.Length ?? 0) > MaxInlineLegalEntityAssetDataUrlLength)
+        {
+            return "Логотип компании слишком большой для сохранения. Уменьшите изображение и попробуйте снова.";
+        }
+
+        if ((request.SealDataUrl?.Length ?? 0) > MaxInlineLegalEntityAssetDataUrlLength)
+        {
+            return "Печать компании слишком большая для сохранения. Уменьшите изображение и попробуйте снова.";
+        }
+
+        if ((request.DirectorSignatureDataUrl?.Length ?? 0) > MaxInlineLegalEntityAssetDataUrlLength)
+        {
+            return "Подпись руководителя слишком большая для сохранения. Уменьшите изображение и попробуйте снова.";
+        }
+
+        if (SumInlineAssetPayloadLength(request) > MaxInlineLegalEntityAssetsTotalLength)
+        {
+            return "Суммарный размер логотипа, печати и подписи слишком большой для одного запроса. Уменьшите изображения и попробуйте снова.";
+        }
+
+        return null;
+    }
 
     private async Task EnsureAndNormalizeDictionaryValuesAsync(LegalEntity entity, CancellationToken ct)
     {
@@ -606,6 +638,12 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
+        var inlineAssetError = ValidateInlineAssetPayload(request);
+        if (inlineAssetError is not null)
+        {
+            return BadRequest(inlineAssetError);
+        }
+
         var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, excludeEntityId: null, ct);
         if (duplicateInnError is not null)
         {
@@ -695,7 +733,7 @@ public class LegalEntitiesController : ControllerBase
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
         await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
-        return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity));
+        return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity, includeInlineAssets: false));
     }
 
     [HttpDelete("{id:int}")]
@@ -848,7 +886,7 @@ public class LegalEntitiesController : ControllerBase
             .OrderBy(le => le.ShortName)
             .ToListAsync(ct);
 
-        return Ok(items.Select(MapDetail));
+        return Ok(items.Select(item => MapDetail(item)));
     }
 
     [HttpGet("paged")]
@@ -890,7 +928,7 @@ public class LegalEntitiesController : ControllerBase
 
         return Ok(new PagedResponse<LegalEntityListItemDto>
         {
-            Items = items.Select(MapDetail).ToList(),
+            Items = items.Select(item => MapDetail(item)).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize
@@ -976,6 +1014,12 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
+        var inlineAssetError = ValidateInlineAssetPayload(request);
+        if (inlineAssetError is not null)
+        {
+            return BadRequest(inlineAssetError);
+        }
+
         var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, id, ct);
         if (duplicateInnError is not null)
         {
@@ -1053,7 +1097,7 @@ public class LegalEntitiesController : ControllerBase
         await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
         await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
         await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
-        return Ok(MapDetail(entity));
+        return Ok(MapDetail(entity, includeInlineAssets: false));
     }
 
     /// <summary>

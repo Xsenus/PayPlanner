@@ -35,6 +35,13 @@ import {
   mergeLegalEntityAddressEntry,
   upsertLegalEntityAddressEntry,
 } from './legalEntityFormUtils';
+import {
+  getLegalEntityImageProfile,
+  isLegalEntityInlineAssetPayloadSafe,
+  isLegalEntityRequestBodyLengthSafe,
+  type LegalEntityImageKind,
+  type LegalEntityImageUploadProfile,
+} from './legalEntityImageUtils';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -148,9 +155,8 @@ interface EnglishRequisites {
 type RequisitesTab = 'base' | 'tax' | 'codes' | 'treasury' | 'english' | 'addresses' | 'contacts';
 type LegalEntityDictTab = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 
-const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 4_000_000;
-const TARGET_IMAGE_DATA_URL_LENGTH = 3_900_000;
-const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 15_500_000;
+const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 350_000;
+const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 900_000;
 
 const EMPTY_PERSON_DOC: PersonDocInfo = {
   position: '',
@@ -300,6 +306,63 @@ function parseJsonOrDefault<T>(json: string | null | undefined, fallback: T): T 
   } catch {
     return fallback;
   }
+}
+
+function fitImageIntoBox(
+  width: number,
+  height: number,
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  const safeWidth = Math.max(1, width || 1);
+  const safeHeight = Math.max(1, height || 1);
+  const scale = Math.min(1, maxWidth / safeWidth, maxHeight / safeHeight);
+
+  return {
+    width: Math.max(1, Math.round(safeWidth * scale)),
+    height: Math.max(1, Math.round(safeHeight * scale)),
+  };
+}
+
+async function convertImageToUploadProfileDataUrl(
+  file: File,
+  profile: LegalEntityImageUploadProfile,
+): Promise<string> {
+  const original = await readFileAsDataUrl(file);
+  const image = await loadImageElement(original);
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Браузер не поддерживает обработку изображений.');
+  }
+
+  const fitted = fitImageIntoBox(image.width, image.height, profile.maxWidth, profile.maxHeight);
+  canvas.width = fitted.width;
+  canvas.height = fitted.height;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const pngCandidate = canvas.toDataURL('image/png');
+  if (pngCandidate.length <= profile.maxDataUrlLength) {
+    return pngCandidate;
+  }
+
+  const qualities = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42];
+  for (const quality of qualities) {
+    context.save();
+    context.globalCompositeOperation = 'destination-over';
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+
+    const jpegCandidate = canvas.toDataURL('image/jpeg', quality);
+    if (jpegCandidate.length <= profile.maxDataUrlLength) {
+      return jpegCandidate;
+    }
+  }
+
+  throw new Error(`${profile.label}: изображение слишком большое даже после сжатия. Выберите файл поменьше.`);
 }
 
 const DEFAULT_STATE: FormState = {
@@ -753,11 +816,12 @@ export function LegalEntityModal({
     file: File | null,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
+    kind: LegalEntityImageKind,
   ) => {
     if (!file) return;
     setError(null);
     try {
-      const optimized = await convertImageToFittingDataUrl(file, TARGET_IMAGE_DATA_URL_LENGTH);
+      const optimized = await convertImageToUploadProfileDataUrl(file, getLegalEntityImageProfile(kind));
       setter(optimized);
       markChanged(true);
     } catch (err) {
@@ -1099,8 +1163,13 @@ export function LegalEntityModal({
       if (!initial || directorSignatureChanged) {
         payload.directorSignatureDataUrl = directorSignatureDataUrl || null;
       }
+      if (!isLegalEntityInlineAssetPayloadSafe(payload)) {
+        setError('Суммарный размер логотипа, печати и подписи слишком большой для безопасного сохранения. Уменьшите изображения и попробуйте ещё раз.');
+        setLoading(false);
+        return;
+      }
       const serializedPayload = JSON.stringify(payload);
-      if (serializedPayload.length > LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH) {
+      if (!isLegalEntityRequestBodyLengthSafe(serializedPayload.length) || serializedPayload.length > LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH) {
         setError('Данные юридического лица слишком большие для сохранения одним запросом. Уменьшите размер картинок или лишних вложенных данных.');
         setLoading(false);
         return;
@@ -1777,7 +1846,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Логотип компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl, setLogoChanged); }} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl, setLogoChanged, 'logo'); }} />
                 {logoDataUrl ? <><img src={logoDataUrl} alt="Логотип" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setLogoDataUrl, setLogoChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 545x185. Форматы: JPG, JPEG, PNG.</div>
@@ -1785,7 +1854,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Печать компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl, setSealChanged); }} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl, setSealChanged, 'seal'); }} />
                 {sealDataUrl ? <><img src={sealDataUrl} alt="Печать" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setSealDataUrl, setSealChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 200x200. Форматы: JPG, JPEG, PNG.</div>
@@ -1793,7 +1862,7 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Подпись руководителя</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl, setDirectorSignatureChanged); }} />
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl, setDirectorSignatureChanged, 'signature'); }} />
                 {directorSignatureDataUrl ? <><img src={directorSignatureDataUrl} alt="Подпись" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setDirectorSignatureDataUrl, setDirectorSignatureChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG.</div>
