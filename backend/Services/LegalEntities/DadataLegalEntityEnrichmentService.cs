@@ -258,10 +258,15 @@ namespace PayPlanner.Api.Services.LegalEntities
                 Country: s.Address?.Data?.Country,
                 RegionWithType: s.Address?.Data?.RegionWithType,
                 CityWithType: s.Address?.Data?.CityWithType,
+                SettlementWithType: s.Address?.Data?.SettlementWithType,
                 StreetWithType: s.Address?.Data?.StreetWithType,
                 House: s.Address?.Data?.House,
                 Flat: s.Address?.Data?.Flat,
                 PostalCode: s.Address?.Data?.PostalCode,
+                FiasId: s.Address?.Data?.FiasId,
+                KladrId: s.Address?.Data?.KladrId,
+                GeoLat: s.Address?.Data?.GeoLat,
+                GeoLon: s.Address?.Data?.GeoLon,
                 Okato: s.Okato,
                 Oktmo: s.Oktmo,
                 Okpo: s.Okpo,
@@ -382,6 +387,7 @@ namespace PayPlanner.Api.Services.LegalEntities
             }
 
             var effectiveLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
+            var fetchLimit = Math.Clamp(Math.Max(effectiveLimit * 3, effectiveLimit), 1, 20);
             var payloadQuery = !string.IsNullOrWhiteSpace(inn) ? inn!.Trim() : query?.Trim();
             if (string.IsNullOrWhiteSpace(payloadQuery))
                 return Array.Empty<LegalEntitySuggestion>();
@@ -389,7 +395,7 @@ namespace PayPlanner.Api.Services.LegalEntities
             var url = Combine(_opt.BaseUrl, "suggest/party"); // POST body: { query, count }
             using var req = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                Content = JsonContent(new { query = payloadQuery, count = effectiveLimit })
+                Content = JsonContent(new { query = payloadQuery, count = fetchLimit })
             };
             req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
 
@@ -415,7 +421,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                         s.Data?.Inn,
                         s.Data?.Kpp,
                         s.Data?.Ogrn,
-                        s.Data?.Address?.Value,
+                        s.Data?.Address?.UnrestrictedValue ?? s.Data?.Address?.Value,
                         ExtractContactValues(s.Data?.Phones).FirstOrDefault(),
                         ExtractContactValues(s.Data?.Emails).FirstOrDefault(),
                         s.Data?.Management?.Name))
@@ -600,6 +606,9 @@ namespace PayPlanner.Api.Services.LegalEntities
             [JsonPropertyName("city_with_type")]
             public string? CityWithType { get; set; }
 
+            [JsonPropertyName("settlement_with_type")]
+            public string? SettlementWithType { get; set; }
+
             [JsonPropertyName("street_with_type")]
             public string? StreetWithType { get; set; }
 
@@ -611,6 +620,18 @@ namespace PayPlanner.Api.Services.LegalEntities
 
             [JsonPropertyName("postal_code")]
             public string? PostalCode { get; set; }
+
+            [JsonPropertyName("fias_id")]
+            public string? FiasId { get; set; }
+
+            [JsonPropertyName("kladr_id")]
+            public string? KladrId { get; set; }
+
+            [JsonPropertyName("geo_lat")]
+            public string? GeoLat { get; set; }
+
+            [JsonPropertyName("geo_lon")]
+            public string? GeoLon { get; set; }
         }
 
         private sealed class FinanceData

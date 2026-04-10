@@ -427,6 +427,52 @@ public class LegalEntitiesController : ControllerBase
         target.IsPrimary |= incoming.IsPrimary;
     }
 
+    private static IReadOnlyList<LegalEntitySuggestion> DeduplicateLegalEntitySuggestions(
+        IReadOnlyList<LegalEntitySuggestion> suggestions,
+        int limit)
+    {
+        var normalizedLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
+        var deduped = new List<LegalEntitySuggestion>(normalizedLimit);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var suggestion in suggestions)
+        {
+            var key = BuildLegalEntitySuggestionIdentityKey(suggestion);
+            if (!string.IsNullOrWhiteSpace(key) && !seen.Add(key))
+            {
+                continue;
+            }
+
+            deduped.Add(suggestion);
+            if (deduped.Count >= normalizedLimit)
+            {
+                break;
+            }
+        }
+
+        return deduped;
+    }
+
+    private static string BuildLegalEntitySuggestionIdentityKey(LegalEntitySuggestion suggestion)
+    {
+        var inn = Regex.Replace(NormalizeOptional(suggestion.Inn) ?? string.Empty, "\\D+", string.Empty);
+        if (!string.IsNullOrWhiteSpace(inn))
+        {
+            var kpp = Regex.Replace(NormalizeOptional(suggestion.Kpp) ?? string.Empty, "\\D+", string.Empty);
+            return string.IsNullOrWhiteSpace(kpp) ? $"inn:{inn}" : $"inn:{inn}|kpp:{kpp}";
+        }
+
+        var ogrn = Regex.Replace(NormalizeOptional(suggestion.Ogrn) ?? string.Empty, "\\D+", string.Empty);
+        if (!string.IsNullOrWhiteSpace(ogrn))
+        {
+            return $"ogrn:{ogrn}";
+        }
+
+        var name = CanonicalizeAddressToken(suggestion.FullName ?? suggestion.ShortName);
+        var address = CanonicalizeAddressToken(suggestion.Address);
+        return $"{name}|{address}";
+    }
+
     private static string? ResolveUpdatedAssetValue(string? currentValue, string? incomingValue, bool? changed)
     {
         if (changed == true)
@@ -515,6 +561,7 @@ public class LegalEntitiesController : ControllerBase
             Country = result.Country,
             RegionWithType = result.RegionWithType,
             CityWithType = result.CityWithType,
+            SettlementWithType = result.SettlementWithType,
             StreetWithType = result.StreetWithType,
             House = result.House,
             Flat = result.Flat,
@@ -871,10 +918,15 @@ public class LegalEntitiesController : ControllerBase
             Country = details.Country,
             RegionWithType = details.RegionWithType,
             CityWithType = details.CityWithType,
+            SettlementWithType = details.SettlementWithType,
             StreetWithType = details.StreetWithType,
             House = details.House,
             Flat = details.Flat,
             PostalCode = details.PostalCode,
+            FiasId = details.FiasId,
+            KladrId = details.KladrId,
+            GeoLat = details.GeoLat,
+            GeoLon = details.GeoLon,
             Okato = details.Okato,
             Oktmo = details.Oktmo,
             Okpo = details.Okpo,
@@ -997,7 +1049,7 @@ public class LegalEntitiesController : ControllerBase
         }
 
         var suggestions = await _enrichmentService.SuggestAsync(request.Query, request.Inn, request.Limit, ct);
-        var response = suggestions.Select(s => new LegalEntitySuggestionDto
+        var response = DeduplicateLegalEntitySuggestions(suggestions, request.Limit).Select(s => new LegalEntitySuggestionDto
         {
             ShortName = s.ShortName,
             FullName = s.FullName,
@@ -1517,10 +1569,15 @@ public sealed record LegalEntityDetailsDto
     public string? Country { get; init; }
     public string? RegionWithType { get; init; }
     public string? CityWithType { get; init; }
+    public string? SettlementWithType { get; init; }
     public string? StreetWithType { get; init; }
     public string? House { get; init; }
     public string? Flat { get; init; }
     public string? PostalCode { get; init; }
+    public string? FiasId { get; init; }
+    public string? KladrId { get; init; }
+    public string? GeoLat { get; init; }
+    public string? GeoLon { get; init; }
     public int? BranchCount { get; init; }
     public string? Director { get; init; }
     public string? DirectorPost { get; init; }
@@ -1563,6 +1620,7 @@ public sealed record CleanedAddressDto
     public string? PostalCode { get; init; }
     public string? RegionWithType { get; init; }
     public string Result { get; init; } = string.Empty;
+    public string? SettlementWithType { get; init; }
     public string? StreetWithType { get; init; }
 }
 

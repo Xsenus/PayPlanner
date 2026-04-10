@@ -192,10 +192,15 @@ export interface LegalEntityDadataDetails {
   country?: string | null;
   regionWithType?: string | null;
   cityWithType?: string | null;
+  settlementWithType?: string | null;
   streetWithType?: string | null;
   house?: string | null;
   flat?: string | null;
   postalCode?: string | null;
+  fiasId?: string | null;
+  kladrId?: string | null;
+  geoLat?: string | null;
+  geoLon?: string | null;
   okato?: string | null;
   oktmo?: string | null;
   okpo?: string | null;

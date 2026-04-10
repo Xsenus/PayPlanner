@@ -5,6 +5,7 @@ export interface ClientAddressEntryFormValue {
   additionalTypes: string[];
   fullAddress: string;
   postalCode: string;
+  country?: string;
   region: string;
   district: string;
   city: string;
@@ -12,6 +13,10 @@ export interface ClientAddressEntryFormValue {
   street: string;
   house: string;
   flat: string;
+  fiasId?: string;
+  kladrId?: string;
+  geoLat?: string;
+  geoLon?: string;
   validFrom: string;
   validTo: string;
 }

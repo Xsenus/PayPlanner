@@ -1,5 +1,6 @@
 import type { LegalEntityAddressInput } from '../../types';
 import type { ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
+import { chooseBestDisplayAddress } from '../Clients/addressEntryUtils';
 
 type ComparableAddress = {
   type?: string | number | null;
@@ -43,22 +44,8 @@ function normalizeAddressToken(value?: string | number | null): string {
     .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-export function buildLegalEntityAddressKey(address: ComparableAddress): string {
-  const typeKey = normalizeAddressToken(address.type);
-  const fiasKey = normalizeAddressToken(address.fiasId);
-
-  if (fiasKey) {
-    return `${typeKey}|fias:${fiasKey}`;
-  }
-
-  const textKey = normalizeAddressToken(
-    address.unrestrictedValue ?? address.value ?? address.fullAddress,
-  );
-  if (textKey) {
-    return `${typeKey}|text:${textKey}`;
-  }
-
-  const structuredKey = [
+function buildStructuredLegalEntityAddressKey(address: ComparableAddress): string {
+  return [
     address.regionWithType ?? address.region,
     address.cityWithType ?? address.city ?? address.settlement,
     address.streetWithType ?? address.street,
@@ -68,8 +55,39 @@ export function buildLegalEntityAddressKey(address: ComparableAddress): string {
     .map((item) => normalizeAddressToken(item))
     .filter(Boolean)
     .join('|');
+}
 
-  return `${typeKey}|${structuredKey}`;
+function buildTextLegalEntityAddressKey(address: ComparableAddress): string {
+  return normalizeAddressToken(
+    address.unrestrictedValue ?? address.value ?? address.fullAddress,
+  );
+}
+
+function buildLegalEntityAddressKeys(address: ComparableAddress): string[] {
+  const typeKey = normalizeAddressToken(address.type);
+  const fiasKey = normalizeAddressToken(address.fiasId);
+  const keys: string[] = [];
+
+  if (fiasKey) {
+    keys.push(`${typeKey}|fias:${fiasKey}`);
+  }
+
+  const structuredKey = buildStructuredLegalEntityAddressKey(address);
+  if (structuredKey) {
+    keys.push(`${typeKey}|structured:${structuredKey}`);
+  }
+
+  const textKey = buildTextLegalEntityAddressKey(address);
+  if (textKey) {
+    keys.push(`${typeKey}|text:${textKey}`);
+  }
+
+  return keys;
+}
+
+export function buildLegalEntityAddressKey(address: ComparableAddress): string {
+  const keys = buildLegalEntityAddressKeys(address);
+  return keys[0] ?? `${normalizeAddressToken(address.type)}|`;
 }
 
 function preferIncoming(current: string, incoming?: string | null): string {
@@ -86,10 +104,27 @@ export function mergeLegalEntityAddressEntry(
   current: ClientAddressEntryFormValue,
   incoming: Partial<ClientAddressEntryFormValue>,
 ): ClientAddressEntryFormValue {
+  const mergedParts = {
+    postalCode: current.postalCode || incoming.postalCode,
+    country: current.country || incoming.country,
+    region: current.region || incoming.region,
+    district: current.district || incoming.district,
+    city: current.city || incoming.city,
+    settlement: current.settlement || incoming.settlement,
+    street: current.street || incoming.street,
+    house: current.house || incoming.house,
+    flat: current.flat || incoming.flat,
+  };
+
   return {
     ...current,
-    fullAddress: preferIncoming(current.fullAddress, incoming.fullAddress),
+    fullAddress: chooseBestDisplayAddress(
+      mergedParts,
+      current.fullAddress,
+      incoming.fullAddress,
+    ),
     postalCode: fillIfEmpty(current.postalCode, incoming.postalCode),
+    country: fillIfEmpty(current.country ?? '', incoming.country),
     region: fillIfEmpty(current.region, incoming.region),
     district: fillIfEmpty(current.district, incoming.district),
     city: fillIfEmpty(current.city, incoming.city),
@@ -97,6 +132,10 @@ export function mergeLegalEntityAddressEntry(
     street: fillIfEmpty(current.street, incoming.street),
     house: fillIfEmpty(current.house, incoming.house),
     flat: fillIfEmpty(current.flat, incoming.flat),
+    fiasId: fillIfEmpty(current.fiasId ?? '', incoming.fiasId),
+    kladrId: fillIfEmpty(current.kladrId ?? '', incoming.kladrId),
+    geoLat: fillIfEmpty(current.geoLat ?? '', incoming.geoLat),
+    geoLon: fillIfEmpty(current.geoLon ?? '', incoming.geoLon),
     validFrom: fillIfEmpty(current.validFrom, incoming.validFrom),
     validTo: fillIfEmpty(current.validTo, incoming.validTo),
     additionalTypes: Array.from(
@@ -119,12 +158,26 @@ export function findMatchingLegalEntityAddressEntryIndex(
     street: incoming.street,
     house: incoming.house,
     flat: incoming.flat,
+    fiasId: incoming.fiasId,
   });
 
-  if (!incomingKey.replace(/\|/g, '')) return -1;
+  const incomingKeys = new Set(buildLegalEntityAddressKeys({
+    type: incoming.type,
+    fullAddress: incoming.fullAddress,
+    postalCode: incoming.postalCode,
+    region: incoming.region,
+    city: incoming.city,
+    settlement: incoming.settlement,
+    street: incoming.street,
+    house: incoming.house,
+    flat: incoming.flat,
+    fiasId: incoming.fiasId,
+  }));
+
+  if (incomingKeys.size === 0 || !incomingKey.replace(/\|/g, '')) return -1;
 
   return entries.findIndex((entry) => {
-    const entryKey = buildLegalEntityAddressKey({
+    const entryKeys = buildLegalEntityAddressKeys({
       type: entry.type,
       fullAddress: entry.fullAddress,
       postalCode: entry.postalCode,
@@ -134,9 +187,10 @@ export function findMatchingLegalEntityAddressEntryIndex(
       street: entry.street,
       house: entry.house,
       flat: entry.flat,
+      fiasId: entry.fiasId,
     });
 
-    return entryKey === incomingKey;
+    return entryKeys.some((key) => incomingKeys.has(key));
   });
 }
 

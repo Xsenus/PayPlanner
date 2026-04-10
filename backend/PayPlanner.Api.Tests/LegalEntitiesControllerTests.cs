@@ -471,6 +471,67 @@ public class LegalEntitiesControllerTests
         Assert.Null(storedEntity.ServiceLanguage);
     }
 
+    [Fact]
+    public async Task Suggest_DeduplicatesSameInnSuggestions_AndKeepsFullAddress()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService
+            {
+                Suggestions =
+                [
+                    new LegalEntitySuggestion(
+                        "ИП Кожеваткин Андрей Владимирович",
+                        "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+                        "633009620345",
+                        null,
+                        "317631300153603",
+                        "446200, Россия, Самарская область, г. Новокуйбышевск",
+                        null,
+                        null,
+                        null),
+                    new LegalEntitySuggestion(
+                        "ИП Кожеваткин Андрей Владимирович",
+                        "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+                        "633009620345",
+                        null,
+                        "307631300200020",
+                        "446200, Россия, Самарская область, г. Новокуйбышевск, ул. Миронова, д. 9",
+                        null,
+                        null,
+                        null),
+                    new LegalEntitySuggestion(
+                        "ООО Пример",
+                        "Общество с ограниченной ответственностью Пример",
+                        "7707083893",
+                        "770701001",
+                        "1027700132195",
+                        "109012, Россия, г. Москва, ул. Ильинка, д. 9",
+                        null,
+                        null,
+                        null),
+                ]
+            },
+            userId: 18);
+
+        var action = await controller.Suggest(
+            new LegalEntitySuggestionRequest
+            {
+                Query = "633009620345",
+                Limit = 6,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var items = Assert.IsAssignableFrom<IEnumerable<LegalEntitySuggestionDto>>(ok.Value).ToList();
+
+        Assert.Equal(2, items.Count);
+        var entrepreneur = Assert.Single(items, item => item.Inn == "633009620345");
+        Assert.Contains("446200", entrepreneur.Address);
+        Assert.Contains("Новокуйбышевск", entrepreneur.Address);
+    }
+
     private static LegalEntityRequest BuildRequest()
     {
         return new LegalEntityRequest
@@ -581,6 +642,12 @@ public class LegalEntitiesControllerTests
     }
 
     private static LegalEntitiesController CreateController(PaymentContext db, int userId)
+        => CreateController(db, new NoopLegalEntityEnrichmentService(), userId);
+
+    private static LegalEntitiesController CreateController(
+        PaymentContext db,
+        ILegalEntityEnrichmentService enrichmentService,
+        int userId)
     {
         var claims = new[]
         {
@@ -589,7 +656,7 @@ public class LegalEntitiesControllerTests
             new Claim(ClaimTypes.Name, "Тестовый пользователь"),
         };
 
-        var controller = new LegalEntitiesController(db, new NoopLegalEntityEnrichmentService(), new NoopFormRequirementsService());
+        var controller = new LegalEntitiesController(db, enrichmentService, new NoopFormRequirementsService());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -607,24 +674,32 @@ public class LegalEntitiesControllerTests
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default) => Task.FromResult(new List<string>());
     }
 
-    private sealed class NoopLegalEntityEnrichmentService : ILegalEntityEnrichmentService
+    private class NoopLegalEntityEnrichmentService : ILegalEntityEnrichmentService
     {
-        public Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(string query, int limit, CancellationToken cancellationToken)
+        public virtual Task<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>> SuggestAddressesAsync(string query, int limit, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<ILegalEntityEnrichmentService.DadataAddressSuggestion>>(Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>());
 
-        public Task<CleanedAddress?> CleanAddressAsync(string rawAddress, CancellationToken cancellationToken)
+        public virtual Task<CleanedAddress?> CleanAddressAsync(string rawAddress, CancellationToken cancellationToken)
             => Task.FromResult<CleanedAddress?>(null);
 
-        public Task<CleanedEmail?> CleanEmailAsync(string rawEmail, CancellationToken cancellationToken)
+        public virtual Task<CleanedEmail?> CleanEmailAsync(string rawEmail, CancellationToken cancellationToken)
             => Task.FromResult<CleanedEmail?>(null);
 
-        public Task<CleanedPhone?> CleanPhoneAsync(string rawPhone, CancellationToken cancellationToken)
+        public virtual Task<CleanedPhone?> CleanPhoneAsync(string rawPhone, CancellationToken cancellationToken)
             => Task.FromResult<CleanedPhone?>(null);
 
-        public Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken)
+        public virtual Task<LegalEntityDetails?> FindByInnOrOgrnAsync(string query, string? kpp, CancellationToken cancellationToken)
             => Task.FromResult<LegalEntityDetails?>(null);
 
-        public Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit, CancellationToken cancellationToken)
+        public virtual Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<LegalEntitySuggestion>>(Array.Empty<LegalEntitySuggestion>());
+    }
+
+    private sealed class StubLegalEntityEnrichmentService : NoopLegalEntityEnrichmentService
+    {
+        public IReadOnlyList<LegalEntitySuggestion> Suggestions { get; init; } = Array.Empty<LegalEntitySuggestion>();
+
+        public override Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(string? query, string? inn, int limit, CancellationToken cancellationToken)
+            => Task.FromResult(Suggestions);
     }
 }

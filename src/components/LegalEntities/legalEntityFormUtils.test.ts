@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLegalEntityAddressKey,
   dedupeLegalEntityAddressInputs,
+  mergeLegalEntityAddressEntry,
   upsertLegalEntityAddressEntry,
 } from './legalEntityFormUtils';
 
@@ -96,5 +97,39 @@ describe('legalEntityFormUtils', () => {
 
     expect(deduped).toHaveLength(1);
     expect(deduped[0].isPrimary).toBe(true);
+  });
+
+  it('keeps the fuller legal entity address when merging a shorter normalized variant', () => {
+    const merged = mergeLegalEntityAddressEntry(
+      {
+        type: 'legal',
+        additionalTypes: [],
+        fullAddress: '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
+        postalCode: '633208',
+        country: 'Россия',
+        region: 'Новосибирская обл',
+        district: '',
+        city: 'г Искитим',
+        settlement: '',
+        street: 'Южный мкр',
+        house: '37',
+        flat: '19',
+        fiasId: 'fias-1',
+        kladrId: 'kladr-1',
+        geoLat: '',
+        geoLon: '',
+        validFrom: '',
+        validTo: '',
+      },
+      {
+        fullAddress: '633208, Новосибирская обл, г Искитим',
+        postalCode: '633208',
+        region: 'Новосибирская обл',
+        city: 'г Искитим',
+      },
+    );
+
+    expect(merged.fullAddress).toBe('633208, Россия, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19');
+    expect(merged.fiasId).toBe('fias-1');
   });
 });

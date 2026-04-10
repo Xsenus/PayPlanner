@@ -88,6 +88,7 @@ import {
   type AddressTypeOption,
   type ClientAddressEntryFormValue,
 } from './ClientAddressEntriesForm';
+import { chooseBestDisplayAddress } from './addressEntryUtils';
 
 interface ClientDetailProps {
   clientId: number;
@@ -629,19 +630,30 @@ const buildAddressEntriesFromClient = (client: Client): ClientAddressItem[] => {
     .map((address) => {
       const fullAddress = (address.unrestrictedValue ?? address.value ?? '').trim();
       if (!fullAddress) return null;
+      const structuredAddress = {
+        postalCode: address.postalCode ?? '',
+        region: address.regionWithType ?? '',
+        city: address.cityWithType ?? '',
+        street: address.streetWithType ?? '',
+        house: address.house ?? '',
+        flat: address.flat ?? '',
+      };
       return {
         ...createEmptyAddressEntry(),
         type: mapBackendAddressTypeToProfile(address.type),
         sourceQuery: fullAddress,
-        fullAddress,
-        postalCode: address.postalCode ?? '',
-        region: address.regionWithType ?? '',
+        fullAddress: chooseBestDisplayAddress(structuredAddress, fullAddress, composeAddressFromParts({
+          ...createEmptyAddressEntry(),
+          ...structuredAddress,
+        })),
+        postalCode: structuredAddress.postalCode,
+        region: structuredAddress.region,
         district: '',
-        city: address.cityWithType ?? '',
+        city: structuredAddress.city,
         settlement: '',
-        street: address.streetWithType ?? '',
-        house: address.house ?? '',
-        flat: address.flat ?? '',
+        street: structuredAddress.street,
+        house: structuredAddress.house,
+        flat: structuredAddress.flat,
         fiasId: address.fiasId ?? '',
         kladrId: address.kladrId ?? '',
         geoLat: address.geoLat ?? '',
@@ -2538,7 +2550,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
         if (['postalCode', 'region', 'district', 'city', 'settlement', 'street', 'house', 'flat'].includes(key)) {
           return {
             ...updated,
-            fullAddress: composeAddressFromParts(updated),
+            fullAddress: chooseBestDisplayAddress(updated, updated.fullAddress, updated.sourceQuery),
           };
         }
         return updated;
@@ -2652,7 +2664,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           const updated = {
             ...item,
             sourceQuery: raw,
-            fullAddress: cleaned.result || raw,
             postalCode: cleaned.postalCode || '',
             region: cleaned.regionWithType || '',
             district: '',
@@ -2666,7 +2677,10 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
             geoLat: cleaned.geoLat || '',
             geoLon: cleaned.geoLon || '',
           };
-          return { ...updated, fullAddress: composeAddressFromParts(updated) || cleaned.result || raw };
+          return {
+            ...updated,
+            fullAddress: chooseBestDisplayAddress(updated, item.fullAddress, cleaned.result, raw),
+          };
         }),
       }));
     } catch (error) {
@@ -2677,23 +2691,29 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           const fallbackAddress = (fallbackSuggestion.unrestrictedValue || fallbackSuggestion.value || raw).trim();
           setClientFormState((prev) => ({
             ...prev,
-            addressEntries: prev.addressEntries.map((item, i) => i === index ? {
-              ...item,
-              sourceQuery: raw,
-              fullAddress: fallbackAddress,
-              postalCode: fallbackSuggestion.postalCode || item.postalCode,
-              region: fallbackSuggestion.regionWithType || item.region,
-              district: fallbackSuggestion.areaWithType || item.district,
-              city: fallbackSuggestion.cityWithType || item.city,
-              settlement: fallbackSuggestion.settlementWithType || item.settlement,
-              street: fallbackSuggestion.streetWithType || item.street,
-              house: fallbackSuggestion.house || item.house,
-              flat: fallbackSuggestion.flat || item.flat,
-              fiasId: fallbackSuggestion.fiasId || item.fiasId,
-              kladrId: fallbackSuggestion.kladrId || item.kladrId,
-              geoLat: fallbackSuggestion.geoLat || item.geoLat,
-              geoLon: fallbackSuggestion.geoLon || item.geoLon,
-            } : item),
+            addressEntries: prev.addressEntries.map((item, i) => {
+              if (i !== index) return item;
+              const updated = {
+                ...item,
+                sourceQuery: raw,
+                postalCode: fallbackSuggestion.postalCode || item.postalCode,
+                region: fallbackSuggestion.regionWithType || item.region,
+                district: fallbackSuggestion.areaWithType || item.district,
+                city: fallbackSuggestion.cityWithType || item.city,
+                settlement: fallbackSuggestion.settlementWithType || item.settlement,
+                street: fallbackSuggestion.streetWithType || item.street,
+                house: fallbackSuggestion.house || item.house,
+                flat: fallbackSuggestion.flat || item.flat,
+                fiasId: fallbackSuggestion.fiasId || item.fiasId,
+                kladrId: fallbackSuggestion.kladrId || item.kladrId,
+                geoLat: fallbackSuggestion.geoLat || item.geoLat,
+                geoLon: fallbackSuggestion.geoLon || item.geoLon,
+              };
+              return {
+                ...updated,
+                fullAddress: chooseBestDisplayAddress(updated, fallbackAddress, item.fullAddress, raw),
+              };
+            }),
           }));
           return;
         }
@@ -2716,23 +2736,29 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     // Быстро заполняем минимум из suggestion даже если clean endpoint временно недоступен.
     setClientFormState((prev) => ({
       ...prev,
-      addressEntries: prev.addressEntries.map((item, i) => i === index ? {
-        ...item,
-        sourceQuery: selected,
-        fullAddress: selected,
-        postalCode: suggestion.postalCode || item.postalCode,
-        region: suggestion.regionWithType || item.region,
-        district: suggestion.areaWithType || item.district,
-        city: suggestion.cityWithType || item.city,
-        settlement: suggestion.settlementWithType || item.settlement,
-        street: suggestion.streetWithType || item.street,
-        house: suggestion.house || item.house,
-        flat: suggestion.flat || item.flat,
-        fiasId: suggestion.fiasId || item.fiasId,
-        kladrId: suggestion.kladrId || item.kladrId,
-        geoLat: suggestion.geoLat || item.geoLat,
-        geoLon: suggestion.geoLon || item.geoLon,
-      } : item),
+      addressEntries: prev.addressEntries.map((item, i) => {
+        if (i !== index) return item;
+        const updated = {
+          ...item,
+          sourceQuery: selected,
+          postalCode: suggestion.postalCode || item.postalCode,
+          region: suggestion.regionWithType || item.region,
+          district: suggestion.areaWithType || item.district,
+          city: suggestion.cityWithType || item.city,
+          settlement: suggestion.settlementWithType || item.settlement,
+          street: suggestion.streetWithType || item.street,
+          house: suggestion.house || item.house,
+          flat: suggestion.flat || item.flat,
+          fiasId: suggestion.fiasId || item.fiasId,
+          kladrId: suggestion.kladrId || item.kladrId,
+          geoLat: suggestion.geoLat || item.geoLat,
+          geoLon: suggestion.geoLon || item.geoLon,
+        };
+        return {
+          ...updated,
+          fullAddress: chooseBestDisplayAddress(updated, selected, item.fullAddress),
+        };
+      }),
     }));
 
     setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));

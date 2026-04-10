@@ -22,6 +22,7 @@ import type {
 } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
+import { chooseBestDisplayAddress } from '../Clients/addressEntryUtils';
 import { apiService } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useDictionaries } from '../../hooks/useDictionaries';
@@ -36,6 +37,11 @@ import {
   mergeLegalEntityAddressEntry,
   upsertLegalEntityAddressEntry,
 } from './legalEntityFormUtils';
+import {
+  dedupeLegalEntitySuggestions,
+  getPreferredLegalEntityAddress,
+  resolveInitialLegalEntityDadataQuery,
+} from './legalEntityDadataUtils';
 import {
   getLegalEntityImageProfile,
   isLegalEntityInlineAssetPayloadSafe,
@@ -335,6 +341,7 @@ const createEmptyLegalEntityAddressEntry = (): ClientAddressEntryFormValue => ({
   additionalTypes: [],
   fullAddress: '',
   postalCode: '',
+  country: '',
   region: '',
   district: '',
   city: '',
@@ -342,6 +349,10 @@ const createEmptyLegalEntityAddressEntry = (): ClientAddressEntryFormValue => ({
   street: '',
   house: '',
   flat: '',
+  fiasId: '',
+  kladrId: '',
+  geoLat: '',
+  geoLon: '',
   validFrom: '',
   validTo: '',
 });
@@ -732,13 +743,28 @@ export function LegalEntityModal({
         const nextEntry: ClientAddressEntryFormValue = {
           ...createEmptyLegalEntityAddressEntry(),
           type: mapAddressTypeToForm(address.type),
-          fullAddress: address.value ?? '',
+          fullAddress: chooseBestDisplayAddress(
+            {
+              postalCode: address.postalCode,
+              region: address.regionWithType,
+              city: address.cityWithType,
+              street: address.streetWithType,
+              house: address.house,
+              flat: address.flat,
+            },
+            getPreferredLegalEntityAddress(address.value, address.unrestrictedValue),
+          ),
           postalCode: address.postalCode ?? '',
+          country: address.country ?? '',
           region: address.regionWithType ?? '',
           city: address.cityWithType ?? '',
           street: address.streetWithType ?? '',
           house: address.house ?? '',
           flat: address.flat ?? '',
+          fiasId: address.fiasId ?? '',
+          kladrId: address.kladrId ?? '',
+          geoLat: address.geoLat ?? '',
+          geoLon: address.geoLon ?? '',
           additionalTypes: [],
         };
 
@@ -779,7 +805,7 @@ export function LegalEntityModal({
     setError(null);
     setSuggestions([]);
     setSuggestError(null);
-    setDadataQuery('');
+    setDadataQuery(resolveInitialLegalEntityDadataQuery(initial?.inn));
     setPickerOpen(false);
     setPickerSearch('');
     setPickerClients([]);
@@ -1044,36 +1070,61 @@ export function LegalEntityModal({
     const source = (rawInput ?? addressEntries[index]?.fullAddress ?? '').trim();
     if (!source) return;
     const cleaned = await apiService.cleanAddress(source);
-    setAddressEntries((prev) => prev.map((entry, i) => i === index ? ({
-      ...entry,
-      fullAddress: cleaned.result ?? source,
-      postalCode: cleaned.postalCode ?? '',
-      region: cleaned.regionWithType ?? '',
-      district: '',
-      city: cleaned.cityWithType ?? '',
-      settlement: cleaned.settlementWithType ?? '',
-      street: cleaned.streetWithType ?? '',
-      house: cleaned.house ?? '',
-      flat: cleaned.flat ?? '',
-    }) : entry));
+    setAddressEntries((prev) => prev.map((entry, i) => {
+      if (i !== index) return entry;
+
+      const updated = {
+        ...entry,
+        postalCode: cleaned.postalCode ?? '',
+        country: cleaned.country ?? entry.country ?? '',
+        region: cleaned.regionWithType ?? '',
+        district: '',
+        city: cleaned.cityWithType ?? '',
+        settlement: cleaned.settlementWithType ?? '',
+        street: cleaned.streetWithType ?? '',
+        house: cleaned.house ?? '',
+        flat: cleaned.flat ?? '',
+        fiasId: cleaned.fiasId ?? '',
+        kladrId: cleaned.kladrId ?? '',
+        geoLat: cleaned.geoLat ?? '',
+        geoLon: cleaned.geoLon ?? '',
+      };
+
+      return {
+        ...updated,
+        fullAddress: chooseBestDisplayAddress(updated, entry.fullAddress, cleaned.result, source),
+      };
+    }));
   };
 
   const applyAddressSuggestion = async (index: number, suggestion: DadataAddressSuggestion) => {
     const selected = (suggestion.unrestrictedValue ?? suggestion.value ?? '').trim();
     if (!selected) return;
 
-    setAddressEntries((prev) => prev.map((entry, i) => i === index ? ({
-      ...entry,
-      fullAddress: selected,
-      postalCode: suggestion.postalCode ?? '',
-      region: suggestion.regionWithType ?? '',
-      district: suggestion.areaWithType ?? '',
-      city: suggestion.cityWithType ?? '',
-      settlement: suggestion.settlementWithType ?? '',
-      street: suggestion.streetWithType ?? '',
-      house: suggestion.house ?? '',
-      flat: suggestion.flat ?? '',
-    }) : entry));
+    setAddressEntries((prev) => prev.map((entry, i) => {
+      if (i !== index) return entry;
+
+      const updated = {
+        ...entry,
+        postalCode: suggestion.postalCode ?? '',
+        region: suggestion.regionWithType ?? '',
+        district: suggestion.areaWithType ?? '',
+        city: suggestion.cityWithType ?? '',
+        settlement: suggestion.settlementWithType ?? '',
+        street: suggestion.streetWithType ?? '',
+        house: suggestion.house ?? '',
+        flat: suggestion.flat ?? '',
+        fiasId: suggestion.fiasId ?? entry.fiasId ?? '',
+        kladrId: suggestion.kladrId ?? entry.kladrId ?? '',
+        geoLat: suggestion.geoLat ?? entry.geoLat ?? '',
+        geoLon: suggestion.geoLon ?? entry.geoLon ?? '',
+      };
+
+      return {
+        ...updated,
+        fullAddress: chooseBestDisplayAddress(updated, selected, entry.fullAddress),
+      };
+    }));
     setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
 
     try {
@@ -1092,9 +1143,9 @@ export function LegalEntityModal({
     }
     try {
       setSuggestLoading(true);
-      const results = await suggest({ query, limit: 6 });
-      setSuggestions(results ?? []);
-      if ((results ?? []).length === 0) {
+      const results = dedupeLegalEntitySuggestions(await suggest({ query, limit: 6 }), 6);
+      setSuggestions(results);
+      if (results.length === 0) {
         setSuggestError(t('legalEntityDadataNoResults') || 'Ничего не найдено');
       }
     } catch (err) {
@@ -1108,6 +1159,15 @@ export function LegalEntityModal({
 
   const applySuggestion = async (suggestion: LegalEntitySuggestion) => {
     const baseAddress = suggestion.address?.trim();
+    const applyFallbackAddress = (address: string) => {
+      setAddressEntries((prev) =>
+        upsertLegalEntityAddressEntry(prev, {
+          ...createEmptyLegalEntityAddressEntry(),
+          type: 'legal',
+          fullAddress: address,
+        }),
+      );
+    };
 
     setFormState((prev) => ({
       ...prev,
@@ -1122,22 +1182,31 @@ export function LegalEntityModal({
       director: suggestion.director ?? prev.director,
     }));
 
-    if (baseAddress) {
-      setAddressEntries((prev) =>
-        upsertLegalEntityAddressEntry(prev, {
-          ...createEmptyLegalEntityAddressEntry(),
-          type: 'legal',
-          fullAddress: baseAddress,
-        }),
-      );
-    }
-
     const query = (suggestion.inn || suggestion.ogrn || dadataQuery).trim();
-    if (!query) return;
+    if (!query) {
+      if (baseAddress) {
+        applyFallbackAddress(baseAddress);
+      }
+      return;
+    }
 
     try {
       const details = await findById({ query, kpp: suggestion.kpp ?? undefined });
-      const normalizedAddress = (details.addressUnrestricted || details.address || '').trim();
+      const normalizedAddress = chooseBestDisplayAddress(
+        {
+          country: details.country,
+          postalCode: details.postalCode,
+          region: details.regionWithType,
+          city: details.cityWithType,
+          settlement: details.settlementWithType,
+          street: details.streetWithType,
+          house: details.house,
+          flat: details.flat,
+        },
+        details.addressUnrestricted,
+        details.address,
+        baseAddress,
+      );
 
       setFormState((prev) => ({
         ...prev,
@@ -1173,11 +1242,17 @@ export function LegalEntityModal({
             type: 'legal',
             fullAddress: normalizedAddress,
             postalCode: details.postalCode ?? '',
+            country: details.country ?? '',
             region: details.regionWithType ?? '',
             city: details.cityWithType ?? '',
+            settlement: details.settlementWithType ?? '',
             street: details.streetWithType ?? '',
             house: details.house ?? '',
             flat: details.flat ?? '',
+            fiasId: details.fiasId ?? '',
+            kladrId: details.kladrId ?? '',
+            geoLat: details.geoLat ?? '',
+            geoLon: details.geoLon ?? '',
           };
           const existingIndex = findMatchingLegalEntityAddressEntryIndex(prev, nextEntry);
 
@@ -1189,9 +1264,13 @@ export function LegalEntityModal({
 
           return [nextEntry, ...prev];
         });
+      } else if (baseAddress) {
+        applyFallbackAddress(baseAddress);
       }
     } catch {
-      // fallback to suggest data already applied
+      if (baseAddress) {
+        applyFallbackAddress(baseAddress);
+      }
     }
   };
 
@@ -1240,11 +1319,16 @@ export function LegalEntityModal({
             value: address.fullAddress.trim(),
             unrestrictedValue: address.fullAddress.trim(),
             postalCode: normalize(address.postalCode),
+            country: normalize(address.country ?? ''),
             regionWithType: normalize(address.region),
             cityWithType: normalize(address.city || address.settlement),
             streetWithType: normalize(address.street),
             house: normalize(address.house),
             flat: normalize(address.flat),
+            fiasId: normalize(address.fiasId ?? ''),
+            kladrId: normalize(address.kladrId ?? ''),
+            geoLat: normalize(address.geoLat ?? ''),
+            geoLon: normalize(address.geoLon ?? ''),
             isPrimary: index === 0,
           })),
       );
@@ -1416,17 +1500,33 @@ export function LegalEntityModal({
       setLogoChanged(false);
       setSealChanged(false);
       setDirectorSignatureChanged(false);
+      setDadataQuery((prev) => prev.trim() || resolveInitialLegalEntityDadataQuery(saved.inn));
       setAddressEntries((saved.addresses ?? []).reduce<ClientAddressEntryFormValue[]>((acc, address) => {
         const nextEntry: ClientAddressEntryFormValue = {
           ...createEmptyLegalEntityAddressEntry(),
           type: mapAddressTypeToForm(address.type),
-          fullAddress: address.value ?? '',
+          fullAddress: chooseBestDisplayAddress(
+            {
+              postalCode: address.postalCode,
+              region: address.regionWithType,
+              city: address.cityWithType,
+              street: address.streetWithType,
+              house: address.house,
+              flat: address.flat,
+            },
+            getPreferredLegalEntityAddress(address.value, address.unrestrictedValue),
+          ),
           postalCode: address.postalCode ?? '',
+          country: address.country ?? '',
           region: address.regionWithType ?? '',
           city: address.cityWithType ?? '',
           street: address.streetWithType ?? '',
           house: address.house ?? '',
           flat: address.flat ?? '',
+          fiasId: address.fiasId ?? '',
+          kladrId: address.kladrId ?? '',
+          geoLat: address.geoLat ?? '',
+          geoLon: address.geoLon ?? '',
         };
 
         const matchIndex = findMatchingLegalEntityAddressEntryIndex(acc, nextEntry);
