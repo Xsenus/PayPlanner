@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from './ClientAddressEntriesForm';
 import type { DadataAddressSuggestion } from '../../types';
 
+const initialFullAddress = '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19';
+const updatedFullAddress = '633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12';
+
 const baseEntry: ClientAddressEntryFormValue = {
   type: 'legal',
   additionalTypes: [],
-  fullAddress: '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
+  fullAddress: initialFullAddress,
   postalCode: '633208',
   region: 'Новосибирская обл',
   district: '',
@@ -33,7 +36,7 @@ describe('ClientAddressEntriesForm integration', () => {
 
     const fullSuggestion: DadataAddressSuggestion = {
       value: 'г Искитим, Южный мкр, д 37',
-      unrestrictedValue: '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
+      unrestrictedValue: initialFullAddress,
       postalCode: '633208',
       regionWithType: 'Новосибирская обл',
       cityWithType: 'г Искитим',
@@ -59,17 +62,14 @@ describe('ClientAddressEntriesForm integration', () => {
       />,
     );
 
-    const suggestionButton = screen.getByRole('button', {
-      name: '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
-    });
+    const suggestionButton = screen.getByRole('button', { name: initialFullAddress });
 
     await user.click(suggestionButton);
 
     expect(onApplySuggestion).toHaveBeenCalledWith(0, fullSuggestion);
   });
 
-  it('keeps full address input as the primary editable field and schedules lookup from it', async () => {
-    const user = userEvent.setup();
+  it('keeps full address input as the primary editable field and schedules lookup from it', () => {
     const onScheduleSuggestions = vi.fn();
 
     function Harness() {
@@ -101,15 +101,15 @@ describe('ClientAddressEntriesForm integration', () => {
 
     render(<Harness />);
 
-    const fullAddressInput = screen.getByDisplayValue('633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19');
+    const fullAddressInput = screen.getByDisplayValue(initialFullAddress);
 
-    await user.clear(fullAddressInput);
-    await user.type(fullAddressInput, '633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12');
+    fireEvent.change(fullAddressInput, {
+      target: {
+        value: updatedFullAddress,
+      },
+    });
 
-    expect(screen.getByDisplayValue('633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12')).toBeTruthy();
-    expect(onScheduleSuggestions).toHaveBeenLastCalledWith(
-      0,
-      '633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12',
-    );
+    expect(screen.getByDisplayValue(updatedFullAddress)).toBeTruthy();
+    expect(onScheduleSuggestions).toHaveBeenLastCalledWith(0, updatedFullAddress);
   });
 });

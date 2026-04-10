@@ -331,6 +331,7 @@ public class ClientsController : ControllerBase
             countryIsoCode = result.CountryIsoCode,
             federalDistrict = result.FederalDistrict,
             regionWithType = result.RegionWithType,
+            areaWithType = result.AreaWithType,
             cityWithType = result.CityWithType,
             settlementWithType = result.SettlementWithType,
             streetWithType = result.StreetWithType,
@@ -541,7 +542,16 @@ public class ClientsController : ControllerBase
                     Type = ParseAddressType(item.Type),
                     IsPrimary = index == 0,
                     Value = NormalizeOptional(item.FullAddress) ?? NormalizeOptional(item.SourceQuery) ?? string.Empty,
+                    UnrestrictedValue = NormalizeOptional(item.FullAddress),
                     PostalCode = NormalizeOptional(item.PostalCode),
+                    Country = NormalizeOptional(item.Country),
+                    RegionWithType = NormalizeOptional(item.Region),
+                    AreaWithType = NormalizeOptional(item.District),
+                    CityWithType = NormalizeOptional(item.City),
+                    SettlementWithType = NormalizeOptional(item.Settlement),
+                    StreetWithType = NormalizeOptional(item.Street),
+                    House = NormalizeOptional(item.House),
+                    Flat = NormalizeOptional(item.Flat),
                     FiasId = NormalizeOptional(item.FiasId),
                     KladrId = NormalizeOptional(item.KladrId),
                     GeoLat = NormalizeOptional(item.GeoLat),
@@ -1023,6 +1033,14 @@ public sealed class ClientAddressEntryProfile
     public string? SourceQuery { get; init; }
     public string? FullAddress { get; init; }
     public string? PostalCode { get; init; }
+    public string? Country { get; init; }
+    public string? Region { get; init; }
+    public string? District { get; init; }
+    public string? City { get; init; }
+    public string? Settlement { get; init; }
+    public string? Street { get; init; }
+    public string? House { get; init; }
+    public string? Flat { get; init; }
     public string? FiasId { get; init; }
     public string? KladrId { get; init; }
     public string? GeoLat { get; init; }

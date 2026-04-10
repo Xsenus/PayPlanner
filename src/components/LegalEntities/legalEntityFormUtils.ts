@@ -8,8 +8,11 @@ type ComparableAddress = {
   value?: string | null;
   unrestrictedValue?: string | null;
   postalCode?: string | null;
+  country?: string | null;
   region?: string | null;
   regionWithType?: string | null;
+  district?: string | null;
+  areaWithType?: string | null;
   city?: string | null;
   cityWithType?: string | null;
   settlement?: string | null;
@@ -46,8 +49,11 @@ function normalizeAddressToken(value?: string | number | null): string {
 
 function buildStructuredLegalEntityAddressKey(address: ComparableAddress): string {
   return [
+    address.country,
     address.regionWithType ?? address.region,
+    address.areaWithType ?? address.district,
     address.cityWithType ?? address.city ?? address.settlement,
+    address.settlement,
     address.streetWithType ?? address.street,
     address.house,
     address.flat,
@@ -152,7 +158,9 @@ export function findMatchingLegalEntityAddressEntryIndex(
     type: incoming.type,
     fullAddress: incoming.fullAddress,
     postalCode: incoming.postalCode,
+    country: incoming.country,
     region: incoming.region,
+    district: incoming.district,
     city: incoming.city,
     settlement: incoming.settlement,
     street: incoming.street,
@@ -165,7 +173,9 @@ export function findMatchingLegalEntityAddressEntryIndex(
     type: incoming.type,
     fullAddress: incoming.fullAddress,
     postalCode: incoming.postalCode,
+    country: incoming.country,
     region: incoming.region,
+    district: incoming.district,
     city: incoming.city,
     settlement: incoming.settlement,
     street: incoming.street,
@@ -181,7 +191,9 @@ export function findMatchingLegalEntityAddressEntryIndex(
       type: entry.type,
       fullAddress: entry.fullAddress,
       postalCode: entry.postalCode,
+      country: entry.country,
       region: entry.region,
+      district: entry.district,
       city: entry.city,
       settlement: entry.settlement,
       street: entry.street,
@@ -222,7 +234,9 @@ function mergeLegalEntityAddressInput(
     postalCode: current.postalCode || incoming.postalCode || null,
     country: current.country || incoming.country || null,
     regionWithType: current.regionWithType || incoming.regionWithType || null,
+    areaWithType: current.areaWithType || incoming.areaWithType || null,
     cityWithType: current.cityWithType || incoming.cityWithType || null,
+    settlementWithType: current.settlementWithType || incoming.settlementWithType || null,
     streetWithType: current.streetWithType || incoming.streetWithType || null,
     house: current.house || incoming.house || null,
     flat: current.flat || incoming.flat || null,
@@ -246,8 +260,11 @@ export function dedupeLegalEntityAddressInputs(
       value: address.value,
       unrestrictedValue: address.unrestrictedValue,
       postalCode: address.postalCode,
+      country: address.country,
       regionWithType: address.regionWithType,
+      areaWithType: address.areaWithType,
       cityWithType: address.cityWithType,
+      settlementWithType: address.settlementWithType,
       streetWithType: address.streetWithType,
       house: address.house,
       flat: address.flat,

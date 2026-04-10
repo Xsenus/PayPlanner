@@ -115,7 +115,9 @@ public class AddressRecordDto
     public string? PostalCode { get; set; }
     public string? Country { get; set; }
     public string? RegionWithType { get; set; }
+    public string? AreaWithType { get; set; }
     public string? CityWithType { get; set; }
+    public string? SettlementWithType { get; set; }
     public string? StreetWithType { get; set; }
     public string? House { get; set; }
     public string? Flat { get; set; }

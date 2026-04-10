@@ -147,6 +147,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AreaWithType")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("CityWithType")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -220,6 +224,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(20)");
 
                     b.Property<string>("RegionWithType")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("SettlementWithType")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 

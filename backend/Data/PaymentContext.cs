@@ -731,7 +731,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.PostalCode).HasMaxLength(20);
             entity.Property(e => e.Country).HasMaxLength(120);
             entity.Property(e => e.RegionWithType).HasMaxLength(200);
+            entity.Property(e => e.AreaWithType).HasMaxLength(200);
             entity.Property(e => e.CityWithType).HasMaxLength(200);
+            entity.Property(e => e.SettlementWithType).HasMaxLength(200);
             entity.Property(e => e.StreetWithType).HasMaxLength(200);
             entity.Property(e => e.House).HasMaxLength(50);
             entity.Property(e => e.Flat).HasMaxLength(50);

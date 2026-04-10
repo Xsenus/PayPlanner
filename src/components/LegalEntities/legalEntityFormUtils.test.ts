@@ -132,4 +132,43 @@ describe('legalEntityFormUtils', () => {
     expect(merged.fullAddress).toBe('633208, Россия, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19');
     expect(merged.fiasId).toBe('fias-1');
   });
+
+  it('uses district and settlement when deduplicating legal entity address payloads', () => {
+    const deduped = dedupeLegalEntityAddressInputs([
+      {
+        type: 3,
+        value: '633208, Россия, Новосибирская обл, Искитимский р-н, г Искитим, Южный мкр, д 37, кв 19',
+        unrestrictedValue: '633208, Россия, Новосибирская обл, Искитимский р-н, г Искитим, Южный мкр, д 37, кв 19',
+        postalCode: '633208',
+        country: 'Россия',
+        regionWithType: 'Новосибирская обл',
+        areaWithType: 'Искитимский р-н',
+        cityWithType: 'г Искитим',
+        settlementWithType: 'Южный мкр',
+        streetWithType: 'Южный мкр',
+        house: '37',
+        flat: '19',
+        isPrimary: true,
+      },
+      {
+        type: 3,
+        value: 'Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
+        unrestrictedValue: 'Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19',
+        postalCode: '633208',
+        country: 'Россия',
+        regionWithType: 'Новосибирская обл',
+        areaWithType: 'Искитимский р-н',
+        cityWithType: 'г Искитим',
+        settlementWithType: 'Южный мкр',
+        streetWithType: 'Южный мкр',
+        house: '37',
+        flat: '19',
+        isPrimary: false,
+      },
+    ]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].areaWithType).toBe('Искитимский р-н');
+    expect(deduped[0].settlementWithType).toBe('Южный мкр');
+  });
 });

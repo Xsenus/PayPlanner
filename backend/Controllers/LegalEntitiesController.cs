@@ -244,7 +244,9 @@ public class LegalEntitiesController : ControllerBase
             PostalCode = address.PostalCode,
             Country = address.Country,
             RegionWithType = address.RegionWithType,
+            AreaWithType = address.AreaWithType,
             CityWithType = address.CityWithType,
+            SettlementWithType = address.SettlementWithType,
             StreetWithType = address.StreetWithType,
             House = address.House,
             Flat = address.Flat,
@@ -399,8 +401,11 @@ public class LegalEntitiesController : ControllerBase
 
         var structuredKey = string.Join("|", new[]
         {
+            CanonicalizeAddressToken(address.Country),
             CanonicalizeAddressToken(address.RegionWithType),
+            CanonicalizeAddressToken(address.AreaWithType),
             CanonicalizeAddressToken(address.CityWithType),
+            CanonicalizeAddressToken(address.SettlementWithType),
             CanonicalizeAddressToken(address.StreetWithType),
             CanonicalizeAddressToken(address.House),
             CanonicalizeAddressToken(address.Flat),
@@ -416,7 +421,9 @@ public class LegalEntitiesController : ControllerBase
         target.PostalCode = target.PostalCode ?? NormalizeOptional(incoming.PostalCode);
         target.Country = target.Country ?? NormalizeOptional(incoming.Country);
         target.RegionWithType = target.RegionWithType ?? NormalizeOptional(incoming.RegionWithType);
+        target.AreaWithType = target.AreaWithType ?? NormalizeOptional(incoming.AreaWithType);
         target.CityWithType = target.CityWithType ?? NormalizeOptional(incoming.CityWithType);
+        target.SettlementWithType = target.SettlementWithType ?? NormalizeOptional(incoming.SettlementWithType);
         target.StreetWithType = target.StreetWithType ?? NormalizeOptional(incoming.StreetWithType);
         target.House = target.House ?? NormalizeOptional(incoming.House);
         target.Flat = target.Flat ?? NormalizeOptional(incoming.Flat);
@@ -560,6 +567,7 @@ public class LegalEntitiesController : ControllerBase
             PostalCode = result.PostalCode,
             Country = result.Country,
             RegionWithType = result.RegionWithType,
+            AreaWithType = result.AreaWithType,
             CityWithType = result.CityWithType,
             SettlementWithType = result.SettlementWithType,
             StreetWithType = result.StreetWithType,
@@ -633,7 +641,9 @@ public class LegalEntitiesController : ControllerBase
                 PostalCode = NormalizeOptional(address.PostalCode),
                 Country = NormalizeOptional(address.Country),
                 RegionWithType = NormalizeOptional(address.RegionWithType),
+                AreaWithType = NormalizeOptional(address.AreaWithType),
                 CityWithType = NormalizeOptional(address.CityWithType),
+                SettlementWithType = NormalizeOptional(address.SettlementWithType),
                 StreetWithType = NormalizeOptional(address.StreetWithType),
                 House = NormalizeOptional(address.House),
                 Flat = NormalizeOptional(address.Flat),
@@ -917,6 +927,7 @@ public class LegalEntitiesController : ControllerBase
             AddressUnrestricted = details.AddressUnrestrictedValue,
             Country = details.Country,
             RegionWithType = details.RegionWithType,
+            AreaWithType = details.AreaWithType,
             CityWithType = details.CityWithType,
             SettlementWithType = details.SettlementWithType,
             StreetWithType = details.StreetWithType,
@@ -1287,6 +1298,7 @@ public class LegalEntitiesController : ControllerBase
                     CountryIsoCode: null,
                     FederalDistrict: null,
                     RegionWithType: NormalizeOptional(first.RegionWithType),
+                    AreaWithType: NormalizeOptional(first.AreaWithType),
                     CityWithType: NormalizeOptional(first.CityWithType),
                     SettlementWithType: NormalizeOptional(first.SettlementWithType),
                     StreetWithType: NormalizeOptional(first.StreetWithType),
@@ -1466,7 +1478,9 @@ public class LegalEntitiesController : ControllerBase
             changed |= SetIfDifferent(target.PostalCode, v => target.PostalCode = v, NormalizeOptional(cleaned?.PostalCode));
             changed |= SetIfDifferent(target.Country, v => target.Country = v, NormalizeOptional(cleaned?.Country));
             changed |= SetIfDifferent(target.RegionWithType, v => target.RegionWithType = v, NormalizeOptional(cleaned?.RegionWithType));
+            changed |= SetIfDifferent(target.AreaWithType, v => target.AreaWithType = v, NormalizeOptional(cleaned?.AreaWithType));
             changed |= SetIfDifferent(target.CityWithType, v => target.CityWithType = v, NormalizeOptional(cleaned?.CityWithType));
+            changed |= SetIfDifferent(target.SettlementWithType, v => target.SettlementWithType = v, NormalizeOptional(cleaned?.SettlementWithType));
             changed |= SetIfDifferent(target.StreetWithType, v => target.StreetWithType = v, NormalizeOptional(cleaned?.StreetWithType));
             changed |= SetIfDifferent(target.House, v => target.House = v, NormalizeOptional(cleaned?.House));
             changed |= SetIfDifferent(target.Flat, v => target.Flat = v, NormalizeOptional(cleaned?.Flat));
@@ -1493,7 +1507,9 @@ public class LegalEntitiesController : ControllerBase
         changed |= FillIfEmpty(target.PostalCode, v => target.PostalCode = v, NormalizeOptional(cleaned?.PostalCode));
         changed |= FillIfEmpty(target.Country, v => target.Country = v, NormalizeOptional(cleaned?.Country));
         changed |= FillIfEmpty(target.RegionWithType, v => target.RegionWithType = v, NormalizeOptional(cleaned?.RegionWithType));
+        changed |= FillIfEmpty(target.AreaWithType, v => target.AreaWithType = v, NormalizeOptional(cleaned?.AreaWithType));
         changed |= FillIfEmpty(target.CityWithType, v => target.CityWithType = v, NormalizeOptional(cleaned?.CityWithType));
+        changed |= FillIfEmpty(target.SettlementWithType, v => target.SettlementWithType = v, NormalizeOptional(cleaned?.SettlementWithType));
         changed |= FillIfEmpty(target.StreetWithType, v => target.StreetWithType = v, NormalizeOptional(cleaned?.StreetWithType));
         changed |= FillIfEmpty(target.House, v => target.House = v, NormalizeOptional(cleaned?.House));
         changed |= FillIfEmpty(target.Flat, v => target.Flat = v, NormalizeOptional(cleaned?.Flat));
@@ -1568,6 +1584,7 @@ public sealed record LegalEntityDetailsDto
     public string? AddressUnrestricted { get; init; }
     public string? Country { get; init; }
     public string? RegionWithType { get; init; }
+    public string? AreaWithType { get; init; }
     public string? CityWithType { get; init; }
     public string? SettlementWithType { get; init; }
     public string? StreetWithType { get; init; }
@@ -1619,6 +1636,7 @@ public sealed record CleanedAddressDto
     public string? KladrId { get; init; }
     public string? PostalCode { get; init; }
     public string? RegionWithType { get; init; }
+    public string? AreaWithType { get; init; }
     public string Result { get; init; } = string.Empty;
     public string? SettlementWithType { get; init; }
     public string? StreetWithType { get; init; }

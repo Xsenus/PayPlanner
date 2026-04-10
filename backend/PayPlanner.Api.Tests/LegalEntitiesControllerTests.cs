@@ -46,7 +46,9 @@ public class LegalEntitiesControllerTests
         Assert.Equal("446200", primaryAddress.PostalCode);
         Assert.Equal("Россия", primaryAddress.Country);
         Assert.Equal("Самарская обл", primaryAddress.RegionWithType);
+        Assert.Equal("Безенчукский р-н", primaryAddress.AreaWithType);
         Assert.Equal("г Новокуйбышевск", primaryAddress.CityWithType);
+        Assert.Equal("п Гранный", primaryAddress.SettlementWithType);
         Assert.Equal("ул Миронова", primaryAddress.StreetWithType);
         Assert.Equal("9", primaryAddress.House);
         Assert.Equal("1", primaryAddress.Flat);
@@ -102,7 +104,9 @@ public class LegalEntitiesControllerTests
                 PostalCode = "446200",
                 Country = "Россия",
                 RegionWithType = "Самарская обл",
+                AreaWithType = "Безенчукский р-н",
                 CityWithType = "г Новокуйбышевск",
+                SettlementWithType = "п Гранный",
                 StreetWithType = "ул Миронова",
                 House = "9",
                 Flat = "1",
@@ -155,7 +159,9 @@ public class LegalEntitiesControllerTests
         Assert.Equal("Россия", storedAddresses[0].Country);
         Assert.Equal("446200", storedAddresses[0].PostalCode);
         Assert.Equal("Самарская обл", storedAddresses[0].RegionWithType);
+        Assert.Equal("Безенчукский р-н", storedAddresses[0].AreaWithType);
         Assert.Equal("г Новокуйбышевск", storedAddresses[0].CityWithType);
+        Assert.Equal("п Гранный", storedAddresses[0].SettlementWithType);
         Assert.Equal("ул Миронова", storedAddresses[0].StreetWithType);
         Assert.Equal("9", storedAddresses[0].House);
         Assert.Equal("1", storedAddresses[0].Flat);
@@ -600,7 +606,9 @@ public class LegalEntitiesControllerTests
                     PostalCode = "446200",
                     Country = "Россия",
                     RegionWithType = "Самарская обл",
+                    AreaWithType = "Безенчукский р-н",
                     CityWithType = "г Новокуйбышевск",
+                    SettlementWithType = "п Гранный",
                     StreetWithType = "ул Миронова",
                     House = "9",
                     Flat = "1",

@@ -25,7 +25,11 @@ export function composeAddressFromParts(parts: AddressDisplayParts): string {
     normalizeAddressPart(parts.street),
     normalizeAddressPart(parts.house) && `д ${normalizeAddressPart(parts.house)}`,
     normalizeAddressPart(parts.flat) && `кв ${normalizeAddressPart(parts.flat)}`,
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .filter((value, index, source) =>
+      source.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index,
+    );
 
   return values.join(', ');
 }

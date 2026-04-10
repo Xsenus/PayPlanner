@@ -10,7 +10,9 @@ export interface AddressRecord {
   postalCode?: string | null;
   country?: string | null;
   regionWithType?: string | null;
+  areaWithType?: string | null;
   cityWithType?: string | null;
+  settlementWithType?: string | null;
   streetWithType?: string | null;
   house?: string | null;
   flat?: string | null;
@@ -191,6 +193,7 @@ export interface LegalEntityDadataDetails {
   addressUnrestricted?: string | null;
   country?: string | null;
   regionWithType?: string | null;
+  areaWithType?: string | null;
   cityWithType?: string | null;
   settlementWithType?: string | null;
   streetWithType?: string | null;
@@ -218,7 +221,9 @@ export interface LegalEntityAddressInput {
   postalCode?: string | null;
   country?: string | null;
   regionWithType?: string | null;
+  areaWithType?: string | null;
   cityWithType?: string | null;
+  settlementWithType?: string | null;
   streetWithType?: string | null;
   house?: string | null;
   flat?: string | null;
@@ -360,6 +365,7 @@ export interface CleanedAddress {
   countryIsoCode?: string | null;
   federalDistrict?: string | null;
   regionWithType?: string | null;
+  areaWithType?: string | null;
   cityWithType?: string | null;
   settlementWithType?: string | null;
   streetWithType?: string | null;

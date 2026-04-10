@@ -201,7 +201,13 @@ public class LegalEntityAddressRequest
     public string? RegionWithType { get; set; }
 
     [MaxLength(200)]
+    public string? AreaWithType { get; set; }
+
+    [MaxLength(200)]
     public string? CityWithType { get; set; }
+
+    [MaxLength(200)]
+    public string? SettlementWithType { get; set; }
 
     [MaxLength(200)]
     public string? StreetWithType { get; set; }

@@ -138,6 +138,10 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AreaWithType")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CityWithType")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -211,6 +215,10 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RegionWithType")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettlementWithType")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 

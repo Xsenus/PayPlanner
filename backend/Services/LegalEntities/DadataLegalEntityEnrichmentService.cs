@@ -127,6 +127,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 CountryIsoCode: e.GetPropertyOrDefault("country_iso_code"),
                 FederalDistrict: e.GetPropertyOrDefault("federal_district"),
                 RegionWithType: e.GetPropertyOrDefault("region_with_type"),
+                AreaWithType: e.GetPropertyOrDefault("area_with_type"),
                 CityWithType: e.GetPropertyOrDefault("city_with_type"),
                 SettlementWithType: e.GetPropertyOrDefault("settlement_with_type"),
                 StreetWithType: e.GetPropertyOrDefault("street_with_type"),
@@ -257,6 +258,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                 AddressUnrestrictedValue: s.Address?.UnrestrictedValue,
                 Country: s.Address?.Data?.Country,
                 RegionWithType: s.Address?.Data?.RegionWithType,
+                AreaWithType: s.Address?.Data?.AreaWithType,
                 CityWithType: s.Address?.Data?.CityWithType,
                 SettlementWithType: s.Address?.Data?.SettlementWithType,
                 StreetWithType: s.Address?.Data?.StreetWithType,
@@ -602,6 +604,9 @@ namespace PayPlanner.Api.Services.LegalEntities
 
             [JsonPropertyName("region_with_type")]
             public string? RegionWithType { get; set; }
+
+            [JsonPropertyName("area_with_type")]
+            public string? AreaWithType { get; set; }
 
             [JsonPropertyName("city_with_type")]
             public string? CityWithType { get; set; }
