@@ -179,15 +179,7 @@ namespace PayPlanner.Api.Services
             }
 
 
-            if (!await context.Countries.AnyAsync())
-            {
-                context.Countries.AddRange(
-                    new CountryDictionaryItem { Name = "Р РѕСЃСЃРёСЏ", Description = "Р РѕСЃСЃРёР№СЃРєР°СЏ Р¤РµРґРµСЂР°С†РёСЏ", ColorHex = "#2563EB" },
-                    new CountryDictionaryItem { Name = "РљР°Р·Р°С…СЃС‚Р°РЅ", Description = "Р РµСЃРїСѓР±Р»РёРєР° РљР°Р·Р°С…СЃС‚Р°РЅ", ColorHex = "#0EA5E9" },
-                    new CountryDictionaryItem { Name = "Р‘РµР»Р°СЂСѓСЃСЊ", Description = "Р РµСЃРїСѓР±Р»РёРєР° Р‘РµР»Р°СЂСѓСЃСЊ", ColorHex = "#1D4ED8" }
-                );
-                await context.SaveChangesAsync();
-            }
+            await CountryDictionaryCatalog.EnsureSeededAsync(context);
 
             if (!await context.BaseCurrencies.AnyAsync())
             {
