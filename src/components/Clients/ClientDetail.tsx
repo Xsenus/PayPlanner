@@ -80,6 +80,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { filterRelatedPaymentsForInvoice } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
@@ -170,51 +171,6 @@ const SECTION_ORDER: ClientDetailSection[] = [
 
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = 'pp.client_detail_table';
-
-function accountKey(value?: string | null): string | null {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized) return null;
-
-  const numeric = normalized.replace(/\D+/g, '');
-  if (numeric) return numeric;
-
-  const stripped = normalized.replace(/[^a-z0-9а-яё]+/gi, '');
-  return stripped || normalized;
-}
-
-function invoiceEntityId(value?: Invoice | null): number | null {
-  return typeof value?.invoiceEntityId === 'number' && value.invoiceEntityId > 0
-    ? value.invoiceEntityId
-    : null;
-}
-
-function invoiceLegacyKey(number?: string | null, date?: string | null): string | null {
-  const normalizedNumber = accountKey(number);
-  if (!normalizedNumber) return null;
-
-  const normalizedDate = toDateInputValue(date ?? null);
-  const year = normalizedDate?.slice(0, 4) ?? 'na';
-  return `${normalizedNumber}::${year}`;
-}
-
-function paymentLegacyKey(payment: Payment): string | null {
-  return invoiceLegacyKey(payment.account, payment.accountDate ?? payment.date);
-}
-
-function isPaymentLinkedToInvoice(payment: Payment, invoice: Invoice): boolean {
-  if (payment.documentKind === 'Invoice') {
-    return false;
-  }
-
-  const canonicalInvoiceId = invoiceEntityId(invoice) ?? (invoice.id > 0 ? invoice.id : null);
-  if (canonicalInvoiceId && payment.invoiceId === canonicalInvoiceId) {
-    return true;
-  }
-
-  const invoiceKey = invoiceLegacyKey(invoice.number, invoice.date);
-  const paymentKey = paymentLegacyKey(payment);
-  return Boolean(invoiceKey && paymentKey && invoiceKey === paymentKey);
-}
 
 const PAYMENT_TABLE_COLUMNS: Array<{
   key: PaymentTableColumnKey;
@@ -1868,19 +1824,21 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       return;
     }
 
+    const selectedCaseId = invoiceSnapshot.clientCaseIds?.length === 1
+      ? invoiceSnapshot.clientCaseIds[0]
+      : invoiceSnapshot.clientCaseId ?? undefined;
+
     try {
       const paymentPool = await apiService.getPayments({
         from: MIN_DATE,
         to: MAX_DATE,
         clientId,
-        caseId: invoiceSnapshot.clientCaseId ?? undefined,
+        caseId: selectedCaseId,
       });
 
-      setInvoiceModalRelatedPayments(paymentPool.filter((payment) => isPaymentLinkedToInvoice(payment, invoiceSnapshot)));
+      setInvoiceModalRelatedPayments(filterRelatedPaymentsForInvoice(paymentPool, invoiceSnapshot));
     } catch {
-      setInvoiceModalRelatedPayments(
-        visiblePayments.filter((payment) => isPaymentLinkedToInvoice(payment, invoiceSnapshot)),
-      );
+      setInvoiceModalRelatedPayments(filterRelatedPaymentsForInvoice(visiblePayments, invoiceSnapshot));
     }
   }, [clientId, visiblePayments]);
   const refreshInvoiceModalData = useCallback(async () => {

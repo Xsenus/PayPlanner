@@ -173,6 +173,74 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Get_WithCaseId_IncludesPaymentsLinkedThroughInvoiceCases()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Клиент по делу",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с привязкой через счет",
+        };
+
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var invoice = new Invoice
+        {
+            Number = "30",
+            Date = new DateTime(2026, 4, 8),
+        };
+
+        var invoicePayment = CreatePayment(new DateTime(2026, 4, 8), 18_000m, "Счет №30");
+        invoicePayment.Client = client;
+        invoicePayment.DocumentKind = DocumentKind.Invoice;
+        invoicePayment.Invoice = invoice;
+        invoicePayment.InvoiceId = invoice.Id;
+        invoicePayment.Account = invoice.Number;
+        invoicePayment.AccountDate = invoice.Date;
+
+        var linkedPayment = CreatePayment(new DateTime(2026, 4, 9), 18_000m, "Рассрочка 1/3");
+        linkedPayment.Client = client;
+        linkedPayment.Invoice = invoice;
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.ClientCaseId = null;
+        linkedPayment.DocumentKind = DocumentKind.Payment;
+
+        db.Payments.AddRange(invoicePayment, linkedPayment);
+        await db.SaveChangesAsync();
+
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = linkedPayment.Id,
+            ClientCaseId = clientCase.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: client.Id,
+            caseId: clientCase.Id,
+            excludeInstallmentParents: false,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var payments = Assert.IsAssignableFrom<List<Payment>>(ok.Value);
+
+        Assert.Collection(
+            payments,
+            payment => Assert.Equal(linkedPayment.Id, payment.Id));
+    }
+
+    [Fact]
     public async Task PaymentsV2_ExcludesParentInvoice_WhenInstallmentScheduleExists()
     {
         await using var db = await CreateContextAsync();

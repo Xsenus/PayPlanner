@@ -47,7 +47,12 @@ public class PaymentsController : ControllerBase
             q = q.Where(p => p.Date <= toDate);
         }
         if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
-        if (caseId.HasValue) q = q.Where(p => p.ClientCaseId == caseId.Value);
+        if (caseId.HasValue)
+        {
+            q = q.Where(p =>
+                p.ClientCaseId == caseId.Value ||
+                p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+        }
         var list = await ProjectPaymentsForRead(q)
             .OrderBy(p => p.Date)
             .ToListAsync(ct);
