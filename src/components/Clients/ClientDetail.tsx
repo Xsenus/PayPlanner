@@ -80,7 +80,10 @@ import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
-import { filterRelatedPaymentsForInvoiceWithOptions } from '../../utils/invoicePayments';
+import {
+  collectClientInvoiceRelatedPayments,
+  resolveClientInvoiceCaseId,
+} from '../../utils/clientInvoiceRelatedPayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
@@ -1844,9 +1847,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       return;
     }
 
-    const selectedCaseId = invoiceSnapshot.clientCaseIds?.length === 1
-      ? invoiceSnapshot.clientCaseIds[0]
-      : invoiceSnapshot.clientCaseId ?? undefined;
+    const selectedCaseId = resolveClientInvoiceCaseId(invoiceSnapshot);
 
     setInvoiceModalPaymentsLoading(true);
     try {
@@ -1857,17 +1858,9 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         caseId: selectedCaseId,
       });
 
-      setInvoiceModalRelatedPayments(
-        filterRelatedPaymentsForInvoiceWithOptions(paymentPool, invoiceSnapshot, {
-          includeCurrentInvoiceRecord: true,
-        }),
-      );
+      setInvoiceModalRelatedPayments(collectClientInvoiceRelatedPayments(invoiceSnapshot, paymentPool));
     } catch {
-      setInvoiceModalRelatedPayments(
-        filterRelatedPaymentsForInvoiceWithOptions(visiblePayments, invoiceSnapshot, {
-          includeCurrentInvoiceRecord: true,
-        }),
-      );
+      setInvoiceModalRelatedPayments(collectClientInvoiceRelatedPayments(invoiceSnapshot, visiblePayments));
     } finally {
       setInvoiceModalPaymentsLoading(false);
     }

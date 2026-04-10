@@ -1,0 +1,110 @@
+import { describe, expect, it } from 'vitest';
+
+import type { Invoice, Payment } from '../types';
+import {
+  collectClientInvoiceRelatedPayments,
+  resolveClientInvoiceCaseId,
+} from './clientInvoiceRelatedPayments';
+
+function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
+  return {
+    id: 547,
+    invoiceEntityId: 30,
+    number: '30',
+    date: '2026-04-08',
+    amount: 18_000,
+    type: 'Income',
+    status: 'Pending',
+    isPaid: false,
+    createdAt: '2026-04-08T00:00:00Z',
+    clientCaseId: 701,
+    clientCaseIds: [701],
+    ...overrides,
+  };
+}
+
+function createPayment(overrides: Partial<Payment> = {}): Payment {
+  return {
+    id: 900,
+    date: '2026-04-09',
+    plannedDate: '2026-04-09',
+    amount: 18_000,
+    type: 'Income',
+    status: 'Pending',
+    isPaid: false,
+    description: 'Платеж по счету',
+    createdAt: '2026-04-09T00:00:00Z',
+    updatedAt: null,
+    documentKind: 'Payment',
+    account: '30',
+    accountDate: '2026-04-08',
+    invoiceId: 30,
+    ...overrides,
+  } as Payment;
+}
+
+describe('clientInvoiceRelatedPayments', () => {
+  it('uses the only client case id from clientCaseIds for invoice payment lookup', () => {
+    expect(resolveClientInvoiceCaseId(createInvoice({ clientCaseIds: [123], clientCaseId: undefined }))).toBe(123);
+  });
+
+  it('falls back to clientCaseId when invoice has no single case in clientCaseIds', () => {
+    expect(
+      resolveClientInvoiceCaseId(
+        createInvoice({
+          clientCaseIds: [111, 222],
+          clientCaseId: 333,
+        }),
+      ),
+    ).toBe(333);
+  });
+
+  it('returns undefined when invoice has no usable client case id', () => {
+    expect(
+      resolveClientInvoiceCaseId(
+        createInvoice({
+          clientCaseIds: [],
+          clientCaseId: undefined,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('keeps the representative row and sibling operations for the same invoice', () => {
+    const invoice = createInvoice({ id: 528, invoiceEntityId: 24, number: '24' });
+    const representativePayment = createPayment({
+      id: 528,
+      invoiceId: 24,
+      amount: 10_000,
+      description: 'Представляющая запись по счету №24',
+      plannedDate: '2026-04-02',
+      date: '2026-04-02',
+    });
+    const siblingPayment = createPayment({
+      id: 529,
+      invoiceId: 24,
+      amount: 5_000,
+      description: 'Доплата по счету №24',
+      plannedDate: '2026-04-03',
+      date: '2026-04-03',
+    });
+    const unrelatedPayment = createPayment({
+      id: 530,
+      invoiceId: 99,
+      account: '99',
+      description: 'Другой счет',
+    });
+
+    const result = collectClientInvoiceRelatedPayments(invoice, [
+      siblingPayment,
+      representativePayment,
+      unrelatedPayment,
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual([528, 529]);
+  });
+
+  it('returns an empty list when invoice is missing', () => {
+    expect(collectClientInvoiceRelatedPayments(null, [createPayment()])).toEqual([]);
+  });
+});
