@@ -389,7 +389,8 @@ function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
-async function convertImageToFittingDataUrl(file: File, maxLength: number): Promise<string> {
+// eslint-disable-next-line react-refresh/only-export-components
+export async function convertImageToFittingDataUrl(file: File, maxLength: number): Promise<string> {
   const original = await readFileAsDataUrl(file);
   if (original.length <= maxLength) return original;
 
@@ -649,6 +650,7 @@ export function LegalEntityModal({
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
+  const showLegacyImageFields = false;
 
   useEffect(() => {
     if (!isOpen) {
@@ -2162,7 +2164,7 @@ export function LegalEntityModal({
                 )
               }
             />
-            {false ? (
+            {showLegacyImageFields ? (
               <>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Логотип компании</div>

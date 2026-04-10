@@ -65,7 +65,7 @@ import type {
   PowerOfAttorney,
 } from '../../types';
 import type { MenuSectionKey } from '../../types/permissions';
-import { toDateInputValue, toRuDate, formatLocalYMD } from '../../utils/dateUtils';
+import { toRuDate, formatLocalYMD } from '../../utils/dateUtils';
 import { MonthRangePicker } from '../MonthRange/MonthRangePicker';
 import { CaseModal } from './CaseModal';
 import { TwoTypeStats } from '../Statistics/TwoTypeStats';

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Copy, FileSearch, FileText, Plus, RefreshCw, RotateCcw, Save, Search, Trash2 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type { InvoiceDocumentTemplateDto, InvoiceDocumentTemplateSettingsDto } from '../../services/api';
@@ -209,7 +209,7 @@ export function InvoiceDocumentTemplateSettings() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadSettings = async (showSuccessToast = false) => {
+  const loadSettings = useCallback(async (showSuccessToast = false) => {
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -232,11 +232,11 @@ export function InvoiceDocumentTemplateSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     void loadSettings();
-  }, []);
+  }, [loadSettings]);
 
   const selectedTemplate = useMemo(
     () => settings?.templates.find((item) => item.key === selectedTemplateKey) ?? null,

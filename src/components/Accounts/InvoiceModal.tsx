@@ -1809,7 +1809,6 @@ export function InvoiceModal({
   };
 
   const amountValue = parseMoneyInput(form.amount);
-  const lineItemsTotal = lineItems.reduce((sum, item) => sum + parseMoneyInput(item.quantity) * parseMoneyInput(item.price), 0);
   const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
