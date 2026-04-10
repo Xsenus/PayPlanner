@@ -29,6 +29,12 @@ import { useToast } from '../../hooks/useToast';
 import DictionariesModal from '../Dictionaries/DictionariesModal';
 import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import {
+  dedupeLegalEntityAddressInputs,
+  findMatchingLegalEntityAddressEntryIndex,
+  mergeLegalEntityAddressEntry,
+  upsertLegalEntityAddressEntry,
+} from './legalEntityFormUtils';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -383,6 +389,9 @@ export function LegalEntityModal({
 
   const extractErrorMessage = (error: unknown, fallback: string) => {
     const raw = error instanceof Error ? error.message : String(error);
+    if (/failed to fetch|networkerror|load failed|net::err_failed/i.test(raw)) {
+      return 'Сервер не вернул ответ при сохранении. Проверьте соединение и попробуйте ещё раз.';
+    }
     const marker = ' - ';
     const markerIndex = raw.indexOf(marker);
     if (markerIndex >= 0) {
@@ -436,6 +445,9 @@ export function LegalEntityModal({
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
   const [sealDataUrl, setSealDataUrl] = useState<string>('');
   const [directorSignatureDataUrl, setDirectorSignatureDataUrl] = useState<string>('');
+  const [logoChanged, setLogoChanged] = useState(false);
+  const [sealChanged, setSealChanged] = useState(false);
+  const [directorSignatureChanged, setDirectorSignatureChanged] = useState(false);
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>('base');
   const [addressEntries, setAddressEntries] = useState<ClientAddressEntryFormValue[]>([]);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<Record<number, DadataAddressSuggestion[]>>({});
@@ -532,18 +544,32 @@ export function LegalEntityModal({
       setLogoDataUrl(initial.logoDataUrl ?? "");
       setSealDataUrl(initial.sealDataUrl ?? "");
       setDirectorSignatureDataUrl(initial.directorSignatureDataUrl ?? "");
-      setAddressEntries((initial.addresses ?? []).map((a) => ({
-        ...createEmptyLegalEntityAddressEntry(),
-        type: mapAddressTypeToForm(a.type),
-        fullAddress: a.value ?? '',
-        postalCode: a.postalCode ?? '',
-        region: a.regionWithType ?? '',
-        city: a.cityWithType ?? '',
-        street: a.streetWithType ?? '',
-        house: a.house ?? '',
-        flat: a.flat ?? '',
-        additionalTypes: [],
-      })));
+      setLogoChanged(false);
+      setSealChanged(false);
+      setDirectorSignatureChanged(false);
+      setAddressEntries((initial.addresses ?? []).reduce<ClientAddressEntryFormValue[]>((acc, address) => {
+        const nextEntry: ClientAddressEntryFormValue = {
+          ...createEmptyLegalEntityAddressEntry(),
+          type: mapAddressTypeToForm(address.type),
+          fullAddress: address.value ?? '',
+          postalCode: address.postalCode ?? '',
+          region: address.regionWithType ?? '',
+          city: address.cityWithType ?? '',
+          street: address.streetWithType ?? '',
+          house: address.house ?? '',
+          flat: address.flat ?? '',
+          additionalTypes: [],
+        };
+
+        const matchIndex = findMatchingLegalEntityAddressEntryIndex(acc, nextEntry);
+        if (matchIndex < 0) {
+          acc.push(nextEntry);
+          return acc;
+        }
+
+        acc[matchIndex] = mergeLegalEntityAddressEntry(acc[matchIndex], nextEntry);
+        return acc;
+      }, []));
       setContactPhones(parseJsonOrDefault<string[]>(initial.contactPhonesJson, initial.phone ? [initial.phone] : []));
       setContactEmails(parseJsonOrDefault<string[]>(initial.contactEmailsJson, initial.email ? [initial.email] : []));
     } else {
@@ -558,6 +584,9 @@ export function LegalEntityModal({
       setLogoDataUrl("");
       setSealDataUrl("");
       setDirectorSignatureDataUrl("");
+      setLogoChanged(false);
+      setSealChanged(false);
+      setDirectorSignatureChanged(false);
       setAddressEntries([createEmptyLegalEntityAddressEntry()]);
       setAddressSuggestionsByIndex({});
       setContactPhones([]);
@@ -723,15 +752,25 @@ export function LegalEntityModal({
   const handleImageUpload = async (
     file: File | null,
     setter: (value: string) => void,
+    markChanged: (value: boolean) => void,
   ) => {
     if (!file) return;
     setError(null);
     try {
       const optimized = await convertImageToFittingDataUrl(file, TARGET_IMAGE_DATA_URL_LENGTH);
       setter(optimized);
+      markChanged(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить изображение.');
     }
+  };
+
+  const clearImageValue = (
+    setter: (value: string) => void,
+    markChanged: (value: boolean) => void,
+  ) => {
+    setter('');
+    markChanged(true);
   };
 
   const updateEnglishRequisites = (key: keyof EnglishRequisites, value: string) => {
@@ -860,16 +899,13 @@ export function LegalEntityModal({
     }));
 
     if (baseAddress) {
-      setAddressEntries((prev) => {
-        if (prev.some((entry) => entry.fullAddress.trim() === baseAddress)) {
-          return prev;
-        }
-        return [{
+      setAddressEntries((prev) =>
+        upsertLegalEntityAddressEntry(prev, {
           ...createEmptyLegalEntityAddressEntry(),
           type: 'legal',
           fullAddress: baseAddress,
-        }, ...prev];
-      });
+        }),
+      );
     }
 
     const query = (suggestion.inn || suggestion.ogrn || dadataQuery).trim();
@@ -908,24 +944,7 @@ export function LegalEntityModal({
 
       if (normalizedAddress) {
         setAddressEntries((prev) => {
-          const existingIndex = prev.findIndex((entry) =>
-            entry.fullAddress.trim() === normalizedAddress ||
-            entry.fullAddress.trim() === (details.address ?? '').trim());
-
-          if (existingIndex >= 0) {
-            return prev.map((entry, idx) => (idx === existingIndex ? {
-              ...entry,
-              fullAddress: normalizedAddress,
-              postalCode: details.postalCode ?? entry.postalCode,
-              region: details.regionWithType ?? entry.region,
-              city: details.cityWithType ?? entry.city,
-              street: details.streetWithType ?? entry.street,
-              house: details.house ?? entry.house,
-              flat: details.flat ?? entry.flat,
-            } : entry));
-          }
-
-          return [{
+          const nextEntry: ClientAddressEntryFormValue = {
             ...createEmptyLegalEntityAddressEntry(),
             type: 'legal',
             fullAddress: normalizedAddress,
@@ -935,7 +954,16 @@ export function LegalEntityModal({
             street: details.streetWithType ?? '',
             house: details.house ?? '',
             flat: details.flat ?? '',
-          }, ...prev];
+          };
+          const existingIndex = findMatchingLegalEntityAddressEntryIndex(prev, nextEntry);
+
+          if (existingIndex >= 0) {
+            return prev.map((entry, idx) =>
+              idx === existingIndex ? mergeLegalEntityAddressEntry(entry, nextEntry) : entry,
+            );
+          }
+
+          return [nextEntry, ...prev];
         });
       }
     } catch {
@@ -979,6 +1007,23 @@ export function LegalEntityModal({
         setLoading(false);
         return;
       }
+
+      const dedupedAddressInputs = dedupeLegalEntityAddressInputs(
+        addressEntries
+          .filter((address) => address.fullAddress.trim())
+          .map((address, index) => ({
+            type: mapAddressTypeFromForm(address.type),
+            value: address.fullAddress.trim(),
+            unrestrictedValue: address.fullAddress.trim(),
+            postalCode: normalize(address.postalCode),
+            regionWithType: normalize(address.region),
+            cityWithType: normalize(address.city || address.settlement),
+            streetWithType: normalize(address.street),
+            house: normalize(address.house),
+            flat: normalize(address.flat),
+            isPrimary: index === 0,
+          })),
+      );
 
       const payload: LegalEntityInput = {
         shortName,
@@ -1028,30 +1073,32 @@ export function LegalEntityModal({
         cashRegistersJson: cashRegisters.length > 0 ? JSON.stringify(cashRegisters) : null,
         cardsJson: cards.length > 0 ? JSON.stringify(cards) : null,
         requisitesEnglishJson: JSON.stringify(englishRequisites),
-        logoDataUrl: logoDataUrl || null,
-        sealDataUrl: sealDataUrl || null,
-        directorSignatureDataUrl: directorSignatureDataUrl || null,
         documentDirectorJson: JSON.stringify(documentDirector),
         chiefAccountantJson: JSON.stringify(chiefAccountant),
         contactPhonesJson: JSON.stringify(contactPhones.filter((x) => x.trim())),
         contactEmailsJson: JSON.stringify(contactEmails.filter((x) => x.trim())),
         notes: normalize(formState.notes),
-        addresses: addressEntries
-          .filter((a) => a.fullAddress.trim())
-          .map((a, idx) => ({
-            type: mapAddressTypeFromForm(a.type),
-            value: a.fullAddress.trim(),
-            unrestrictedValue: a.fullAddress.trim(),
-            postalCode: normalize(a.postalCode),
-            regionWithType: normalize(a.region),
-            cityWithType: normalize(a.city || a.settlement),
-            streetWithType: normalize(a.street),
-            house: normalize(a.house),
-            flat: normalize(a.flat),
-            isPrimary: idx === 0,
-          })),
+        addresses: dedupedAddressInputs,
         clientIds,
       };
+
+      if (initial) {
+        payload.logoChanged = logoChanged;
+        payload.sealChanged = sealChanged;
+        payload.directorSignatureChanged = directorSignatureChanged;
+      }
+
+      if (!initial || logoChanged) {
+        payload.logoDataUrl = logoDataUrl || null;
+      }
+
+      if (!initial || sealChanged) {
+        payload.sealDataUrl = sealDataUrl || null;
+      }
+
+      if (!initial || directorSignatureChanged) {
+        payload.directorSignatureDataUrl = directorSignatureDataUrl || null;
+      }
       const serializedPayload = JSON.stringify(payload);
       if (serializedPayload.length > LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH) {
         setError('Данные юридического лица слишком большие для сохранения одним запросом. Уменьшите размер картинок или лишних вложенных данных.');
@@ -1134,7 +1181,31 @@ export function LegalEntityModal({
       setLogoDataUrl(saved.logoDataUrl ?? logoDataUrl);
       setSealDataUrl(saved.sealDataUrl ?? sealDataUrl);
       setDirectorSignatureDataUrl(saved.directorSignatureDataUrl ?? directorSignatureDataUrl);
-      setAddressEntries((saved.addresses ?? []).map((a) => ({ ...createEmptyLegalEntityAddressEntry(), type: mapAddressTypeToForm(a.type), fullAddress: a.value ?? '', postalCode: a.postalCode ?? '', region: a.regionWithType ?? '', city: a.cityWithType ?? '', street: a.streetWithType ?? '', house: a.house ?? '', flat: a.flat ?? '' })));
+      setLogoChanged(false);
+      setSealChanged(false);
+      setDirectorSignatureChanged(false);
+      setAddressEntries((saved.addresses ?? []).reduce<ClientAddressEntryFormValue[]>((acc, address) => {
+        const nextEntry: ClientAddressEntryFormValue = {
+          ...createEmptyLegalEntityAddressEntry(),
+          type: mapAddressTypeToForm(address.type),
+          fullAddress: address.value ?? '',
+          postalCode: address.postalCode ?? '',
+          region: address.regionWithType ?? '',
+          city: address.cityWithType ?? '',
+          street: address.streetWithType ?? '',
+          house: address.house ?? '',
+          flat: address.flat ?? '',
+        };
+
+        const matchIndex = findMatchingLegalEntityAddressEntryIndex(acc, nextEntry);
+        if (matchIndex < 0) {
+          acc.push(nextEntry);
+          return acc;
+        }
+
+        acc[matchIndex] = mergeLegalEntityAddressEntry(acc[matchIndex], nextEntry);
+        return acc;
+      }, []));
       setContactPhones(parseJsonOrDefault<string[]>(saved.contactPhonesJson, contactPhones));
       setContactEmails(parseJsonOrDefault<string[]>(saved.contactEmailsJson, contactEmails));
       if (!isPageMode) {
@@ -1706,24 +1777,24 @@ export function LegalEntityModal({
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Логотип компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl); }} />
-                {logoDataUrl ? <img src={logoDataUrl} alt="Логотип" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setLogoDataUrl, setLogoChanged); }} />
+                {logoDataUrl ? <><img src={logoDataUrl} alt="Логотип" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setLogoDataUrl, setLogoChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 545x185. Форматы: JPG, JPEG, PNG.</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Печать компании</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl); }} />
-                {sealDataUrl ? <img src={sealDataUrl} alt="Печать" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setSealDataUrl, setSealChanged); }} />
+                {sealDataUrl ? <><img src={sealDataUrl} alt="Печать" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setSealDataUrl, setSealChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 200x200. Форматы: JPG, JPEG, PNG.</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">Подпись руководителя</div>
               <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl); }} />
-                {directorSignatureDataUrl ? <img src={directorSignatureDataUrl} alt="Подпись" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" /> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
+                <input type="file" accept="image/*" className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700" disabled={readOnly} onChange={(e) => { void handleImageUpload(e.target.files?.[0] ?? null, setDirectorSignatureDataUrl, setDirectorSignatureChanged); }} />
+                {directorSignatureDataUrl ? <><img src={directorSignatureDataUrl} alt="Подпись" className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1" />{!readOnly ? <button type="button" onClick={() => clearImageValue(setDirectorSignatureDataUrl, setDirectorSignatureChanged)} className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50">Убрать изображение</button> : null}</> : <><div className="mt-2 font-semibold">Выберите файлы</div><div className="text-xs text-slate-400">или перетащите сюда.</div></>}
               </div>
               <div className="mt-4 text-xs text-slate-400">Рекомендуемый размер для загрузки: 165x50. Форматы: JPG, JPEG, PNG.</div>
             </div>

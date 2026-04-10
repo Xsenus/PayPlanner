@@ -155,6 +155,12 @@ public class LegalEntityRequest
     [MaxLength(12000000)]
     public string? DirectorSignatureDataUrl { get; set; }
 
+    public bool? LogoChanged { get; set; }
+
+    public bool? SealChanged { get; set; }
+
+    public bool? DirectorSignatureChanged { get; set; }
+
     [MaxLength(8000)]
     public string? DocumentDirectorJson { get; set; }
 

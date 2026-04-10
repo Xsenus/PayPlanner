@@ -8,6 +8,8 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -305,6 +307,97 @@ public class LegalEntitiesController : ControllerBase
         return new string(chars);
     }
 
+    private static string CanonicalizeAddressToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var normalized = value
+            .Trim()
+            .ToLowerInvariant()
+            .Replace(".", " ", StringComparison.Ordinal)
+            .Replace(",", " ", StringComparison.Ordinal);
+
+        normalized = Regex.Replace(normalized, @"\b\d{6}\b", " ", RegexOptions.CultureInvariant);
+
+        normalized = Regex.Replace(
+            normalized,
+            @"\b(россия|рф|г|гор|город|ул|улица|д|дом|кв|квартира|обл|область)\b",
+            " ",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        var chars = normalized
+            .Where(char.IsLetterOrDigit)
+            .ToArray();
+
+        return new string(chars);
+    }
+
+    private static string BuildAddressIdentityKey(AddressRecord address)
+    {
+        var typeKey = ((int)address.Type).ToString(CultureInfo.InvariantCulture);
+        var fiasKey = CanonicalizeAddressToken(address.FiasId);
+        if (!string.IsNullOrWhiteSpace(fiasKey))
+        {
+            return $"{typeKey}|fias:{fiasKey}";
+        }
+
+        var textKey = CanonicalizeAddressToken(address.UnrestrictedValue);
+        if (string.IsNullOrWhiteSpace(textKey))
+        {
+            textKey = CanonicalizeAddressToken(address.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(textKey))
+        {
+            return $"{typeKey}|text:{textKey}";
+        }
+
+        var structuredKey = string.Join("|", new[]
+        {
+            CanonicalizeAddressToken(address.RegionWithType),
+            CanonicalizeAddressToken(address.CityWithType),
+            CanonicalizeAddressToken(address.StreetWithType),
+            CanonicalizeAddressToken(address.House),
+            CanonicalizeAddressToken(address.Flat),
+        });
+
+        return $"{typeKey}|{structuredKey}";
+    }
+
+    private static void MergeAddressRecord(AddressRecord target, AddressRecord incoming)
+    {
+        target.Value = NormalizeOptional(incoming.Value) ?? target.Value;
+        target.UnrestrictedValue = target.UnrestrictedValue ?? NormalizeOptional(incoming.UnrestrictedValue);
+        target.PostalCode = target.PostalCode ?? NormalizeOptional(incoming.PostalCode);
+        target.Country = target.Country ?? NormalizeOptional(incoming.Country);
+        target.RegionWithType = target.RegionWithType ?? NormalizeOptional(incoming.RegionWithType);
+        target.CityWithType = target.CityWithType ?? NormalizeOptional(incoming.CityWithType);
+        target.StreetWithType = target.StreetWithType ?? NormalizeOptional(incoming.StreetWithType);
+        target.House = target.House ?? NormalizeOptional(incoming.House);
+        target.Flat = target.Flat ?? NormalizeOptional(incoming.Flat);
+        target.FiasId = target.FiasId ?? NormalizeOptional(incoming.FiasId);
+        target.KladrId = target.KladrId ?? NormalizeOptional(incoming.KladrId);
+        target.GeoLat = target.GeoLat ?? NormalizeOptional(incoming.GeoLat);
+        target.GeoLon = target.GeoLon ?? NormalizeOptional(incoming.GeoLon);
+        target.IsPrimary |= incoming.IsPrimary;
+    }
+
+    private static string? ResolveUpdatedAssetValue(string? currentValue, string? incomingValue, bool? changed)
+    {
+        if (changed == true)
+        {
+            return NormalizeOptional(incomingValue);
+        }
+
+        if (incomingValue is not null)
+        {
+            return NormalizeOptional(incomingValue);
+        }
+
+        return currentValue;
+    }
+
     private static void SetProperty(object target, string propertyName, object value)
     {
         var propertyInfo = target.GetType().GetProperty(propertyName);
@@ -437,28 +530,39 @@ public class LegalEntitiesController : ControllerBase
     {
         if (addresses is null) return;
 
-        var normalized = addresses
-            .Where(a => !string.IsNullOrWhiteSpace(a.Value))
-            .Select(a => new AddressRecord
+        var deduped = new List<AddressRecord>();
+
+        foreach (var address in addresses.Where(a => !string.IsNullOrWhiteSpace(a.Value)))
+        {
+            var normalized = new AddressRecord
             {
-                Type = Enum.IsDefined(typeof(AddressType), a.Type) ? (AddressType)a.Type : AddressType.Other,
-                Value = a.Value!.Trim(),
-                UnrestrictedValue = NormalizeOptional(a.UnrestrictedValue),
-                PostalCode = NormalizeOptional(a.PostalCode),
-                Country = NormalizeOptional(a.Country),
-                RegionWithType = NormalizeOptional(a.RegionWithType),
-                CityWithType = NormalizeOptional(a.CityWithType),
-                StreetWithType = NormalizeOptional(a.StreetWithType),
-                House = NormalizeOptional(a.House),
-                Flat = NormalizeOptional(a.Flat),
-                FiasId = NormalizeOptional(a.FiasId),
-                KladrId = NormalizeOptional(a.KladrId),
-                GeoLat = NormalizeOptional(a.GeoLat),
-                GeoLon = NormalizeOptional(a.GeoLon),
-                IsPrimary = a.IsPrimary,
+                Type = Enum.IsDefined(typeof(AddressType), address.Type) ? (AddressType)address.Type : AddressType.Other,
+                Value = address.Value!.Trim(),
+                UnrestrictedValue = NormalizeOptional(address.UnrestrictedValue),
+                PostalCode = NormalizeOptional(address.PostalCode),
+                Country = NormalizeOptional(address.Country),
+                RegionWithType = NormalizeOptional(address.RegionWithType),
+                CityWithType = NormalizeOptional(address.CityWithType),
+                StreetWithType = NormalizeOptional(address.StreetWithType),
+                House = NormalizeOptional(address.House),
+                Flat = NormalizeOptional(address.Flat),
+                FiasId = NormalizeOptional(address.FiasId),
+                KladrId = NormalizeOptional(address.KladrId),
+                GeoLat = NormalizeOptional(address.GeoLat),
+                GeoLon = NormalizeOptional(address.GeoLon),
+                IsPrimary = address.IsPrimary,
                 LegalEntityId = entity.Id,
-            })
-            .ToList();
+            };
+
+            var existingIndex = deduped.FindIndex(item => BuildAddressIdentityKey(item) == BuildAddressIdentityKey(normalized));
+            if (existingIndex < 0)
+            {
+                deduped.Add(normalized);
+                continue;
+            }
+
+            MergeAddressRecord(deduped[existingIndex], normalized);
+        }
 
         var existing = entity.Addresses.ToList();
         if (existing.Count > 0)
@@ -467,16 +571,21 @@ public class LegalEntitiesController : ControllerBase
             entity.Addresses.Clear();
         }
 
-        if (normalized.Count > 0)
+        if (deduped.Count == 0)
         {
-            if (!normalized.Any(a => a.IsPrimary))
-            {
-                normalized[0].IsPrimary = true;
-            }
-            foreach (var item in normalized)
-            {
-                entity.Addresses.Add(item);
-            }
+            return;
+        }
+
+        var primaryIndex = deduped.FindIndex(item => item.IsPrimary);
+        if (primaryIndex < 0)
+        {
+            primaryIndex = 0;
+        }
+
+        for (var index = 0; index < deduped.Count; index++)
+        {
+            deduped[index].IsPrimary = index == primaryIndex;
+            entity.Addresses.Add(deduped[index]);
         }
     }
 
@@ -926,9 +1035,9 @@ public class LegalEntitiesController : ControllerBase
         entity.CashRegistersJson = NormalizeOptional(request.CashRegistersJson);
         entity.CardsJson = NormalizeOptional(request.CardsJson);
         entity.RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson);
-        entity.LogoDataUrl = NormalizeOptional(request.LogoDataUrl);
-        entity.SealDataUrl = NormalizeOptional(request.SealDataUrl);
-        entity.DirectorSignatureDataUrl = NormalizeOptional(request.DirectorSignatureDataUrl);
+        entity.LogoDataUrl = ResolveUpdatedAssetValue(entity.LogoDataUrl, request.LogoDataUrl, request.LogoChanged);
+        entity.SealDataUrl = ResolveUpdatedAssetValue(entity.SealDataUrl, request.SealDataUrl, request.SealChanged);
+        entity.DirectorSignatureDataUrl = ResolveUpdatedAssetValue(entity.DirectorSignatureDataUrl, request.DirectorSignatureDataUrl, request.DirectorSignatureChanged);
         entity.DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson);
         entity.ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson);
         entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);

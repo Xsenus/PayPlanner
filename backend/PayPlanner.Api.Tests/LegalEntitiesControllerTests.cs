@@ -175,6 +175,133 @@ public class LegalEntitiesControllerTests
         Assert.NotNull(auditEvent);
     }
 
+    [Fact]
+    public async Task Update_DeduplicatesEquivalentAddresses_AndKeepsSinglePrimary()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "Тест адресов",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 8);
+        var request = BuildRequest();
+        request.Addresses =
+        [
+            new LegalEntityAddressRequest
+            {
+                Type = 3,
+                Value = "Самарская обл., г. Новокуйбышевск, ул. Миронова, д. 9",
+                UnrestrictedValue = "446200, Самарская обл., г. Новокуйбышевск, ул. Миронова, д. 9",
+                PostalCode = "446200",
+                CityWithType = "г Новокуйбышевск",
+                StreetWithType = "ул Миронова",
+                House = "9",
+                IsPrimary = true,
+            },
+            new LegalEntityAddressRequest
+            {
+                Type = 3,
+                Value = "446200 Самарская обл г Новокуйбышевск ул Миронова дом 9",
+                UnrestrictedValue = "446200 Самарская обл г Новокуйбышевск ул Миронова дом 9",
+                PostalCode = "446200",
+                CityWithType = "Новокуйбышевск",
+                StreetWithType = "Миронова",
+                House = "9",
+                IsPrimary = false,
+            },
+        ];
+
+        var action = await controller.Update(entity.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+        Assert.Single(dto.Addresses);
+        Assert.True(dto.Addresses[0].IsPrimary);
+
+        var storedAddresses = await db.AddressRecords
+            .AsNoTracking()
+            .Where(item => item.LegalEntityId == entity.Id)
+            .ToListAsync();
+
+        Assert.Single(storedAddresses);
+        Assert.Equal("446200", storedAddresses[0].PostalCode);
+    }
+
+    [Fact]
+    public async Task Update_PreservesExistingImages_WhenTheyWereNotChanged()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "Тест изображений",
+            LogoDataUrl = "data:image/png;base64,AAAA",
+            SealDataUrl = "data:image/png;base64,BBBB",
+            DirectorSignatureDataUrl = "data:image/png;base64,CCCC",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 9);
+        var request = BuildRequest();
+        request.LogoDataUrl = null;
+        request.SealDataUrl = null;
+        request.DirectorSignatureDataUrl = null;
+
+        var action = await controller.Update(entity.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+
+        Assert.Equal("data:image/png;base64,AAAA", dto.LogoDataUrl);
+        Assert.Equal("data:image/png;base64,BBBB", dto.SealDataUrl);
+        Assert.Equal("data:image/png;base64,CCCC", dto.DirectorSignatureDataUrl);
+    }
+
+    [Fact]
+    public async Task Update_ClearsImages_WhenTheyWereExplicitlyChanged()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "Очистка изображений",
+            LogoDataUrl = "data:image/png;base64,AAAA",
+            SealDataUrl = "data:image/png;base64,BBBB",
+            DirectorSignatureDataUrl = "data:image/png;base64,CCCC",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 10);
+        var request = BuildRequest();
+        request.LogoDataUrl = null;
+        request.SealDataUrl = null;
+        request.DirectorSignatureDataUrl = null;
+        request.LogoChanged = true;
+        request.SealChanged = true;
+        request.DirectorSignatureChanged = true;
+
+        var action = await controller.Update(entity.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+
+        Assert.Null(dto.LogoDataUrl);
+        Assert.Null(dto.SealDataUrl);
+        Assert.Null(dto.DirectorSignatureDataUrl);
+    }
+
     private static LegalEntityRequest BuildRequest()
     {
         return new LegalEntityRequest

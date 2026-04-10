@@ -275,6 +275,9 @@ export interface LegalEntityInput {
   logoDataUrl?: string | null;
   sealDataUrl?: string | null;
   directorSignatureDataUrl?: string | null;
+  logoChanged?: boolean | null;
+  sealChanged?: boolean | null;
+  directorSignatureChanged?: boolean | null;
   documentDirectorJson?: string | null;
   chiefAccountantJson?: string | null;
   contactPhonesJson?: string | null;
