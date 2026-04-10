@@ -225,6 +225,15 @@ public class LegalEntitiesController : ControllerBase
         };
     }
 
+    private async Task<LegalEntity?> LoadLegalEntityForDetailAsync(int id, CancellationToken ct)
+    {
+        return await _db.LegalEntities
+            .Include(le => le.Clients)
+            .Include(le => le.Addresses)
+            .Include(le => le.ResponsibleUser)
+            .FirstOrDefaultAsync(le => le.Id == id, ct);
+    }
+
     private static AddressRecordDto MapAddress(AddressRecord address)
         => new()
         {
@@ -558,7 +567,7 @@ public class LegalEntitiesController : ControllerBase
     }
 
 
-    private void ApplyLegalEntityAddresses(LegalEntity entity, List<LegalEntityAddressRequest>? addresses)
+    private async Task ApplyLegalEntityAddressesAsync(LegalEntity entity, List<LegalEntityAddressRequest>? addresses, CancellationToken ct)
     {
         if (addresses is null) return;
 
@@ -583,6 +592,7 @@ public class LegalEntitiesController : ControllerBase
                 GeoLat = NormalizeOptional(address.GeoLat),
                 GeoLon = NormalizeOptional(address.GeoLon),
                 IsPrimary = address.IsPrimary,
+                ClientId = null,
                 LegalEntityId = entity.Id,
             };
 
@@ -596,12 +606,24 @@ public class LegalEntitiesController : ControllerBase
             MergeAddressRecord(deduped[existingIndex], normalized);
         }
 
-        var existing = entity.Addresses.ToList();
-        if (existing.Count > 0)
+        if (entity.Id > 0)
         {
-            _db.AddressRecords.RemoveRange(existing);
-            entity.Addresses.Clear();
+            var trackedAddresses = _db.ChangeTracker
+                .Entries<AddressRecord>()
+                .Where(entry => entry.Entity.LegalEntityId == entity.Id)
+                .ToList();
+
+            foreach (var trackedAddress in trackedAddresses)
+            {
+                trackedAddress.State = EntityState.Detached;
+            }
+
+            await _db.AddressRecords
+                .Where(item => item.LegalEntityId == entity.Id)
+                .ExecuteDeleteAsync(ct);
         }
+
+        entity.Addresses.Clear();
 
         if (deduped.Count == 0)
         {
@@ -617,8 +639,11 @@ public class LegalEntitiesController : ControllerBase
         for (var index = 0; index < deduped.Count; index++)
         {
             deduped[index].IsPrimary = index == primaryIndex;
-            entity.Addresses.Add(deduped[index]);
+            deduped[index].ClientId = null;
+            deduped[index].LegalEntityId = entity.Id;
         }
+
+        _db.AddressRecords.AddRange(deduped);
     }
 
     [HttpPost]
@@ -727,13 +752,11 @@ public class LegalEntitiesController : ControllerBase
             await ApplyClientLinksAsync(entity.Id, clientIds, ct);
         }
 
-        ApplyLegalEntityAddresses(entity, request.Addresses);
+        await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
         await _db.SaveChangesAsync(ct);
 
-        await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
-        await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
-        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
-        return Created($"/api/legal-entities/{entity.Id}", MapDetail(entity, includeInlineAssets: false));
+        var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
+        return Created($"/api/legal-entities/{entity.Id}", MapDetail(responseEntity ?? entity, includeInlineAssets: false));
     }
 
     [HttpDelete("{id:int}")]
@@ -1091,13 +1114,11 @@ public class LegalEntitiesController : ControllerBase
 
         await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
-        ApplyLegalEntityAddresses(entity, request.Addresses);
+        await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
         await _db.SaveChangesAsync(ct);
 
-        await _db.Entry(entity).Collection(le => le.Clients).LoadAsync(ct);
-        await _db.Entry(entity).Collection(le => le.Addresses).LoadAsync(ct);
-        await _db.Entry(entity).Reference(le => le.ResponsibleUser).LoadAsync(ct);
-        return Ok(MapDetail(entity, includeInlineAssets: false));
+        var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
+        return Ok(MapDetail(responseEntity ?? entity, includeInlineAssets: false));
     }
 
     /// <summary>

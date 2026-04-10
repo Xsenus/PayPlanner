@@ -234,6 +234,69 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task Update_ReplacesExistingAddresses_WhenEntityAlreadyHasStoredAddressRows()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "Р—Р°РјРµРЅР° Р°РґСЂРµСЃРѕРІ",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Add(new AddressRecord
+        {
+            LegalEntityId = entity.Id,
+            Type = AddressType.Legal,
+            Value = "РЎС‚Р°СЂС‹Р№ Р°РґСЂРµСЃ",
+            CityWithType = "Рі РЎР°РјР°СЂР°",
+            StreetWithType = "СѓР» РЎС‚Р°СЂР°СЏ",
+            House = "1",
+            IsPrimary = true,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 12);
+        var request = BuildRequest();
+        request.Addresses =
+        [
+            new LegalEntityAddressRequest
+            {
+                Type = 3,
+                Value = "РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
+                UnrestrictedValue = "446200, РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
+                PostalCode = "446200",
+                CityWithType = "Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє",
+                StreetWithType = "СѓР» РњРёСЂРѕРЅРѕРІР°",
+                House = "9",
+                IsPrimary = true,
+            },
+        ];
+
+        var action = await controller.Update(entity.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+        Assert.Single(dto.Addresses);
+        Assert.True(dto.Addresses[0].IsPrimary);
+
+        var storedAddresses = await db.AddressRecords
+            .AsNoTracking()
+            .Where(item => item.LegalEntityId == entity.Id)
+            .ToListAsync();
+
+        Assert.Single(storedAddresses);
+        Assert.Equal("446200", storedAddresses[0].PostalCode);
+        Assert.Equal("Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє", storedAddresses[0].CityWithType);
+        Assert.Null(storedAddresses[0].ClientId);
+        Assert.Equal(entity.Id, storedAddresses[0].LegalEntityId);
+        Assert.DoesNotContain(storedAddresses, item => item.Value == "РЎС‚Р°СЂС‹Р№ Р°РґСЂРµСЃ");
+    }
+
+    [Fact]
     public async Task Update_PreservesExistingImages_WhenTheyWereNotChanged()
     {
         await using var db = await CreateContextAsync();
@@ -269,6 +332,45 @@ public class LegalEntitiesControllerTests
         Assert.Equal("data:image/png;base64,AAAA", stored.LogoDataUrl);
         Assert.Equal("data:image/png;base64,BBBB", stored.SealDataUrl);
         Assert.Equal("data:image/png;base64,CCCC", stored.DirectorSignatureDataUrl);
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsStoredAddresses()
+    {
+        await using var db = await CreateContextAsync();
+        var entity = new LegalEntity
+        {
+            ShortName = "РџСЂРѕС‡РёС‚Р°С‚СЊ Р°РґСЂРµСЃР°",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Add(new AddressRecord
+        {
+            LegalEntityId = entity.Id,
+            Type = AddressType.Legal,
+            Value = "РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
+            PostalCode = "446200",
+            CityWithType = "Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє",
+            StreetWithType = "СѓР» РњРёСЂРѕРЅРѕРІР°",
+            House = "9",
+            IsPrimary = true,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 13);
+        var action = await controller.GetById(entity.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+
+        var address = Assert.Single(dto.Addresses);
+        Assert.Equal("446200", address.PostalCode);
+        Assert.Equal("Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє", address.CityWithType);
+        Assert.Equal("СѓР» РњРёСЂРѕРЅРѕРІР°", address.StreetWithType);
     }
 
     [Fact]
