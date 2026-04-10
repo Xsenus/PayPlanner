@@ -367,7 +367,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<InvoiceLineItem>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Name).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(2000).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Price).HasColumnType("decimal(18,2)");

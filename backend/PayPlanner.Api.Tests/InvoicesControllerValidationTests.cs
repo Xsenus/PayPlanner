@@ -14,6 +14,9 @@ namespace PayPlanner.Api.Tests;
 
 public class InvoicesControllerValidationTests
 {
+    private const string LongInvoiceLineItemName =
+        "Юридические услуги / ОКАЗАНИЕ ЮРИДИЧЕСКИХ УСЛУГ В РАМКАХ ДОГОВОРА № 1-20/03-2026 ОТ 20.03.2026 Г. по вопросу оказания услуг реализации транспортного средства, организации подачи объявлений на площадках в сети интернет, организация просмотра транспортного средства, подготовки договора для продажи транспортного средства LADA VESTA GFL110; идентификационный номер (vin): XTAGFL110NY628724; год выпуска: октябрь 2021; государственный регистрационный номер: Е506ОХ763; номер кузова: XTAGFL110NY628724";
+
     [Fact]
     public async Task Create_IgnoresOrphanInvoiceRecord_WhenCheckingDuplicateNumber()
     {
@@ -82,6 +85,35 @@ public class InvoicesControllerValidationTests
 
         var remainingNumbers = await db.Invoices.AsNoTracking().OrderBy(x => x.Number).Select(x => x.Number).ToListAsync();
         Assert.Equal(new[] { "24" }, remainingNumbers);
+    }
+
+    [Fact]
+    public async Task Create_AllowsLongInvoiceLineItemName()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("31", clientId, new DateTime(2026, 4, 10));
+        request.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                Name = LongInvoiceLineItemName,
+                Quantity = 1,
+                Unit = "шт",
+                Price = 22_500m,
+            },
+        ];
+        request.Amount = 22_500m;
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        Assert.NotNull(created.Value);
+
+        var storedName = await db.InvoiceLineItems.AsNoTracking().Select(x => x.Name).SingleAsync();
+        Assert.Equal(LongInvoiceLineItemName, storedName);
     }
 
     private static UpsertInvoiceRequest CreateRequest(string number, int clientId, DateTime date)

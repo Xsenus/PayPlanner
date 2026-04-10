@@ -1393,8 +1393,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<int>("PaymentId")
                         .HasColumnType("integer");

@@ -11,7 +11,7 @@ public class InvoiceLineItem
 
     public int SortOrder { get; set; }
 
-    [MaxLength(300)]
+    [MaxLength(2000)]
     public string Name { get; set; } = string.Empty;
 
     public decimal Quantity { get; set; }

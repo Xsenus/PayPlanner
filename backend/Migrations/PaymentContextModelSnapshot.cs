@@ -1354,7 +1354,7 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(300)
+                        .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("PaymentId")

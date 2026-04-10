@@ -77,7 +77,7 @@ public class UpsertInvoiceRequest
 
 public class InvoiceLineItemRequest
 {
-    [MaxLength(300)]
+    [MaxLength(2000)]
     public string? Name { get; set; }
 
     [Range(0, double.MaxValue)]
