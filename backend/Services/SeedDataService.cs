@@ -1,17 +1,18 @@
-using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.ReferenceData;
 using System.Data;
 using System.Data.Common;
 
 namespace PayPlanner.Api.Services
 {
     /// <summary>
-    /// Первичное наполнение БД тестовыми данными: роли, админ, клиенты, дела, словари и платежи.
+    /// РџРµСЂРІРёС‡РЅРѕРµ РЅР°РїРѕР»РЅРµРЅРёРµ Р‘Р” С‚РµСЃС‚РѕРІС‹РјРё РґР°РЅРЅС‹РјРё: СЂРѕР»Рё, Р°РґРјРёРЅ, РєР»РёРµРЅС‚С‹, РґРµР»Р°, СЃР»РѕРІР°СЂРё Рё РїР»Р°С‚РµР¶Рё.
     /// </summary>
     public static class SeedDataService
     {
@@ -36,21 +37,21 @@ namespace PayPlanner.Api.Services
         }
 
         /// <summary>
-        /// Выполнить сиды.
+        /// Р’С‹РїРѕР»РЅРёС‚СЊ СЃРёРґС‹.
         /// </summary>
         /// <param name="context">DbContext</param>
         /// <param name="seedClientsAndPayments">
-        /// Если true — добавить клиентов, дела и платежи (даже если таблица не пустая).
-        /// Если false — клиенты/дела/платежи сидятся только когда Clients пуст.
+        /// Р•СЃР»Рё true вЂ” РґРѕР±Р°РІРёС‚СЊ РєР»РёРµРЅС‚РѕРІ, РґРµР»Р° Рё РїР»Р°С‚РµР¶Рё (РґР°Р¶Рµ РµСЃР»Рё С‚Р°Р±Р»РёС†Р° РЅРµ РїСѓСЃС‚Р°СЏ).
+        /// Р•СЃР»Рё false вЂ” РєР»РёРµРЅС‚С‹/РґРµР»Р°/РїР»Р°С‚РµР¶Рё СЃРёРґСЏС‚СЃСЏ С‚РѕР»СЊРєРѕ РєРѕРіРґР° Clients РїСѓСЃС‚.
         /// </param>
         public static async Task SeedAsync(PaymentContext context, bool seedClientsAndPayments = false)
         {
-            await SeedDictionariesAsync(context);          // словари
-            await SeedRolesAsync(context);                 // роли (admin, user)
-            await SeedRolePermissionsAsync(context);       // права по ролям
-            await SeedAdminUserAsync(context);             // администратор
+            await SeedDictionariesAsync(context);          // СЃР»РѕРІР°СЂРё
+            await SeedRolesAsync(context);                 // СЂРѕР»Рё (admin, user)
+            await SeedRolePermissionsAsync(context);       // РїСЂР°РІР° РїРѕ СЂРѕР»СЏРј
+            await SeedAdminUserAsync(context);             // Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ
 
-            // Возможность отключить клиентские сиды на проде:
+            // Р’РѕР·РјРѕР¶РЅРѕСЃС‚СЊ РѕС‚РєР»СЋС‡РёС‚СЊ РєР»РёРµРЅС‚СЃРєРёРµ СЃРёРґС‹ РЅР° РїСЂРѕРґРµ:
             var skipClientsByEnv =
                 string.Equals(Environment.GetEnvironmentVariable("PAYPLANNER_SKIP_CLIENT_SEED"), "1",
                     StringComparison.OrdinalIgnoreCase);
@@ -67,13 +68,13 @@ namespace PayPlanner.Api.Services
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"[SEED][Clients] skipped due to error: {ex.GetType().Name}: {ex.Message}");
-                    // Не валим процесс — просто пропустим клиентскую часть
+                    // РќРµ РІР°Р»РёРј РїСЂРѕС†РµСЃСЃ вЂ” РїСЂРѕСЃС‚Рѕ РїСЂРѕРїСѓСЃС‚РёРј РєР»РёРµРЅС‚СЃРєСѓСЋ С‡Р°СЃС‚СЊ
                 }
             }
         }
 
         /// <summary>
-        /// Словари (deal types, income types, sources, statuses).
+        /// РЎР»РѕРІР°СЂРё (deal types, income types, sources, statuses).
         /// </summary>
         private static async Task SeedDictionariesAsync(PaymentContext context)
         {
@@ -105,11 +106,11 @@ namespace PayPlanner.Api.Services
             {
                 var dealTypes = new[]
                 {
-                    new DealType { Name = "Консалтинг",      Description = "Профессиональные консультационные услуги", ColorHex = "#3B82F6" },
-                    new DealType { Name = "Продажа товара",   Description = "Прямая продажа продукции",                ColorHex = "#10B981" },
-                    new DealType { Name = "Подписка",         Description = "Регулярные подписные услуги",             ColorHex = "#8B5CF6" },
-                    new DealType { Name = "Проект",           Description = "Работа по проекту с фиксированным объёмом", ColorHex = "#F59E0B" },
-                    new DealType { Name = "Обслуживание",     Description = "Долгосрочные контракты на обслуживание",  ColorHex = "#EF4444" }
+                    new DealType { Name = "РљРѕРЅСЃР°Р»С‚РёРЅРі",      Description = "РџСЂРѕС„РµСЃСЃРёРѕРЅР°Р»СЊРЅС‹Рµ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёРѕРЅРЅС‹Рµ СѓСЃР»СѓРіРё", ColorHex = "#3B82F6" },
+                    new DealType { Name = "РџСЂРѕРґР°Р¶Р° С‚РѕРІР°СЂР°",   Description = "РџСЂСЏРјР°СЏ РїСЂРѕРґР°Р¶Р° РїСЂРѕРґСѓРєС†РёРё",                ColorHex = "#10B981" },
+                    new DealType { Name = "РџРѕРґРїРёСЃРєР°",         Description = "Р РµРіСѓР»СЏСЂРЅС‹Рµ РїРѕРґРїРёСЃРЅС‹Рµ СѓСЃР»СѓРіРё",             ColorHex = "#8B5CF6" },
+                    new DealType { Name = "РџСЂРѕРµРєС‚",           Description = "Р Р°Р±РѕС‚Р° РїРѕ РїСЂРѕРµРєС‚Сѓ СЃ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рј РѕР±СЉС‘РјРѕРј", ColorHex = "#F59E0B" },
+                    new DealType { Name = "РћР±СЃР»СѓР¶РёРІР°РЅРёРµ",     Description = "Р”РѕР»РіРѕСЃСЂРѕС‡РЅС‹Рµ РєРѕРЅС‚СЂР°РєС‚С‹ РЅР° РѕР±СЃР»СѓР¶РёРІР°РЅРёРµ",  ColorHex = "#EF4444" }
                 };
                 context.DealTypes.AddRange(dealTypes);
                 await context.SaveChangesAsync();
@@ -121,8 +122,8 @@ namespace PayPlanner.Api.Services
                 {
                     var incomeTypes = new[]
                     {
-                        new IncomeType { Name = "Доход от услуг",  Description = "Доход от оказания услуг",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
-                        new IncomeType { Name = "Прочие доходы",    Description = "Прочие доходы",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
+                        new IncomeType { Name = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",  Description = "Р”РѕС…РѕРґ РѕС‚ РѕРєР°Р·Р°РЅРёСЏ СѓСЃР»СѓРі",       ColorHex = "#10B981", PaymentType = PaymentType.Income },
+                        new IncomeType { Name = "РџСЂРѕС‡РёРµ РґРѕС…РѕРґС‹",    Description = "РџСЂРѕС‡РёРµ РґРѕС…РѕРґС‹",                ColorHex = "#064E3B", PaymentType = PaymentType.Income },
                     };
                     context.IncomeTypes.AddRange(incomeTypes);
                     await context.SaveChangesAsync();
@@ -132,7 +133,7 @@ namespace PayPlanner.Api.Services
                 {
                     var expenseTypes = new[]
                     {
-                    new IncomeType { Name = "Прочие расходы", Description = "Иные расходы", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
+                    new IncomeType { Name = "РџСЂРѕС‡РёРµ СЂР°СЃС…РѕРґС‹", Description = "РРЅС‹Рµ СЂР°СЃС…РѕРґС‹", ColorHex = "#991B1B", PaymentType = PaymentType.Expense },
                 };
                     context.IncomeTypes.AddRange(expenseTypes);
                     await context.SaveChangesAsync();
@@ -143,11 +144,11 @@ namespace PayPlanner.Api.Services
             {
                 var paymentSources = new[]
                 {
-                    new PaymentSource { Name = "Банковский перевод", Description = "Прямой банковский перевод", ColorHex = "#6B7280" },
-                    new PaymentSource { Name = "Банковская карта",   Description = "Оплата банковской картой",  ColorHex = "#4B5563" },
-                    new PaymentSource { Name = "PayPal",             Description = "Оплата через PayPal",       ColorHex = "#374151" },
-                    new PaymentSource { Name = "Чек",                Description = "Оплата банковским чеком",   ColorHex = "#1F2937" },
-                    new PaymentSource { Name = "Наличные",           Description = "Оплата наличными",          ColorHex = "#111827" }
+                    new PaymentSource { Name = "Р‘Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ", Description = "РџСЂСЏРјРѕР№ Р±Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ", ColorHex = "#6B7280" },
+                    new PaymentSource { Name = "Р‘Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°",   Description = "РћРїР»Р°С‚Р° Р±Р°РЅРєРѕРІСЃРєРѕР№ РєР°СЂС‚РѕР№",  ColorHex = "#4B5563" },
+                    new PaymentSource { Name = "PayPal",             Description = "РћРїР»Р°С‚Р° С‡РµСЂРµР· PayPal",       ColorHex = "#374151" },
+                    new PaymentSource { Name = "Р§РµРє",                Description = "РћРїР»Р°С‚Р° Р±Р°РЅРєРѕРІСЃРєРёРј С‡РµРєРѕРј",   ColorHex = "#1F2937" },
+                    new PaymentSource { Name = "РќР°Р»РёС‡РЅС‹Рµ",           Description = "РћРїР»Р°С‚Р° РЅР°Р»РёС‡РЅС‹РјРё",          ColorHex = "#111827" }
                 };
                 context.PaymentSources.AddRange(paymentSources);
                 await context.SaveChangesAsync();
@@ -157,9 +158,9 @@ namespace PayPlanner.Api.Services
             {
                 var paymentStatuses = new[]
                 {
-                    new PaymentStatusEntity { Name = "Ожидается",  Description = "Оплата находится в ожидании",  ColorHex = "#F59E0B" },
-                    new PaymentStatusEntity { Name = "Выполнено",  Description = "Оплата успешно завершена",    ColorHex = "#10B981" },
-                    new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",           ColorHex = "#EF4444" }
+                    new PaymentStatusEntity { Name = "РћР¶РёРґР°РµС‚СЃСЏ",  Description = "РћРїР»Р°С‚Р° РЅР°С…РѕРґРёС‚СЃСЏ РІ РѕР¶РёРґР°РЅРёРё",  ColorHex = "#F59E0B" },
+                    new PaymentStatusEntity { Name = "Р’С‹РїРѕР»РЅРµРЅРѕ",  Description = "РћРїР»Р°С‚Р° СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°",    ColorHex = "#10B981" },
+                    new PaymentStatusEntity { Name = "РџСЂРѕСЃСЂРѕС‡РµРЅРѕ", Description = "РЎСЂРѕРє РѕРїР»Р°С‚С‹ РёСЃС‚С‘Рє",           ColorHex = "#EF4444" }
                 };
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
@@ -169,9 +170,9 @@ namespace PayPlanner.Api.Services
             {
                 var clientStatuses = new[]
                 {
-                    new ClientStatusEntity { Name = "Клиент", Description = "Основной заказчик", ColorHex = "#2563EB" },
-                    new ClientStatusEntity { Name = "Поставщик", Description = "Поставщик услуг или товаров", ColorHex = "#7C3AED" },
-                    new ClientStatusEntity { Name = "Кредитор", Description = "Контрагент с кредитными обязательствами", ColorHex = "#DC2626" }
+                    new ClientStatusEntity { Name = "РљР»РёРµРЅС‚", Description = "РћСЃРЅРѕРІРЅРѕР№ Р·Р°РєР°Р·С‡РёРє", ColorHex = "#2563EB" },
+                    new ClientStatusEntity { Name = "РџРѕСЃС‚Р°РІС‰РёРє", Description = "РџРѕСЃС‚Р°РІС‰РёРє СѓСЃР»СѓРі РёР»Рё С‚РѕРІР°СЂРѕРІ", ColorHex = "#7C3AED" },
+                    new ClientStatusEntity { Name = "РљСЂРµРґРёС‚РѕСЂ", Description = "РљРѕРЅС‚СЂР°РіРµРЅС‚ СЃ РєСЂРµРґРёС‚РЅС‹РјРё РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІР°РјРё", ColorHex = "#DC2626" }
                 };
                 context.ClientStatuses.AddRange(clientStatuses);
                 await context.SaveChangesAsync();
@@ -181,9 +182,9 @@ namespace PayPlanner.Api.Services
             if (!await context.Countries.AnyAsync())
             {
                 context.Countries.AddRange(
-                    new CountryDictionaryItem { Name = "Россия", Description = "Российская Федерация", ColorHex = "#2563EB" },
-                    new CountryDictionaryItem { Name = "Казахстан", Description = "Республика Казахстан", ColorHex = "#0EA5E9" },
-                    new CountryDictionaryItem { Name = "Беларусь", Description = "Республика Беларусь", ColorHex = "#1D4ED8" }
+                    new CountryDictionaryItem { Name = "Р РѕСЃСЃРёСЏ", Description = "Р РѕСЃСЃРёР№СЃРєР°СЏ Р¤РµРґРµСЂР°С†РёСЏ", ColorHex = "#2563EB" },
+                    new CountryDictionaryItem { Name = "РљР°Р·Р°С…СЃС‚Р°РЅ", Description = "Р РµСЃРїСѓР±Р»РёРєР° РљР°Р·Р°С…СЃС‚Р°РЅ", ColorHex = "#0EA5E9" },
+                    new CountryDictionaryItem { Name = "Р‘РµР»Р°СЂСѓСЃСЊ", Description = "Р РµСЃРїСѓР±Р»РёРєР° Р‘РµР»Р°СЂСѓСЃСЊ", ColorHex = "#1D4ED8" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -191,9 +192,9 @@ namespace PayPlanner.Api.Services
             if (!await context.BaseCurrencies.AnyAsync())
             {
                 context.BaseCurrencies.AddRange(
-                    new BaseCurrencyDictionaryItem { Name = "RUB", Description = "Российский рубль", ColorHex = "#16A34A" },
-                    new BaseCurrencyDictionaryItem { Name = "USD", Description = "Доллар США", ColorHex = "#059669" },
-                    new BaseCurrencyDictionaryItem { Name = "EUR", Description = "Евро", ColorHex = "#15803D" }
+                    new BaseCurrencyDictionaryItem { Name = "RUB", Description = "Р РѕСЃСЃРёР№СЃРєРёР№ СЂСѓР±Р»СЊ", ColorHex = "#16A34A" },
+                    new BaseCurrencyDictionaryItem { Name = "USD", Description = "Р”РѕР»Р»Р°СЂ РЎРЁРђ", ColorHex = "#059669" },
+                    new BaseCurrencyDictionaryItem { Name = "EUR", Description = "Р•РІСЂРѕ", ColorHex = "#15803D" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -201,7 +202,7 @@ namespace PayPlanner.Api.Services
             if (!await context.ServiceLanguages.AnyAsync())
             {
                 context.ServiceLanguages.AddRange(
-                    new ServiceLanguageDictionaryItem { Name = "Русский", Description = "Русский язык", ColorHex = "#9333EA" },
+                    new ServiceLanguageDictionaryItem { Name = "Р СѓСЃСЃРєРёР№", Description = "Р СѓСЃСЃРєРёР№ СЏР·С‹Рє", ColorHex = "#9333EA" },
                     new ServiceLanguageDictionaryItem { Name = "English", Description = "English language", ColorHex = "#7E22CE" }
                 );
                 await context.SaveChangesAsync();
@@ -210,39 +211,20 @@ namespace PayPlanner.Api.Services
             if (!await context.OrganizationForms.AnyAsync())
             {
                 context.OrganizationForms.AddRange(
-                    new OrganizationFormDictionaryItem { Name = "ООО", Description = "Общество с ограниченной ответственностью", ColorHex = "#F59E0B" },
-                    new OrganizationFormDictionaryItem { Name = "ИП", Description = "Индивидуальный предприниматель", ColorHex = "#D97706" },
-                    new OrganizationFormDictionaryItem { Name = "АО", Description = "Акционерное общество", ColorHex = "#B45309" }
+                    new OrganizationFormDictionaryItem { Name = "РћРћРћ", Description = "РћР±С‰РµСЃС‚РІРѕ СЃ РѕРіСЂР°РЅРёС‡РµРЅРЅРѕР№ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅРѕСЃС‚СЊСЋ", ColorHex = "#F59E0B" },
+                    new OrganizationFormDictionaryItem { Name = "РРџ", Description = "РРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Р№ РїСЂРµРґРїСЂРёРЅРёРјР°С‚РµР»СЊ", ColorHex = "#D97706" },
+                    new OrganizationFormDictionaryItem { Name = "РђРћ", Description = "РђРєС†РёРѕРЅРµСЂРЅРѕРµ РѕР±С‰РµСЃС‚РІРѕ", ColorHex = "#B45309" }
                 );
                 await context.SaveChangesAsync();
             }
-
-            if (!await context.Timezones.AnyAsync())
-            {
-                context.Timezones.AddRange(
-                    new TimezoneDictionaryItem { Name = "Europe/Moscow", Description = "Москва (UTC+3)", ColorHex = "#0EA5E9" },
-                    new TimezoneDictionaryItem { Name = "Asia/Yekaterinburg", Description = "Екатеринбург (UTC+5)", ColorHex = "#0284C7" },
-                    new TimezoneDictionaryItem { Name = "Asia/Novosibirsk", Description = "Новосибирск (UTC+7)", ColorHex = "#0369A1" }
-                );
-                await context.SaveChangesAsync();
-            }
-
-            if (!await context.TaxSystems.AnyAsync())
-            {
-                context.TaxSystems.AddRange(
-                    new TaxSystemDictionaryItem { Name = "ОСНО", Description = "Общая система налогообложения", ColorHex = "#0EA5E9" },
-                    new TaxSystemDictionaryItem { Name = "УСН", Description = "Упрощенная система налогообложения", ColorHex = "#0284C7" },
-                    new TaxSystemDictionaryItem { Name = "ПСН", Description = "Патентная система налогообложения", ColorHex = "#0369A1" }
-                );
-                await context.SaveChangesAsync();
-            }
+            await TimezoneDictionaryCatalog.EnsureSeededAsync(context);
 
             if (!await context.TaxSystemModes.AnyAsync())
             {
                 context.TaxSystemModes.AddRange(
-                    new TaxSystemModeDictionaryItem { Name = "Доходы", Description = "УСН: доходы", ColorHex = "#0891B2" },
-                    new TaxSystemModeDictionaryItem { Name = "Доходы минус расходы", Description = "УСН: доходы-расходы", ColorHex = "#0E7490" },
-                    new TaxSystemModeDictionaryItem { Name = "Без НДС", Description = "Режим без НДС", ColorHex = "#155E75" }
+                    new TaxSystemModeDictionaryItem { Name = "Р”РѕС…РѕРґС‹", Description = "РЈРЎРќ: РґРѕС…РѕРґС‹", ColorHex = "#0891B2" },
+                    new TaxSystemModeDictionaryItem { Name = "Р”РѕС…РѕРґС‹ РјРёРЅСѓСЃ СЂР°СЃС…РѕРґС‹", Description = "РЈРЎРќ: РґРѕС…РѕРґС‹-СЂР°СЃС…РѕРґС‹", ColorHex = "#0E7490" },
+                    new TaxSystemModeDictionaryItem { Name = "Р‘РµР· РќР”РЎ", Description = "Р РµР¶РёРј Р±РµР· РќР”РЎ", ColorHex = "#155E75" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -250,9 +232,9 @@ namespace PayPlanner.Api.Services
             if (!await context.Services.AnyAsync())
             {
                 context.Services.AddRange(
-                    new ServiceDictionaryItem { Name = "Юридическая консультация", Description = "Разовая консультация", ColorHex = "#0EA5E9" },
-                    new ServiceDictionaryItem { Name = "Подготовка документов", Description = "Составление договоров и заявлений", ColorHex = "#0284C7" },
-                    new ServiceDictionaryItem { Name = "Сопровождение сделки", Description = "Комплексное сопровождение", ColorHex = "#0369A1" }
+                    new ServiceDictionaryItem { Name = "Р®СЂРёРґРёС‡РµСЃРєР°СЏ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ", Description = "Р Р°Р·РѕРІР°СЏ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ", ColorHex = "#0EA5E9" },
+                    new ServiceDictionaryItem { Name = "РџРѕРґРіРѕС‚РѕРІРєР° РґРѕРєСѓРјРµРЅС‚РѕРІ", Description = "РЎРѕСЃС‚Р°РІР»РµРЅРёРµ РґРѕРіРѕРІРѕСЂРѕРІ Рё Р·Р°СЏРІР»РµРЅРёР№", ColorHex = "#0284C7" },
+                    new ServiceDictionaryItem { Name = "РЎРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ СЃРґРµР»РєРё", Description = "РљРѕРјРїР»РµРєСЃРЅРѕРµ СЃРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ", ColorHex = "#0369A1" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -260,16 +242,16 @@ namespace PayPlanner.Api.Services
             if (!await context.InvoiceUnits.AnyAsync())
             {
                 context.InvoiceUnits.AddRange(
-                    new InvoiceUnitDictionaryItem { Name = "усл. ед.", Description = "Условная единица", ColorHex = "#475569" },
-                    new InvoiceUnitDictionaryItem { Name = "шт", Description = "Штуки", ColorHex = "#334155" },
-                    new InvoiceUnitDictionaryItem { Name = "час", Description = "Часы", ColorHex = "#1E293B" },
-                    new InvoiceUnitDictionaryItem { Name = "день", Description = "Дни", ColorHex = "#0F172A" },
-                    new InvoiceUnitDictionaryItem { Name = "мес", Description = "Месяцы", ColorHex = "#64748B" },
-                    new InvoiceUnitDictionaryItem { Name = "кг", Description = "Килограммы", ColorHex = "#475569" },
-                    new InvoiceUnitDictionaryItem { Name = "л", Description = "Литры", ColorHex = "#334155" },
-                    new InvoiceUnitDictionaryItem { Name = "м", Description = "Метры", ColorHex = "#1E293B" },
-                    new InvoiceUnitDictionaryItem { Name = "м²", Description = "Квадратные метры", ColorHex = "#0F172A" },
-                    new InvoiceUnitDictionaryItem { Name = "м³", Description = "Кубические метры", ColorHex = "#64748B" }
+                    new InvoiceUnitDictionaryItem { Name = "СѓСЃР». РµРґ.", Description = "РЈСЃР»РѕРІРЅР°СЏ РµРґРёРЅРёС†Р°", ColorHex = "#475569" },
+                    new InvoiceUnitDictionaryItem { Name = "С€С‚", Description = "РЁС‚СѓРєРё", ColorHex = "#334155" },
+                    new InvoiceUnitDictionaryItem { Name = "С‡Р°СЃ", Description = "Р§Р°СЃС‹", ColorHex = "#1E293B" },
+                    new InvoiceUnitDictionaryItem { Name = "РґРµРЅСЊ", Description = "Р”РЅРё", ColorHex = "#0F172A" },
+                    new InvoiceUnitDictionaryItem { Name = "РјРµСЃ", Description = "РњРµСЃСЏС†С‹", ColorHex = "#64748B" },
+                    new InvoiceUnitDictionaryItem { Name = "РєРі", Description = "РљРёР»РѕРіСЂР°РјРјС‹", ColorHex = "#475569" },
+                    new InvoiceUnitDictionaryItem { Name = "Р»", Description = "Р›РёС‚СЂС‹", ColorHex = "#334155" },
+                    new InvoiceUnitDictionaryItem { Name = "Рј", Description = "РњРµС‚СЂС‹", ColorHex = "#1E293B" },
+                    new InvoiceUnitDictionaryItem { Name = "РјВІ", Description = "РљРІР°РґСЂР°С‚РЅС‹Рµ РјРµС‚СЂС‹", ColorHex = "#0F172A" },
+                    new InvoiceUnitDictionaryItem { Name = "РјВі", Description = "РљСѓР±РёС‡РµСЃРєРёРµ РјРµС‚СЂС‹", ColorHex = "#64748B" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -277,16 +259,16 @@ namespace PayPlanner.Api.Services
             if (!await context.InvoiceItemNames.AnyAsync())
             {
                 context.InvoiceItemNames.AddRange(
-                    new InvoiceItemNameDictionaryItem { Name = "Юридическая консультация", Unit = "усл. ед.", DefaultPrice = 5000m, Description = "Разовая консультация", ColorHex = "#334155" },
-                    new InvoiceItemNameDictionaryItem { Name = "Составление документов", Unit = "усл. ед.", DefaultPrice = 12000m, Description = "Подготовка процессуальных и договорных документов", ColorHex = "#1E293B" },
-                    new InvoiceItemNameDictionaryItem { Name = "Представительство в суде", Unit = "день", DefaultPrice = 15000m, Description = "Участие в судебных заседаниях", ColorHex = "#0F172A" },
-                    new InvoiceItemNameDictionaryItem { Name = "Абонентское обслуживание", Unit = "мес", DefaultPrice = 30000m, Description = "Регулярное юридическое сопровождение", ColorHex = "#475569" },
-                    new InvoiceItemNameDictionaryItem { Name = "Аудит документов", Unit = "усл. ед.", DefaultPrice = 8000m, Description = "Проверка и анализ документации", ColorHex = "#64748B" },
-                    new InvoiceItemNameDictionaryItem { Name = "Подготовка претензии", Unit = "усл. ед.", DefaultPrice = 7000m, Description = "Досудебная претензионная работа", ColorHex = "#334155" },
-                    new InvoiceItemNameDictionaryItem { Name = "Согласование договора", Unit = "усл. ед.", DefaultPrice = 10000m, Description = "Правки и согласование условий договора", ColorHex = "#1E293B" },
-                    new InvoiceItemNameDictionaryItem { Name = "Выезд специалиста", Unit = "час", DefaultPrice = 4000m, Description = "Работа специалиста на выезде", ColorHex = "#0F172A" },
-                    new InvoiceItemNameDictionaryItem { Name = "Аналитическая справка", Unit = "усл. ед.", DefaultPrice = 9000m, Description = "Подготовка письменной аналитики", ColorHex = "#475569" },
-                    new InvoiceItemNameDictionaryItem { Name = "Подготовка отчета", Unit = "усл. ед.", DefaultPrice = 11000m, Description = "Подготовка итогового отчета", ColorHex = "#64748B" }
+                    new InvoiceItemNameDictionaryItem { Name = "Р®СЂРёРґРёС‡РµСЃРєР°СЏ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 5000m, Description = "Р Р°Р·РѕРІР°СЏ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ", ColorHex = "#334155" },
+                    new InvoiceItemNameDictionaryItem { Name = "РЎРѕСЃС‚Р°РІР»РµРЅРёРµ РґРѕРєСѓРјРµРЅС‚РѕРІ", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 12000m, Description = "РџРѕРґРіРѕС‚РѕРІРєР° РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅС‹С… Рё РґРѕРіРѕРІРѕСЂРЅС‹С… РґРѕРєСѓРјРµРЅС‚РѕРІ", ColorHex = "#1E293B" },
+                    new InvoiceItemNameDictionaryItem { Name = "РџСЂРµРґСЃС‚Р°РІРёС‚РµР»СЊСЃС‚РІРѕ РІ СЃСѓРґРµ", Unit = "РґРµРЅСЊ", DefaultPrice = 15000m, Description = "РЈС‡Р°СЃС‚РёРµ РІ СЃСѓРґРµР±РЅС‹С… Р·Р°СЃРµРґР°РЅРёСЏС…", ColorHex = "#0F172A" },
+                    new InvoiceItemNameDictionaryItem { Name = "РђР±РѕРЅРµРЅС‚СЃРєРѕРµ РѕР±СЃР»СѓР¶РёРІР°РЅРёРµ", Unit = "РјРµСЃ", DefaultPrice = 30000m, Description = "Р РµРіСѓР»СЏСЂРЅРѕРµ СЋСЂРёРґРёС‡РµСЃРєРѕРµ СЃРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ", ColorHex = "#475569" },
+                    new InvoiceItemNameDictionaryItem { Name = "РђСѓРґРёС‚ РґРѕРєСѓРјРµРЅС‚РѕРІ", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 8000m, Description = "РџСЂРѕРІРµСЂРєР° Рё Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚Р°С†РёРё", ColorHex = "#64748B" },
+                    new InvoiceItemNameDictionaryItem { Name = "РџРѕРґРіРѕС‚РѕРІРєР° РїСЂРµС‚РµРЅР·РёРё", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 7000m, Description = "Р”РѕСЃСѓРґРµР±РЅР°СЏ РїСЂРµС‚РµРЅР·РёРѕРЅРЅР°СЏ СЂР°Р±РѕС‚Р°", ColorHex = "#334155" },
+                    new InvoiceItemNameDictionaryItem { Name = "РЎРѕРіР»Р°СЃРѕРІР°РЅРёРµ РґРѕРіРѕРІРѕСЂР°", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 10000m, Description = "РџСЂР°РІРєРё Рё СЃРѕРіР»Р°СЃРѕРІР°РЅРёРµ СѓСЃР»РѕРІРёР№ РґРѕРіРѕРІРѕСЂР°", ColorHex = "#1E293B" },
+                    new InvoiceItemNameDictionaryItem { Name = "Р’С‹РµР·Рґ СЃРїРµС†РёР°Р»РёСЃС‚Р°", Unit = "С‡Р°СЃ", DefaultPrice = 4000m, Description = "Р Р°Р±РѕС‚Р° СЃРїРµС†РёР°Р»РёСЃС‚Р° РЅР° РІС‹РµР·РґРµ", ColorHex = "#0F172A" },
+                    new InvoiceItemNameDictionaryItem { Name = "РђРЅР°Р»РёС‚РёС‡РµСЃРєР°СЏ СЃРїСЂР°РІРєР°", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 9000m, Description = "РџРѕРґРіРѕС‚РѕРІРєР° РїРёСЃСЊРјРµРЅРЅРѕР№ Р°РЅР°Р»РёС‚РёРєРё", ColorHex = "#475569" },
+                    new InvoiceItemNameDictionaryItem { Name = "РџРѕРґРіРѕС‚РѕРІРєР° РѕС‚С‡РµС‚Р°", Unit = "СѓСЃР». РµРґ.", DefaultPrice = 11000m, Description = "РџРѕРґРіРѕС‚РѕРІРєР° РёС‚РѕРіРѕРІРѕРіРѕ РѕС‚С‡РµС‚Р°", ColorHex = "#64748B" }
                 );
                 await context.SaveChangesAsync();
             }
@@ -401,7 +383,7 @@ namespace PayPlanner.Api.Services
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_Name\" ON \"InvoiceUnits\" (\"Name\");", cancellationToken);
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceUnitDictionaryItems_IsActive_Name\" ON \"InvoiceUnits\" (\"IsActive\", \"Name\");", cancellationToken);
 
-                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceItemNames\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceItemNames\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Unit\" TEXT NOT NULL DEFAULT 'шт', \"DefaultPrice\" TEXT NOT NULL DEFAULT '0', \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
+                await ExecuteNonQueryAsync(connection, "CREATE TABLE IF NOT EXISTS \"InvoiceItemNames\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_InvoiceItemNames\" PRIMARY KEY AUTOINCREMENT, \"Name\" TEXT NOT NULL, \"Unit\" TEXT NOT NULL DEFAULT 'С€С‚', \"DefaultPrice\" TEXT NOT NULL DEFAULT '0', \"Description\" TEXT NOT NULL, \"ColorHex\" TEXT NOT NULL, \"IsActive\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL);", cancellationToken);
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive\" ON \"InvoiceItemNames\" (\"IsActive\");", cancellationToken);
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_Name\" ON \"InvoiceItemNames\" (\"Name\");", cancellationToken);
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceItemNameDictionaryItems_IsActive_Name\" ON \"InvoiceItemNames\" (\"IsActive\", \"Name\");", cancellationToken);
@@ -419,7 +401,7 @@ namespace PayPlanner.Api.Services
                 {
                     var legacyHasUnit = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "Unit", cancellationToken);
                     var legacyHasDefaultPrice = await ColumnExistsAsync(connection, "InvoiceItemNameDictionaryItems", "DefaultPrice", cancellationToken);
-                    var legacyUnitSql = legacyHasUnit ? "\"Unit\"" : "'шт'";
+                    var legacyUnitSql = legacyHasUnit ? "\"Unit\"" : "'С€С‚'";
                     var legacyDefaultPriceSql = legacyHasDefaultPrice ? "\"DefaultPrice\"" : "'0'";
 
                     await ExecuteNonQueryAsync(connection,
@@ -535,23 +517,23 @@ namespace PayPlanner.Api.Services
         }
 
         /// <summary>
-        /// Создаёт роли admin и user (если отсутствуют).
+        /// РЎРѕР·РґР°С‘С‚ СЂРѕР»Рё admin Рё user (РµСЃР»Рё РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚).
         /// </summary>
         private static async Task SeedRolesAsync(PaymentContext context)
         {
             if (!await context.Roles.AnyAsync())
             {
                 context.Roles.AddRange(
-                    new Role { Name = "admin", Description = "Администратор системы" },
-                    new Role { Name = "user", Description = "Обычный пользователь" }
+                    new Role { Name = "admin", Description = "РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ СЃРёСЃС‚РµРјС‹" },
+                    new Role { Name = "user", Description = "РћР±С‹С‡РЅС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ" }
                 );
                 await context.SaveChangesAsync();
                 return;
             }
 
-            // Досеять недостающие роли
-            await EnsureRoleAsync(context, "admin", "Администратор системы");
-            await EnsureRoleAsync(context, "user", "Обычный пользователь");
+            // Р”РѕСЃРµСЏС‚СЊ РЅРµРґРѕСЃС‚Р°СЋС‰РёРµ СЂРѕР»Рё
+            await EnsureRoleAsync(context, "admin", "РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ СЃРёСЃС‚РµРјС‹");
+            await EnsureRoleAsync(context, "user", "РћР±С‹С‡РЅС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ");
         }
 
         private static async Task SeedRolePermissionsAsync(PaymentContext context)
@@ -606,7 +588,7 @@ namespace PayPlanner.Api.Services
         }
 
         /// <summary>
-        /// Создаёт пользователя-администратора, если его ещё нет.
+        /// РЎРѕР·РґР°С‘С‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ-Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°, РµСЃР»Рё РµРіРѕ РµС‰С‘ РЅРµС‚.
         /// </summary>
         private static async Task SeedAdminUserAsync(PaymentContext context)
         {
@@ -629,7 +611,7 @@ namespace PayPlanner.Api.Services
 
             if (adminRoleId == 0)
             {
-                context.Roles.Add(new Role { Name = "admin", Description = "Администратор системы" });
+                context.Roles.Add(new Role { Name = "admin", Description = "РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ СЃРёСЃС‚РµРјС‹" });
                 await context.SaveChangesAsync();
                 adminRoleId = await context.Roles.Where(r => r.Name == "admin").Select(r => r.Id).FirstAsync();
             }
@@ -663,11 +645,11 @@ namespace PayPlanner.Api.Services
             await context.SaveChangesAsync();
         }
 
-        // ----------------------- ниже — сид клиентов/дел, платежей -----------------------
+        // ----------------------- РЅРёР¶Рµ вЂ” СЃРёРґ РєР»РёРµРЅС‚РѕРІ/РґРµР», РїР»Р°С‚РµР¶РµР№ -----------------------
 
         private static async Task SeedClientsCasesPaymentsAsync(PaymentContext context)
         {
-            // Читаем справочники и строим безопасные карты (без падения на дублях)
+            // Р§РёС‚Р°РµРј СЃРїСЂР°РІРѕС‡РЅРёРєРё Рё СЃС‚СЂРѕРёРј Р±РµР·РѕРїР°СЃРЅС‹Рµ РєР°СЂС‚С‹ (Р±РµР· РїР°РґРµРЅРёСЏ РЅР° РґСѓР±Р»СЏС…)
             var dealTypes = await context.DealTypes.AsNoTracking().ToListAsync();
             var dealTypeByName = BuildNameMap(dealTypes, d => d.Name, d => d.Id);
 
@@ -680,14 +662,14 @@ namespace PayPlanner.Api.Services
             var statuses = await context.PaymentStatuses.AsNoTracking().ToListAsync();
             var statusByName = BuildNameMap(statuses, s => s.Name, s => s.Id);
 
-            // Идемпотентные клиенты
+            // РРґРµРјРїРѕС‚РµРЅС‚РЅС‹Рµ РєР»РёРµРЅС‚С‹
             var clients = new[]
             {
-                new Client { Name = "Иван Иванов",      Email = "ivan@example.com",  Phone = "+7-900-010-01-01", Company = "ТехКорп",                Address = "ул. Ленина, д. 10, Москва" },
-                new Client { Name = "Мария Петрова",    Email = "maria@company.com", Phone = "+7-900-010-01-02", Company = "Студия Дизайна",         Address = "пр. Мира, д. 25, Санкт-Петербург" },
-                new Client { Name = "Алексей Смирнов",  Email = "alex@business.com", Phone = "+7-900-010-01-03", Company = "Смирнов Индастриз",      Address = "ул. Советская, д. 5, Екатеринбург" },
-                new Client { Name = "Екатерина Сидорова", Email = "katya@startup.com", Phone = "+7-900-010-01-04", Company = "Инновационные Лаборатории", Address = "ул. Гагарина, д. 12, Новосибирск" },
-                new Client { Name = "Дмитрий Кузнецов", Email = "dmitry@consulting.com", Phone = "+7-900-010-01-05", Company = "Кузнецов Консалтинг", Address = "ул. Пушкина, д. 8, Казань" }
+                new Client { Name = "РРІР°РЅ РРІР°РЅРѕРІ",      Email = "ivan@example.com",  Phone = "+7-900-010-01-01", Company = "РўРµС…РљРѕСЂРї",                Address = "СѓР». Р›РµРЅРёРЅР°, Рґ. 10, РњРѕСЃРєРІР°" },
+                new Client { Name = "РњР°СЂРёСЏ РџРµС‚СЂРѕРІР°",    Email = "maria@company.com", Phone = "+7-900-010-01-02", Company = "РЎС‚СѓРґРёСЏ Р”РёР·Р°Р№РЅР°",         Address = "РїСЂ. РњРёСЂР°, Рґ. 25, РЎР°РЅРєС‚-РџРµС‚РµСЂР±СѓСЂРі" },
+                new Client { Name = "РђР»РµРєСЃРµР№ РЎРјРёСЂРЅРѕРІ",  Email = "alex@business.com", Phone = "+7-900-010-01-03", Company = "РЎРјРёСЂРЅРѕРІ РРЅРґР°СЃС‚СЂРёР·",      Address = "СѓР». РЎРѕРІРµС‚СЃРєР°СЏ, Рґ. 5, Р•РєР°С‚РµСЂРёРЅР±СѓСЂРі" },
+                new Client { Name = "Р•РєР°С‚РµСЂРёРЅР° РЎРёРґРѕСЂРѕРІР°", Email = "katya@startup.com", Phone = "+7-900-010-01-04", Company = "РРЅРЅРѕРІР°С†РёРѕРЅРЅС‹Рµ Р›Р°Р±РѕСЂР°С‚РѕСЂРёРё", Address = "СѓР». Р“Р°РіР°СЂРёРЅР°, Рґ. 12, РќРѕРІРѕСЃРёР±РёСЂСЃРє" },
+                new Client { Name = "Р”РјРёС‚СЂРёР№ РљСѓР·РЅРµС†РѕРІ", Email = "dmitry@consulting.com", Phone = "+7-900-010-01-05", Company = "РљСѓР·РЅРµС†РѕРІ РљРѕРЅСЃР°Р»С‚РёРЅРі", Address = "СѓР». РџСѓС€РєРёРЅР°, Рґ. 8, РљР°Р·Р°РЅСЊ" }
             };
 
             var existingClients = await context.Clients.AsNoTracking().ToListAsync();
@@ -714,12 +696,12 @@ namespace PayPlanner.Api.Services
 
             var casesToEnsure = new List<(string clientEmail, string title, string? desc, ClientCaseStatus status)>
             {
-                ("ivan@example.com",   "Подготовка договора консалтинга", "Аналитика + ТЗ", ClientCaseStatus.Open),
-                ("ivan@example.com",   "Поддержка подписки SaaS",         "Месячная подписка", ClientCaseStatus.Open),
-                ("maria@company.com",  "Редизайн сайта",                  "UI/UX + вёрстка", ClientCaseStatus.OnHold),
-                ("alex@business.com",  "Поставка партии №101",            "Отгрузка 50 шт.", ClientCaseStatus.Open),
-                ("katya@startup.com",  "Научный проект R&D",              "Этап 1 — НИР", ClientCaseStatus.Open),
-                ("dmitry@consulting.com","Сопровождение 2025",            "Помесячное обслуживание", ClientCaseStatus.Closed)
+                ("ivan@example.com",   "РџРѕРґРіРѕС‚РѕРІРєР° РґРѕРіРѕРІРѕСЂР° РєРѕРЅСЃР°Р»С‚РёРЅРіР°", "РђРЅР°Р»РёС‚РёРєР° + РўР—", ClientCaseStatus.Open),
+                ("ivan@example.com",   "РџРѕРґРґРµСЂР¶РєР° РїРѕРґРїРёСЃРєРё SaaS",         "РњРµСЃСЏС‡РЅР°СЏ РїРѕРґРїРёСЃРєР°", ClientCaseStatus.Open),
+                ("maria@company.com",  "Р РµРґРёР·Р°Р№РЅ СЃР°Р№С‚Р°",                  "UI/UX + РІС‘СЂСЃС‚РєР°", ClientCaseStatus.OnHold),
+                ("alex@business.com",  "РџРѕСЃС‚Р°РІРєР° РїР°СЂС‚РёРё в„–101",            "РћС‚РіСЂСѓР·РєР° 50 С€С‚.", ClientCaseStatus.Open),
+                ("katya@startup.com",  "РќР°СѓС‡РЅС‹Р№ РїСЂРѕРµРєС‚ R&D",              "Р­С‚Р°Рї 1 вЂ” РќРР ", ClientCaseStatus.Open),
+                ("dmitry@consulting.com","РЎРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ 2025",            "РџРѕРјРµСЃСЏС‡РЅРѕРµ РѕР±СЃР»СѓР¶РёРІР°РЅРёРµ", ClientCaseStatus.Closed)
             };
 
             var caseEntities = new List<ClientCase>();
@@ -761,161 +743,161 @@ namespace PayPlanner.Api.Services
                 new PaymentSeedDefinition
                 {
                     Email = "ivan@example.com",
-                    CaseTitle = "Подготовка договора консалтинга",
+                    CaseTitle = "РџРѕРґРіРѕС‚РѕРІРєР° РґРѕРіРѕРІРѕСЂР° РєРѕРЅСЃР°Р»С‚РёРЅРіР°",
                     Date = today.AddDays(-10),
                     AccountDate = (DateTime?)today.AddDays(-12),
                     Account = "1306",
                     Amount = 150_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Completed,
-                    Description = "Аванс по договору",
+                    Description = "РђРІР°РЅСЃ РїРѕ РґРѕРіРѕРІРѕСЂСѓ",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-10),
-                    DealType = "Консалтинг",
-                    IncomeType = "Доход от услуг",
-                    Source = "Банковский перевод",
-                    StatusName = "Выполнено",
+                    DealType = "РљРѕРЅСЃР°Р»С‚РёРЅРі",
+                    IncomeType = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",
+                    Source = "Р‘Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ",
+                    StatusName = "Р’С‹РїРѕР»РЅРµРЅРѕ",
                     ActReference = (string?)null
                 },
                 new PaymentSeedDefinition
                 {
                     Email = "ivan@example.com",
-                    CaseTitle = "Подготовка договора консалтинга",
+                    CaseTitle = "РџРѕРґРіРѕС‚РѕРІРєР° РґРѕРіРѕРІРѕСЂР° РєРѕРЅСЃР°Р»С‚РёРЅРіР°",
                     Date = today.AddDays(20),
                     AccountDate = (DateTime?)today.AddDays(15),
                     Account = "INV-2026",
                     Amount = 200_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Окончательный расчёт",
+                    Description = "РћРєРѕРЅС‡Р°С‚РµР»СЊРЅС‹Р№ СЂР°СЃС‡С‘С‚",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Консалтинг",
-                    IncomeType = "Доход от услуг",
-                    Source = "Банковская карта",
-                    StatusName = "Ожидается",
+                    DealType = "РљРѕРЅСЃР°Р»С‚РёРЅРі",
+                    IncomeType = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",
+                    Source = "Р‘Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°",
+                    StatusName = "РћР¶РёРґР°РµС‚СЃСЏ",
                     ActReference = (string?)null
                 },
 
-                // Мария Петрова — Редизайн сайта
+                // РњР°СЂРёСЏ РџРµС‚СЂРѕРІР° вЂ” Р РµРґРёР·Р°Р№РЅ СЃР°Р№С‚Р°
                 new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
-                    CaseTitle = "Редизайн сайта",
+                    CaseTitle = "Р РµРґРёР·Р°Р№РЅ СЃР°Р№С‚Р°",
                     Date = today.AddDays(-5),
                     AccountDate = (DateTime?)today.AddDays(-7),
                     Account = "1305",
                     Amount = 90_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Completed,
-                    Description = "Этап 1 — прототипы",
+                    Description = "Р­С‚Р°Рї 1 вЂ” РїСЂРѕС‚РѕС‚РёРїС‹",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-5),
-                    DealType = "Проект",
-                    IncomeType = "Доход от услуг",
+                    DealType = "РџСЂРѕРµРєС‚",
+                    IncomeType = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",
                     Source = "PayPal",
-                    StatusName = "Выполнено",
+                    StatusName = "Р’С‹РїРѕР»РЅРµРЅРѕ",
                     ActReference = (string?)null
                 },
                 new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
-                    CaseTitle = "Редизайн сайта",
+                    CaseTitle = "Р РµРґРёР·Р°Р№РЅ СЃР°Р№С‚Р°",
                     Date = today.AddDays(-1),
                     AccountDate = (DateTime?)today.AddDays(-3),
                     Account = "INV-2042",
                     Amount = 110_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Overdue,
-                    Description = "Этап 2 — UI",
+                    Description = "Р­С‚Р°Рї 2 вЂ” UI",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Проект",
-                    IncomeType = "Доход от услуг",
-                    Source = "Банковский перевод",
-                    StatusName = "Просрочено",
-                    ActReference = "Акт ожидается"
+                    DealType = "РџСЂРѕРµРєС‚",
+                    IncomeType = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",
+                    Source = "Р‘Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ",
+                    StatusName = "РџСЂРѕСЃСЂРѕС‡РµРЅРѕ",
+                    ActReference = "РђРєС‚ РѕР¶РёРґР°РµС‚СЃСЏ"
                 },
                 new PaymentSeedDefinition
                 {
                     Email = "maria@company.com",
-                    CaseTitle = "Редизайн сайта",
+                    CaseTitle = "Р РµРґРёР·Р°Р№РЅ СЃР°Р№С‚Р°",
                     Date = today.AddDays(-2),
                     AccountDate = (DateTime?)today.AddDays(-4),
                     Account = "154",
                     Amount = 65_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Счёт за тестирование",
+                    Description = "РЎС‡С‘С‚ Р·Р° С‚РµСЃС‚РёСЂРѕРІР°РЅРёРµ",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Проект",
-                    IncomeType = "Доход от услуг",
-                    Source = "Банковский перевод",
-                    StatusName = "Ожидается",
-                    ActReference = "Акт будет подписан в ноябре"
+                    DealType = "РџСЂРѕРµРєС‚",
+                    IncomeType = "Р”РѕС…РѕРґ РѕС‚ СѓСЃР»СѓРі",
+                    Source = "Р‘Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ",
+                    StatusName = "РћР¶РёРґР°РµС‚СЃСЏ",
+                    ActReference = "РђРєС‚ Р±СѓРґРµС‚ РїРѕРґРїРёСЃР°РЅ РІ РЅРѕСЏР±СЂРµ"
                 },
 
-                // Алексей Смирнов — Поставка партии №101
+                // РђР»РµРєСЃРµР№ РЎРјРёСЂРЅРѕРІ вЂ” РџРѕСЃС‚Р°РІРєР° РїР°СЂС‚РёРё в„–101
                 new PaymentSeedDefinition
                 {
                     Email = "alex@business.com",
-                    CaseTitle = "Поставка партии №101",
+                    CaseTitle = "РџРѕСЃС‚Р°РІРєР° РїР°СЂС‚РёРё в„–101",
                     Date = today.AddDays(7),
                     AccountDate = (DateTime?)today.AddDays(2),
                     Account = "1307",
                     Amount = 350_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Оплата за поставку",
+                    Description = "РћРїР»Р°С‚Р° Р·Р° РїРѕСЃС‚Р°РІРєСѓ",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Продажа товара",
-                    IncomeType = "Прочие доходы",
-                    Source = "Чек",
-                    StatusName = "Ожидается",
+                    DealType = "РџСЂРѕРґР°Р¶Р° С‚РѕРІР°СЂР°",
+                    IncomeType = "РџСЂРѕС‡РёРµ РґРѕС…РѕРґС‹",
+                    Source = "Р§РµРє",
+                    StatusName = "РћР¶РёРґР°РµС‚СЃСЏ",
                     ActReference = (string?)null
                 },
 
-                // Екатерина Сидорова — Научный проект R&D
+                // Р•РєР°С‚РµСЂРёРЅР° РЎРёРґРѕСЂРѕРІР° вЂ” РќР°СѓС‡РЅС‹Р№ РїСЂРѕРµРєС‚ R&D
                 new PaymentSeedDefinition
                 {
                     Email = "katya@startup.com",
-                    CaseTitle = "Научный проект R&D",
+                    CaseTitle = "РќР°СѓС‡РЅС‹Р№ РїСЂРѕРµРєС‚ R&D",
                     Date = today.AddDays(30),
                     AccountDate = (DateTime?)today.AddDays(28),
                     Account = "INV-RD-001",
                     Amount = 500_000m,
                     Type = PaymentType.Income,
                     Status = PaymentStatus.Pending,
-                    Description = "Этап 1 — НИР",
+                    Description = "Р­С‚Р°Рї 1 вЂ” РќРР ",
                     IsPaid = false,
                     PaidDate = (DateTime?)null,
-                    DealType = "Проект",
-                    IncomeType = "Прочие доходы",
-                    Source = "Банковский перевод",
-                    StatusName = "Ожидается",
+                    DealType = "РџСЂРѕРµРєС‚",
+                    IncomeType = "РџСЂРѕС‡РёРµ РґРѕС…РѕРґС‹",
+                    Source = "Р‘Р°РЅРєРѕРІСЃРєРёР№ РїРµСЂРµРІРѕРґ",
+                    StatusName = "РћР¶РёРґР°РµС‚СЃСЏ",
                     ActReference = (string?)null
                 },
 
-                // Дмитрий Кузнецов — Сопровождение 2025 (РАСХОД)
+                // Р”РјРёС‚СЂРёР№ РљСѓР·РЅРµС†РѕРІ вЂ” РЎРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ 2025 (Р РђРЎРҐРћР”)
                 new PaymentSeedDefinition
                 {
                     Email = "dmitry@consulting.com",
-                    CaseTitle = "Сопровождение 2025",
+                    CaseTitle = "РЎРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ 2025",
                     Date = today.AddDays(-3),
                     AccountDate = (DateTime?)null,
                     Account = (string?)null,
                     Amount = 25_000m,
                     Type = PaymentType.Expense,
                     Status = PaymentStatus.Completed,
-                    Description = "Закупка ПО для сопровождения",
+                    Description = "Р—Р°РєСѓРїРєР° РџРћ РґР»СЏ СЃРѕРїСЂРѕРІРѕР¶РґРµРЅРёСЏ",
                     IsPaid = true,
                     PaidDate = (DateTime?)today.AddDays(-3),
-                    DealType = "Обслуживание",
-                    IncomeType = "Прочие расходы",
-                    Source = "Наличные",
-                    StatusName = "Выполнено",
+                    DealType = "РћР±СЃР»СѓР¶РёРІР°РЅРёРµ",
+                    IncomeType = "РџСЂРѕС‡РёРµ СЂР°СЃС…РѕРґС‹",
+                    Source = "РќР°Р»РёС‡РЅС‹Рµ",
+                    StatusName = "Р’С‹РїРѕР»РЅРµРЅРѕ",
                     ActReference = (string?)null
                 },
             };
@@ -996,7 +978,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-001",
-                    Title = "Акт передачи макетов по редизайну сайта",
+                    Title = "РђРєС‚ РїРµСЂРµРґР°С‡Рё РјР°РєРµС‚РѕРІ РїРѕ СЂРµРґРёР·Р°Р№РЅСѓ СЃР°Р№С‚Р°",
                     Date = today.AddDays(-15),
                     Amount = 51721.64m,
                     Invoice = "1305",
@@ -1007,7 +989,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-002",
-                    Title = "Акт оказанных услуг по консалтингу",
+                    Title = "РђРєС‚ РѕРєР°Р·Р°РЅРЅС‹С… СѓСЃР»СѓРі РїРѕ РєРѕРЅСЃР°Р»С‚РёРЅРіСѓ",
                     Date = today.AddDays(-5),
                     Amount = 118000m,
                     Invoice = "1306",
@@ -1018,7 +1000,7 @@ namespace PayPlanner.Api.Services
                 new
                 {
                     Number = "ACT-003",
-                    Title = "Акт приёма-передачи партии №101",
+                    Title = "РђРєС‚ РїСЂРёС‘РјР°-РїРµСЂРµРґР°С‡Рё РїР°СЂС‚РёРё в„–101",
                     Date = today.AddDays(-2),
                     Amount = 90000m,
                     Invoice = "1307",
@@ -1125,7 +1107,7 @@ namespace PayPlanner.Api.Services
             }
         }
 
-        // --- нормализация и безопасные карты имён ---
+        // --- РЅРѕСЂРјР°Р»РёР·Р°С†РёСЏ Рё Р±РµР·РѕРїР°СЃРЅС‹Рµ РєР°СЂС‚С‹ РёРјС‘РЅ ---
 
         private static string Norm(string? s) =>
             (s ?? string.Empty).Trim().ToUpperInvariant();
@@ -1150,3 +1132,4 @@ namespace PayPlanner.Api.Services
         }
     }
 }
+
