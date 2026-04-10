@@ -13,6 +13,7 @@ using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalEntities;
 using PayPlanner.Api.Services.UserActivity;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Serialization;
 
@@ -122,7 +123,17 @@ builder.Services.AddCors(options =>
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/json" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
 });
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
