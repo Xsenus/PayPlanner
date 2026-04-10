@@ -86,6 +86,78 @@ public class InvoicePaymentConsistencyTests
             payment => Assert.Equal(aggregate.InvoicePaymentId, payment.Id));
     }
 
+    [Fact]
+    public async Task InvoiceEndpoints_KeepAllSiblingOperations_ForClientInvoiceWithSeveralPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInvoiceWithSiblingPaymentAsync(db);
+
+        var invoicesController = CreateInvoicesController(db);
+        var accountsController = new AccountsController(db);
+        var paymentsController = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var invoicesResult = await invoicesController.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            clientId: aggregate.ClientId,
+            clientIds: null,
+            caseId: aggregate.ClientCaseId,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var invoicesOk = Assert.IsType<OkObjectResult>(invoicesResult);
+        var invoiceItems = ExtractInvoiceItems(invoicesOk);
+        var invoiceRow = Assert.Single(invoiceItems);
+
+        Assert.Equal(aggregate.InvoicePaymentId, invoiceRow.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, invoiceRow.InvoiceEntityId);
+        Assert.Equal("25", invoiceRow.Number);
+
+        var accountsResult = await accountsController.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var accountsOk = Assert.IsType<OkObjectResult>(accountsResult.Result);
+        var accountsPayload = Assert.IsType<AccountsPageResponse>(accountsOk.Value);
+        var registryRow = Assert.Single(accountsPayload.Items);
+
+        Assert.Equal("25", registryRow.AccountNumber);
+        Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+        Assert.Equal(
+            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
+            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+
+        var paymentsResult = await paymentsController.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: aggregate.ClientId,
+            caseId: aggregate.ClientCaseId,
+            excludeInstallmentParents: false,
+            ct: CancellationToken.None);
+
+        var paymentsOk = Assert.IsType<OkObjectResult>(paymentsResult);
+        var paymentItems = Assert.IsAssignableFrom<List<Payment>>(paymentsOk.Value);
+
+        Assert.Equal(
+            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
+            paymentItems.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+    }
+
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
     {
         var itemsProperty = ok.Value?.GetType().GetProperty("items");
@@ -140,6 +212,74 @@ public class InvoicePaymentConsistencyTests
         await db.SaveChangesAsync();
 
         return (representativePayment.Id, invoice.Id, client.Id, clientCase.Id);
+    }
+
+    private static async Task<(int InvoicePaymentId, int SiblingPaymentId, int InvoiceEntityId, int ClientId, int ClientCaseId)> CreateInvoiceWithSiblingPaymentAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Байгузина Екатерина Евгеньевна",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "БАЙГУЗИНА - ОТМЕНА ПРОТОКОЛОВ ОБЩЕГО СОБРАНИЯ",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "25",
+            Date = new DateTime(2026, 4, 2),
+        };
+
+        var representativePayment = new Payment
+        {
+            Amount = 10_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 4, 2),
+            PlannedDate = new DateTime(2026, 4, 2),
+            PaidDate = new DateTime(2026, 4, 3),
+            LastPaymentDate = new DateTime(2026, 4, 3),
+            PaidAmount = 10_000m,
+            Description = "Оплата по счету №25",
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            ClientCase = clientCase,
+            Invoice = invoice,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+        };
+
+        var siblingPayment = new Payment
+        {
+            Amount = 5_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 4, 4),
+            PlannedDate = new DateTime(2026, 4, 4),
+            PaidDate = new DateTime(2026, 4, 5),
+            LastPaymentDate = new DateTime(2026, 4, 5),
+            PaidAmount = 5_000m,
+            Description = "Доплата по счету №25",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            ClientCase = clientCase,
+            Invoice = invoice,
+            InvoiceId = null,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+        };
+
+        db.Payments.AddRange(representativePayment, siblingPayment);
+        await db.SaveChangesAsync();
+
+        return (representativePayment.Id, siblingPayment.Id, invoice.Id, client.Id, clientCase.Id);
     }
 
     private static InvoicesController CreateInvoicesController(PaymentContext db)

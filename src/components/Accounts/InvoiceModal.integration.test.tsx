@@ -34,8 +34,12 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
-    downloadInvoiceDocument: vi.fn().mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
-    getInvoiceRulesSettings: vi.fn().mockResolvedValue({ maxClientCasesPerInvoice: 3, maxActsPerInvoice: 3 }),
+    downloadInvoiceDocument: vi
+      .fn()
+      .mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
+    getInvoiceRulesSettings: vi
+      .fn()
+      .mockResolvedValue({ maxClientCasesPerInvoice: 3, maxActsPerInvoice: 3 }),
     getContracts: vi.fn().mockResolvedValue({ items: [] }),
     getCases: vi.fn().mockResolvedValue([]),
     getActs: vi.fn().mockResolvedValue({ items: [] }),
@@ -129,5 +133,64 @@ describe('InvoiceModal integration', () => {
     await screen.findByText('Оплата по счету №24');
     expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
     expect(screen.getAllByText('10 000 ₽').length).toBeGreaterThan(0);
+  });
+
+  it('renders sibling operations for the same invoice together', async () => {
+    const invoice = {
+      id: 529,
+      invoiceEntityId: 25,
+      number: '25',
+      date: '2026-04-02',
+      dueDate: '2026-04-03',
+      amount: 15000,
+      type: 'Income',
+      status: 'Completed',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 15000 }],
+    } as unknown as Invoice;
+
+    const representativePayment = {
+      id: 529,
+      invoiceId: 25,
+      amount: 10000,
+      date: '2026-04-02',
+      paidDate: '2026-04-03',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Первая оплата по счету №25',
+      account: '25',
+      accountDate: '2026-04-02',
+    } as unknown as Payment;
+
+    const siblingPayment = {
+      id: 530,
+      invoiceId: 25,
+      amount: 5000,
+      date: '2026-04-04',
+      paidDate: '2026-04-05',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Доплата по счету №25',
+      account: '25',
+      accountDate: '2026-04-02',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[representativePayment, siblingPayment]}
+      />,
+    );
+
+    await screen.findByText('Первая оплата по счету №25');
+    expect(screen.getByText('Доплата по счету №25')).toBeTruthy();
+    expect(screen.getAllByText(/₽/).length).toBeGreaterThan(1);
   });
 });
