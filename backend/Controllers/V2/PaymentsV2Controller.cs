@@ -25,15 +25,16 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
-        [FromQuery] string? clientIds,
-        [FromQuery] string? categoryTokens,
-        [FromQuery] PaymentType? type,
-        [FromQuery] PaymentStatus? status,
-        [FromQuery] decimal? minAmount,
-        [FromQuery] decimal? maxAmount,
-        [FromQuery] string? search,
-        [FromQuery] string? sortBy,
-        [FromQuery] string? sortDir,
+        [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] string? clientIds = null,
+        [FromQuery] string? categoryTokens = null,
+        [FromQuery] PaymentType? type = null,
+        [FromQuery] PaymentStatus? status = null,
+        [FromQuery] decimal? minAmount = null,
+        [FromQuery] decimal? maxAmount = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -43,6 +44,7 @@ public class PaymentsV2Controller : ControllerBase
 
         var query = _db.Payments.AsQueryable()
             .WithPaymentIncludes()
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search);
 
         var clientIdList = ParseIntList(clientIds);

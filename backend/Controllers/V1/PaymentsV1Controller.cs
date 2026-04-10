@@ -21,12 +21,14 @@ public class PaymentsV1Controller : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
-        [FromQuery] string? search,
-        [FromQuery] string? sortBy,
-        [FromQuery] string? sortDir,
-        CancellationToken ct)
+        [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
+        CancellationToken ct = default)
     {
         var q = _db.Payments.AsQueryable().WithPaymentIncludes()
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search)
             .ApplyPaymentSort(sortBy, sortDir);
 

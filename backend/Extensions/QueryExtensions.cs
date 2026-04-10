@@ -1,10 +1,13 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Extensions
 {
     public static class QueryExtensions
     {
+        private const string InstallmentPaymentMarker = "[pp:installment-payment]";
+
         // ---------- Acts ----------
         public static IQueryable<Act> ApplyActFilters(
             this IQueryable<Act> q,
@@ -123,6 +126,27 @@ namespace PayPlanner.Api.Extensions
                     (p.PaymentSource != null && p.PaymentSource.Name != null && p.PaymentSource.Name.ToLower().Contains(search)));
             }
             return q;
+        }
+
+        public static IQueryable<Payment> ExcludeInstallmentParentInvoices(
+            this IQueryable<Payment> q,
+            PaymentContext db,
+            bool excludeInstallmentParents = true)
+        {
+            if (!excludeInstallmentParents)
+            {
+                return q;
+            }
+
+            return q.Where(payment =>
+                payment.DocumentKind != DocumentKind.Invoice
+                || payment.InvoiceId == null
+                || !db.Payments.Any(child =>
+                    child.InvoiceId == payment.InvoiceId
+                    && child.Id != payment.Id
+                    && child.DocumentKind != DocumentKind.Invoice
+                    && child.SystemNotes != null
+                    && child.SystemNotes.Contains(InstallmentPaymentMarker)));
         }
 
         public static IQueryable<Payment> ApplyPaymentSort(this IQueryable<Payment> q, string? sortBy, string? sortDir)

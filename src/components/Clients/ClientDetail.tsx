@@ -1471,6 +1471,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         await createClientInvoice(payload);
         toast.success('Счет успешно создан.', 'Счет сохранен');
       }
+      await refreshPayments();
       bumpStats();
       closeInvoiceModal();
     } catch (err) {
@@ -1488,6 +1489,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     if (!(await confirm({ title: 'Подтверждение удаления', description: t('invoiceDeleteConfirm') ?? 'Удалить счёт?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }))) return;
     try {
       await deleteClientInvoice(invoice.id);
+      await refreshPayments();
       bumpStats();
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить счёт'), 'Ошибка удаления');

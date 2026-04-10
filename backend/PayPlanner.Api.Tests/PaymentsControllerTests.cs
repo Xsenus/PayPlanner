@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -168,6 +170,77 @@ public class PaymentsControllerTests
             .ToListAsync();
 
         Assert.Equal(new[] { aprilPayment.Id }, paymentIds);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_ExcludesParentInvoice_WhenInstallmentScheduleExists()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Тестовый клиент",
+            Company = "ООО Тест",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "31",
+            Date = new DateTime(2026, 4, 9),
+        };
+
+        var parentPayment = CreatePayment(new DateTime(2026, 4, 9), 60_000m, "Счет с рассрочкой");
+        parentPayment.Client = client;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.Invoice = invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var installmentOne = CreatePayment(new DateTime(2026, 4, 10), 20_000m, "Платеж 1/3");
+        installmentOne.Client = client;
+        installmentOne.Invoice = invoice;
+        installmentOne.InvoiceId = invoice.Id;
+        installmentOne.SystemNotes = $"{InstallmentPaymentMarker} 1";
+
+        var installmentTwo = CreatePayment(new DateTime(2026, 5, 10), 20_000m, "Платеж 2/3");
+        installmentTwo.Client = client;
+        installmentTwo.Invoice = invoice;
+        installmentTwo.InvoiceId = invoice.Id;
+        installmentTwo.SystemNotes = $"{InstallmentPaymentMarker} 2";
+
+        db.Payments.AddRange(parentPayment, installmentOne, installmentTwo);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+
+        var actionResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 5, 31),
+            clientId: client.Id,
+            caseId: null,
+            excludeInstallmentParents: true,
+            clientIds: null,
+            categoryTokens: null,
+            type: null,
+            status: null,
+            minAmount: null,
+            maxAmount: null,
+            search: null,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+
+        Assert.Equal(2, response.Total);
+        Assert.Equal(2, response.Items.Count);
+        Assert.DoesNotContain(response.Items, payment => payment.Id == parentPayment.Id);
+        Assert.Equal(40_000m, response.Summary.Income);
+        Assert.Equal(2, response.Summary.IncomeCount);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

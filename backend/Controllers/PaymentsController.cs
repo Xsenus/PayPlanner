@@ -14,7 +14,6 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class PaymentsController : ControllerBase
 {
-    private const string InstallmentPaymentMarker = "[pp:installment-payment]";
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
     public PaymentsController(PaymentContext db, IFormRequirementsService formRequirements)
@@ -29,22 +28,12 @@ public class PaymentsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
-        [FromQuery] bool excludeInstallmentParents = false,
+        [FromQuery] bool excludeInstallmentParents = true,
         CancellationToken ct = default)
     {
-        var q = _db.Payments.AsQueryable();
-        if (excludeInstallmentParents)
-        {
-            q = q.Where(p =>
-                p.DocumentKind != DocumentKind.Invoice
-                || p.InvoiceId == null
-                || !_db.Payments.Any(child =>
-                    child.InvoiceId == p.InvoiceId
-                    && child.Id != p.Id
-                    && child.DocumentKind != DocumentKind.Invoice
-                    && child.SystemNotes != null
-                    && child.SystemNotes.Contains(InstallmentPaymentMarker)));
-        }
+        var q = _db.Payments
+            .AsQueryable()
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents);
 
         if (from.HasValue)
         {
