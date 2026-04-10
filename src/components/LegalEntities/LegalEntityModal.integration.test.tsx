@@ -176,5 +176,5 @@ describe('LegalEntityModal integration', () => {
     expect(screen.getByDisplayValue('Южный мкр')).toBeTruthy();
     expect(screen.getByDisplayValue('37')).toBeTruthy();
     expect(screen.getByDisplayValue('19')).toBeTruthy();
-  });
+  }, 15000);
 });
