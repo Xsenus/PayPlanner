@@ -312,6 +312,9 @@ public class LegalEntitiesController : ControllerBase
             return null;
 
         var normalizedKey = CanonicalizeDictionaryName(normalized);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+            return null;
+
         var existing = await set
             .AsNoTracking()
             .Select(item => new { Entity = item, Name = EF.Property<string>(item, "Name") })

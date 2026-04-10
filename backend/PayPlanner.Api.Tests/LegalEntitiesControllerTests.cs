@@ -440,6 +440,37 @@ public class LegalEntitiesControllerTests
         Assert.Contains("Логотип", message);
     }
 
+    [Fact]
+    public async Task Create_DoesNotCreateServiceLanguage_FromQuestionMarks()
+    {
+        await using var db = await CreateContextAsync();
+        db.ServiceLanguages.Add(new ServiceLanguageDictionaryItem
+        {
+            Name = "Русский",
+            Description = "Русский язык",
+            ColorHex = "#9333EA",
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 17);
+        var request = BuildRequest();
+        request.ServiceLanguage = "???????";
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(created.Value);
+        Assert.Null(dto.ServiceLanguage);
+
+        var serviceLanguages = await db.ServiceLanguages.AsNoTracking().OrderBy(item => item.Id).ToListAsync();
+        Assert.Single(serviceLanguages);
+        Assert.Equal("Русский", serviceLanguages[0].Name);
+
+        var storedEntity = await db.LegalEntities.AsNoTracking().SingleAsync();
+        Assert.Null(storedEntity.ServiceLanguage);
+    }
+
     private static LegalEntityRequest BuildRequest()
     {
         return new LegalEntityRequest
