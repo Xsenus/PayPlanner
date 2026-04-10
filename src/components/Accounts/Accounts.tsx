@@ -41,6 +41,7 @@ import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import {
   clearInvoiceEditorDraft,
   peekInvoiceEditorDraft,
@@ -50,6 +51,7 @@ import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import { FormPromptModal } from '../ui/FormPromptModal';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -258,18 +260,11 @@ export function Accounts({
   const canEdit = permissions.accounts.canEdit;
   const canDelete = permissions.accounts.canDelete;
 
-  const today = useMemo(() => new Date(), []);
-  const startOfYear = useMemo(() => formatLocalYMD(new Date(today.getFullYear(), 0, 1)), [today]);
-  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
-
+  const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'preset', preset: 'year_to_date' }), []);
   const storagePrefix = useMemo(() => `pp.accounts.${user?.id ?? 'guest'}`, [user?.id]);
-  const savedPeriod = useMemo(
-    () => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}),
-    [storagePrefix],
-  );
-
-  const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
-  const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
+  const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
+  const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
   const [search, setSearch] = useState('');
@@ -346,8 +341,8 @@ export function Accounts({
     error,
     refresh: refreshAccounts,
   } = useAccountsRegistry({
-    from: from || undefined,
-    to: to || undefined,
+    from: periodRange.from || undefined,
+    to: periodRange.to || undefined,
     status: statusFilter,
     search: debouncedSearch || undefined,
     type: typeFilter,
@@ -364,7 +359,7 @@ export function Accounts({
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, statusFilter, debouncedSearch, typeFilter, pageSize]);
+  }, [periodRange.from, periodRange.to, statusFilter, debouncedSearch, typeFilter, pageSize]);
 
   useEffect(() => {
     if (!defaultType) {
@@ -375,8 +370,12 @@ export function Accounts({
   }, [defaultType]);
 
   useEffect(() => {
-    safeWrite(`${storagePrefix}.period`, { from, to });
-  }, [from, to, storagePrefix]);
+    setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  }, [defaultPeriod, savedPeriod]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.period`, period);
+  }, [period, storagePrefix]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -863,8 +862,7 @@ export function Accounts({
   };
 
   const handleResetFilters = () => {
-    setFrom(startOfYear);
-    setTo(todayYMD);
+    setPeriod(defaultPeriod);
     setStatusFilter('all');
     setSearch('');
   };
@@ -1637,30 +1635,14 @@ export function Accounts({
 
             <div className="flex min-w-[320px] flex-1 flex-col gap-3 rounded-xl bg-slate-50/80 p-3">
               <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-center font-medium text-gray-700">{t('invoiceFiltersPeriod') ?? 'Период с'}</span>
-                  <div className="relative">
-                    <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                    <input
-                      type="date"
-                      value={from}
-                      onChange={(event) => setFrom(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    />
-                  </div>
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-center font-medium text-gray-700">{t('invoiceFiltersPeriodTo') ?? 'Период по'}</span>
-                  <div className="relative">
-                    <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                    <input
-                      type="date"
-                      value={to}
-                      onChange={(event) => setTo(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-10 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    />
-                  </div>
-                </label>
+                <div className="flex flex-col gap-1 text-sm sm:col-span-2">
+                  <DatePeriodPicker
+                    value={period}
+                    onChange={setPeriod}
+                    label={t('invoiceFiltersPeriod') ?? 'Период'}
+                    accent="blue"
+                  />
+                </div>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-gray-700">{t('invoiceFiltersStatus') ?? t('status') ?? 'Статус'}</span>
                   <select

@@ -12,9 +12,11 @@ import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ActModal } from './ActModal';
+import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 
 const STATUS_ORDER: ActStatus[] = ['Terminated', 'Transferred', 'Signed'];
 
@@ -96,14 +98,11 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   const { t } = useTranslation();
 
+  const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'custom', from: '', to: '' }), []);
   const storagePrefix = useMemo(() => `pp.acts.${user?.id ?? 'guest'}`, [user?.id]);
-  const savedPeriod = useMemo(
-    () => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}),
-    [storagePrefix],
-  );
-
-  const [from, setFrom] = useState<string>(savedPeriod.from || '');
-  const [to, setTo] = useState<string>(savedPeriod.to || '');
+  const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
+  const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
@@ -152,8 +151,8 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     refresh,
     createAct,
   } = useActs({
-    from: from || undefined,
-    to: to || undefined,
+    from: periodRange.from || undefined,
+    to: periodRange.to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
@@ -261,7 +260,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, from, to, pageSize]);
+  }, [debouncedSearch, statusFilter, periodRange.from, periodRange.to, pageSize]);
 
   useEffect(() => {
     setPage((prev) => Math.min(prev, totalPages));
@@ -273,8 +272,12 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   }, [error, toast]);
 
   useEffect(() => {
-    safeWrite(`${storagePrefix}.period`, { from, to });
-  }, [from, to, storagePrefix]);
+    setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  }, [defaultPeriod, savedPeriod]);
+
+  useEffect(() => {
+    safeWrite(`${storagePrefix}.period`, period);
+  }, [period, storagePrefix]);
 
   const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;
@@ -375,8 +378,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   };
 
   const handleResetFilters = () => {
-    setFrom('');
-    setTo('');
+    setPeriod(defaultPeriod);
     setStatusFilter('all');
     setSearch('');
     setSortState({ key: 'date', direction: 'desc' });
@@ -510,59 +512,50 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
               </div>
             ))
           ) : (
-            summaryCards.map((card, index) => {
+            summaryCards.map((card) => {
               const Icon = card.icon;
-              const filterLabel = index === 0
-                ? (t('actFiltersPeriod') ?? 'Период с')
-                : index === 1
-                  ? (t('actFiltersPeriodTo') ?? 'Период по')
-                  : (t('status') ?? 'Статус');
 
               return (
-                <div key={card.key} className="flex flex-col gap-3">
-                  <div className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${card.accent}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium uppercase tracking-wide text-slate-500">
-                        {card.title}
-                      </span>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="mt-3 text-2xl font-semibold">{formatMoney(card.bucket.amount)}</div>
-                    <div className="mt-2 text-sm text-slate-600">
-                      {t('actsSummaryCount') ?? 'Количество актов'}: {card.bucket.count}
-                    </div>
+                <div key={card.key} className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${card.accent}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                      {card.title}
+                    </span>
+                    <Icon className="h-5 w-5" />
                   </div>
-
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="text-center font-medium text-slate-700">{filterLabel}</span>
-                    {index < 2 ? (
-                      <div className="relative">
-                        <CalendarRange className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                        <input
-                          type="date"
-                          value={index === 0 ? from : to}
-                          onChange={(event) => (index === 0 ? setFrom(event.target.value) : setTo(event.target.value))}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                        />
-                      </div>
-                    ) : (
-                      <select
-                        value={statusFilter}
-                        onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActStatus))}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                        <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-                        {STATUS_ORDER.concat('Created' as ActStatus).map((status) => (
-                          <option key={status} value={status}>
-                            {statusLabels[status]}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </label>
+                  <div className="mt-3 text-2xl font-semibold">{formatMoney(card.bucket.amount)}</div>
+                  <div className="mt-2 text-sm text-slate-600">
+                    {t('actsSummaryCount') ?? 'Количество актов'}: {card.bucket.count}
+                  </div>
                 </div>
               );
             })
           )}
+        </div>
+
+        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="min-w-[260px] flex-1">
+            <DatePeriodPicker
+              value={period}
+              onChange={setPeriod}
+              label={t('actFiltersPeriod') ?? 'Период'}
+              accent="indigo"
+            />
+          </div>
+          <label className="flex min-w-[200px] flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">{t('status') ?? 'Статус'}</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActStatus))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+              <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+              {STATUS_ORDER.concat('Created' as ActStatus).map((status) => (
+                <option key={status} value={status}>
+                  {statusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

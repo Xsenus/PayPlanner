@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CalendarRange, CheckCircle2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, WalletCards } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, WalletCards } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -10,10 +10,12 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
 import type { ActResponsible, Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
 import { apiService } from '../../services/api';
-import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
+import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { InvoiceModal } from './InvoiceModal';
@@ -98,13 +100,11 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
   const canDelete = permissions.accounts.canDelete;
-  const today = useMemo(() => new Date(), []);
-  const startOfYear = useMemo(() => formatLocalYMD(new Date(today.getFullYear(), 0, 1)), [today]);
-  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
+  const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'preset', preset: 'year_to_date' }), []);
   const storagePrefix = useMemo(() => `pp.installments.${user?.id ?? 'guest'}`, [user?.id]);
-  const savedPeriod = useMemo(() => safeRead<{ from?: string; to?: string }>(`${storagePrefix}.period`, {}), [storagePrefix]);
-  const [from, setFrom] = useState<string>(savedPeriod.from || startOfYear);
-  const [to, setTo] = useState<string>(savedPeriod.to || todayYMD);
+  const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
+  const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
   const [search, setSearch] = useState('');
@@ -132,8 +132,8 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     minColumnWidth: 110,
   });
   const { invoices, loading, refreshing, error, summary, pagination, refresh } = useInvoices({
-    from: from || undefined,
-    to: to || undefined,
+    from: periodRange.from || undefined,
+    to: periodRange.to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
     type: typeFilter === 'All' ? undefined : typeFilter,
@@ -143,9 +143,10 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     pageSize,
   });
 
-  useEffect(() => { setPage(1); }, [from, to, statusFilter, debouncedSearch, typeFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [periodRange.from, periodRange.to, statusFilter, debouncedSearch, typeFilter, pageSize]);
   useEffect(() => { if (!defaultType) { setTypeFilter('All'); return; } setTypeFilter(defaultType); }, [defaultType]);
-  useEffect(() => { safeWrite(`${storagePrefix}.period`, { from, to }); }, [from, to, storagePrefix]);
+  useEffect(() => { setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod)); }, [defaultPeriod, savedPeriod]);
+  useEffect(() => { safeWrite(`${storagePrefix}.period`, period); }, [period, storagePrefix]);
   useEffect(() => { if (error) toast.error(error); }, [error, toast]);
 
   const totalPages = useMemo(() => !pagination.pageSize ? 1 : Math.max(1, Math.ceil((pagination.total ?? 0) / pagination.pageSize)), [pagination.total, pagination.pageSize]);
@@ -223,7 +224,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     }
   };
 
-  const handleResetFilters = () => { setFrom(startOfYear); setTo(todayYMD); setStatusFilter('all'); setSearch(''); };
+  const handleResetFilters = () => { setPeriod(defaultPeriod); setStatusFilter('all'); setSearch(''); };
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
 
   const renderCell = (invoice: Invoice, columnKey: InstallmentColumnKey) => {
@@ -332,11 +333,13 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <CalendarRange className="h-4 w-4 text-gray-500" />
-            <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            <span className="text-gray-500">—</span>
-            <input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          <div className="min-w-[240px] flex-1">
+            <DatePeriodPicker
+              value={period}
+              onChange={setPeriod}
+              label={t('invoiceFiltersPeriod') ?? 'Период'}
+              accent="blue"
+            />
           </div>
 
           <div>
