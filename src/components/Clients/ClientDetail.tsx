@@ -83,6 +83,7 @@ import { ClientStatusBadge } from './ClientStatusBadge';
 import {
   loadClientInvoiceRelatedPayments,
 } from '../../utils/clientInvoiceRelatedPayments';
+import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } from '../../utils/clientInvoiceModalData';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
@@ -1862,22 +1863,23 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     }
   }, [clientId, visiblePayments]);
   const refreshInvoiceModalData = useCallback(async () => {
-    await Promise.all([refreshInvoices(), refreshPayments()]);
-
-    if (!selectedInvoice?.id) {
-      setInvoiceModalRelatedPayments([]);
-      setInvoiceModalPaymentsLoading(false);
-      return;
-    }
-
+    setInvoiceModalPaymentsLoading(true);
     try {
-      const freshInvoice = await apiService.getInvoice(selectedInvoice.id);
-      setSelectedInvoice(freshInvoice);
-      await loadInvoiceRelatedPayments(freshInvoice);
-    } catch {
-      await loadInvoiceRelatedPayments(selectedInvoice);
+      const refreshed = await refreshClientInvoiceModalDataHelper({
+        selectedInvoice,
+        clientId,
+        visiblePayments,
+        refreshInvoices,
+        refreshPayments,
+        fetchInvoice: apiService.getInvoice,
+        fetchPayments: apiService.getPayments,
+      });
+      setSelectedInvoice(refreshed.invoice);
+      setInvoiceModalRelatedPayments(refreshed.relatedPayments);
+    } finally {
+      setInvoiceModalPaymentsLoading(false);
     }
-  }, [loadInvoiceRelatedPayments, refreshInvoices, refreshPayments, selectedInvoice]);
+  }, [clientId, refreshInvoices, refreshPayments, selectedInvoice, visiblePayments]);
   useEffect(() => {
     if (!invoiceModalOpen || invoiceModalMode !== 'edit') {
       setInvoiceModalRelatedPayments([]);
