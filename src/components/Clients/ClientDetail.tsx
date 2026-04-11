@@ -81,8 +81,7 @@ import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import {
-  collectClientInvoiceRelatedPayments,
-  resolveClientInvoiceCaseId,
+  loadClientInvoiceRelatedPayments,
 } from '../../utils/clientInvoiceRelatedPayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
@@ -1847,20 +1846,17 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
       return;
     }
 
-    const selectedCaseId = resolveClientInvoiceCaseId(invoiceSnapshot);
-
     setInvoiceModalPaymentsLoading(true);
     try {
-      const paymentPool = await apiService.getPayments({
-        from: MIN_DATE,
-        to: MAX_DATE,
+      const relatedPayments = await loadClientInvoiceRelatedPayments({
+        invoice: invoiceSnapshot,
         clientId,
-        caseId: selectedCaseId,
+        visiblePayments,
+        fetchPayments: apiService.getPayments,
       });
-
-      setInvoiceModalRelatedPayments(collectClientInvoiceRelatedPayments(invoiceSnapshot, paymentPool));
+      setInvoiceModalRelatedPayments(relatedPayments);
     } catch {
-      setInvoiceModalRelatedPayments(collectClientInvoiceRelatedPayments(invoiceSnapshot, visiblePayments));
+      setInvoiceModalRelatedPayments([]);
     } finally {
       setInvoiceModalPaymentsLoading(false);
     }

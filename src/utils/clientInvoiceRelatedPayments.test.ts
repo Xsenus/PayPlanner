@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Invoice, Payment } from '../types';
 import {
+  CLIENT_INVOICE_LOOKUP_FROM,
+  CLIENT_INVOICE_LOOKUP_TO,
   collectClientInvoiceRelatedPayments,
+  loadClientInvoiceRelatedPayments,
   resolveClientInvoiceCaseId,
 } from './clientInvoiceRelatedPayments';
 
@@ -106,5 +109,61 @@ describe('clientInvoiceRelatedPayments', () => {
 
   it('returns an empty list when invoice is missing', () => {
     expect(collectClientInvoiceRelatedPayments(null, [createPayment()])).toEqual([]);
+  });
+
+  it('loads related payments for the client invoice with the full lookup window', async () => {
+    const invoice = createInvoice({ id: 528, invoiceEntityId: 24, number: '24', clientCaseIds: [701] });
+    const representativePayment = createPayment({
+      id: 528,
+      invoiceId: 24,
+      description: 'Представляющая запись по счету №24',
+    });
+    const siblingPayment = createPayment({
+      id: 529,
+      invoiceId: 24,
+      description: 'Доплата по счету №24',
+    });
+    const fetchPayments = vi.fn().mockResolvedValue([siblingPayment, representativePayment]);
+
+    const result = await loadClientInvoiceRelatedPayments({
+      invoice,
+      clientId: 42,
+      visiblePayments: [],
+      fetchPayments,
+    });
+
+    expect(fetchPayments).toHaveBeenCalledWith({
+      from: CLIENT_INVOICE_LOOKUP_FROM,
+      to: CLIENT_INVOICE_LOOKUP_TO,
+      clientId: 42,
+      caseId: 701,
+    });
+    expect(result.map((item) => item.id)).toEqual([528, 529]);
+  });
+
+  it('falls back to currently visible payments when the remote lookup fails', async () => {
+    const invoice = createInvoice({ id: 530, invoiceEntityId: 25, number: '25', clientCaseIds: [702] });
+    const representativePayment = createPayment({
+      id: 530,
+      invoiceId: 25,
+      account: '25',
+      description: 'Представляющая запись по счету №25',
+    });
+    const siblingPayment = createPayment({
+      id: 531,
+      invoiceId: 25,
+      account: '25',
+      description: 'Доплата по счету №25',
+    });
+    const fetchPayments = vi.fn().mockRejectedValue(new Error('network'));
+
+    const result = await loadClientInvoiceRelatedPayments({
+      invoice,
+      clientId: 42,
+      visiblePayments: [siblingPayment, representativePayment],
+      fetchPayments,
+    });
+
+    expect(result.map((item) => item.id)).toEqual([530, 531]);
   });
 });
