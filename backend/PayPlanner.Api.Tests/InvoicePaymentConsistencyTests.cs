@@ -277,6 +277,123 @@ public class InvoicePaymentConsistencyTests
             paymentItems.Select(payment => payment.Id).OrderBy(id => id).ToArray());
     }
 
+    [Fact]
+    public async Task PaymentCreate_NormalizesInvoiceLink_AndKeepsInvoiceReadsConsistent()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateSingleOperationInvoiceAsync(db);
+
+        var invoicesController = CreateInvoicesController(db);
+        var accountsController = new AccountsController(db);
+        var paymentsController = CreatePaymentsController(db);
+
+        var createModel = new Payment
+        {
+            Amount = 3_000m,
+            CounterpartyName = "Supplement payment",
+            Date = new DateTime(2026, 4, 4),
+            PlannedDate = new DateTime(2026, 4, 4),
+            PaidDate = new DateTime(2026, 4, 5),
+            LastPaymentDate = new DateTime(2026, 4, 5),
+            PaidAmount = 3_000m,
+            Description = "Supplement for invoice 24",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            ClientId = aggregate.ClientId,
+            ClientCaseId = aggregate.ClientCaseId,
+            InvoiceId = aggregate.InvoiceEntityId,
+            Account = " LEGACY-24 ",
+            AccountDate = new DateTime(2025, 12, 31),
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        };
+
+        var createResult = await paymentsController.Create(createModel, CancellationToken.None);
+
+        var createCreated = Assert.IsType<CreatedResult>(createResult);
+        var createdPayment = Assert.IsType<Payment>(createCreated.Value);
+
+        Assert.NotEqual(aggregate.InvoicePaymentId, createdPayment.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, createdPayment.InvoiceId);
+        Assert.Equal("24", createdPayment.Account);
+        Assert.Equal(new DateTime(2026, 4, 2), createdPayment.AccountDate);
+        Assert.Equal("LEGACY-24", createdPayment.LegacyAccountNumber);
+        Assert.Equal(new DateTime(2025, 12, 31), createdPayment.LegacyAccountDate);
+
+        var paymentByIdResult = await paymentsController.GetById(createdPayment.Id, CancellationToken.None);
+        var paymentByIdOk = Assert.IsType<OkObjectResult>(paymentByIdResult);
+        var paymentById = Assert.IsType<Payment>(paymentByIdOk.Value);
+
+        Assert.Equal(aggregate.InvoiceEntityId, paymentById.InvoiceId);
+        Assert.Equal("24", paymentById.Account);
+        Assert.Equal(new DateTime(2026, 4, 2), paymentById.AccountDate);
+        Assert.Equal("LEGACY-24", paymentById.LegacyAccountNumber);
+
+        var invoicesResult = await invoicesController.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            clientId: aggregate.ClientId,
+            clientIds: null,
+            caseId: aggregate.ClientCaseId,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var invoicesOk = Assert.IsType<OkObjectResult>(invoicesResult);
+        var invoiceItems = ExtractInvoiceItems(invoicesOk);
+        var invoiceRow = Assert.Single(invoiceItems);
+
+        Assert.Equal(aggregate.InvoicePaymentId, invoiceRow.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, invoiceRow.InvoiceEntityId);
+        Assert.Equal("24", invoiceRow.Number);
+
+        var accountsResult = await accountsController.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var accountsOk = Assert.IsType<OkObjectResult>(accountsResult.Result);
+        var accountsPayload = Assert.IsType<AccountsPageResponse>(accountsOk.Value);
+        var registryRow = Assert.Single(accountsPayload.Items);
+
+        Assert.Equal("24", registryRow.AccountNumber);
+        Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
+        Assert.Equal(
+            new[] { aggregate.InvoicePaymentId, createdPayment.Id },
+            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+
+        var paymentsResult = await paymentsController.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: aggregate.ClientId,
+            caseId: aggregate.ClientCaseId,
+            excludeInstallmentParents: false,
+            ct: CancellationToken.None);
+
+        var paymentsOk = Assert.IsType<OkObjectResult>(paymentsResult);
+        var paymentItems = Assert.IsAssignableFrom<List<Payment>>(paymentsOk.Value);
+
+        Assert.Equal(
+            new[] { aggregate.InvoicePaymentId, createdPayment.Id },
+            paymentItems.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+    }
+
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
     {
         var itemsProperty = ok.Value?.GetType().GetProperty("items");
