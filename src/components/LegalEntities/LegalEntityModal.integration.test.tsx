@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LegalEntityModal } from './LegalEntityModal';
+import { apiService } from '../../services/api';
 import type {
   LegalEntityDadataDetails,
   LegalEntityDetail,
@@ -80,16 +81,37 @@ vi.mock('../Clients/ClientStatusBadge', () => ({
   ClientStatusBadge: () => null,
 }));
 
+function createInitialLegalEntity(
+  overrides: Partial<LegalEntityDetail> = {},
+): LegalEntityDetail {
+  return {
+    id: 9,
+    shortName: '',
+    fullName: '',
+    inn: '',
+    createdAt: '2026-04-09T13:18:06Z',
+    updatedAt: '2026-04-10T06:18:36Z',
+    clients: [],
+    addresses: [],
+    ...overrides,
+  } as LegalEntityDetail;
+}
+
 describe('LegalEntityModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
     toastErrorMock.mockReset();
     toastInfoMock.mockReset();
     toastSuccessMock.mockReset();
+    vi.mocked(apiService.suggestClientAddresses).mockReset();
+    vi.mocked(apiService.cleanAddress).mockReset();
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([]);
+    vi.mocked(apiService.cleanAddress).mockResolvedValue({ result: '' });
   });
 
   it('prefills DaData query from saved inn and keeps the full address after suggestion selection', async () => {
-    const suggestMock = vi.fn<[{ query?: string; inn?: string; limit?: number }], Promise<LegalEntitySuggestion[]>>()
+    const suggestMock = vi
+      .fn<[{ query?: string; inn?: string; limit?: number }], Promise<LegalEntitySuggestion[]>>()
       .mockResolvedValue([
         {
           shortName: 'ИП Кожеваткин Андрей Владимирович',
@@ -121,16 +143,7 @@ describe('LegalEntityModal integration', () => {
       .fn<[{ query: string; kpp?: string }], Promise<LegalEntityDadataDetails>>()
       .mockResolvedValue(details);
 
-    const initial = {
-      id: 9,
-      shortName: '',
-      fullName: '',
-      inn: '633009620345',
-      createdAt: '2026-04-09T13:18:06Z',
-      updatedAt: '2026-04-10T06:18:36Z',
-      clients: [],
-      addresses: [],
-    } as unknown as LegalEntityDetail;
+    const initial = createInitialLegalEntity({ inn: '633009620345' });
 
     render(
       <LegalEntityModal
@@ -177,4 +190,60 @@ describe('LegalEntityModal integration', () => {
     expect(screen.getByDisplayValue('37')).toBeTruthy();
     expect(screen.getByDisplayValue('19')).toBeTruthy();
   }, 15000);
+
+  it('deduplicates repeated DaData suggestions in the modal UI', async () => {
+    const suggestMock = vi
+      .fn<[{ query?: string; inn?: string; limit?: number }], Promise<LegalEntitySuggestion[]>>()
+      .mockResolvedValue([
+        {
+          shortName: 'ИП Кожеваткин Андрей Владимирович',
+          fullName: 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович',
+          inn: '633009620345',
+          ogrn: '317631300153603',
+          address: 'Самарская обл, г Новокуйбышевск',
+        },
+        {
+          shortName: 'ИП Кожеваткин Андрей Владимирович',
+          fullName: 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович',
+          inn: '633009620345',
+          ogrn: '307631300200020',
+          address: 'Самарская обл, г Новокуйбышевск',
+        },
+        {
+          shortName: 'ООО Пример',
+          fullName: 'Общество с ограниченной ответственностью Пример',
+          inn: '7707083893',
+          kpp: '770701001',
+          ogrn: '1027700132195',
+          address: 'г Москва, ул Ильинка, д 9',
+        },
+      ]);
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(createInitialLegalEntity())}
+        initial={createInitialLegalEntity()}
+        suggest={suggestMock}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByPlaceholderText('Например: 7707083893 или ООО Пример'),
+      'Кожеваткин',
+    );
+    await user.click(screen.getByRole('button', { name: 'Найти' }));
+
+    await waitFor(() =>
+      expect(suggestMock).toHaveBeenCalledWith({ query: 'Кожеваткин', limit: 6 }),
+    );
+
+    expect(await screen.findAllByText('ИП Кожеваткин Андрей Владимирович')).toHaveLength(1);
+    expect(screen.getByText('ООО Пример')).toBeTruthy();
+  });
 });
