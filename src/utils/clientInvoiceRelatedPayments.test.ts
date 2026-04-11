@@ -107,6 +107,35 @@ describe('clientInvoiceRelatedPayments', () => {
     expect(result.map((item) => item.id)).toEqual([528, 529]);
   });
 
+  it('keeps sibling operations linked only by legacy account/date when invoiceId is missing', () => {
+    const invoice = createInvoice({ id: 528, invoiceEntityId: 24, number: '24', date: '2026-04-02' });
+    const representativePayment = createPayment({
+      id: 528,
+      invoiceId: 24,
+      account: '24',
+      accountDate: '2026-04-02',
+      description: 'Representative payment for invoice 24',
+      plannedDate: '2026-04-02',
+      date: '2026-04-02',
+    });
+    const legacySiblingPayment = createPayment({
+      id: 529,
+      invoiceId: undefined,
+      account: '24',
+      accountDate: '2026-04-02',
+      description: 'Legacy sibling payment for invoice 24',
+      plannedDate: '2026-04-03',
+      date: '2026-04-03',
+    });
+
+    const result = collectClientInvoiceRelatedPayments(invoice, [
+      legacySiblingPayment,
+      representativePayment,
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual([528, 529]);
+  });
+
   it('returns an empty list when invoice is missing', () => {
     expect(collectClientInvoiceRelatedPayments(null, [createPayment()])).toEqual([]);
   });
@@ -139,6 +168,31 @@ describe('clientInvoiceRelatedPayments', () => {
       caseId: 701,
     });
     expect(result.map((item) => item.id)).toEqual([528, 529]);
+  });
+
+  it('does not over-filter the remote lookup by caseId when invoice is linked to several cases', async () => {
+    const invoice = createInvoice({
+      id: 540,
+      invoiceEntityId: 27,
+      number: '27',
+      clientCaseIds: [701, 702],
+      clientCaseId: undefined,
+    });
+    const fetchPayments = vi.fn().mockResolvedValue([]);
+
+    await loadClientInvoiceRelatedPayments({
+      invoice,
+      clientId: 42,
+      visiblePayments: [],
+      fetchPayments,
+    });
+
+    expect(fetchPayments).toHaveBeenCalledWith({
+      from: CLIENT_INVOICE_LOOKUP_FROM,
+      to: CLIENT_INVOICE_LOOKUP_TO,
+      clientId: 42,
+      caseId: undefined,
+    });
   });
 
   it('falls back to currently visible payments when the remote lookup fails', async () => {
