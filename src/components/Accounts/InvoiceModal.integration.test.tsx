@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { InvoiceModal } from './InvoiceModal';
 import type { Invoice, Payment } from '../../types';
 
@@ -14,7 +15,7 @@ const {
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: () => undefined }),
 }));
 
 vi.mock('../../hooks/useDictionaries', () => ({
@@ -192,5 +193,70 @@ describe('InvoiceModal integration', () => {
     await screen.findByText('Первая оплата по счету №25');
     expect(screen.getByText('Доплата по счету №25')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(1);
+  });
+
+  it('restores installment summary and badges from related installment payments', async () => {
+    const invoice = {
+      id: 530,
+      invoiceEntityId: 26,
+      number: '26',
+      date: '2026-05-10',
+      dueDate: '2026-05-10',
+      amount: 10000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Рассрочка по счету', quantity: 1, unit: 'шт', price: 10000 }],
+    } as unknown as Invoice;
+
+    const firstInstallment = {
+      id: 601,
+      invoiceId: 26,
+      amount: 5600,
+      date: '2026-05-10',
+      plannedDate: '2026-05-10',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Рассрочка по счету №26 · платеж 1/2',
+      account: '26',
+      accountDate: '2026-05-10',
+      systemNotes:
+        '[pp:installment-payment] {"sequence":1,"total":10000,"downPayment":0,"annualRate":0,"months":2,"startDate":"2026-05-10","roundingMode":"none","roundingStep":null,"toPay":11200,"overpay":1200,"loanAmount":10000,"baseMonthlyPayment":5600,"roundedMonthlyPayment":5600,"item":{"sequence":1,"date":"2026-05-10","principal":5000,"interest":600,"payment":5600,"balance":5000}}',
+    } as unknown as Payment;
+
+    const secondInstallment = {
+      id: 602,
+      invoiceId: 26,
+      amount: 5600,
+      date: '2026-06-10',
+      plannedDate: '2026-06-10',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Рассрочка по счету №26 · платеж 2/2',
+      account: '26',
+      accountDate: '2026-05-10',
+      systemNotes:
+        '[pp:installment-payment] {"sequence":2,"total":10000,"downPayment":0,"annualRate":0,"months":2,"startDate":"2026-05-10","roundingMode":"none","roundingStep":null,"toPay":11200,"overpay":1200,"loanAmount":10000,"baseMonthlyPayment":5600,"roundedMonthlyPayment":5600,"item":{"sequence":2,"date":"2026-06-10","principal":5000,"interest":600,"payment":5600,"balance":0}}',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[firstInstallment, secondInstallment]}
+      />,
+    );
+
+    await screen.findByText('Рассрочка по счету №26 · платеж 1/2');
+    expect(screen.getByText('Изменить рассрочку')).toBeTruthy();
+    expect(screen.getByText(/Настроено платежей:\s*2,/)).toBeTruthy();
+    expect(screen.getByText('Рассрочка 1/2')).toBeTruthy();
+    expect(screen.getByText('Рассрочка 2/2')).toBeTruthy();
   });
 });
