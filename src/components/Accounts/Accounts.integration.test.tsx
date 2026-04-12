@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
@@ -10,6 +10,7 @@ const {
   getClientsMock,
   getInvoiceMock,
   invoiceModalPropsSpy,
+  paymentModalPropsSpy,
   refreshAccountsMock,
 } = vi.hoisted(() => ({
   getActResponsiblesMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   getClientsMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
+  paymentModalPropsSpy: vi.fn(),
   refreshAccountsMock: vi.fn(),
 }));
 
@@ -42,6 +44,7 @@ function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
     isPaid: true,
     clientId: 55,
     clientName: 'Test Client',
+    clientCaseId: 701,
     responsibleName: 'Test Responsible',
     createdAt: '2026-04-02T10:00:00Z',
     ...overrides,
@@ -260,7 +263,35 @@ vi.mock('./InvoiceModal', () => ({
 }));
 
 vi.mock('../Calendar/PaymentModal', () => ({
-  PaymentModal: () => null,
+  PaymentModal: (props: {
+    isOpen: boolean;
+    linkedInvoice?: {
+      invoiceEntityId: number;
+      invoiceRecordId?: number | null;
+      number: string;
+      date: string;
+      clientId?: number | null;
+      clientCaseId?: number | null;
+      type?: 'Income' | 'Expense';
+    } | null;
+  }) => {
+    paymentModalPropsSpy(props);
+    if (!props.isOpen) {
+      return null;
+    }
+
+    return (
+      <div data-testid="payment-modal">
+        <div>{`linked-invoice-id:${props.linkedInvoice?.invoiceEntityId ?? ''}`}</div>
+        <div>{`linked-invoice-record-id:${props.linkedInvoice?.invoiceRecordId ?? ''}`}</div>
+        <div>{`linked-invoice-number:${props.linkedInvoice?.number ?? ''}`}</div>
+        <div>{`linked-invoice-date:${props.linkedInvoice?.date ?? ''}`}</div>
+        <div>{`linked-client-id:${props.linkedInvoice?.clientId ?? ''}`}</div>
+        <div>{`linked-case-id:${props.linkedInvoice?.clientCaseId ?? ''}`}</div>
+        <div>{`linked-type:${props.linkedInvoice?.type ?? ''}`}</div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../Acts/ActModal', () => ({
@@ -302,6 +333,7 @@ describe('Accounts integration', () => {
     getClientsMock.mockReset();
     getInvoiceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
+    paymentModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
 
     getAccountsRegistryResultMock.mockReturnValue({
@@ -359,5 +391,21 @@ describe('Accounts integration', () => {
     expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
     expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('Legacy sibling payment for invoice 24')).toBeTruthy();
+  });
+
+  it('passes the canonical linked invoice context into the payment modal opened from the accounts registry', async () => {
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByText('Добавить платеж'));
+
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-id:24')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-record-id:528')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-number:24')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-date:2026-04-02')).toBeTruthy();
+    expect(screen.getByText('linked-client-id:55')).toBeTruthy();
+    expect(screen.getByText('linked-case-id:701')).toBeTruthy();
+    expect(screen.getByText('linked-type:Income')).toBeTruthy();
   });
 });
