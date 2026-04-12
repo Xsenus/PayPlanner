@@ -84,6 +84,7 @@ import {
   loadClientInvoiceRelatedPayments,
 } from '../../utils/clientInvoiceRelatedPayments';
 import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } from '../../utils/clientInvoiceModalData';
+import { bindClientInvoiceModalApi } from '../../utils/clientInvoiceModalApi';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import {
@@ -1840,6 +1841,10 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   });
 
   const visiblePayments = payments;
+  const { fetchInvoice: fetchInvoiceById, fetchPayments: fetchInvoicePayments } = useMemo(
+    () => bindClientInvoiceModalApi(apiService),
+    [],
+  );
   const loadInvoiceRelatedPayments = useCallback(async (invoiceSnapshot: Invoice | null) => {
     if (!invoiceSnapshot) {
       setInvoiceModalRelatedPayments([]);
@@ -1853,7 +1858,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         invoice: invoiceSnapshot,
         clientId,
         visiblePayments,
-        fetchPayments: apiService.getPayments,
+        fetchPayments: fetchInvoicePayments,
       });
       setInvoiceModalRelatedPayments(relatedPayments);
     } catch {
@@ -1861,7 +1866,7 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     } finally {
       setInvoiceModalPaymentsLoading(false);
     }
-  }, [clientId, visiblePayments]);
+  }, [clientId, fetchInvoicePayments, visiblePayments]);
   const refreshInvoiceModalData = useCallback(async () => {
     setInvoiceModalPaymentsLoading(true);
     try {
@@ -1871,15 +1876,23 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
         visiblePayments,
         refreshInvoices,
         refreshPayments,
-        fetchInvoice: apiService.getInvoice,
-        fetchPayments: apiService.getPayments,
+        fetchInvoice: fetchInvoiceById,
+        fetchPayments: fetchInvoicePayments,
       });
       setSelectedInvoice(refreshed.invoice);
       setInvoiceModalRelatedPayments(refreshed.relatedPayments);
     } finally {
       setInvoiceModalPaymentsLoading(false);
     }
-  }, [clientId, refreshInvoices, refreshPayments, selectedInvoice, visiblePayments]);
+  }, [
+    clientId,
+    fetchInvoiceById,
+    fetchInvoicePayments,
+    refreshInvoices,
+    refreshPayments,
+    selectedInvoice,
+    visiblePayments,
+  ]);
   useEffect(() => {
     if (!invoiceModalOpen || invoiceModalMode !== 'edit') {
       setInvoiceModalRelatedPayments([]);
