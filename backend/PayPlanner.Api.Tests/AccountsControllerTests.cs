@@ -97,6 +97,36 @@ public class AccountsControllerTests
         Assert.Equal(new DateTime(2026, 6, 25), row.DueDate);
     }
 
+    [Fact]
+    public async Task GetRegistry_KeepsLegacySiblingPayment_WhenPaymentHasNoInvoiceId_ButSharesAccountAndDate()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateInvoiceWithLegacySiblingPaymentAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("24", row.AccountNumber);
+        Assert.Equal(2, row.Payments.Count);
+        Assert.Equal(new[] { 3_000m, 10_000m }, row.Payments.Select(payment => payment.Amount).OrderBy(value => value).ToArray());
+        Assert.Equal(new DateTime(2026, 4, 4), row.DueDate);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -172,6 +202,59 @@ public class AccountsControllerTests
         var sixth = CreateLinkedPayment(invoice, new DateTime(2026, 6, 25), 11_000m, PaymentStatus.Pending);
 
         db.Payments.AddRange(invoicePayment, firstPaid, secondPaid, overdue, fourth, fifth, sixth);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateInvoiceWithLegacySiblingPaymentAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Test Client",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Test Case",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "24",
+            Date = new DateTime(2026, 4, 2),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = CreatePayment(invoice.Date, 10_000m, "Representative payment for invoice 24");
+        representativePayment.DocumentKind = DocumentKind.Invoice;
+        representativePayment.InvoiceId = invoice.Id;
+        representativePayment.Account = invoice.Number;
+        representativePayment.AccountDate = invoice.Date;
+        representativePayment.Client = client;
+        representativePayment.ClientCase = clientCase;
+        representativePayment.CounterpartyName = client.Name;
+        representativePayment.Status = PaymentStatus.Completed;
+        representativePayment.IsPaid = true;
+        representativePayment.PaidAmount = representativePayment.Amount;
+        representativePayment.PaidDate = new DateTime(2026, 4, 3);
+        representativePayment.LastPaymentDate = representativePayment.PaidDate;
+
+        var legacySiblingPayment = CreatePayment(new DateTime(2026, 4, 4), 3_000m, "Legacy sibling payment for invoice 24");
+        legacySiblingPayment.InvoiceId = null;
+        legacySiblingPayment.Account = invoice.Number;
+        legacySiblingPayment.AccountDate = invoice.Date;
+        legacySiblingPayment.Client = client;
+        legacySiblingPayment.ClientCase = clientCase;
+        legacySiblingPayment.CounterpartyName = client.Name;
+        legacySiblingPayment.Status = PaymentStatus.Completed;
+        legacySiblingPayment.IsPaid = true;
+        legacySiblingPayment.PaidAmount = legacySiblingPayment.Amount;
+        legacySiblingPayment.PaidDate = legacySiblingPayment.Date;
+        legacySiblingPayment.LastPaymentDate = legacySiblingPayment.Date;
+
+        db.Payments.AddRange(representativePayment, legacySiblingPayment);
         await db.SaveChangesAsync();
     }
 

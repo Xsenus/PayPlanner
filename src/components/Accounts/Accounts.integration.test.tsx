@@ -6,12 +6,14 @@ import type { AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } fr
 
 const {
   getActResponsiblesMock,
+  getAccountsRegistryResultMock,
   getClientsMock,
   getInvoiceMock,
   invoiceModalPropsSpy,
   refreshAccountsMock,
 } = vi.hoisted(() => ({
   getActResponsiblesMock: vi.fn(),
+  getAccountsRegistryResultMock: vi.fn(),
   getClientsMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
@@ -27,25 +29,26 @@ function createPermissions() {
   };
 }
 
-function createInvoice(): Invoice {
+function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
     id: 528,
     invoiceEntityId: 24,
     number: '24',
     date: '2026-04-02',
     dueDate: '2026-04-03',
-    amount: 10_000,
+    amount: 15_000,
     type: 'Income',
     status: 'Completed',
     isPaid: true,
     clientId: 55,
-    clientName: 'Байгузина Екатерина Евгеньевна',
-    responsibleName: 'Черкасова Н.Д.',
+    clientName: 'Test Client',
+    responsibleName: 'Test Responsible',
     createdAt: '2026-04-02T10:00:00Z',
+    ...overrides,
   } as Invoice;
 }
 
-function createRepresentativePayment(): Payment {
+function createRepresentativePayment(overrides: Partial<Payment> = {}): Payment {
   return {
     id: 528,
     invoiceId: 24,
@@ -56,16 +59,17 @@ function createRepresentativePayment(): Payment {
     type: 'Income',
     status: 'Completed',
     isPaid: true,
-    description: 'Представляющая запись по счету №24',
+    description: 'Representative payment for invoice 24',
     createdAt: '2026-04-02T10:05:00Z',
     updatedAt: null,
     documentKind: 'Payment',
     account: '24',
     accountDate: '2026-04-02',
+    ...overrides,
   } as Payment;
 }
 
-function createSiblingPayment(): Payment {
+function createSiblingPayment(overrides: Partial<Payment> = {}): Payment {
   return {
     id: 529,
     invoiceId: 24,
@@ -76,23 +80,34 @@ function createSiblingPayment(): Payment {
     type: 'Income',
     status: 'Completed',
     isPaid: true,
-    description: 'Доплата по счету №24',
+    description: 'Sibling payment for invoice 24',
     createdAt: '2026-04-03T12:00:00Z',
     updatedAt: null,
     documentKind: 'Payment',
     account: '24',
     accountDate: '2026-04-02',
+    ...overrides,
   } as Payment;
 }
 
-function createAccountRow(): AccountRegistryRow {
+function createLegacySiblingPayment(overrides: Partial<Payment> = {}): Payment {
+  return createSiblingPayment({
+    id: 530,
+    invoiceId: undefined,
+    description: 'Legacy sibling payment for invoice 24',
+    ...overrides,
+  });
+}
+
+function createAccountRow(options?: { invoice?: Invoice; payments?: Payment[] }): AccountRegistryRow {
+  const payments = options?.payments ?? [createRepresentativePayment(), createSiblingPayment()];
   return {
     groupKey: 'invoice-24',
     accountNumber: '24',
-    invoice: createInvoice(),
-    payments: [createRepresentativePayment(), createSiblingPayment()],
+    invoice: options?.invoice ?? createInvoice(),
+    payments,
     acts: [],
-    totalAmount: 10_000,
+    totalAmount: payments.reduce((sum, payment) => sum + (payment.amount ?? 0), 0),
     dueDate: '2026-04-03',
     paidDate: '2026-04-03',
     status: 'paid',
@@ -103,9 +118,9 @@ function createAccountRow(): AccountRegistryRow {
 
 function createSummary(): AccountsSummary {
   return {
-    total: { amount: 10_000, count: 1 },
+    total: { amount: 15_000, count: 1 },
     pending: { amount: 0, count: 0 },
-    paid: { amount: 10_000, count: 1 },
+    paid: { amount: 15_000, count: 1 },
     overdue: { amount: 0, count: 0 },
     cancelled: { amount: 0, count: 0 },
   };
@@ -114,7 +129,7 @@ function createSummary(): AccountsSummary {
 function createClient(): Client {
   return {
     id: 55,
-    name: 'Байгузина Екатерина Евгеньевна',
+    name: 'Test Client',
     email: '',
     phone: '',
     company: '',
@@ -195,15 +210,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
 }));
 
 vi.mock('../../hooks/useAccountsRegistry', () => ({
-  useAccountsRegistry: () => ({
-    items: [createAccountRow()],
-    total: 1,
-    summary: createSummary(),
-    loading: false,
-    refreshing: false,
-    error: null,
-    refresh: refreshAccountsMock,
-  }),
+  useAccountsRegistry: () => getAccountsRegistryResultMock(),
 }));
 
 vi.mock('../../hooks/useTableSelection', () => ({
@@ -290,12 +297,22 @@ vi.mock('../ui/TableSelectCheckbox', () => ({
 
 describe('Accounts integration', () => {
   beforeEach(() => {
-    getInvoiceMock.mockReset();
-    getClientsMock.mockReset();
     getActResponsiblesMock.mockReset();
+    getAccountsRegistryResultMock.mockReset();
+    getClientsMock.mockReset();
+    getInvoiceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
 
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [createAccountRow()],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
     getActResponsiblesMock.mockResolvedValue([]);
@@ -307,8 +324,40 @@ describe('Accounts integration', () => {
     await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
 
     expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
-    expect(await screen.findByText('Представляющая запись по счету №24')).toBeTruthy();
-    expect(screen.getByText('Доплата по счету №24')).toBeTruthy();
+    expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
+    expect(screen.getByText('Sibling payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('payments-loading:false')).toBeTruthy();
+  });
+
+  it('keeps grouped payments when the fetched invoice has another row id but the same invoice entity id', async () => {
+    getInvoiceMock.mockResolvedValue(createInvoice({ id: 777 }));
+
+    render(<Accounts routeInvoiceId={777} />);
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(777));
+
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+    expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
+    expect(screen.getByText('Sibling payment for invoice 24')).toBeTruthy();
+  });
+
+  it('passes legacy sibling payments from the grouped registry row into the editor', async () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [createAccountRow({ payments: [createRepresentativePayment(), createLegacySiblingPayment()] })],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts routeInvoiceId={528} />);
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+    expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
+    expect(screen.getByText('Legacy sibling payment for invoice 24')).toBeTruthy();
   });
 });
