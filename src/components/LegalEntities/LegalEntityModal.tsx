@@ -67,6 +67,10 @@ interface LegalEntityModalProps {
   allowDelete: boolean;
   mode?: 'modal' | 'page';
   onBack?: () => void;
+  titleOverride?: string;
+  hidePageNavigation?: boolean;
+  hideFormActions?: boolean;
+  hideDadataSection?: boolean;
 }
 
 interface LegalEntityImageFieldProps {
@@ -534,6 +538,10 @@ export function LegalEntityModal({
   allowDelete,
   mode = 'modal',
   onBack,
+  titleOverride,
+  hidePageNavigation = false,
+  hideFormActions = false,
+  hideDadataSection = false,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -637,6 +645,13 @@ export function LegalEntityModal({
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === 'page';
   const showLegacyImageFields = false;
+  const shouldHidePageNavigation = isPageMode && hidePageNavigation;
+  const shouldShowFormActions = !hideFormActions;
+  const shouldShowDadataSection = !hideDadataSection;
+  const resolvedTitle = titleOverride
+    ?? (initial
+      ? t('editLegalEntity') || 'Редактирование юридического лица'
+      : t('addLegalEntity') || 'Добавление юридического лица');
 
   useEffect(() => {
     if (!isOpen) {
@@ -1734,7 +1749,7 @@ export function LegalEntityModal({
     <div className={isPageMode ? 'rounded-2xl border border-gray-200 bg-white shadow-sm' : 'w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl'}>
         <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
           <div>
-            {isPageMode && onBack && (
+            {isPageMode && onBack && !shouldHidePageNavigation && (
               <button
                 type="button"
                 onClick={onBack}
@@ -1743,11 +1758,7 @@ export function LegalEntityModal({
                 {t('previous') || 'Назад'}
               </button>
             )}
-            <h2 className="text-xl font-semibold text-gray-900">
-              {initial
-                ? t('editLegalEntity') || 'Редактирование юридического лица'
-                : t('addLegalEntity') || 'Добавление юридического лица'}
-            </h2>
+            <h2 className="text-xl font-semibold text-gray-900">{resolvedTitle}</h2>
             {initial && (
               <p className="mt-1 text-sm text-gray-500">
                 {(t('createdAt') || 'Создано')}: {new Date(initial.createdAt).toLocaleString()}
@@ -1757,13 +1768,15 @@ export function LegalEntityModal({
               </p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-            aria-label={isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Закрыть')}>
-            <X size={20} />
-          </button>
+          {!shouldHidePageNavigation ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              aria-label={isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Закрыть')}>
+              <X size={20} />
+            </button>
+          ) : null}
         </div>
 
         {error && (
@@ -1792,7 +1805,7 @@ export function LegalEntityModal({
         ) : null}
 
         <form onSubmit={handleSubmit} className="px-6 pb-6 pt-4 space-y-6">
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className={`grid gap-6 ${shouldShowDadataSection ? 'md:grid-cols-2' : ''}`}>
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -1892,7 +1905,7 @@ export function LegalEntityModal({
                 </div>
               </div>
             </div>
-            {dadataSection}
+            {shouldShowDadataSection ? dadataSection : null}
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 px-6 pt-4">
@@ -2230,38 +2243,40 @@ export function LegalEntityModal({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-gray-500">
-              {t('legalEntityFormHint') || 'Поля, помеченные * обязательны для заполнения.'}
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {allowDelete && initial && onDelete && (
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100">
-                  {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {t('delete') || 'Удалить'}
-                </button>
-              )}
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:border-gray-400 hover:text-gray-700">
-                  {isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Отмена')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || readOnly}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300">
-                  {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {initial ? t('save') || 'Сохранить' : t('add') || 'Добавить'}
-                </button>
+          {shouldShowFormActions ? (
+            <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-gray-500">
+                {t('legalEntityFormHint') || 'Поля, помеченные * обязательны для заполнения.'}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                {allowDelete && initial && onDelete && (
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100">
+                    {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {t('delete') || 'Удалить'}
+                  </button>
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:border-gray-400 hover:text-gray-700">
+                    {isPageMode ? (t('previous') || 'Назад') : (t('cancel') || 'Отмена')}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading || readOnly}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300">
+                    {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {initial ? t('save') || 'Сохранить' : t('add') || 'Добавить'}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
         </form>
 
         <DictionariesModal

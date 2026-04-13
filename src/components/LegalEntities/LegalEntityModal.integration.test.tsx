@@ -246,4 +246,40 @@ describe('LegalEntityModal integration', () => {
     expect(await screen.findAllByText('ИП Кожеваткин Андрей Владимирович')).toHaveLength(1);
     expect(screen.getByText('ООО Пример')).toBeTruthy();
   });
+
+  it('renders company profile page as read-only when profile mode hides editing controls', () => {
+    const initial = createInitialLegalEntity({
+      shortName: 'ИП Кожеваткин Андрей Владимирович',
+      fullName: 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович',
+      inn: '633009620345',
+      ogrn: '317631300153603',
+      director: 'Кожеваткин Андрей Владимирович',
+    });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit={false}
+        allowDelete={false}
+        mode="page"
+        onBack={vi.fn()}
+        titleOverride="Профиль компании"
+        hidePageNavigation
+        hideFormActions
+        hideDadataSection
+      />,
+    );
+
+    expect(screen.getByText('Профиль компании')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Назад' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+    expect(screen.queryByText('Заполнить по данным DaData')).toBeNull();
+    expect(screen.getByDisplayValue('ИП Кожеваткин Андрей Владимирович')).toHaveProperty('disabled', true);
+    expect(screen.getByDisplayValue('633009620345')).toHaveProperty('disabled', true);
+  });
 });

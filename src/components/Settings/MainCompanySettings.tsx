@@ -5,7 +5,7 @@ import { useTabNavigation } from '../../contexts/TabContext';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
 import type { LegalEntitySummary } from '../../types';
-import { setStoredCompanyProfileCompanyId } from '../../utils/companyProfileBridge';
+import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { useToast } from '../../hooks/useToast';
@@ -168,6 +168,7 @@ export function MainCompanySettings() {
 
   const handleOpenCompanyProfile = useCallback((companyId: number) => {
     setStoredCompanyProfileCompanyId(companyId);
+    setStoredCompanyProfileMode('edit');
     setActiveTab('companyProfile');
   }, [setActiveTab]);
 

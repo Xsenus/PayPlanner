@@ -1,40 +1,19 @@
 import { AlertCircle, Building2, Loader2, Settings2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
-import type { LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
-import { getStoredCompanyProfileCompanyId, setStoredCompanyProfileCompanyId } from '../../utils/companyProfileBridge';
+import type { LegalEntityDetail, LegalEntityInput } from '../../types';
+import {
+  getStoredCompanyProfileCompanyId,
+  getStoredCompanyProfileMode,
+  setStoredCompanyProfileCompanyId,
+  type CompanyProfileMode,
+} from '../../utils/companyProfileBridge';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
-import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
-
-function buildCompanyOption(entity: LegalEntitySummary | LegalEntityDetail): LookupSelectOption {
-  const descriptionParts = [
-    entity.fullName?.trim() || null,
-    entity.inn ? `ИНН ${entity.inn}` : null,
-    entity.kpp ? `КПП ${entity.kpp}` : null,
-  ].filter(Boolean) as string[];
-
-  return {
-    value: String(entity.id),
-    label: entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`,
-    description: descriptionParts.join(' • ') || undefined,
-    keywords: [
-      entity.shortName,
-      entity.fullName ?? '',
-      entity.inn ?? '',
-      entity.kpp ?? '',
-      entity.ogrn ?? '',
-      entity.address ?? '',
-      entity.email ?? '',
-      entity.phone ?? '',
-      entity.director ?? '',
-    ].filter(Boolean),
-  };
-}
 
 export function CompanyProfile() {
   const { isAdmin } = useAuth();
@@ -46,15 +25,11 @@ export function CompanyProfile() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [profileMode] = useState<CompanyProfileMode>(() => getStoredCompanyProfileMode() ?? 'view');
 
   const [profile, setProfile] = useState<LegalEntityDetail | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
-
-  const companyOptions = useMemo(
-    () => (settings?.companies ?? []).map(buildCompanyOption),
-    [settings?.companies],
-  );
 
   const loadSettings = useCallback(async () => {
     try {
@@ -71,17 +46,13 @@ export function CompanyProfile() {
           : (response.companies[0] ? String(response.companies[0].id) : '');
 
       const nextSelectedCompanyId =
-        storedCompanyId && response.companies.some((company) => String(company.id) === storedCompanyId)
+        profileMode === 'edit'
+        && storedCompanyId
+        && response.companies.some((company) => String(company.id) === storedCompanyId)
           ? storedCompanyId
           : fallbackCompanyId;
 
-      setSelectedCompanyId((current) => {
-        if (current && response.companies.some((company) => String(company.id) === current)) {
-          return current;
-        }
-
-        return nextSelectedCompanyId;
-      });
+      setSelectedCompanyId(nextSelectedCompanyId);
     } catch (error) {
       setSettings(null);
       setSelectedCompanyId('');
@@ -91,7 +62,7 @@ export function CompanyProfile() {
     } finally {
       setSettingsLoading(false);
     }
-  }, []);
+  }, [profileMode]);
 
   const loadProfile = useCallback(async (companyId: string) => {
     if (!companyId) {
@@ -136,51 +107,31 @@ export function CompanyProfile() {
 
       const saved = await apiService.updateLegalEntity(profile.id, payload);
       setProfile(saved);
-      setSettings((prev) => prev ? ({
-        ...prev,
-        companies: prev.companies.map((company) => (company.id === saved.id ? saved : company)),
-      }) : prev);
+      setSettings((prev) => prev
+        ? {
+            ...prev,
+            companies: prev.companies.map((company) => (company.id === saved.id ? saved : company)),
+          }
+        : prev);
       toast.success('Профиль компании сохранён.', 'Профиль компании');
       return saved;
     },
     [profile, toast],
   );
 
+  const handleReadonlySubmit = useCallback(async () => {
+    if (!profile) {
+      throw new Error('Компания профиля не загружена.');
+    }
+
+    return profile;
+  }, [profile]);
+
   const hasConfiguredCompanies = (settings?.companies.length ?? 0) > 0;
+  const isReadOnlyProfile = profileMode === 'view';
 
   return (
     <div className="space-y-6 p-6">
-      {hasConfiguredCompanies ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            <div className="w-full xl:max-w-xl">
-              <LookupSelect
-                label="Компания для редактирования"
-                value={selectedCompanyId}
-                options={companyOptions}
-                onChange={setSelectedCompanyId}
-                placeholder={settingsLoading ? 'Загрузка списка компаний...' : 'Выберите компанию'}
-                title="Выбор компании для редактирования"
-                searchPlaceholder="Поиск по названию, ИНН, КПП или адресу"
-                noOptionsText="Основные компании не настроены"
-                disabled={settingsLoading || profileLoading || companyOptions.length === 0}
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setActiveTab('settings')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                <Settings2 className="h-4 w-4" />
-                К настройкам компаний
-              </button>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       {settingsError ? (
         <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           <AlertCircle className="h-4 w-4 shrink-0" />
@@ -206,14 +157,18 @@ export function CompanyProfile() {
         <LegalEntityModal
           isOpen
           initial={profile}
-          onClose={() => setActiveTab('legalEntities')}
-          onBack={() => setActiveTab('legalEntities')}
-          onSubmit={handleSubmit}
+          onClose={isReadOnlyProfile ? () => undefined : () => setActiveTab('settings')}
+          onBack={isReadOnlyProfile ? undefined : () => setActiveTab('settings')}
+          onSubmit={isReadOnlyProfile ? handleReadonlySubmit : handleSubmit}
           suggest={(payload) => apiService.suggestLegalEntities(payload)}
           findById={(payload) => apiService.findLegalEntityById(payload)}
-          allowEdit
+          allowEdit={!isReadOnlyProfile}
           allowDelete={false}
           mode="page"
+          titleOverride={isReadOnlyProfile ? 'Профиль компании' : undefined}
+          hidePageNavigation={isReadOnlyProfile}
+          hideFormActions={isReadOnlyProfile}
+          hideDadataSection={isReadOnlyProfile}
         />
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
@@ -223,10 +178,10 @@ export function CompanyProfile() {
           </h2>
           <p className="mt-2 text-sm text-slate-500">
             {isAdminUser
-              ? 'Сначала добавьте одну или несколько основных компаний в настройках, а затем здесь можно будет редактировать их реквизиты.'
+              ? 'Сначала добавьте одну или несколько основных компаний в настройках, а затем здесь можно будет просматривать их реквизиты.'
               : 'Попросите администратора настроить основные компании в разделе настроек.'}
           </p>
-          {isAdminUser ? (
+          {isAdminUser && !hasConfiguredCompanies ? (
             <div className="mt-6">
               <button
                 type="button"

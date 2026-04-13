@@ -3,6 +3,7 @@ import { Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
+import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
 
 type TopBarProps = {
   title: string;
@@ -124,6 +125,8 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
                       type="button"
                       onClick={() => {
                         setUserMenuOpen(false);
+                        setStoredCompanyProfileCompanyId(null);
+                        setStoredCompanyProfileMode('view');
                         setActiveTab('companyProfile');
                       }}
                       className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
