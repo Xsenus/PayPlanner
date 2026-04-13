@@ -955,7 +955,7 @@ public static class InvoiceDocumentTemplateEngine
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 46px;
+      height: 58px;
       vertical-align: bottom;
       position: relative;
     }
@@ -964,9 +964,21 @@ public static class InvoiceDocumentTemplateEngine
       max-height: 42px;
       object-fit: contain;
       position: absolute;
-      left: 50%;
-      bottom: 2px;
+      left: 32%;
+      bottom: 4px;
       transform: translateX(-50%);
+      z-index: 2;
+    }
+    .signature-line .seal {
+      max-width: 150px;
+      max-height: 150px;
+      object-fit: contain;
+      position: absolute;
+      left: 58%;
+      bottom: -16px;
+      transform: translateX(-50%);
+      opacity: 0.92;
+      z-index: 1;
     }
     .signature-caption {
       padding-top: 3px;
@@ -1112,7 +1124,7 @@ public static class InvoiceDocumentTemplateEngine
           <tr>
             <td class="font-b v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
             <td style="width: 5%;"></td>
-            <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}</td>
+            <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}{{seller.sealHtml}}</td>
             <td style="width: 5%;"></td>
             <td class="signature-line text-c v-al-b" style="width: 35%;">{{seller.documentDirectorShortName}}</td>
           </tr>

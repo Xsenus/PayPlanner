@@ -30,6 +30,7 @@ public class InvoiceDocumentTemplateTests
         Assert.NotEmpty(dto.Tokens);
         Assert.Equal(dto.Templates[0].Key, dto.ActiveTemplateKey);
         Assert.Contains("{{invoice.number}}", dto.DefaultTemplateHtml);
+        Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
     }
 
     [Fact]
@@ -82,6 +83,24 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("application/pdf", file.ContentType);
         Assert.Equal(pdfBytes, file.FileContents);
         Assert.Equal("invoice-25.pdf", file.FileDownloadName);
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersSealAndSignature_WhenMainCompanyConfigured()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        await CreateMainCompanyAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("data:image/png;base64,seal-demo", content.Content);
+        Assert.Contains("data:image/png;base64,signature-demo", content.Content);
+        Assert.Contains("class=\"seal\"", content.Content);
+        Assert.Contains("class=\"signature\"", content.Content);
     }
 
     [Fact]
@@ -166,6 +185,33 @@ public class InvoiceDocumentTemplateTests
 
         await db.SaveChangesAsync();
         return payment.Id;
+    }
+
+    private static async Task CreateMainCompanyAsync(PaymentContext db)
+    {
+        var company = new LegalEntity
+        {
+            ShortName = "ИП Кожеваткин А.В.",
+            FullName = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+            Inn = "633009620345",
+            Address = "446200, Самарская область, г. Новокуйбышевск, ул. Миронова, д. 9",
+            LogoDataUrl = "data:image/png;base64,logo-demo",
+            SealDataUrl = "data:image/png;base64,seal-demo",
+            DirectorSignatureDataUrl = "data:image/png;base64,signature-demo",
+            DocumentDirectorJson = "{\"position\":\"Предприниматель\",\"lastName\":\"Кожеваткин\",\"firstName\":\"Андрей\",\"middleName\":\"Владимирович\",\"noMiddleName\":false}",
+            BankAccountsJson = "[{\"bank\":\"ООО \\\"Банк Точка\\\"\",\"bik\":\"044525104\",\"accountNumber\":\"40802810414500006073\"}]",
+            TreasuryCorrAccountNumber = "30101810745374525104",
+        };
+
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyId",
+            Value = company.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

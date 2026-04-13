@@ -1699,6 +1699,27 @@ export function InvoiceModal({
     window.setTimeout(callback, 160);
   }, []);
 
+  const getDocumentActionErrorMessage = useCallback((error: unknown, fallback: string) => {
+    if (!(error instanceof Error)) {
+      return fallback;
+    }
+
+    const message = error.message.trim();
+    if (!message) {
+      return fallback;
+    }
+
+    const separatorIndex = message.lastIndexOf(' - ');
+    if (separatorIndex >= 0) {
+      const detail = message.slice(separatorIndex + 3).trim();
+      if (detail) {
+        return detail;
+      }
+    }
+
+    return message;
+  }, []);
+
   const handlePrintDocument = async () => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно печатать документ.');
@@ -1709,7 +1730,7 @@ export function InvoiceModal({
       const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf');
       openBlobInNewWindow(blob);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось сформировать PDF документа.');
+      toast.error(getDocumentActionErrorMessage(err, 'Не удалось сформировать PDF документа.'));
     }
   };
 
@@ -1725,7 +1746,7 @@ export function InvoiceModal({
       downloadBlob(`invoice-${form.number || 'export'}.${extension}`, blob);
       setDownloadMenuOpen(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось скачать документ.');
+      toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));
     }
   };
 

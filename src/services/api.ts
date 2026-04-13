@@ -521,6 +521,49 @@ function parseContentDispositionFileName(header: string | null): string | null {
   return plainMatch?.[1]?.trim() || null;
 }
 
+export async function extractResponseErrorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
+    try {
+      const payload = await response.json() as
+        | { detail?: string; title?: string; message?: string; errors?: Record<string, string[] | string> }
+        | null;
+
+      const detail = payload?.detail?.trim();
+      if (detail) {
+        return detail;
+      }
+
+      const message = payload?.message?.trim();
+      if (message) {
+        return message;
+      }
+
+      const title = payload?.title?.trim();
+      if (title) {
+        return title;
+      }
+
+      const firstError = payload?.errors
+        ? Object.values(payload.errors)
+            .flatMap((value) => Array.isArray(value) ? value : [value])
+            .map((value) => `${value}`.trim())
+            .find(Boolean)
+        : '';
+
+      if (firstError) {
+        return firstError;
+      }
+    } catch {
+      // no-op, fall back to text
+    }
+  }
+
+  const text = await response.text().catch(() => '');
+  return text.trim();
+}
+
 export class ApiService {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -538,7 +581,7 @@ export class ApiService {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
+      const text = await extractResponseErrorMessage(response);
       throw new Error(
         `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,
       );
@@ -736,7 +779,7 @@ export class ApiService {
     );
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
+      const text = await extractResponseErrorMessage(response);
       throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
     }
 
@@ -847,7 +890,7 @@ export class ApiService {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
+      const text = await extractResponseErrorMessage(response);
       throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
     }
 
@@ -1040,8 +1083,8 @@ export class ApiService {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
     }
 
     return response.blob();

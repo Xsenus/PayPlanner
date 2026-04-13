@@ -6,6 +6,7 @@ namespace PayPlanner.Api.Services.Invoices;
 public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
 {
     private const string BrowserPathConfigKey = "Pdf:BrowserPath";
+    private const string BrowserCachePathConfigKey = "Pdf:BrowserCachePath";
     private static readonly string[] CandidateBrowserPaths =
     [
         "/usr/bin/chromium-browser",
@@ -23,6 +24,8 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<InvoiceDocumentPdfService> _logger;
+    private readonly SemaphoreSlim _browserResolveLock = new(1, 1);
+    private string? _resolvedBrowserPath;
 
     public InvoiceDocumentPdfService(IConfiguration configuration, ILogger<InvoiceDocumentPdfService> logger)
     {
@@ -37,13 +40,7 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
             throw new InvalidOperationException("HTML-шаблон счета пуст, PDF сформировать невозможно.");
         }
 
-        var executablePath = ResolveBrowserPath();
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            throw new InvalidOperationException(
-                "На сервере не найден Chromium/Chrome для генерации PDF. " +
-                "Установите браузер или задайте путь через переменную PAYPLANNER_PDF_BROWSER_PATH.");
-        }
+        var executablePath = await ResolveBrowserPathAsync(ct);
 
         try
         {
@@ -94,7 +91,53 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
         }
     }
 
-    private string? ResolveBrowserPath()
+    private async Task<string> ResolveBrowserPathAsync(CancellationToken ct)
+    {
+        if (IsExistingFile(_resolvedBrowserPath))
+        {
+            return _resolvedBrowserPath!;
+        }
+
+        var existingPath = FindExistingBrowserPath();
+        if (existingPath is not null)
+        {
+            _resolvedBrowserPath = existingPath;
+            return existingPath;
+        }
+
+        await _browserResolveLock.WaitAsync(ct);
+        try
+        {
+            if (IsExistingFile(_resolvedBrowserPath))
+            {
+                return _resolvedBrowserPath!;
+            }
+
+            existingPath = FindExistingBrowserPath();
+            if (existingPath is not null)
+            {
+                _resolvedBrowserPath = existingPath;
+                return existingPath;
+            }
+
+            var downloadedPath = await DownloadBundledBrowserAsync();
+            if (downloadedPath is not null)
+            {
+                _resolvedBrowserPath = downloadedPath;
+                return downloadedPath;
+            }
+        }
+        finally
+        {
+            _browserResolveLock.Release();
+        }
+
+        throw new InvalidOperationException(
+            "На сервере не найден Chromium/Chrome для генерации PDF, и не удалось автоматически подготовить встроенный браузер. " +
+            "Установите браузер или задайте путь через переменную PAYPLANNER_PDF_BROWSER_PATH.");
+    }
+
+    private string? FindExistingBrowserPath()
     {
         var configuredPath = _configuration[BrowserPathConfigKey]
             ?? Environment.GetEnvironmentVariable("PAYPLANNER_PDF_BROWSER_PATH");
@@ -105,6 +148,74 @@ public sealed class InvoiceDocumentPdfService : IInvoiceDocumentPdfService
         }
 
         return CandidateBrowserPaths.FirstOrDefault(IsExistingFile);
+    }
+
+    private async Task<string?> DownloadBundledBrowserAsync()
+    {
+        try
+        {
+            var browserCachePath = ResolveBrowserCachePath();
+            Directory.CreateDirectory(browserCachePath);
+
+            var fetcher = new BrowserFetcher(new BrowserFetcherOptions
+            {
+                Browser = SupportedBrowser.Chrome,
+                Path = browserCachePath,
+            });
+
+            var installedBrowser = fetcher
+                .GetInstalledBrowsers()
+                .FirstOrDefault();
+
+            if (installedBrowser is not null)
+            {
+                var installedPath = installedBrowser.GetExecutablePath();
+                if (IsExistingFile(installedPath))
+                {
+                    return installedPath;
+                }
+            }
+
+            _logger.LogInformation(
+                "No system browser found for invoice PDF generation. Downloading bundled browser to {BrowserCachePath}",
+                browserCachePath);
+
+            var downloadedBrowser = await fetcher.DownloadAsync(BrowserTag.Stable);
+            var executablePath = downloadedBrowser.GetExecutablePath();
+
+            if (IsExistingFile(executablePath))
+            {
+                _logger.LogInformation(
+                    "Bundled browser for invoice PDF generation is ready at {ExecutablePath}",
+                    executablePath);
+                return executablePath;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to download bundled browser for invoice PDF generation");
+        }
+
+        return null;
+    }
+
+    private string ResolveBrowserCachePath()
+    {
+        var configuredPath = _configuration[BrowserCachePathConfigKey]
+            ?? Environment.GetEnvironmentVariable("PAYPLANNER_PDF_BROWSER_CACHE_PATH");
+
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return Path.Combine(localAppData, "PayPlanner", "browser-cache");
+        }
+
+        return Path.Combine(Path.GetTempPath(), "PayPlanner", "browser-cache");
     }
 
     private static bool IsExistingFile(string? path)
