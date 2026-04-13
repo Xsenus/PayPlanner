@@ -1,9 +1,11 @@
-import { Building2, Loader2, Plus, Star, Trash2 } from 'lucide-react';
+import { Building2, Loader2, PencilLine, Plus, Star, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useTabNavigation } from '../../contexts/TabContext';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
 import type { LegalEntitySummary } from '../../types';
+import { setStoredCompanyProfileCompanyId } from '../../utils/companyProfileBridge';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { useToast } from '../../hooks/useToast';
@@ -39,6 +41,7 @@ function buildSnapshot(settings: MainCompanySettingsDto | null) {
 }
 
 export function MainCompanySettings() {
+  const { setActiveTab } = useTabNavigation();
   const toast = useToast();
   const {
     legalEntities,
@@ -163,6 +166,11 @@ export function MainCompanySettings() {
     setMessage(null);
   }, []);
 
+  const handleOpenCompanyProfile = useCallback((companyId: number) => {
+    setStoredCompanyProfileCompanyId(companyId);
+    setActiveTab('companyProfile');
+  }, [setActiveTab]);
+
   const handleSave = useCallback(async () => {
     try {
       setSaving(true);
@@ -280,6 +288,16 @@ export function MainCompanySettings() {
                       </div>
 
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCompanyProfile(company.id)}
+                          disabled={saving}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <PencilLine className="h-4 w-4" />
+                          Редактировать
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => setSettings((prev) => prev ? ({ ...prev, defaultCompanyId: company.id }) : prev)}

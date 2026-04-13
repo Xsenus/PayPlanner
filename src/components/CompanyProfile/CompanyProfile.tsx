@@ -6,6 +6,7 @@ import { useTabNavigation } from '../../contexts/TabContext';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
 import type { LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import { getStoredCompanyProfileCompanyId, setStoredCompanyProfileCompanyId } from '../../utils/companyProfileBridge';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
@@ -63,10 +64,16 @@ export function CompanyProfile() {
       const response = await apiService.getMainCompanySettings();
       setSettings(response);
 
-      const nextSelectedCompanyId =
+      const storedCompanyId = getStoredCompanyProfileCompanyId();
+      const fallbackCompanyId =
         response.defaultCompanyId != null
           ? String(response.defaultCompanyId)
           : (response.companies[0] ? String(response.companies[0].id) : '');
+
+      const nextSelectedCompanyId =
+        storedCompanyId && response.companies.some((company) => String(company.id) === storedCompanyId)
+          ? storedCompanyId
+          : fallbackCompanyId;
 
       setSelectedCompanyId((current) => {
         if (current && response.companies.some((company) => String(company.id) === current)) {
@@ -117,6 +124,10 @@ export function CompanyProfile() {
     void loadProfile(selectedCompanyId);
   }, [loadProfile, selectedCompanyId]);
 
+  useEffect(() => {
+    setStoredCompanyProfileCompanyId(selectedCompanyId);
+  }, [selectedCompanyId]);
+
   const handleSubmit = useCallback(
     async (payload: LegalEntityInput) => {
       if (!profile) {
@@ -139,32 +150,23 @@ export function CompanyProfile() {
 
   return (
     <div className="space-y-6 p-6">
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Профиль компании</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              Здесь редактируются реквизиты компаний, которые уже отмечены как основные в системных настройках.
-              Сам состав основных компаний теперь задаётся отдельно в разделе настроек.
-            </p>
-          </div>
-
-          {hasConfiguredCompanies ? (
-            <div className="w-full max-w-xl">
+      {hasConfiguredCompanies ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="w-full xl:max-w-xl">
               <LookupSelect
-                label="Компания профиля"
+                label="Компания для редактирования"
                 value={selectedCompanyId}
                 options={companyOptions}
                 onChange={setSelectedCompanyId}
                 placeholder={settingsLoading ? 'Загрузка списка компаний...' : 'Выберите компанию'}
                 title="Выбор компании для редактирования"
                 searchPlaceholder="Поиск по названию, ИНН, КПП или адресу"
-                helperText="Здесь выбирается уже настроенная основная компания для редактирования. Менять список основных компаний нужно в настройках."
                 noOptionsText="Основные компании не настроены"
                 disabled={settingsLoading || profileLoading || companyOptions.length === 0}
               />
             </div>
-          ) : (
+
             <div className="flex justify-end">
               <button
                 type="button"
@@ -172,26 +174,26 @@ export function CompanyProfile() {
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
                 <Settings2 className="h-4 w-4" />
-                Открыть настройки
+                К настройкам компаний
               </button>
             </div>
-          )}
+          </div>
+        </section>
+      ) : null}
+
+      {settingsError ? (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {settingsError}
         </div>
+      ) : null}
 
-        {settingsError ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {settingsError}
-          </div>
-        ) : null}
-
-        {profileError ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {profileError}
-          </div>
-        ) : null}
-      </section>
+      {profileError ? (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {profileError}
+        </div>
+      ) : null}
 
       {settingsLoading || profileLoading ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 shadow-sm">
