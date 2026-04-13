@@ -803,7 +803,7 @@ public static class InvoiceDocumentTemplateEngine
   <meta charset="utf-8" />
   <title>{{document.title}}</title>
   <style>
-    @page { size: A4; margin: 14mm; }
+    @page { size: A4; margin: 40px 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -817,6 +817,9 @@ public static class InvoiceDocumentTemplateEngine
     .page-content {
       width: 675px;
       padding: 0 50px;
+      height: 100%;
+      box-sizing: content-box;
+      zoom: 1;
       margin: 0 auto;
       background: #ffffff;
     }
@@ -844,48 +847,49 @@ public static class InvoiceDocumentTemplateEngine
     .pad-t-5 { padding-top: 5px; }
     .color-line { border-bottom: 2px solid #000000; }
     .doc-title {
-      font-size: 18px !important;
+      font-size: 19px !important;
       font-weight: 700;
-      line-height: 1.25;
+      line-height: 1.22;
     }
     .logo-wrap {
       text-align: right;
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 100px;
-      max-width: 100%;
+      max-height: 110px;
+      max-width: 210px;
       margin-left: auto;
       object-fit: contain;
     }
     .invoice-qr {
       display: block;
-      width: 150px;
-      height: 150px;
-      max-width: 150px;
-      max-height: 150px;
+      width: 148px;
+      height: 148px;
+      max-width: 148px;
+      max-height: 148px;
       margin-left: auto;
       object-fit: contain;
     }
     .bank-grid td {
-      padding: 4px 5px;
+      padding: 3px 5px;
       border: 1px solid #000000;
       vertical-align: top;
+      line-height: 1.15;
     }
     .bank-grid .bor0-b { border-bottom: 0; }
     .bank-grid .bor0-t { border-top: 0; }
     .doc-main-title {
-      margin: 12px 0;
+      margin: 12px 0 14px;
       text-align: center;
       font-size: 23px !important;
       font-weight: 700;
     }
     .counterparty-table td {
-      padding: 4px 3px;
+      padding: 3px 4px;
       vertical-align: top;
     }
     .counterparty-label {
-      width: 14%;
+      width: 15%;
       color: #222222;
     }
     .counterparty-value {
@@ -898,8 +902,9 @@ public static class InvoiceDocumentTemplateEngine
     .items-table th,
     .items-table td {
       border: 1px solid #000000;
-      padding: 6px 6px;
+      padding: 5px 6px;
       vertical-align: top;
+      line-height: 1.18;
     }
     .items-table th {
       text-align: center;
@@ -930,7 +935,7 @@ public static class InvoiceDocumentTemplateEngine
       white-space: nowrap;
     }
     .totals-table td {
-      padding: 2px 0;
+      padding: 1px 0;
     }
     .totals-label {
       width: 82%;
@@ -944,40 +949,41 @@ public static class InvoiceDocumentTemplateEngine
       font-weight: 700;
     }
     .summary-line {
-      margin-top: 10px;
+      margin-top: 8px;
     }
     .words {
       font-weight: 700;
     }
     .signature-table {
-      margin-top: 10px;
+      margin-top: 8px;
     }
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 58px;
+      height: 62px;
       vertical-align: bottom;
       position: relative;
+      overflow: visible;
     }
     .signature-line .signature {
-      max-width: 160px;
-      max-height: 42px;
+      max-width: 150px;
+      max-height: 44px;
       object-fit: contain;
       position: absolute;
-      left: 32%;
-      bottom: 4px;
+      left: 44%;
+      bottom: 8px;
       transform: translateX(-50%);
       z-index: 2;
     }
     .signature-line .seal {
-      max-width: 150px;
-      max-height: 150px;
+      max-width: 142px;
+      max-height: 142px;
       object-fit: contain;
       position: absolute;
-      left: 58%;
-      bottom: -16px;
+      left: 96%;
+      bottom: -22px;
       transform: translateX(-50%);
-      opacity: 0.92;
+      opacity: 0.88;
       z-index: 1;
     }
     .signature-caption {
