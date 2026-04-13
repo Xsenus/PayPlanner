@@ -3,6 +3,7 @@ namespace PayPlanner.Api.Models.Responses;
 public class InvoiceDocumentTemplateSettingsDto
 {
     public string ActiveTemplateKey { get; set; } = string.Empty;
+    public bool PrintWithSignatureAndSealByDefault { get; set; }
     public List<InvoiceDocumentTemplateDto> Templates { get; set; } = new();
     public List<InvoiceDocumentTemplateTokenDto> Tokens { get; set; } = new();
     public string DefaultTemplateHtml { get; set; } = string.Empty;

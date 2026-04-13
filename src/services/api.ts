@@ -239,6 +239,7 @@ export interface InvoiceDocumentTemplateTokenDto {
 
 export interface InvoiceDocumentTemplateSettingsDto {
   activeTemplateKey: string;
+  printWithSignatureAndSealByDefault: boolean;
   templates: InvoiceDocumentTemplateDto[];
   tokens: InvoiceDocumentTemplateTokenDto[];
   defaultTemplateHtml: string;
@@ -1020,7 +1021,7 @@ export class ApiService {
     return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings');
   }
 
-  async updateInvoiceDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates'>) {
+  async updateInvoiceDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates' | 'printWithSignatureAndSealByDefault'>) {
     return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -1104,9 +1105,17 @@ export class ApiService {
     return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(`/accounts/registry${q}`);
   }
 
-  async downloadInvoiceDocument(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
+  async downloadInvoiceDocument(
+    id: number,
+    format: 'word' | 'pdf' | 'html' = 'word',
+    options?: { includeSignatureAndSeal?: boolean },
+  ) {
     const token = getAuthToken();
-    const response = await fetch(`${API_BASE_URL}/invoices/${id}/document?format=${format}`, {
+    const query = buildQuery({
+      format,
+      includeSignatureAndSeal: options?.includeSignatureAndSeal,
+    });
+    const response = await fetch(`${API_BASE_URL}/invoices/${id}/document${query}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });

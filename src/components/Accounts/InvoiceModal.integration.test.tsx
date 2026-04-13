@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
 import type { Invoice, Payment } from '../../types';
+import { apiService } from '../../services/api';
 
 const {
   confirmMock,
@@ -88,6 +89,28 @@ describe('InvoiceModal integration', () => {
     confirmMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    vi.restoreAllMocks();
+    Object.defineProperty(window, 'open', {
+      configurable: true,
+      value: vi.fn(() => ({
+        closed: false,
+        location: { href: '' },
+        document: {
+          open: vi.fn(),
+          write: vi.fn(),
+          close: vi.fn(),
+        },
+        close: vi.fn(),
+      })),
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:test'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
   });
 
   it('renders related payments even when the current invoice record is the only operation available', async () => {
@@ -258,5 +281,86 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText(/Настроено платежей:\s*2,/)).toBeTruthy();
     expect(screen.getByText('Рассрочка 1/2')).toBeTruthy();
     expect(screen.getByText('Рассрочка 2/2')).toBeTruthy();
+  });
+
+  it('downloads document variant without signature and seal on demand', async () => {
+    const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
+    downloadMock.mockClear();
+
+    const invoice = {
+      id: 551,
+      invoiceEntityId: 551,
+      number: '551',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 18000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /скачать/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pdf без подписи и печати/i }));
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledWith(551, 'pdf', { includeSignatureAndSeal: false });
+    });
+  });
+
+  it('opens print window before requesting printable html document', async () => {
+    const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
+    downloadMock.mockClear();
+    const openMock = vi.mocked(window.open);
+
+    const invoice = {
+      id: 552,
+      invoiceEntityId: 552,
+      number: '552',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 18000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /печать/i }));
+
+    expect(openMock).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledWith(552, 'html');
+    });
   });
 });

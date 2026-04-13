@@ -1684,14 +1684,98 @@ export function InvoiceModal({
     URL.revokeObjectURL(href);
   };
 
-  const openBlobInNewWindow = (blob: Blob) => {
+  const openPendingDocumentWindow = () => {
     if (typeof window === 'undefined') return;
-    const href = URL.createObjectURL(blob);
-    const previewWindow = window.open(href, '_blank', 'noopener,noreferrer,width=1180,height=900');
+    const previewWindow = window.open('', '_blank', 'width=1180,height=900');
     if (!previewWindow) {
-      URL.revokeObjectURL(href);
       throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
     }
+
+    previewWindow.document.open();
+    previewWindow.document.write(`
+      <!doctype html>
+      <html lang="ru">
+        <head>
+          <meta charset="utf-8" />
+          <title>Подготавливаем PDF…</title>
+          <style>
+            body {
+              margin: 0;
+              font-family: Arial, sans-serif;
+              background: #f8fafc;
+              color: #0f172a;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+            }
+            .box {
+              padding: 24px 28px;
+              border: 1px solid #cbd5e1;
+              border-radius: 16px;
+              background: #ffffff;
+              box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+              font-size: 15px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="box">Подготавливаем PDF-документ…</div>
+        </body>
+      </html>
+    `);
+    previewWindow.document.close();
+
+    return previewWindow;
+  };
+
+  const buildAutoPrintHtml = (html: string) => {
+    const autoPrintScript = `
+      <script>
+        window.addEventListener('load', function () {
+          window.setTimeout(function () {
+            try {
+              window.focus();
+              window.print();
+            } catch (error) {
+              console.error('print failed', error);
+            }
+          }, 120);
+        });
+      </script>
+    `;
+
+    if (html.includes('</body>')) {
+      return html.replace('</body>', `${autoPrintScript}</body>`);
+    }
+
+    return `${html}${autoPrintScript}`;
+  };
+
+  const openHtmlInWindow = (html: string, previewWindow?: Window | null) => {
+    if (!previewWindow || previewWindow.closed) {
+      throw new Error('Окно печати было закрыто до загрузки документа. Повторите ещё раз.');
+    }
+
+    previewWindow.document.open();
+    previewWindow.document.write(buildAutoPrintHtml(html));
+    previewWindow.document.close();
+  };
+
+  const openBlobInWindow = (blob: Blob, previewWindow?: Window | null) => {
+    if (typeof window === 'undefined') return;
+    const href = URL.createObjectURL(blob);
+
+    if (previewWindow && !previewWindow.closed) {
+      previewWindow.location.href = href;
+    } else {
+      const nextWindow = window.open(href, '_blank', 'width=1180,height=900');
+      if (!nextWindow) {
+        URL.revokeObjectURL(href);
+        throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
+      }
+    }
+
     window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
   };
 
@@ -1726,22 +1810,33 @@ export function InvoiceModal({
       return;
     }
 
+    let previewWindow: Window | null | undefined;
     try {
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf');
-      openBlobInNewWindow(blob);
+      previewWindow = openPendingDocumentWindow();
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
+      const html = await blob.text();
+      openHtmlInWindow(html, previewWindow);
     } catch (err) {
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
       toast.error(getDocumentActionErrorMessage(err, 'Не удалось сформировать PDF документа.'));
     }
   };
 
-  const handleDownloadDocument = async (format: 'word' | 'pdf') => {
+  const handleDownloadDocument = async (
+    format: 'word' | 'pdf',
+    includeSignatureAndSeal: boolean,
+  ) => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно скачать документ.');
       return;
     }
 
     try {
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, format);
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, format, {
+        includeSignatureAndSeal,
+      });
       const extension = format === 'pdf' ? 'pdf' : 'doc';
       downloadBlob(`invoice-${form.number || 'export'}.${extension}`, blob);
       setDownloadMenuOpen(false);
@@ -2449,21 +2544,38 @@ export function InvoiceModal({
                 <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[12rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                   <button
                     type="button"
-                    onClick={() => void handleDownloadDocument('pdf')}
+                    onClick={() => void handleDownloadDocument('pdf', false)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>Скачать PDF</span>
+                    <span>PDF без подписи и печати</span>
                     <span className="text-xs text-slate-400">.pdf</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => void handleDownloadDocument('word')}
+                    onClick={() => void handleDownloadDocument('pdf', true)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>Скачать Word</span>
+                    <span>PDF с подписью и печатью</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
+                  </button>
+                  <div className="my-1 border-t border-slate-100" />
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', false)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Word без подписи и печати</span>
+                    <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', true)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Word с подписью и печатью</span>
                     <span className="text-xs text-slate-400">.doc</span>
                   </button>
                 </div>

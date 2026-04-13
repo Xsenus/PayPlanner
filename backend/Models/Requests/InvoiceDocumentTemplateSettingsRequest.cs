@@ -7,6 +7,8 @@ public class InvoiceDocumentTemplateSettingsRequest
     [Required]
     public string ActiveTemplateKey { get; set; } = string.Empty;
 
+    public bool PrintWithSignatureAndSealByDefault { get; set; }
+
     [Required]
     public List<InvoiceDocumentTemplateRequest> Templates { get; set; } = new();
 }

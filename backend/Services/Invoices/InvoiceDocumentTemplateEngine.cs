@@ -22,6 +22,7 @@ public static class InvoiceDocumentTemplateEngine
         return CreateResponse(new InvoiceDocumentTemplateSettingsStorage
         {
             ActiveTemplateKey = DefaultTemplateKey,
+            PrintWithSignatureAndSealByDefault = false,
             Templates =
             [
                 new InvoiceDocumentTemplateStorageItem
@@ -62,6 +63,7 @@ public static class InvoiceDocumentTemplateEngine
         return new InvoiceDocumentTemplateSettingsDto
         {
             ActiveTemplateKey = activeTemplateKey,
+            PrintWithSignatureAndSealByDefault = storage.PrintWithSignatureAndSealByDefault,
             Templates = templates,
             Tokens = GetAvailableTokens(),
             DefaultTemplateHtml = DefaultTemplateHtml,
@@ -84,6 +86,7 @@ public static class InvoiceDocumentTemplateEngine
         return new InvoiceDocumentTemplateSettingsStorage
         {
             ActiveTemplateKey = request.ActiveTemplateKey.Trim(),
+            PrintWithSignatureAndSealByDefault = request.PrintWithSignatureAndSealByDefault,
             Templates = templates,
         };
     }
@@ -112,9 +115,10 @@ public static class InvoiceDocumentTemplateEngine
         string templateHtml,
         Payment payment,
         IReadOnlyCollection<InvoiceLineItemDto> lineItems,
-        LegalEntity? mainCompany)
+        LegalEntity? mainCompany,
+        bool includeSignatureAndSeal = true)
     {
-        var model = BuildRenderModel(payment, lineItems, mainCompany);
+        var model = BuildRenderModel(payment, lineItems, mainCompany, includeSignatureAndSeal);
         var rendered = RenderLineItems(templateHtml, model.LineItems);
         return ReplaceTokens(rendered, model.Tokens);
     }
@@ -170,7 +174,8 @@ public static class InvoiceDocumentTemplateEngine
     private static InvoiceDocumentRenderModel BuildRenderModel(
         Payment payment,
         IReadOnlyCollection<InvoiceLineItemDto> lineItems,
-        LegalEntity? mainCompany)
+        LegalEntity? mainCompany,
+        bool includeSignatureAndSeal)
     {
         var invoiceDate = (payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date).Date;
         var number = payment.Invoice?.Number ?? payment.Account ?? "—";
@@ -230,8 +235,12 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.documentDirectorFullName"] = Encode(directorFullName),
                 ["seller.documentDirectorShortName"] = Encode(directorShortName),
                 ["seller.logoHtml"] = BuildImageHtml(mainCompany?.LogoDataUrl, "Логотип", "logo"),
-                ["seller.sealHtml"] = BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal"),
-                ["seller.signatureHtml"] = BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature"),
+                ["seller.sealHtml"] = includeSignatureAndSeal
+                    ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
+                    : string.Empty,
+                ["seller.signatureHtml"] = includeSignatureAndSeal
+                    ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature")
+                    : string.Empty,
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),
@@ -674,6 +683,7 @@ public static class InvoiceDocumentTemplateEngine
     public sealed class InvoiceDocumentTemplateSettingsStorage
     {
         public string ActiveTemplateKey { get; set; } = string.Empty;
+        public bool PrintWithSignatureAndSealByDefault { get; set; }
         public List<InvoiceDocumentTemplateStorageItem> Templates { get; set; } = new();
     }
 

@@ -29,6 +29,7 @@ public class InvoiceDocumentTemplateTests
         Assert.NotEmpty(dto.Templates);
         Assert.NotEmpty(dto.Tokens);
         Assert.Equal(dto.Templates[0].Key, dto.ActiveTemplateKey);
+        Assert.False(dto.PrintWithSignatureAndSealByDefault);
         Assert.Contains("{{invoice.number}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
     }
@@ -58,7 +59,7 @@ public class InvoiceDocumentTemplateTests
 
         Assert.IsType<OkObjectResult>(saveAction.Result);
 
-        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
@@ -77,7 +78,7 @@ public class InvoiceDocumentTemplateTests
             isAdmin: true,
             pdfService: new FakeInvoiceDocumentPdfService(pdfBytes));
 
-        var result = await controller.GetDocument(paymentId, "pdf", null, CancellationToken.None);
+        var result = await controller.GetDocument(paymentId, "pdf", null, null, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal("application/pdf", file.ContentType);
@@ -86,21 +87,35 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
-    public async Task GetDocument_RendersSealAndSignature_WhenMainCompanyConfigured()
+    public async Task GetDocument_DoesNotRenderSealAndSignature_WhenDefaultPrintModeDisabled()
     {
         await using var db = await CreateContextAsync();
         var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
         await CreateMainCompanyAsync(db);
         var controller = CreateController(db, isAdmin: true);
 
-        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.DoesNotContain("data:image/png;base64,seal-demo", content.Content);
+        Assert.DoesNotContain("data:image/png;base64,signature-demo", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersSealAndSignature_WhenExplicitlyRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        await CreateMainCompanyAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, true, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
         Assert.Contains("data:image/png;base64,seal-demo", content.Content);
         Assert.Contains("data:image/png;base64,signature-demo", content.Content);
-        Assert.Contains("class=\"seal\"", content.Content);
-        Assert.Contains("class=\"signature\"", content.Content);
     }
 
     [Fact]
@@ -136,7 +151,7 @@ public class InvoiceDocumentTemplateTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, isAdmin: true);
-        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+        var result = await controller.GetDocument(paymentId, "html", null, true, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
@@ -179,13 +194,48 @@ public class InvoiceDocumentTemplateTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, isAdmin: true);
-        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
         Assert.Contains("40802810000000000002", content.Content);
         Assert.Contains("222222222", content.Content);
         Assert.DoesNotContain("40802810000000000001", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_UsesStoredPrintMode_WhenOverrideNotProvided()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        await CreateMainCompanyAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var saveAction = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                PrintWithSignatureAndSealByDefault = true,
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                        Name = "Стандартный счет",
+                        Html = InvoiceDocumentTemplateEngine.CreateDefaultSettings().DefaultTemplateHtml,
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(saveAction.Result);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("data:image/png;base64,seal-demo", content.Content);
+        Assert.Contains("data:image/png;base64,signature-demo", content.Content);
     }
 
     [Fact]

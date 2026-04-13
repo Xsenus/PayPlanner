@@ -1155,6 +1155,7 @@ public class InvoicesController : ControllerBase
         int id,
         [FromQuery] string? format = "word",
         [FromQuery] string? templateKey = null,
+        [FromQuery] bool? includeSignatureAndSeal = null,
         CancellationToken ct = default)
     {
         var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
@@ -1166,9 +1167,16 @@ public class InvoicesController : ControllerBase
 
         var normalizedFormat = NormalizeDocumentFormat(format);
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
-        var template = await GetInvoiceDocumentTemplateAsync(templateKey, ct);
+        var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         var mainCompany = await LoadMainCompanyAsync(ct);
-        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, lineItems, mainCompany);
+        var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
+        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+            template.Html,
+            payment,
+            lineItems,
+            mainCompany,
+            shouldIncludeSignatureAndSeal);
 
         if (normalizedFormat == "html")
         {
@@ -1226,9 +1234,15 @@ public class InvoicesController : ControllerBase
         }
 
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
-        var template = await GetInvoiceDocumentTemplateAsync(null, ct);
+        var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        var template = SelectInvoiceDocumentTemplate(documentSettings, null);
         var mainCompany = await LoadMainCompanyAsync(ct);
-        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, lineItems, mainCompany);
+        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+            template.Html,
+            payment,
+            lineItems,
+            mainCompany,
+            documentSettings.PrintWithSignatureAndSealByDefault);
         byte[] bytes;
         string fileName;
         string contentType;
@@ -3144,6 +3158,13 @@ public class InvoicesController : ControllerBase
     private async Task<InvoiceDocumentTemplateDto> GetInvoiceDocumentTemplateAsync(string? preferredTemplateKey, CancellationToken ct)
     {
         var settings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        return SelectInvoiceDocumentTemplate(settings, preferredTemplateKey);
+    }
+
+    private static InvoiceDocumentTemplateDto SelectInvoiceDocumentTemplate(
+        InvoiceDocumentTemplateSettingsDto settings,
+        string? preferredTemplateKey)
+    {
         if (!string.IsNullOrWhiteSpace(preferredTemplateKey))
         {
             var preferred = settings.Templates.FirstOrDefault(template =>

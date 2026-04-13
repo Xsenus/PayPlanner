@@ -111,7 +111,7 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#39;');
 }
 
-function renderTemplatePreview(templateHtml: string) {
+function renderTemplatePreview(templateHtml: string, includeSignatureAndSeal: boolean) {
   const withLineItems = templateHtml.replace(/\{\{#lineItems\}\}([\s\S]*?)\{\{\/lineItems\}\}/g, (_, rowTemplate: string) => (
     PREVIEW_LINE_ITEMS.map((item) => rowTemplate.replace(/\{\{\s*([a-zA-Z0-9._]+)\s*\}\}/g, (match: string, key: string) => (
       Object.prototype.hasOwnProperty.call(item, key)
@@ -123,6 +123,9 @@ function renderTemplatePreview(templateHtml: string) {
   return withLineItems.replace(/\{\{\s*([a-zA-Z0-9._]+)\s*\}\}/g, (match, key: string) => {
     const raw = PREVIEW_TOKENS[key];
     if (raw === undefined) return '';
+    if (!includeSignatureAndSeal && (key === 'seller.sealHtml' || key === 'seller.signatureHtml')) {
+      return '';
+    }
     return PREVIEW_HTML_TOKEN_KEYS.has(key) ? raw : escapeHtml(raw);
   });
 }
@@ -243,8 +246,8 @@ export function InvoiceDocumentTemplateSettings() {
     [selectedTemplateKey, settings],
   );
   const previewHtml = useMemo(
-    () => (selectedTemplate ? renderTemplatePreview(selectedTemplate.html) : ''),
-    [selectedTemplate],
+    () => (selectedTemplate && settings ? renderTemplatePreview(selectedTemplate.html, settings.printWithSignatureAndSealByDefault) : ''),
+    [selectedTemplate, settings],
   );
 
   const tokenGroups = useMemo(() => {
@@ -408,6 +411,7 @@ export function InvoiceDocumentTemplateSettings() {
     try {
       const response = await apiService.updateInvoiceDocumentTemplateSettings({
         activeTemplateKey: settings.activeTemplateKey,
+        printWithSignatureAndSealByDefault: settings.printWithSignatureAndSealByDefault,
         templates: settings.templates,
       });
       setSettings(response);
@@ -511,6 +515,45 @@ export function InvoiceDocumentTemplateSettings() {
           </button>
         </div>
       </div>
+
+      {settings ? (
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-sm font-semibold text-slate-900">Режим печати по умолчанию</div>
+          <p className="mt-1 text-sm text-slate-600">
+            Кнопка «Печать» и встроенное превью используют этот режим. Для скачивания пользователь сможет выбрать вариант отдельно.
+          </p>
+          <div className="mt-3 inline-flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSettings((prev) => prev ? ({
+                ...prev,
+                printWithSignatureAndSealByDefault: false,
+              }) : prev)}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                !settings.printWithSignatureAndSealByDefault
+                  ? 'bg-slate-900 text-white'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Без подписи и печати
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettings((prev) => prev ? ({
+                ...prev,
+                printWithSignatureAndSealByDefault: true,
+              }) : prev)}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                settings.printWithSignatureAndSealByDefault
+                  ? 'bg-slate-900 text-white'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              С подписью и печатью
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {(message || error) && (
         <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
