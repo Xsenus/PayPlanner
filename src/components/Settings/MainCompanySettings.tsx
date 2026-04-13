@@ -209,7 +209,7 @@ export function MainCompanySettings() {
         ) : null}
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <div className="mt-6 space-y-4">
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
@@ -309,15 +309,6 @@ export function MainCompanySettings() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <h5 className="text-base font-semibold text-slate-900">Как это работает сейчас</h5>
-            <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-              <li>Компания по умолчанию используется в печатных формах и документах счета.</li>
-              <li>Все выбранные здесь компании скрываются из обычного списка «Юридические лица».</li>
-              <li>Экран «Профиль компании» редактирует только компании из этого списка.</li>
-            </ul>
-          </div>
-
           {(error || legalEntitiesError || message) ? (
             <div className="space-y-3">
               {error ? (

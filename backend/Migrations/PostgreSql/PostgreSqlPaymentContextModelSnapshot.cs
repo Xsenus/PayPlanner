@@ -289,6 +289,56 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.Bank", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Bik")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("City")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("CorrespondentAccount")
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsForeign")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Bik")
+                        .HasDatabaseName("IX_Banks_Bik");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_Banks_Name");
+
+                    b.HasIndex("Name", "Bik")
+                        .HasDatabaseName("IX_Banks_Name_Bik");
+
+                    b.ToTable("Banks");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>
                 {
                     b.Property<int>("Id")

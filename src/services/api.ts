@@ -254,6 +254,25 @@ export interface UpdateMainCompanySettingsRequest {
   defaultCompanyId?: number | null;
 }
 
+export interface BankDto {
+  id: number;
+  name: string;
+  bik?: string | null;
+  correspondentAccount?: string | null;
+  city?: string | null;
+  isForeign: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface BankUpsertRequest {
+  name: string;
+  bik?: string | null;
+  correspondentAccount?: string | null;
+  city?: string | null;
+  isForeign: boolean;
+}
+
 export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
   year: number;
   nextNumber: string;
@@ -1356,6 +1375,33 @@ export class ApiService {
     return this.request<LegalEntityDetail>(`/legal-entities/company-profile/main/${id}`, {
       method: 'PUT',
     });
+  }
+
+  async getBanks(params?: { search?: string }) {
+    const q = buildQuery({ search: params?.search });
+    return this.request<BankDto[]>(`/banks${q}`);
+  }
+
+  async getBank(id: number) {
+    return this.request<BankDto>(`/banks/${id}`);
+  }
+
+  async createBank(payload: BankUpsertRequest) {
+    return this.request<BankDto>('/banks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateBank(id: number, payload: BankUpsertRequest) {
+    return this.request<BankDto>(`/banks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteBank(id: number) {
+    return this.request<void>(`/banks/${id}`, { method: 'DELETE' });
   }
 
   async createLegalEntity(payload: LegalEntityInput) {

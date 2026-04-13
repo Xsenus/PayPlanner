@@ -254,6 +254,8 @@ public static class InvoiceDocumentTemplateEngine
     private static SellerInfo BuildSeller(LegalEntity? mainCompany)
     {
         var bankAccount = ParseBankAccounts(mainCompany?.BankAccountsJson)
+            .OrderByDescending(account => string.Equals(account.AccountType?.Trim(), "Основной", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(account => string.IsNullOrWhiteSpace(account.AccountNumber) ? 1 : 0)
             .FirstOrDefault(account => !string.IsNullOrWhiteSpace(account.AccountNumber))
             ?? new BankAccountInfo();
 
@@ -262,7 +264,7 @@ public static class InvoiceDocumentTemplateEngine
         var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
         var bik = FirstNotEmpty(bankAccount.Bik, mainCompany?.TreasuryBankBik);
         var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);
-        var corrAccountNumber = mainCompany?.TreasuryCorrAccountNumber ?? string.Empty;
+        var corrAccountNumber = FirstNotEmpty(bankAccount.CorrAccountNumber, mainCompany?.TreasuryCorrAccountNumber);
 
         var requisitesParts = new List<string>
         {
@@ -391,7 +393,13 @@ public static class InvoiceDocumentTemplateEngine
 
         try
         {
-            return JsonSerializer.Deserialize<List<BankAccountInfo>>(json) ?? [];
+            return JsonSerializer.Deserialize<List<BankAccountInfo>>(
+                       json,
+                       new JsonSerializerOptions
+                       {
+                           PropertyNameCaseInsensitive = true,
+                       })
+                   ?? [];
         }
         catch
         {
@@ -701,12 +709,16 @@ public static class InvoiceDocumentTemplateEngine
 
     private sealed class BankAccountInfo
     {
+        public int? BankId { get; set; }
         public string? Bank { get; set; }
         public string? Name { get; set; }
         public string? Bik { get; set; }
         public string? Currency { get; set; }
         public string? AccountNumber { get; set; }
         public string? AccountType { get; set; }
+        public string? CorrAccountNumber { get; set; }
+        public string? City { get; set; }
+        public bool? IsForeignBank { get; set; }
     }
 
     private sealed class PersonInfo

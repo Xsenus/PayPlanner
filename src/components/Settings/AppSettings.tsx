@@ -8,6 +8,7 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
+import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
@@ -25,6 +26,7 @@ import type {
 } from '../../services/api';
 
 type SettingsSection =
+  | 'companies'
   | 'general'
   | 'integrations'
   | 'auth-providers'
@@ -99,6 +101,7 @@ export function AppSettings() {
   const auditOnlyMode = !isAdminRole && permissions.audit.canView;
 
   const activeSectionTitle = useMemo(() => {
+    if (activeSection === 'companies') return 'Компании сервиса';
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
@@ -638,6 +641,17 @@ export function AppSettings() {
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
+                    onClick={() => setActiveSection('companies')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'companies'
+                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
+                    }`}
+                  >
+                    Основные компании
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveSection('general')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'general'
@@ -758,10 +772,15 @@ export function AppSettings() {
               <h3 className="text-2xl font-semibold text-gray-900">{activeSectionTitle}</h3>
             </div>
 
-            {activeSection === 'general' && (
+            {activeSection === 'companies' && (
               <div className="space-y-6">
                 <MainCompanySettings />
+                <BankDirectorySettings />
+              </div>
+            )}
 
+            {activeSection === 'general' && (
+              <div className="space-y-6">
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap gap-2">
                     <button

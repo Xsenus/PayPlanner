@@ -214,6 +214,54 @@ export interface LegalEntityDadataDetails {
   emails?: string[];
 }
 
+export interface BankDirectoryItem {
+  id: number;
+  name: string;
+  bik?: string | null;
+  correspondentAccount?: string | null;
+  city?: string | null;
+  isForeign: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface LegalEntityBankAccount {
+  bankId?: number | null;
+  bank: string;
+  name: string;
+  bik: string;
+  currency: string;
+  accountNumber: string;
+  accountType: string;
+  corrAccountNumber?: string | null;
+  city?: string | null;
+  isForeignBank?: boolean | null;
+}
+
+export interface LegalEntityCashRegister {
+  name: string;
+  currency: string;
+  access?: string | null;
+  accountType?: string | null;
+  isPrimary?: boolean | null;
+  isClosed?: boolean | null;
+  accountingEnabled?: boolean | null;
+}
+
+export interface LegalEntityCard {
+  bankId?: number | null;
+  number: string;
+  bank: string;
+  currency: string;
+  holder: string;
+  name?: string | null;
+  bik?: string | null;
+  corrAccountNumber?: string | null;
+  city?: string | null;
+  access?: string | null;
+  accountingEnabled?: boolean | null;
+}
+
 export interface LegalEntityAddressInput {
   type: string | number;
   value: string;

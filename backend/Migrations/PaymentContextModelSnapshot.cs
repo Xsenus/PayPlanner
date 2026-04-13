@@ -280,6 +280,54 @@ namespace PayPlanner.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.Bank", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Bik")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("City")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrespondentAccount")
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsForeign")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Bik")
+                        .HasDatabaseName("IX_Banks_Bik");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_Banks_Name");
+
+                    b.HasIndex("Name", "Bik")
+                        .HasDatabaseName("IX_Banks_Name_Bik");
+
+                    b.ToTable("Banks");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>
                 {
                     b.Property<int>("Id")

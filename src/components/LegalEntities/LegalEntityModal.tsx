@@ -13,6 +13,9 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type {
   Client,
+  LegalEntityBankAccount,
+  LegalEntityCard,
+  LegalEntityCashRegister,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntitySuggestion,
@@ -50,6 +53,7 @@ import {
   type LegalEntityImageUploadProfile,
 } from './legalEntityImageUtils';
 import { getLegalEntityImageFieldState } from './legalEntityImageFieldUtils';
+import { LegalEntityFinanceSection } from './LegalEntityFinanceSection';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -130,27 +134,9 @@ interface FormState {
 }
 
 
-interface BankAccountItem {
-  bank: string;
-  name: string;
-  bik: string;
-  currency: string;
-  accountNumber: string;
-  accountType: string;
-}
-
-interface CashRegisterItem {
-  name: string;
-  currency: string;
-  access: string;
-}
-
-interface CardItem {
-  number: string;
-  bank: string;
-  currency: string;
-  holder: string;
-}
+type BankAccountItem = LegalEntityBankAccount;
+type CashRegisterItem = LegalEntityCashRegister;
+type CardItem = LegalEntityCard;
 
 interface PersonDocInfo {
   position: string;
@@ -2121,6 +2107,18 @@ export function LegalEntityModal({
           </div>
 
           {clientsSection}
+
+          <div className="mt-6">
+            <LegalEntityFinanceSection
+              readOnly={readOnly}
+              bankAccounts={bankAccounts}
+              cashRegisters={cashRegisters}
+              cards={cards}
+              onBankAccountsChange={setBankAccounts}
+              onCashRegistersChange={setCashRegisters}
+              onCardsChange={setCards}
+            />
+          </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
             <LegalEntityImageField

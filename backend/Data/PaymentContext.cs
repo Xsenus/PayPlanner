@@ -455,6 +455,20 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
         });
 
+        modelBuilder.Entity<Bank>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Bik).HasMaxLength(16);
+            entity.Property(e => e.CorrespondentAccount).HasMaxLength(34);
+            entity.Property(e => e.City).HasMaxLength(120);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_Banks_Name");
+            entity.HasIndex(e => e.Bik).HasDatabaseName("IX_Banks_Bik");
+            entity.HasIndex(e => new { e.Name, e.Bik }).HasDatabaseName("IX_Banks_Name_Bik");
+        });
+
         // ------------------ ExternalContact ------------------
         modelBuilder.Entity<ExternalContact>(entity =>
         {
@@ -1761,6 +1775,7 @@ public class PaymentContext : DbContext
     public DbSet<TaxSystemModeDictionaryItem> TaxSystemModes { get; set; }
     public DbSet<InvoiceUnitDictionaryItem> InvoiceUnits { get; set; }
     public DbSet<InvoiceItemNameDictionaryItem> InvoiceItemNames { get; set; }
+    public DbSet<Bank> Banks { get; set; }
 
     /// <summary>
     /// Статусы клиентов.

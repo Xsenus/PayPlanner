@@ -145,6 +145,50 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_PrefersPrimaryBankAccount_FromCompanyBankAccountsJson()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+
+        var company = new LegalEntity
+        {
+            ShortName = "ООО Тест",
+            FullName = "Общество с ограниченной ответственностью Тест",
+            Inn = "7700000000",
+            Address = "Москва, тестовый адрес",
+            BankAccountsJson =
+                "[" +
+                "{\"bank\":\"Банк 1\",\"bik\":\"111111111\",\"accountNumber\":\"40802810000000000001\",\"accountType\":\"Дополнительный\"}," +
+                "{\"bank\":\"Банк 2\",\"bik\":\"222222222\",\"accountNumber\":\"40802810000000000002\",\"accountType\":\"Основной\",\"corrAccountNumber\":\"30101810000000000002\"}" +
+                "]",
+        };
+
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = $"[{company.Id}]",
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = company.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("40802810000000000002", content.Content);
+        Assert.Contains("222222222", content.Content);
+        Assert.DoesNotContain("40802810000000000001", content.Content);
+    }
+
+    [Fact]
     public async Task SendInvoiceEmail_SendsPdfAttachment_WhenPdfFormatRequested()
     {
         await using var db = await CreateContextAsync();
