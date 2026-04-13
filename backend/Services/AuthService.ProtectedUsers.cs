@@ -69,7 +69,17 @@ public partial class AuthService
             || (request.IsActive.HasValue && request.IsActive.Value != user.IsActive)
             || (request.IsEmployee.HasValue && request.IsEmployee.Value != user.IsEmployee)
             || (request.EmploymentStartDate.HasValue && request.EmploymentStartDate != user.EmploymentStartDate)
-            || (request.EmploymentEndDate.HasValue && request.EmploymentEndDate != user.EmploymentEndDate))
+            || (request.EmploymentEndDate.HasValue && request.EmploymentEndDate != user.EmploymentEndDate)
+            || (request.CompanyIds is not null
+                && !request.CompanyIds
+                    .Where(id => id > 0)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .SequenceEqual(
+                        user.CompanyAccesses
+                            .Select(access => access.LegalEntityId)
+                            .Distinct()
+                            .OrderBy(id => id))))
         {
             throw new InvalidOperationException("ProtectedUserAdministrativeFieldsLocked");
         }

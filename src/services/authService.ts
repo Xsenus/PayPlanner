@@ -74,6 +74,14 @@ export interface ExternalIdentity {
   createdAt?: string | null;
 }
 
+export interface UserCompanyAccess {
+  id: number;
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+}
+
 export interface User {
   id: number;
   email: string;
@@ -103,6 +111,8 @@ export interface User {
   updatedByUserId?: number | null;
   updatedByUserName?: string | null;
   approvedAt?: string | null;
+  companyIds?: number[];
+  companies?: UserCompanyAccess[];
   externalIdentities?: ExternalIdentity[];
 }
 
@@ -200,6 +210,8 @@ export interface CreateUserDto {
   fullName: string;
   roleId: number;
   isActive: boolean;
+  isEmployee?: boolean;
+  companyIds?: number[];
 }
 
 export interface UpdateUserDto {
@@ -221,6 +233,7 @@ export interface UpdateUserDto {
   employmentEndDate?: string;
   roleId?: number;
   isActive?: boolean;
+  companyIds?: number[];
 }
 
 export interface UpdateProfileDto {

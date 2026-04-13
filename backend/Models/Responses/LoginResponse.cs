@@ -36,7 +36,18 @@ namespace PayPlanner.Api.Models.Responses
         public DateTime? UpdatedAt { get; set; }
         public int? UpdatedByUserId { get; set; }
         public string? UpdatedByUserName { get; set; }
+        public List<int> CompanyIds { get; set; } = new();
+        public List<UserCompanyAccessDto> Companies { get; set; } = new();
         public List<ExternalIdentityDto> ExternalIdentities { get; set; } = new();
+    }
+
+    public class UserCompanyAccessDto
+    {
+        public int Id { get; set; }
+        public string ShortName { get; set; } = string.Empty;
+        public string? FullName { get; set; }
+        public string? Inn { get; set; }
+        public string? Kpp { get; set; }
     }
 
     public class RoleDto

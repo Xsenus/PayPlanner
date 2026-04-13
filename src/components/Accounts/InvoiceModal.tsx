@@ -2349,9 +2349,6 @@ export function InvoiceModal({
               <div className="mb-3 flex items-center justify-between gap-3 px-1">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">Печатный шаблон счета</h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Здесь показывается реальный документ, который используется для печати и скачивания.
-                  </p>
                 </div>
                 {documentPreviewLoading ? (
                   <span className="inline-flex items-center gap-2 text-xs text-slate-500">

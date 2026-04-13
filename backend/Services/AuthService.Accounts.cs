@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using System.Text.Json;
 
 namespace PayPlanner.Api.Services;
 
@@ -10,6 +11,8 @@ public partial class AuthService
     private IQueryable<User> QueryUsersWithRelations()
         => _context.Users
             .Include(x => x.Role)
+            .Include(x => x.CompanyAccesses)
+                .ThenInclude(x => x.LegalEntity)
             .Include(x => x.ExternalIdentities);
 
     private static ExternalIdentityDto MapExternalIdentity(UserExternalIdentity identity) => new()
@@ -76,6 +79,112 @@ public partial class AuthService
         }
 
         return "Пользователь";
+    }
+
+    private async Task<HashSet<int>> GetAvailableMainCompanyIdsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await _context.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == MainCompanyIdsSettingKey || item.Key == LegacyMainCompanySettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+
+        var companyIds = new HashSet<int>();
+
+        if (settings.TryGetValue(MainCompanyIdsSettingKey, out var rawIds) && !string.IsNullOrWhiteSpace(rawIds))
+        {
+            try
+            {
+                var parsedIds = JsonSerializer.Deserialize<List<int>>(rawIds);
+                if (parsedIds is not null)
+                {
+                    foreach (var companyId in parsedIds.Where(id => id > 0))
+                    {
+                        companyIds.Add(companyId);
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // ignore invalid JSON and fall back to legacy setting
+            }
+        }
+
+        if (companyIds.Count == 0
+            && settings.TryGetValue(LegacyMainCompanySettingKey, out var rawLegacyId)
+            && int.TryParse(rawLegacyId, out var legacyId)
+            && legacyId > 0)
+        {
+            companyIds.Add(legacyId);
+        }
+
+        return companyIds;
+    }
+
+    private async Task ApplyUserCompanyAssignmentsAsync(
+        User user,
+        IReadOnlyCollection<int>? requestedCompanyIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedIds = (requestedCompanyIds ?? Array.Empty<int>())
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        if (!user.IsEmployee)
+        {
+            normalizedIds.Clear();
+        }
+
+        if (normalizedIds.Count > 0)
+        {
+            var availableMainCompanyIds = await GetAvailableMainCompanyIdsAsync(cancellationToken);
+            var disallowedIds = normalizedIds
+                .Where(id => !availableMainCompanyIds.Contains(id))
+                .ToArray();
+
+            if (disallowedIds.Length > 0)
+            {
+                throw new InvalidOperationException("UserCompanyAccessCompanyNotAllowed");
+            }
+
+            var existingCompanyIds = await _context.LegalEntities
+                .AsNoTracking()
+                .Where(entity => normalizedIds.Contains(entity.Id))
+                .Select(entity => entity.Id)
+                .ToListAsync(cancellationToken);
+
+            if (existingCompanyIds.Count != normalizedIds.Count)
+            {
+                throw new InvalidOperationException("UserCompanyAccessCompanyNotFound");
+            }
+        }
+
+        var currentAccesses = user.CompanyAccesses.ToList();
+        foreach (var access in currentAccesses.Where(access => !normalizedIds.Contains(access.LegalEntityId)))
+        {
+            user.CompanyAccesses.Remove(access);
+            _context.UserCompanyAccesses.Remove(access);
+        }
+
+        var currentCompanyIds = user.CompanyAccesses
+            .Select(access => access.LegalEntityId)
+            .ToHashSet();
+
+        foreach (var companyId in normalizedIds)
+        {
+            if (currentCompanyIds.Contains(companyId))
+            {
+                continue;
+            }
+
+            user.CompanyAccesses.Add(new UserCompanyAccess
+            {
+                UserId = user.Id,
+                LegalEntityId = companyId,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
     }
 
     private async Task ApplyUserChangesAsync(
@@ -213,6 +322,15 @@ public partial class AuthService
             if (request.IsActive.HasValue)
             {
                 user.IsActive = request.IsActive.Value;
+            }
+
+            if (request.CompanyIds is not null || request.IsEmployee.HasValue)
+            {
+                var desiredCompanyIds = request.CompanyIds ?? user.CompanyAccesses
+                    .Select(access => access.LegalEntityId)
+                    .ToList();
+
+                await ApplyUserCompanyAssignmentsAsync(user, desiredCompanyIds, cancellationToken);
             }
         }
 
@@ -376,6 +494,7 @@ public partial class AuthService
                 await ReassignSimpleUserReferencesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
                 await MergePaymentResponsiblesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
                 await MergeUserSettingsAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                await MergeUserCompanyAccessesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
                 await MergeUserExternalIdentitiesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
 
                 if (targetUser.ApprovedByUserId == sourceUser.Id)
@@ -686,6 +805,36 @@ public partial class AuthService
 
             setting.UserId = targetUserId;
             targetKeys.Add(setting.Key);
+        }
+    }
+
+    private async Task MergeUserCompanyAccessesAsync(int sourceUserId, int targetUserId, CancellationToken cancellationToken)
+    {
+        var targetCompanyIds = await _context.UserCompanyAccesses
+            .Where(x => x.UserId == targetUserId)
+            .Select(x => x.LegalEntityId)
+            .ToHashSetAsync(cancellationToken);
+
+        var sourceAccesses = await _context.UserCompanyAccesses
+            .Where(x => x.UserId == sourceUserId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var access in sourceAccesses)
+        {
+            if (targetCompanyIds.Contains(access.LegalEntityId))
+            {
+                _context.UserCompanyAccesses.Remove(access);
+                continue;
+            }
+
+            _context.UserCompanyAccesses.Add(new UserCompanyAccess
+            {
+                UserId = targetUserId,
+                LegalEntityId = access.LegalEntityId,
+                CreatedAt = access.CreatedAt,
+            });
+            _context.UserCompanyAccesses.Remove(access);
+            targetCompanyIds.Add(access.LegalEntityId);
         }
     }
 

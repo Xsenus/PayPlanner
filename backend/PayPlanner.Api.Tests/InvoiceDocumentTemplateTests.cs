@@ -104,6 +104,47 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_UsesDefaultMainCompanyFromNewSettingsStorage()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+
+        var company = new LegalEntity
+        {
+            ShortName = "ООО Тест",
+            FullName = "Общество с ограниченной ответственностью Тест",
+            Inn = "7700000000",
+            Address = "Москва, тестовый адрес",
+            SealDataUrl = "data:image/png;base64,new-seal",
+            DirectorSignatureDataUrl = "data:image/png;base64,new-signature",
+            DocumentDirectorJson = "{\"position\":\"Директор\",\"lastName\":\"Тестов\",\"firstName\":\"Иван\",\"middleName\":\"Иванович\",\"noMiddleName\":false}",
+        };
+
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = $"[{company.Id}]",
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = company.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var result = await controller.GetDocument(paymentId, "html", null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("data:image/png;base64,new-seal", content.Content);
+        Assert.Contains("data:image/png;base64,new-signature", content.Content);
+    }
+
+    [Fact]
     public async Task SendInvoiceEmail_SendsPdfAttachment_WhenPdfFormatRequested()
     {
         await using var db = await CreateContextAsync();

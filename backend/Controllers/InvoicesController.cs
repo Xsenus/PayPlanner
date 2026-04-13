@@ -27,7 +27,9 @@ public class InvoicesController : ControllerBase
     private const string InvoiceMaxClientCasesSettingKey = "invoices.rules.maxClientCasesPerInvoice";
     private const string InvoiceMaxActsSettingKey = "invoices.rules.maxActsPerInvoice";
     private const string InvoiceDocumentTemplatesSettingKey = "invoices.documentTemplates";
-    private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
+    private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private readonly PaymentContext _db;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
@@ -3079,20 +3081,50 @@ public class InvoicesController : ControllerBase
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
     {
-        var rawId = await _db.SystemSettings
+        var settings = await _db.SystemSettings
             .AsNoTracking()
-            .Where(setting => setting.Key == MainCompanySettingKey)
-            .Select(setting => setting.Value)
-            .FirstOrDefaultAsync(ct);
+            .Where(setting =>
+                setting.Key == LegacyMainCompanySettingKey
+                || setting.Key == MainCompanyIdsSettingKey
+                || setting.Key == DefaultMainCompanyIdSettingKey)
+            .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, ct);
 
-        if (!int.TryParse(rawId, out var companyId) || companyId <= 0)
+        int? companyId = null;
+
+        if (settings.TryGetValue(DefaultMainCompanyIdSettingKey, out var rawDefaultId)
+            && int.TryParse(rawDefaultId, out var parsedDefaultId)
+            && parsedDefaultId > 0)
+        {
+            companyId = parsedDefaultId;
+        }
+        else if (settings.TryGetValue(LegacyMainCompanySettingKey, out var rawLegacyId)
+                 && int.TryParse(rawLegacyId, out var parsedLegacyId)
+                 && parsedLegacyId > 0)
+        {
+            companyId = parsedLegacyId;
+        }
+        else if (settings.TryGetValue(MainCompanyIdsSettingKey, out var rawIds)
+                 && !string.IsNullOrWhiteSpace(rawIds))
+        {
+            try
+            {
+                var parsedIds = JsonSerializer.Deserialize<List<int>>(rawIds);
+                companyId = parsedIds?.FirstOrDefault(id => id > 0);
+            }
+            catch (JsonException)
+            {
+                companyId = null;
+            }
+        }
+
+        if (!companyId.HasValue || companyId.Value <= 0)
         {
             return null;
         }
 
         return await _db.LegalEntities
             .AsNoTracking()
-            .FirstOrDefaultAsync(entity => entity.Id == companyId, ct);
+            .FirstOrDefaultAsync(entity => entity.Id == companyId.Value, ct);
     }
 
     private async Task<InvoiceDocumentTemplateSettingsDto> GetInvoiceDocumentTemplateSettingsAsync(CancellationToken ct)

@@ -181,4 +181,5 @@ public class LegalEntity
     public ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
+    public ICollection<UserCompanyAccess> UserCompanyAccesses { get; set; } = new List<UserCompanyAccess>();
 }

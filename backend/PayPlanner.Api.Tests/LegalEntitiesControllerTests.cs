@@ -17,6 +17,119 @@ namespace PayPlanner.Api.Tests;
 public class LegalEntitiesControllerTests
 {
     [Fact]
+    public async Task UpdateMainCompanySettings_SavesMultipleCompanies_AndHidesThemFromLegalEntitiesRegistry()
+    {
+        await using var db = await CreateContextAsync();
+        var firstCompanyId = await CreateLegalEntityAsync(db, "Основная компания 1");
+        var secondCompanyId = await CreateLegalEntityAsync(db, "Основная компания 2");
+        var regularCompanyId = await CreateLegalEntityAsync(db, "Обычное юрлицо");
+
+        var controller = CreateController(db, userId: 31);
+
+        var settingsAction = await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest
+            {
+                CompanyIds = [firstCompanyId, secondCompanyId],
+                DefaultCompanyId = secondCompanyId,
+            },
+            CancellationToken.None);
+
+        var settingsOk = Assert.IsType<OkObjectResult>(settingsAction.Result);
+        var settingsDto = Assert.IsType<MainCompanySettingsDto>(settingsOk.Value);
+        Assert.Equal(secondCompanyId, settingsDto.DefaultCompanyId);
+        Assert.Equal(new[] { firstCompanyId, secondCompanyId }, settingsDto.Companies.Select(item => item.Id).OrderBy(id => id));
+
+        var listAction = await controller.GetAll(null, CancellationToken.None);
+        var listOk = Assert.IsType<OkObjectResult>(listAction.Result);
+        var items = Assert.IsAssignableFrom<IEnumerable<LegalEntityListItemDto>>(listOk.Value).ToList();
+
+        Assert.Single(items);
+        Assert.Equal(regularCompanyId, items[0].Id);
+    }
+
+    [Fact]
+    public async Task Delete_RemovesDeletedCompanyFromMainCompanySettings()
+    {
+        await using var db = await CreateContextAsync();
+        var firstCompanyId = await CreateLegalEntityAsync(db, "Компания для удаления");
+        var secondCompanyId = await CreateLegalEntityAsync(db, "Компания которая остается");
+
+        var controller = CreateController(db, userId: 32);
+        await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest
+            {
+                CompanyIds = [firstCompanyId, secondCompanyId],
+                DefaultCompanyId = firstCompanyId,
+            },
+            CancellationToken.None);
+
+        var deleteResult = await controller.Delete(firstCompanyId, CancellationToken.None);
+        Assert.IsType<NoContentResult>(deleteResult);
+
+        var settingsAction = await controller.GetMainCompanySettings(CancellationToken.None);
+        var settingsOk = Assert.IsType<OkObjectResult>(settingsAction.Result);
+        var settingsDto = Assert.IsType<MainCompanySettingsDto>(settingsOk.Value);
+
+        Assert.Single(settingsDto.Companies);
+        Assert.Equal(secondCompanyId, settingsDto.Companies[0].Id);
+        Assert.Equal(secondCompanyId, settingsDto.DefaultCompanyId);
+    }
+
+    [Fact]
+    public async Task UpdateMainCompanySettings_RemovesStaleUserCompanyAccesses()
+    {
+        await using var db = await CreateContextAsync();
+        var firstCompanyId = await CreateLegalEntityAsync(db, "Основная компания 1");
+        var secondCompanyId = await CreateLegalEntityAsync(db, "Основная компания 2");
+
+        var role = new Role
+        {
+            Name = "user",
+            Description = "User",
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        var user = new User
+        {
+            Email = "employee@example.com",
+            PasswordHash = "hash",
+            FullName = "Employee",
+            RoleId = role.Id,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.UserCompanyAccesses.AddRange(
+            new UserCompanyAccess { UserId = user.Id, LegalEntityId = firstCompanyId },
+            new UserCompanyAccess { UserId = user.Id, LegalEntityId = secondCompanyId });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 33);
+        var action = await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest
+            {
+                CompanyIds = [firstCompanyId],
+                DefaultCompanyId = firstCompanyId,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(action.Result);
+
+        var accessCompanyIds = await db.UserCompanyAccesses
+            .AsNoTracking()
+            .Where(item => item.UserId == user.Id)
+            .Select(item => item.LegalEntityId)
+            .OrderBy(id => id)
+            .ToListAsync();
+
+        Assert.Equal([firstCompanyId], accessCompanyIds);
+    }
+
+    [Fact]
     public async Task Create_RoundTripsNestedPayload_IncludingImagesAndClientLinks()
     {
         await using var db = await CreateContextAsync();
@@ -633,6 +746,21 @@ public class LegalEntitiesControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client.Id;
+    }
+
+    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    {
+        var entity = new LegalEntity
+        {
+            ShortName = shortName,
+            FullName = shortName,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+        return entity.Id;
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

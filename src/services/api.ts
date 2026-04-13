@@ -244,6 +244,16 @@ export interface InvoiceDocumentTemplateSettingsDto {
   defaultTemplateHtml: string;
 }
 
+export interface MainCompanySettingsDto {
+  defaultCompanyId?: number | null;
+  companies: LegalEntitySummary[];
+}
+
+export interface UpdateMainCompanySettingsRequest {
+  companyIds: number[];
+  defaultCompanyId?: number | null;
+}
+
 export interface NextInvoiceNumberDto extends InvoiceNumberingSettingsDto {
   year: number;
   nextNumber: string;
@@ -1329,6 +1339,17 @@ export class ApiService {
 
   async getCompanyProfileLegalEntity() {
     return this.request<LegalEntityDetail>('/legal-entities/company-profile');
+  }
+
+  async getMainCompanySettings() {
+    return this.request<MainCompanySettingsDto>('/legal-entities/main-companies/settings');
+  }
+
+  async updateMainCompanySettings(payload: UpdateMainCompanySettingsRequest) {
+    return this.request<MainCompanySettingsDto>('/legal-entities/main-companies/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   async setCompanyProfileLegalEntity(id: number) {

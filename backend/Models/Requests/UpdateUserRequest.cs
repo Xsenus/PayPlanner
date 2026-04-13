@@ -20,4 +20,5 @@ public class UpdateUserRequest
     public DateTime? EmploymentEndDate { get; set; }
     public int? RoleId { get; set; }
     public bool? IsActive { get; set; }
+    public List<int>? CompanyIds { get; set; }
 }

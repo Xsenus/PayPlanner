@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Loader2, Save, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, Plus, Save, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+
 import { authService, type Role, type UpdateUserDto, type User } from '../../services/authService';
+import { apiService, type MainCompanySettingsDto } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type UserDetailSection = 'main' | 'contacts' | 'employment' | 'access';
 
@@ -33,6 +36,7 @@ type FormState = {
   employmentEndDate: string;
   roleId: number;
   isActive: boolean;
+  companyIds: number[];
 };
 
 const EMPTY_FORM: FormState = {
@@ -54,17 +58,48 @@ const EMPTY_FORM: FormState = {
   employmentEndDate: '',
   roleId: 0,
   isActive: true,
+  companyIds: [],
 };
 
 const SECTION_LABELS: Array<{ id: UserDetailSection; label: string; description: string }> = [
   { id: 'main', label: 'Основное', description: 'Имя, email и базовая информация профиля.' },
   { id: 'contacts', label: 'Контакты', description: 'Телефон, мессенджеры и внешние ссылки.' },
-  { id: 'employment', label: 'Работа в системе', description: 'Роль, активность и кадровые параметры.' },
-  { id: 'access', label: 'Способы входа', description: 'Какие внешние способы входа уже привязаны.' },
+  { id: 'employment', label: 'Работа в системе', description: 'Роль, активность и доступ к компаниям.' },
+  { id: 'access', label: 'Способы входа', description: 'Привязанные внешние способы авторизации.' },
 ];
 
 function toDateInputValue(value?: string | null) {
   return value ? value.split('T')[0] : '';
+}
+
+function getInitials(value?: string | null) {
+  return (value ?? 'U')
+    .split(' ')
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
+function providerLabel(provider?: string | null) {
+  if (provider === 'vk') return 'VK ID';
+  if (provider === 'yandex') return 'Яндекс ID';
+  if (provider === 'telegram') return 'Telegram';
+  return 'Google';
+}
+
+function buildCompanyOption(company: MainCompanySettingsDto['companies'][number]): LookupSelectOption {
+  const description = [company.fullName?.trim() || null, company.inn ? `ИНН ${company.inn}` : null, company.kpp ? `КПП ${company.kpp}` : null]
+    .filter(Boolean)
+    .join(' • ');
+
+  return {
+    value: String(company.id),
+    label: company.shortName?.trim() || company.fullName?.trim() || `Компания #${company.id}`,
+    description: description || undefined,
+    keywords: [company.shortName, company.fullName ?? '', company.inn ?? '', company.kpp ?? ''].filter(Boolean),
+  };
 }
 
 function buildForm(user?: User | null): FormState {
@@ -91,24 +126,8 @@ function buildForm(user?: User | null): FormState {
     employmentEndDate: toDateInputValue(user.employmentEndDate),
     roleId: user.role.id,
     isActive: user.isActive,
+    companyIds: [...(user.companyIds ?? user.companies?.map((item) => item.id) ?? [])].sort((a, b) => a - b),
   };
-}
-
-function providerLabel(provider?: string | null) {
-  if (provider === 'vk') return 'VK ID';
-  if (provider === 'yandex') return 'Яндекс ID';
-  if (provider === 'telegram') return 'Telegram';
-  return 'Google';
-}
-
-function getInitials(value?: string | null) {
-  return (value ?? 'U')
-    .split(' ')
-    .map((part) => part.trim()[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
 }
 
 function buildUpdatePayload(form: FormState): UpdateUserDto {
@@ -130,28 +149,57 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     employmentEndDate: form.employmentEndDate || undefined,
     roleId: form.roleId || undefined,
     isActive: form.isActive,
+    companyIds: form.companyIds,
   };
+}
+
+function TextField(props: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <label className={`space-y-2 ${props.className ?? ''}`}>
+      <span className="text-sm font-medium text-slate-700">{props.label}</span>
+      <input
+        type={props.type ?? 'text'}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        disabled={props.disabled}
+        className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
+      />
+    </label>
+  );
 }
 
 export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps) {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
+
   const [activeSection, setActiveSection] = useState<UserDetailSection>('main');
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [roles, setRoles] = useState<Role[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [mainCompanySettings, setMainCompanySettings] = useState<MainCompanySettingsDto | null>(null);
+  const [selectedCompanyToAddId, setSelectedCompanyToAddId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    const rolesPromise = authService.getRoles();
-    const userPromise = isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId);
-    const [nextRoles, nextUser] = await Promise.all([rolesPromise, userPromise]);
+    const [nextRoles, nextUser, nextMainCompanySettings] = await Promise.all([
+      authService.getRoles(),
+      isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId),
+      apiService.getMainCompanySettings(),
+    ]);
 
     setRoles(nextRoles);
     setUser(nextUser);
+    setMainCompanySettings(nextMainCompanySettings);
 
     const nextForm = buildForm(nextUser);
     if (!nextUser && nextRoles.length > 0) {
@@ -164,23 +212,33 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   useEffect(() => {
     setLoading(true);
     void loadData()
-      .catch((error) => {
-        toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить карточку пользователя.'));
-      })
+      .catch((error) => toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить карточку пользователя.')))
       .finally(() => setLoading(false));
   }, [loadData, toast]);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [user?.photoUrl]);
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
 
+  const mainCompanies = useMemo(() => mainCompanySettings?.companies ?? [], [mainCompanySettings]);
+  const companiesById = useMemo(() => new Map(mainCompanies.map((company) => [company.id, company])), [mainCompanies]);
+  const assignedCompanies = useMemo(
+    () => form.companyIds.map((companyId) => companiesById.get(companyId)).filter(Boolean) as MainCompanySettingsDto['companies'],
+    [companiesById, form.companyIds],
+  );
+  const availableCompanyOptions = useMemo(
+    () => mainCompanies.filter((company) => !form.companyIds.includes(company.id)).map(buildCompanyOption),
+    [form.companyIds, mainCompanies],
+  );
+
   const summaryCards = useMemo(
     () => [
-      { label: 'Статус', value: form.isActive ? 'Активен' : 'Отключен' },
-      {
-        label: 'Одобрение',
-        value: user?.isApproved ? 'Одобрен' : isCreateMode ? 'Создается вручную' : 'Ожидает решения',
-      },
-      { label: 'Привязанных входов', value: String(user?.externalIdentities?.length ?? 0) },
+      { label: 'Статус', value: form.isActive ? 'Активен' : 'Отключён' },
+      { label: 'Одобрение', value: user?.isApproved ? 'Одобрен' : isCreateMode ? 'Создаётся вручную' : 'Ожидает решения' },
+      { label: 'Способов входа', value: String(user?.externalIdentities?.length ?? 0) },
     ],
     [form.isActive, isCreateMode, user?.externalIdentities?.length, user?.isApproved],
   );
@@ -189,34 +247,37 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const canEditProtectedTarget = !isProtectedTarget || currentUser?.id === user?.id;
   const mainFieldsDisabled = isProtectedTarget && !canEditProtectedTarget;
   const administrativeFieldsDisabled = isProtectedTarget;
-  const avatarInitials = useMemo(
-    () => getInitials(form.fullName || user?.fullName || user?.email),
-    [form.fullName, user?.email, user?.fullName],
-  );
+  const avatarInitials = useMemo(() => getInitials(form.fullName || user?.fullName || user?.email), [form.fullName, user?.email, user?.fullName]);
 
-  useEffect(() => {
-    setAvatarLoadFailed(false);
-  }, [user?.photoUrl]);
+  const handleEmployeeToggle = (checked: boolean) => {
+    setForm((current) => ({ ...current, isEmployee: checked, companyIds: checked ? current.companyIds : [] }));
+    if (!checked) {
+      setSelectedCompanyToAddId('');
+    }
+  };
+
+  const handleAddCompany = () => {
+    const companyId = Number(selectedCompanyToAddId);
+    if (!companyId) return;
+    setForm((current) => ({
+      ...current,
+      companyIds: current.companyIds.includes(companyId) ? current.companyIds : [...current.companyIds, companyId].sort((a, b) => a - b),
+    }));
+    setSelectedCompanyToAddId('');
+  };
+
+  const handleRemoveCompany = (companyId: number) => {
+    setForm((current) => ({ ...current, companyIds: current.companyIds.filter((id) => id !== companyId) }));
+  };
 
   const handleSave = async () => {
-    if (!form.email.trim()) {
-      toast.error('Укажите email пользователя.');
-      return;
-    }
-
-    if (isCreateMode && !form.password.trim()) {
-      toast.error('Для нового пользователя нужно задать пароль.');
-      return;
-    }
-
-    if (!form.roleId) {
-      toast.error('Выберите роль пользователя.');
-      return;
-    }
+    if (!form.email.trim()) return toast.error('Укажите email пользователя.');
+    if (isCreateMode && !form.password.trim()) return toast.error('Для нового пользователя нужно задать пароль.');
+    if (!form.roleId) return toast.error('Выберите роль пользователя.');
 
     setSaving(true);
     try {
-      const updatePayload = buildUpdatePayload(form);
+      const payload = buildUpdatePayload(form);
       let nextUser: User;
 
       if (isCreateMode) {
@@ -226,17 +287,18 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
           fullName: form.fullName.trim() || form.email.trim(),
           roleId: form.roleId,
           isActive: form.isActive,
+          isEmployee: form.isEmployee,
+          companyIds: form.companyIds,
         });
-
-        nextUser = await authService.updateUser(createdUser.id, updatePayload);
+        nextUser = await authService.updateUser(createdUser.id, payload);
       } else {
-        nextUser = await authService.updateUser(userId, updatePayload);
+        nextUser = await authService.updateUser(userId, payload);
       }
 
       setUser(nextUser);
       setForm(buildForm(nextUser));
       onSaved(nextUser);
-      toast.success(isCreateMode ? 'Пользователь создан.' : 'Пользователь обновлен.');
+      toast.success(isCreateMode ? 'Пользователь создан.' : 'Пользователь обновлён.');
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить карточку пользователя.'));
     } finally {
@@ -245,13 +307,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   };
 
   if (loading) {
-    return (
-      <div className="p-8">
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-600 shadow-sm">
-          Загружаем карточку пользователя...
-        </div>
-      </div>
-    );
+    return <div className="p-8"><div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-600 shadow-sm">Загружаем карточку пользователя...</div></div>;
   }
 
   return (
@@ -260,76 +316,34 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <button
-                type="button"
-                onClick={onBack}
-                className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-700"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                К списку пользователей
-              </button>
-              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-                Пользователи
-              </div>
-              <h1 className="mt-2 text-3xl font-semibold text-slate-900">
-                {isCreateMode ? 'Новый пользователь' : form.fullName || 'Карточка пользователя'}
-              </h1>
+              <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-700"><ArrowLeft className="h-4 w-4" />К списку пользователей</button>
+              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Пользователи</div>
+              <h1 className="mt-2 text-3xl font-semibold text-slate-900">{isCreateMode ? 'Новый пользователь' : form.fullName || 'Карточка пользователя'}</h1>
             </div>
-
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving || (isProtectedTarget && !canEditProtectedTarget)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Сохранить
-            </button>
+            <button type="button" onClick={() => void handleSave()} disabled={saving || (isProtectedTarget && !canEditProtectedTarget)} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Сохранить</button>
           </div>
-
-          {isProtectedTarget && !canEditProtectedTarget ? (
-            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Этот системный пользователь управляет собой только самостоятельно. Для остальных профиль открыт только на просмотр.
-            </div>
-          ) : null}
+          {isProtectedTarget && !canEditProtectedTarget ? <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Этот системный пользователь управляет собой только самостоятельно.</div> : null}
         </div>
-
         <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="space-y-2">
                 {SECTION_LABELS.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() => setActiveSection(section.id)}
-                    className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                      activeSection === section.id
-                        ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
-                        : 'border-transparent bg-white text-slate-700 hover:border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
+                  <button key={section.id} type="button" onClick={() => setActiveSection(section.id)} className={`w-full rounded-2xl border px-4 py-3 text-left transition ${activeSection === section.id ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm' : 'border-transparent bg-white text-slate-700 hover:border-slate-200 hover:bg-slate-50'}`}>
                     <div className="text-sm font-semibold">{section.label}</div>
                     <div className="mt-1 text-xs leading-5 text-slate-500">{section.description}</div>
                   </button>
                 ))}
               </div>
             </div>
-
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1">
               {summaryCards.map((card) => (
-                <div
-                  key={card.label}
-                  className="flex min-h-[116px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white p-4 text-center shadow-sm"
-                >
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    {card.label}
-                  </div>
+                <div key={card.label} className="flex min-h-[116px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{card.label}</div>
                   <div className="mt-2 text-lg font-semibold text-slate-900">{card.value}</div>
                 </div>
               ))}
             </div>
-
             {!isCreateMode && user ? (
               <ObjectAuditLauncher
                 objectType="user"
@@ -351,102 +365,25 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                 <div className="mb-6 flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
                   <div>
                     <div className="text-sm font-semibold text-slate-900">Основная информация</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      Фото пользователь обновляет сам в личном профиле. Здесь показывается актуальный аватар и базовые данные.
-                    </div>
+                    <div className="mt-1 text-sm text-slate-500">Фото пользователь обновляет сам в личном профиле. Здесь показывается текущий аватар и основные данные карточки.</div>
                   </div>
-
                   <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-center">
                     {user?.photoUrl && !avatarLoadFailed ? (
-                      <img
-                        src={user.photoUrl}
-                        alt={form.fullName || user.email || 'Профиль'}
-                        className="h-24 w-24 rounded-3xl object-cover shadow-sm"
-                        onError={() => setAvatarLoadFailed(true)}
-                      />
+                      <img src={user.photoUrl} alt={form.fullName || user.email || 'Профиль'} className="h-24 w-24 rounded-3xl object-cover shadow-sm" onError={() => setAvatarLoadFailed(true)} />
                     ) : (
-                      <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm">
-                        {avatarInitials}
-                      </div>
+                      <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm">{avatarInitials}</div>
                     )}
-                    <div className="text-xs font-medium text-slate-500">
-                      {user?.photoUrl ? 'Фото загружено пользователем' : 'Фото пока не загружено'}
-                    </div>
+                    <div className="text-xs font-medium text-slate-500">{user?.photoUrl ? 'Фото загружено пользователем' : 'Фото пока не загружено'}</div>
                   </div>
                 </div>
-
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 md:col-span-2">
-                    <span className="text-sm font-medium text-slate-700">Полное имя</span>
-                    <input
-                      type="text"
-                      value={form.fullName}
-                      onChange={(event) => updateForm('fullName', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Email</span>
-                    <input
-                      type="email"
-                      value={form.email}
-                      onChange={(event) => updateForm('email', event.target.value)}
-                      disabled={mainFieldsDisabled || isProtectedTarget}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  {isCreateMode ? (
-                    <label className="space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Пароль</span>
-                      <input
-                        type="password"
-                        value={form.password}
-                        onChange={(event) => updateForm('password', event.target.value)}
-                        className="w-full rounded-2xl border border-slate-300 px-3 py-3"
-                      />
-                    </label>
-                  ) : null}
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Имя</span>
-                    <input
-                      type="text"
-                      value={form.firstName}
-                      onChange={(event) => updateForm('firstName', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Фамилия</span>
-                    <input
-                      type="text"
-                      value={form.lastName}
-                      onChange={(event) => updateForm('lastName', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Отчество</span>
-                    <input
-                      type="text"
-                      value={form.middleName}
-                      onChange={(event) => updateForm('middleName', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Дата рождения</span>
-                    <input
-                      type="date"
-                      value={form.dateOfBirth}
-                      onChange={(event) => updateForm('dateOfBirth', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
+                  <TextField label="Полное имя" value={form.fullName} onChange={(value) => updateForm('fullName', value)} disabled={mainFieldsDisabled} className="md:col-span-2" />
+                  <TextField label="Email" type="email" value={form.email} onChange={(value) => updateForm('email', value)} disabled={mainFieldsDisabled || isProtectedTarget} />
+                  {isCreateMode ? <TextField label="Пароль" type="password" value={form.password} onChange={(value) => updateForm('password', value)} /> : null}
+                  <TextField label="Имя" value={form.firstName} onChange={(value) => updateForm('firstName', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Фамилия" value={form.lastName} onChange={(value) => updateForm('lastName', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Отчество" value={form.middleName} onChange={(value) => updateForm('middleName', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Дата рождения" type="date" value={form.dateOfBirth} onChange={(value) => updateForm('dateOfBirth', value)} disabled={mainFieldsDisabled} />
                 </div>
               </div>
             ) : null}
@@ -454,137 +391,87 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
             {activeSection === 'contacts' ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Телефон</span>
-                    <input
-                      type="text"
-                      value={form.phoneNumber}
-                      onChange={(event) => updateForm('phoneNumber', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">WhatsApp</span>
-                    <input
-                      type="text"
-                      value={form.whatsApp}
-                      onChange={(event) => updateForm('whatsApp', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Telegram</span>
-                    <input
-                      type="text"
-                      value={form.telegram}
-                      onChange={(event) => updateForm('telegram', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Instagram</span>
-                    <input
-                      type="text"
-                      value={form.instagram}
-                      onChange={(event) => updateForm('instagram', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Messenger</span>
-                    <input
-                      type="text"
-                      value={form.messenger}
-                      onChange={(event) => updateForm('messenger', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Viber</span>
-                    <input
-                      type="text"
-                      value={form.viber}
-                      onChange={(event) => updateForm('viber', event.target.value)}
-                      disabled={mainFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
+                  <TextField label="Телефон" value={form.phoneNumber} onChange={(value) => updateForm('phoneNumber', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="WhatsApp" value={form.whatsApp} onChange={(value) => updateForm('whatsApp', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Telegram" value={form.telegram} onChange={(value) => updateForm('telegram', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Instagram" value={form.instagram} onChange={(value) => updateForm('instagram', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Messenger" value={form.messenger} onChange={(value) => updateForm('messenger', value)} disabled={mainFieldsDisabled} />
+                  <TextField label="Viber" value={form.viber} onChange={(value) => updateForm('viber', value)} disabled={mainFieldsDisabled} />
                 </div>
               </div>
             ) : null}
 
             {activeSection === 'employment' ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                {administrativeFieldsDisabled ? (
-                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    Для системного администратора роль и служебный статус зафиксированы и не меняются через карточку пользователя.
-                  </div>
-                ) : null}
+                {administrativeFieldsDisabled ? <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Для системного администратора роль и служебный статус зафиксированы и не меняются через карточку пользователя.</div> : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-slate-700">Роль</span>
-                    <select
-                      value={form.roleId}
-                      onChange={(event) => updateForm('roleId', Number(event.target.value) || 0)}
-                      disabled={administrativeFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    >
-                      {roles.map((role) => (
-                        <option key={role.id} value={role.id}>
-                          {role.name}
-                        </option>
-                      ))}
+                    <select value={form.roleId} onChange={(event) => updateForm('roleId', Number(event.target.value) || 0)} disabled={administrativeFieldsDisabled} className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500">
+                      {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
                     </select>
                   </label>
-
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.isActive}
-                      onChange={(event) => updateForm('isActive', event.target.checked)}
-                      disabled={administrativeFieldsDisabled}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                    />
+                    <input type="checkbox" checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Пользователь активен
                   </label>
-
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.isEmployee}
-                      onChange={(event) => updateForm('isEmployee', event.target.checked)}
-                      disabled={administrativeFieldsDisabled}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                    />
+                    <input type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Учитывать как сотрудника
                   </label>
+                  <TextField label="Начало работы" type="date" value={form.employmentStartDate} onChange={(value) => updateForm('employmentStartDate', value)} disabled={administrativeFieldsDisabled} />
+                  <TextField label="Окончание работы" type="date" value={form.employmentEndDate} onChange={(value) => updateForm('employmentEndDate', value)} disabled={administrativeFieldsDisabled} />
+                </div>
 
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Начало работы</span>
-                    <input
-                      type="date"
-                      value={form.employmentStartDate}
-                      onChange={(event) => updateForm('employmentStartDate', event.target.value)}
-                      disabled={administrativeFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
+                <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-100 text-blue-700"><Building2 className="h-5 w-5" /></div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">Доступ к основным компаниям</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-600">Сотрудника можно связать с одной или несколькими внутренними компаниями из системных настроек. Эти связи станут базой для дальнейшей фильтрации документов по компаниям.</div>
+                    </div>
+                  </div>
 
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Окончание работы</span>
-                    <input
-                      type="date"
-                      value={form.employmentEndDate}
-                      onChange={(event) => updateForm('employmentEndDate', event.target.value)}
-                      disabled={administrativeFieldsDisabled}
-                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </label>
+                  {!form.isEmployee ? (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">Сначала включите признак «Учитывать как сотрудника», после этого появится возможность назначить компании.</div>
+                  ) : mainCompanies.length === 0 ? (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">В настройках ещё не выбраны основные компании. Сначала добавьте их в разделе настроек.</div>
+                  ) : (
+                    <div className="mt-4 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                        <LookupSelect
+                          label="Добавить компанию"
+                          value={selectedCompanyToAddId}
+                          options={availableCompanyOptions}
+                          onChange={setSelectedCompanyToAddId}
+                          placeholder={availableCompanyOptions.length > 0 ? 'Выберите компанию' : 'Все компании уже назначены'}
+                          title="Выбор компании для сотрудника"
+                          searchPlaceholder="Поиск по названию, ИНН или КПП"
+                          noOptionsText="Нет доступных компаний для добавления"
+                          disabled={administrativeFieldsDisabled || availableCompanyOptions.length === 0}
+                          helperText="Назначение определяет, к каким внутренним компаниям относится сотрудник."
+                        />
+                        <button type="button" onClick={handleAddCompany} disabled={administrativeFieldsDisabled || !selectedCompanyToAddId} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Plus className="h-4 w-4" />Добавить</button>
+                      </div>
+
+                      {assignedCompanies.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">Пока не назначено ни одной компании.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {assignedCompanies.map((company) => (
+                            <div key={company.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-slate-900">{company.shortName || company.fullName || `Компания #${company.id}`}</div>
+                                <div className="mt-1 text-sm text-slate-600">{company.fullName || 'Полное наименование не указано'}</div>
+                                <div className="mt-1 text-xs text-slate-500">{[company.inn ? `ИНН ${company.inn}` : null, company.kpp ? `КПП ${company.kpp}` : null].filter(Boolean).join(' • ') || 'Реквизиты не заполнены'}</div>
+                              </div>
+                              <button type="button" onClick={() => handleRemoveCompany(company.id)} disabled={administrativeFieldsDisabled} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"><Trash2 className="h-4 w-4" />Убрать</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -592,39 +479,27 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
             {activeSection === 'access' ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700"><ShieldCheck className="h-5 w-5" /></div>
                   <div>
                     <div className="text-base font-semibold text-slate-900">Привязанные способы входа</div>
-                    <div className="mt-1 text-sm leading-6 text-slate-600">
-                      Здесь отображаются внешние провайдеры, уже связанные с этим пользователем.
-                      Управлять привязкой пользователь может из своего профиля.
-                    </div>
+                    <div className="mt-1 text-sm leading-6 text-slate-600">Здесь отображаются внешние провайдеры, уже связанные с этим пользователем.</div>
                   </div>
                 </div>
-
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
                   {(user?.externalIdentities?.length ?? 0) > 0 ? (
                     user?.externalIdentities?.map((identity) => (
                       <div key={identity.id} className="rounded-2xl border border-slate-200 p-4">
                         <div className="flex items-center gap-2">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                            <UserRound className="h-4 w-4" />
-                          </div>
+                          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-slate-700"><UserRound className="h-4 w-4" /></div>
                           <div>
                             <div className="font-semibold text-slate-900">{providerLabel(identity.provider)}</div>
-                            <div className="text-xs text-slate-500">
-                              {identity.providerEmail || identity.providerUsername || identity.providerUserId}
-                            </div>
+                            <div className="text-xs text-slate-500">{identity.providerEmail || identity.providerUsername || identity.providerUserId}</div>
                           </div>
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                      У этого пользователя пока нет привязанных внешних способов входа.
-                    </div>
+                    <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">У этого пользователя пока нет привязанных внешних способов входа.</div>
                   )}
                 </div>
               </div>

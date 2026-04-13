@@ -32,10 +32,25 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateUser([FromBody] CreateUserRequest req)
     {
-        var dto = await _svc.CreateUserAsync(req);
-        return dto is null
-            ? Conflict(new { message = "Пользователь с таким email уже существует." })
-            : Created($"/api/users/{dto.Id}", dto);
+        try
+        {
+            var dto = await _svc.CreateUserAsync(req);
+            return dto is null
+                ? Conflict(new { message = "Пользователь с таким email уже существует." })
+                : Created($"/api/users/{dto.Id}", dto);
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "RoleNotFound")
+        {
+            return BadRequest(new { message = "Выбранная роль не найдена." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserCompanyAccessCompanyNotAllowed")
+        {
+            return BadRequest(new { message = "Сотрудника можно привязать только к основным компаниям из настроек." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserCompanyAccessCompanyNotFound")
+        {
+            return BadRequest(new { message = "Одна из выбранных компаний не найдена." });
+        }
     }
 
     [HttpDelete("{id:int}")]
@@ -140,8 +155,26 @@ public class UsersController : ControllerBase
             || ex.Message == "ProtectedUserAdministrativeFieldsLocked"
             || ex.Message == "ProtectedUserEmailReserved")
         {
-            return Conflict(new { message = "Изменение системного администратора ограничено: этот пользователь управляет собой только самостоятельно, а его email зарезервирован." });
+            return Conflict(new
+            {
+                message = "Изменение системного администратора ограничено: этот пользователь управляет собой только самостоятельно, а его email зарезервирован."
+            });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "RoleNotFound")
+        {
+            return BadRequest(new { message = "Выбранная роль не найдена." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserAlreadyExists")
+        {
+            return Conflict(new { message = "Пользователь с таким email уже существует." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserCompanyAccessCompanyNotAllowed")
+        {
+            return BadRequest(new { message = "Сотрудника можно привязать только к основным компаниям из настроек." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserCompanyAccessCompanyNotFound")
+        {
+            return BadRequest(new { message = "Одна из выбранных компаний не найдена." });
         }
     }
 }
-

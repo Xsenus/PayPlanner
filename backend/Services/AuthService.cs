@@ -11,6 +11,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 
 namespace PayPlanner.Api.Services;
 
@@ -21,6 +22,8 @@ public partial class AuthService
     private readonly IEmailService _emailService;
     private readonly IWebHostEnvironment _environment;
     private readonly IPasswordHasher<User> _passwordHasher;
+    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
 
     public AuthService(
         PaymentContext context,
@@ -143,6 +146,11 @@ public partial class AuthService
         var roleAudit = user.Role is not null
             ? ReadAuditMetadata(_context.Entry(user.Role))
             : null;
+        var companyAccesses = (user.CompanyAccesses ?? Array.Empty<UserCompanyAccess>())
+            .Where(access => access.LegalEntity is not null)
+            .OrderBy(access => access.LegalEntity.ShortName)
+            .ThenBy(access => access.LegalEntity.FullName)
+            .ToList();
 
         return new UserDto
         {
@@ -173,6 +181,21 @@ public partial class AuthService
             UpdatedAt = userAudit.UpdatedAt,
             UpdatedByUserId = userAudit.UpdatedByUserId,
             UpdatedByUserName = userAudit.UpdatedByUserName,
+            CompanyIds = companyAccesses
+                .Select(access => access.LegalEntityId)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToList(),
+            Companies = companyAccesses
+                .Select(access => new UserCompanyAccessDto
+                {
+                    Id = access.LegalEntityId,
+                    ShortName = access.LegalEntity.ShortName,
+                    FullName = access.LegalEntity.FullName,
+                    Inn = access.LegalEntity.Inn,
+                    Kpp = access.LegalEntity.Kpp,
+                })
+                .ToList(),
             ExternalIdentities = MapExternalIdentities(user.ExternalIdentities),
             Role = new RoleDto
             {
@@ -205,6 +228,11 @@ public partial class AuthService
         }
 
         await _context.Entry(user).Collection(x => x.ExternalIdentities).LoadAsync(cancellationToken);
+        await _context.Entry(user)
+            .Collection(x => x.CompanyAccesses)
+            .Query()
+            .Include(x => x.LegalEntity)
+            .LoadAsync(cancellationToken);
 
         return new LoginResponse
         {
@@ -346,6 +374,7 @@ public partial class AuthService
             Email = email,
             FullName = (request.FullName ?? string.Empty).Trim(),
             RoleId = requestedRoleId,
+            IsEmployee = request.IsEmployee,
             IsActive = IsProtectedSystemUserEmail(email) || request.IsActive,
             IsApproved = true,
             ApprovedAt = DateTime.UtcNow,
@@ -355,11 +384,17 @@ public partial class AuthService
 
         user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
-        await _context.Entry(user).Reference(u => u.Role).LoadAsync();
+        await ApplyUserCompanyAssignmentsAsync(user, request.CompanyIds);
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
-        return MapToDto(user);
+        var createdUser = await QueryUsersWithRelations()
+            .FirstAsync(u => u.Id == user.Id);
+
+        return MapToDto(createdUser);
     }
 
     public async Task<List<RoleDto>> GetAllRolesAsync()
@@ -426,12 +461,10 @@ public partial class AuthService
         await ApplyUserChangesAsync(user, request, allowAdministrativeFields: true);
         await _context.SaveChangesAsync();
 
-        if (previousRoleId != user.RoleId)
-        {
-            await _context.Entry(user).Reference(u => u.Role).LoadAsync();
-        }
+        var refreshedUser = await QueryUsersWithRelations()
+            .FirstAsync(u => u.Id == user.Id);
 
-        return MapToDto(user);
+        return MapToDto(refreshedUser);
     }
 
     public async Task<bool> DeleteUserAsync(int id, int actorUserId)

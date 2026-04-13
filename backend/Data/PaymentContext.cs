@@ -1031,6 +1031,26 @@ public class PaymentContext : DbContext
             });
         });
 
+        modelBuilder.Entity<UserCompanyAccess>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.LegalEntityId });
+            entity.ToTable("UserCompanyAccesses");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany(e => e.CompanyAccesses)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.LegalEntity)
+                .WithMany(e => e.UserCompanyAccesses)
+                .HasForeignKey(e => e.LegalEntityId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.LegalEntityId)
+                .HasDatabaseName("IX_UserCompanyAccesses_LegalEntityId");
+        });
+
         modelBuilder.Entity<UserExternalIdentity>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -1775,6 +1795,7 @@ public class PaymentContext : DbContext
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<SystemSetting> SystemSettings { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
+    public DbSet<UserCompanyAccess> UserCompanyAccesses { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }

@@ -9,6 +9,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace PayPlanner.Api.Controllers;
@@ -18,7 +19,9 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class LegalEntitiesController : ControllerBase
 {
-    private const string MainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
+    private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
     private const int MaxInlineLegalEntityAssetDataUrlLength = 350_000;
     private const int MaxInlineLegalEntityAssetsTotalLength = 800_000;
@@ -37,64 +40,200 @@ public class LegalEntitiesController : ControllerBase
     private bool IsAdmin()
         => User.IsInRole("admin");
 
-    private async Task<int?> GetMainCompanyIdAsync(CancellationToken ct)
-    {
-        var rawValue = await _db.SystemSettings
-            .AsNoTracking()
-            .Where(item => item.Key == MainCompanySettingKey)
-            .Select(item => item.Value)
-            .FirstOrDefaultAsync(ct);
+    private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId);
 
-        return int.TryParse(rawValue, out var id) ? id : (int?)null;
+    private async Task<MainCompanySettingsState> LoadMainCompanySettingsStateAsync(CancellationToken ct)
+    {
+        var values = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == LegacyMainCompanySettingKey
+                || item.Key == MainCompanyIdsSettingKey
+                || item.Key == DefaultMainCompanyIdSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+
+        var companyIds = new List<int>();
+
+        if (values.TryGetValue(MainCompanyIdsSettingKey, out var rawIds) && !string.IsNullOrWhiteSpace(rawIds))
+        {
+            try
+            {
+                var parsedIds = JsonSerializer.Deserialize<List<int>>(rawIds);
+                if (parsedIds is not null)
+                {
+                    companyIds.AddRange(parsedIds.Where(id => id > 0));
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore invalid JSON and fall back to legacy value below.
+            }
+        }
+
+        if (companyIds.Count == 0
+            && values.TryGetValue(LegacyMainCompanySettingKey, out var rawLegacyId)
+            && int.TryParse(rawLegacyId, out var legacyId)
+            && legacyId > 0)
+        {
+            companyIds.Add(legacyId);
+        }
+
+        companyIds = companyIds
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        int? defaultCompanyId = null;
+        if (values.TryGetValue(DefaultMainCompanyIdSettingKey, out var rawDefaultId)
+            && int.TryParse(rawDefaultId, out var configuredDefaultId)
+            && configuredDefaultId > 0)
+        {
+            defaultCompanyId = configuredDefaultId;
+        }
+        else if (values.TryGetValue(LegacyMainCompanySettingKey, out rawLegacyId)
+                 && int.TryParse(rawLegacyId, out legacyId)
+                 && legacyId > 0)
+        {
+            defaultCompanyId = legacyId;
+        }
+
+        if (defaultCompanyId.HasValue && !companyIds.Contains(defaultCompanyId.Value))
+        {
+            defaultCompanyId = companyIds.FirstOrDefault();
+        }
+
+        if (!defaultCompanyId.HasValue && companyIds.Count > 0)
+        {
+            defaultCompanyId = companyIds[0];
+        }
+
+        return new MainCompanySettingsState(companyIds, defaultCompanyId);
     }
+
+    private async Task<int?> GetMainCompanyIdAsync(CancellationToken ct)
+        => (await LoadMainCompanySettingsStateAsync(ct)).DefaultCompanyId;
 
     private async Task UpsertMainCompanyIdAsync(int legalEntityId, CancellationToken ct)
     {
-        var nowUtc = DateTime.UtcNow;
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == MainCompanySettingKey, ct);
+        var state = await LoadMainCompanySettingsStateAsync(ct);
+        var companyIds = state.CompanyIds.Contains(legalEntityId)
+            ? state.CompanyIds
+            : state.CompanyIds.Concat([legalEntityId]).Distinct().OrderBy(id => id).ToList();
 
-        if (setting is null)
+        await SaveMainCompanySettingsStateAsync(companyIds, legalEntityId, ct);
+    }
+
+    private async Task SaveMainCompanySettingsStateAsync(IEnumerable<int> companyIds, int? defaultCompanyId, CancellationToken ct)
+    {
+        var normalizedIds = companyIds
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        var normalizedIdSet = normalizedIds.ToHashSet();
+
+        var normalizedDefaultId = defaultCompanyId.HasValue && normalizedIds.Contains(defaultCompanyId.Value)
+            ? defaultCompanyId
+            : normalizedIds.FirstOrDefault();
+
+        var settings = await _db.SystemSettings
+            .Where(item =>
+                item.Key == LegacyMainCompanySettingKey
+                || item.Key == MainCompanyIdsSettingKey
+                || item.Key == DefaultMainCompanyIdSettingKey)
+            .ToListAsync(ct);
+
+        var nowUtc = DateTime.UtcNow;
+
+        void UpsertSetting(string key, string value)
         {
-            _db.SystemSettings.Add(new SystemSetting
+            var setting = settings.FirstOrDefault(item => item.Key == key);
+            if (setting is null)
             {
-                Key = MainCompanySettingKey,
-                Value = legalEntityId.ToString(),
-                CreatedAt = nowUtc,
-                UpdatedAt = nowUtc,
-            });
+                _db.SystemSettings.Add(new SystemSetting
+                {
+                    Key = key,
+                    Value = value,
+                    CreatedAt = nowUtc,
+                    UpdatedAt = nowUtc,
+                });
+                return;
+            }
+
+            setting.Value = value;
+            setting.UpdatedAt = nowUtc;
+        }
+
+        void RemoveSetting(string key)
+        {
+            var setting = settings.FirstOrDefault(item => item.Key == key);
+            if (setting is not null)
+            {
+                _db.SystemSettings.Remove(setting);
+            }
+        }
+
+        if (normalizedIds.Count == 0)
+        {
+            var allCompanyAccesses = await _db.UserCompanyAccesses.ToListAsync(ct);
+            if (allCompanyAccesses.Count > 0)
+            {
+                _db.UserCompanyAccesses.RemoveRange(allCompanyAccesses);
+            }
+
+            RemoveSetting(MainCompanyIdsSettingKey);
+            RemoveSetting(DefaultMainCompanyIdSettingKey);
+            RemoveSetting(LegacyMainCompanySettingKey);
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        var staleAccesses = await _db.UserCompanyAccesses
+            .Where(item => !normalizedIdSet.Contains(item.LegalEntityId))
+            .ToListAsync(ct);
+        if (staleAccesses.Count > 0)
+        {
+            _db.UserCompanyAccesses.RemoveRange(staleAccesses);
+        }
+
+        UpsertSetting(MainCompanyIdsSettingKey, JsonSerializer.Serialize(normalizedIds));
+
+        if (normalizedDefaultId.HasValue)
+        {
+            UpsertSetting(DefaultMainCompanyIdSettingKey, normalizedDefaultId.Value.ToString(CultureInfo.InvariantCulture));
+            UpsertSetting(LegacyMainCompanySettingKey, normalizedDefaultId.Value.ToString(CultureInfo.InvariantCulture));
         }
         else
         {
-            setting.Value = legalEntityId.ToString();
-            setting.UpdatedAt = nowUtc;
+            RemoveSetting(DefaultMainCompanyIdSettingKey);
+            RemoveSetting(LegacyMainCompanySettingKey);
         }
 
         await _db.SaveChangesAsync(ct);
     }
 
-    private async Task ClearMainCompanyIdIfMatchesAsync(int legalEntityId, CancellationToken ct)
+    private async Task RemoveCompanyFromMainCompanySettingsAsync(int legalEntityId, CancellationToken ct)
     {
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == MainCompanySettingKey, ct);
-        if (setting is null || !int.TryParse(setting.Value, out var currentId) || currentId != legalEntityId)
+        var state = await LoadMainCompanySettingsStateAsync(ct);
+        if (!state.CompanyIds.Contains(legalEntityId))
         {
             return;
         }
 
-        _db.SystemSettings.Remove(setting);
-        await _db.SaveChangesAsync(ct);
+        var remainingIds = state.CompanyIds.Where(id => id != legalEntityId).ToList();
+        var nextDefaultId = state.DefaultCompanyId == legalEntityId
+            ? (remainingIds.Count > 0 ? remainingIds[0] : null)
+            : state.DefaultCompanyId;
+
+        await SaveMainCompanySettingsStateAsync(remainingIds, nextDefaultId, ct);
     }
 
     private async Task<IQueryable<LegalEntity>> ApplyCompanyVisibilityAsync(IQueryable<LegalEntity> query, CancellationToken ct)
     {
-        if (IsAdmin())
+        var state = await LoadMainCompanySettingsStateAsync(ct);
+        if (state.CompanyIds.Count > 0)
         {
-            return query;
-        }
-
-        var mainCompanyId = await GetMainCompanyIdAsync(ct);
-        if (mainCompanyId.HasValue)
-        {
-            query = query.Where(item => item.Id != mainCompanyId.Value);
+            query = query.Where(item => !state.CompanyIds.Contains(item.Id));
         }
 
         return query;
@@ -843,10 +982,76 @@ public class LegalEntitiesController : ControllerBase
             client.LegalEntityId = null;
         }
 
-        await ClearMainCompanyIdIfMatchesAsync(entity.Id, ct);
+        await RemoveCompanyFromMainCompanySettingsAsync(entity.Id, ct);
         _db.LegalEntities.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    [HttpGet("main-companies/settings")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<MainCompanySettingsDto>> GetMainCompanySettings(CancellationToken ct)
+    {
+        var state = await LoadMainCompanySettingsStateAsync(ct);
+        var companies = state.CompanyIds.Count == 0
+            ? new List<LegalEntity>()
+            : await _db.LegalEntities
+                .AsNoTracking()
+                .Include(le => le.Clients)
+                .Include(le => le.Addresses)
+                .Include(le => le.ResponsibleUser)
+                .Where(le => state.CompanyIds.Contains(le.Id))
+                .OrderBy(le => le.ShortName)
+                .ToListAsync(ct);
+
+        return Ok(new MainCompanySettingsDto
+        {
+            DefaultCompanyId = state.DefaultCompanyId,
+            Companies = companies.Select(item => (LegalEntityListItemDto)MapDetail(item)).ToList(),
+        });
+    }
+
+    [HttpPut("main-companies/settings")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<MainCompanySettingsDto>> UpdateMainCompanySettings(
+        [FromBody] UpdateMainCompanySettingsRequest request,
+        CancellationToken ct)
+    {
+        var normalizedIds = (request.CompanyIds ?? [])
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        if (normalizedIds.Count > 0)
+        {
+            var existingIds = await _db.LegalEntities
+                .AsNoTracking()
+                .Where(le => normalizedIds.Contains(le.Id))
+                .Select(le => le.Id)
+                .ToListAsync(ct);
+
+            var missingIds = normalizedIds
+                .Except(existingIds)
+                .OrderBy(id => id)
+                .ToArray();
+
+            if (missingIds.Length > 0)
+            {
+                return NotFound(new
+                {
+                    message = "Не удалось найти часть выбранных компаний.",
+                    missingIds,
+                });
+            }
+        }
+
+        var normalizedDefaultId = request.DefaultCompanyId.HasValue && normalizedIds.Contains(request.DefaultCompanyId.Value)
+            ? request.DefaultCompanyId
+            : (normalizedIds.Count > 0 ? normalizedIds[0] : null);
+
+        await SaveMainCompanySettingsStateAsync(normalizedIds, normalizedDefaultId, ct);
+        return await GetMainCompanySettings(ct);
     }
 
     [HttpGet("company-profile")]
@@ -1027,8 +1232,8 @@ public class LegalEntitiesController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<LegalEntityDetailDto>> GetById(int id, CancellationToken ct)
     {
-        var mainCompanyId = await GetMainCompanyIdAsync(ct);
-        if (!IsAdmin() && mainCompanyId == id)
+        var mainCompanyIds = (await LoadMainCompanySettingsStateAsync(ct)).CompanyIds;
+        if (!IsAdmin() && mainCompanyIds.Contains(id))
         {
             return NotFound();
         }

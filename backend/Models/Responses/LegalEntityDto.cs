@@ -91,6 +91,12 @@ public class LegalEntityDetailDto : LegalEntityListItemDto
 {
 }
 
+public class MainCompanySettingsDto
+{
+    public int? DefaultCompanyId { get; set; }
+    public List<LegalEntityListItemDto> Companies { get; set; } = new();
+}
+
 public class LegalEntitySuggestionDto
 {
     public string ShortName { get; set; } = string.Empty;

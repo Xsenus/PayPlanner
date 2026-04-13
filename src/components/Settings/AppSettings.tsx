@@ -10,6 +10,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
+import { MainCompanySettings } from './MainCompanySettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
   ContractNumberingSettingsDto,
@@ -41,7 +42,7 @@ export function AppSettings() {
   const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
   const toast = useToast();
-  const [activeSection, setActiveSection] = useState<SettingsSection>('integrations');
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
   const [loading, setLoading] = useState(false);
@@ -759,6 +760,8 @@ export function AppSettings() {
 
             {activeSection === 'general' && (
               <div className="space-y-6">
+                <MainCompanySettings />
+
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap gap-2">
                     <button

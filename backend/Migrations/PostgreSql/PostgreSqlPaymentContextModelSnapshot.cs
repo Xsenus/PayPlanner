@@ -3255,6 +3255,27 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("UserActivityLogs");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserCompanyAccess", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("UserId", "LegalEntityId");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_UserCompanyAccesses_LegalEntityId");
+
+                    b.ToTable("UserCompanyAccesses", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserExternalIdentity", b =>
                 {
                     b.Property<int>("Id")
@@ -3752,6 +3773,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserCompanyAccess", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("UserCompanyAccesses")
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany("CompanyAccesses")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LegalEntity");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserExternalIdentity", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -3834,6 +3874,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Addresses");
 
                     b.Navigation("Clients");
+
+                    b.Navigation("UserCompanyAccesses");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
@@ -3872,6 +3914,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("CompanyAccesses");
 
                     b.Navigation("ExternalIdentities");
 
