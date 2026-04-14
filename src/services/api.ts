@@ -671,6 +671,10 @@ export class ApiService {
     return this.request<ActResponsible[]>('/acts/responsibles');
   }
 
+  async getAct(id: number) {
+    return this.request<Act>(`/acts/${id}`);
+  }
+
   async createAct(payload: ActInput) {
     return this.request<Act>('/acts', { method: 'POST', body: JSON.stringify(payload) });
   }

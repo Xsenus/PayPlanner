@@ -592,7 +592,19 @@ export interface PaymentStatusEntity {
 }
 
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
+export type ActCreationMode = 'Manual' | 'Full' | 'Partial';
 export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
+
+export interface ActLineItem {
+  id?: number | null;
+  invoiceLineItemId?: number | null;
+  sourceKey: string;
+  sourceSortOrder?: number | null;
+  name: string;
+  quantity: number;
+  unit: string;
+  price: number;
+}
 
 export interface Act {
   id: number;
@@ -600,6 +612,7 @@ export interface Act {
   title?: string | null;
   date: string;
   amount: number;
+  creationMode?: ActCreationMode;
   invoiceNumber?: string | null;
   invoiceId?: number | null;
   contractId?: number | null;
@@ -611,6 +624,7 @@ export interface Act {
   responsibleName?: string | null;
   responsibles?: InvoiceResponsible[];
   comment?: string | null;
+  lineItems?: ActLineItem[];
   createdAt: string;
   updatedAt?: string | null;
   auditCreatedByUserId?: number | null;
@@ -629,6 +643,7 @@ export interface ActInput {
   title?: string | null;
   date: string;
   amount: number;
+  creationMode?: ActCreationMode;
   invoiceNumber?: string | null;
   invoiceId?: number | null;
   contractId?: number | null;
@@ -637,6 +652,7 @@ export interface ActInput {
   clientId?: number | null;
   responsibleId?: number | null;
   comment?: string | null;
+  lineItems?: Pick<ActLineItem, 'sourceKey' | 'quantity'>[];
 }
 
 export interface ActSummaryBucket {
@@ -802,12 +818,14 @@ export interface InvoiceActLink {
   title?: string | null;
   date: string;
   amount: number;
+  creationMode?: ActCreationMode;
   status: ActStatus;
   clientId?: number | null;
   clientName?: string | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
   comment?: string | null;
+  lineItems?: ActLineItem[];
 }
 
 export interface Invoice {
@@ -869,6 +887,9 @@ export interface Invoice {
 }
 
 export interface InvoiceLineItem {
+  id?: number | null;
+  sortOrder?: number | null;
+  sourceKey?: string | null;
   name: string;
   quantity: number;
   unit: string;

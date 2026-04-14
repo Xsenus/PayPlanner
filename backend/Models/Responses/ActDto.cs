@@ -10,6 +10,7 @@ public class ActDto
     public string? Title { get; set; }
     public DateTime Date { get; set; }
     public decimal Amount { get; set; }
+    public string CreationMode { get; set; } = ActCreationMode.Manual;
     public string? InvoiceNumber { get; set; }
     public int? InvoiceId { get; set; }
     public int? ContractId { get; set; }
@@ -20,6 +21,7 @@ public class ActDto
     public int? ResponsibleId { get; set; }
     public string? ResponsibleName { get; set; }
     public string? Comment { get; set; }
+    public IReadOnlyCollection<ActLineItemDto> LineItems { get; set; } = Array.Empty<ActLineItemDto>();
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? AuditCreatedByUserId { get; set; }
@@ -31,4 +33,16 @@ public class ActDto
     public DateTime? AuditDeletedAt { get; set; }
     public int? AuditDeletedByUserId { get; set; }
     public string? AuditDeletedByUserName { get; set; }
+}
+
+public class ActLineItemDto
+{
+    public int? Id { get; set; }
+    public int? InvoiceLineItemId { get; set; }
+    public string SourceKey { get; set; } = string.Empty;
+    public int? SourceSortOrder { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "шт";
+    public decimal Price { get; set; }
 }

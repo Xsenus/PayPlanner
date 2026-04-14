@@ -7,6 +7,7 @@ public class Act
     public string? Title { get; set; }
     public DateTime Date { get; set; }
     public decimal Amount { get; set; }
+    public string CreationMode { get; set; } = ActCreationMode.Manual;
     public string? InvoiceNumber { get; set; }
     public int? InvoiceId { get; set; }
     public Payment? Invoice { get; set; }
@@ -17,6 +18,7 @@ public class Act
     public int? ResponsibleId { get; set; }
     public User? Responsible { get; set; }
     public string? Comment { get; set; }
+    public ICollection<ActLineItem> LineItems { get; set; } = new List<ActLineItem>();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 }

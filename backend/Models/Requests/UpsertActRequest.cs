@@ -18,6 +18,9 @@ public class UpsertActRequest
     [Range(0, double.MaxValue)]
     public decimal Amount { get; set; }
 
+    [MaxLength(32)]
+    public string CreationMode { get; set; } = ActCreationMode.Manual;
+
     [MaxLength(100)]
     public string? InvoiceNumber { get; set; }
 
@@ -37,4 +40,16 @@ public class UpsertActRequest
 
     [MaxLength(1000)]
     public string? Comment { get; set; }
+
+    public List<ActLineItemRequest> LineItems { get; set; } = new();
+}
+
+public class ActLineItemRequest
+{
+    [Required]
+    [MaxLength(128)]
+    public string SourceKey { get; set; } = string.Empty;
+
+    [Range(typeof(decimal), "0.0000001", "79228162514264337593543950335")]
+    public decimal Quantity { get; set; }
 }

@@ -1985,6 +1985,9 @@ public class InvoicesController : ControllerBase
             .ThenBy(item => item.Id)
             .Select(item => new InvoiceLineItemDto
             {
+                Id = item.Id,
+                SortOrder = item.SortOrder,
+                SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
                 Name = item.Name,
                 Quantity = item.Quantity,
                 Unit = item.Unit,
@@ -2016,6 +2019,9 @@ public class InvoicesController : ControllerBase
                 item.PaymentId,
                 LineItem = new InvoiceLineItemDto
                 {
+                    Id = item.Id,
+                    SortOrder = item.SortOrder,
+                    SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
                     Name = item.Name,
                     Quantity = item.Quantity,
                     Unit = item.Unit,
@@ -2447,6 +2453,7 @@ public class InvoicesController : ControllerBase
                     Title = a.Title,
                     Date = a.Date,
                     Amount = a.Amount,
+                    CreationMode = a.CreationMode,
                     Status = a.Status,
                     ClientId = a.ClientId,
                     ClientName = a.Client != null ? a.Client.Name : null,
@@ -2455,6 +2462,21 @@ public class InvoicesController : ControllerBase
                         ? (string.IsNullOrWhiteSpace(a.Responsible.FullName) ? a.Responsible.Email : a.Responsible.FullName)
                         : null,
                     Comment = a.Comment,
+                    LineItems = a.LineItems
+                        .OrderBy(item => item.SortOrder)
+                        .ThenBy(item => item.Id)
+                        .Select(item => new ActLineItemDto
+                        {
+                            Id = item.Id,
+                            InvoiceLineItemId = item.InvoiceLineItemId,
+                            SourceKey = item.SourceKey,
+                            SourceSortOrder = item.SourceSortOrder,
+                            Name = item.Name,
+                            Quantity = item.Quantity,
+                            Unit = item.Unit,
+                            Price = item.Price,
+                        })
+                        .ToList(),
                 },
             })
             .ToListAsync(ct);

@@ -56,6 +56,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("CreationMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("Manual");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
@@ -137,6 +144,69 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_Act_UpdatedAt_Audit");
 
                     b.ToTable("Acts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ActLineItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ActId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("InvoiceLineItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("SourceSortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActId")
+                        .HasDatabaseName("IX_ActLineItems_ActId");
+
+                    b.HasIndex("ActId", "SortOrder")
+                        .HasDatabaseName("IX_ActLineItems_ActId_SortOrder");
+
+                    b.HasIndex("ActId", "SourceKey")
+                        .HasDatabaseName("IX_ActLineItems_ActId_SourceKey");
+
+                    b.ToTable("ActLineItem");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.AddressRecord", b =>
@@ -3520,6 +3590,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Responsible");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ActLineItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Act", "Act")
+                        .WithMany("LineItems")
+                        .HasForeignKey("ActId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Act");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.AddressRecord", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -3926,6 +4007,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
+                {
+                    b.Navigation("LineItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>

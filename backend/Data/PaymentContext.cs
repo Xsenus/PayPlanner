@@ -224,6 +224,7 @@ public class PaymentContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Title).HasMaxLength(200);
+            entity.Property(e => e.CreationMode).HasMaxLength(32).HasDefaultValue(ActCreationMode.Manual).IsRequired();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(100);
             entity.Property(e => e.CounterpartyInn).HasMaxLength(32);
             entity.Property(e => e.Comment).HasMaxLength(1000);
@@ -247,12 +248,32 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.InvoiceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasMany(e => e.LineItems)
+                  .WithOne(item => item.Act)
+                  .HasForeignKey(item => item.ActId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Acts_Date");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_Acts_Status");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_Acts_ClientId");
             entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Acts_InvoiceId");
+        });
+
+        modelBuilder.Entity<ActLineItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SourceKey).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Price).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.ActId).HasDatabaseName("IX_ActLineItems_ActId");
+            entity.HasIndex(e => new { e.ActId, e.SortOrder }).HasDatabaseName("IX_ActLineItems_ActId_SortOrder");
+            entity.HasIndex(e => new { e.ActId, e.SourceKey }).HasDatabaseName("IX_ActLineItems_ActId_SourceKey");
         });
 
         // ------------------ Contract ------------------

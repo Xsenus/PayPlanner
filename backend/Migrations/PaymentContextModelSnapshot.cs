@@ -49,6 +49,13 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CreationMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Manual");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
@@ -130,6 +137,67 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_Act_UpdatedAt_Audit");
 
                     b.ToTable("Acts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ActLineItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ActId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("InvoiceLineItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SourceSortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActId")
+                        .HasDatabaseName("IX_ActLineItems_ActId");
+
+                    b.HasIndex("ActId", "SortOrder")
+                        .HasDatabaseName("IX_ActLineItems_ActId_SortOrder");
+
+                    b.HasIndex("ActId", "SourceKey")
+                        .HasDatabaseName("IX_ActLineItems_ActId_SourceKey");
+
+                    b.ToTable("ActLineItem");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.AddressRecord", b =>
@@ -3428,6 +3496,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Responsible");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ActLineItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Act", "Act")
+                        .WithMany("LineItems")
+                        .HasForeignKey("ActId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Act");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.AddressRecord", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -3834,6 +3913,11 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
+                {
+                    b.Navigation("LineItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>

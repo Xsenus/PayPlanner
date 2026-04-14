@@ -76,16 +76,21 @@ public class InvoiceActDto
     public string? Title { get; set; }
     public DateTime Date { get; set; }
     public decimal Amount { get; set; }
+    public string CreationMode { get; set; } = ActCreationMode.Manual;
     public ActStatus Status { get; set; }
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
     public int? ResponsibleId { get; set; }
     public string? ResponsibleName { get; set; }
     public string? Comment { get; set; }
+    public IReadOnlyCollection<ActLineItemDto> LineItems { get; set; } = Array.Empty<ActLineItemDto>();
 }
 
 public class InvoiceLineItemDto
 {
+    public int? Id { get; set; }
+    public int? SortOrder { get; set; }
+    public string SourceKey { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = "шт";

@@ -1337,6 +1337,7 @@ export function Accounts({
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
     setActModalInvoice(row);
     setActInitialValues({
+      creationMode: 'Full',
       invoiceId: row.invoice?.id ?? null,
       invoiceNumber: row.accountNumber,
       number: row.invoice?.actNumber ?? row.accountNumber,

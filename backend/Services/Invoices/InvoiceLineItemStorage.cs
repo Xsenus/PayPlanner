@@ -21,8 +21,10 @@ public static class InvoiceLineItemStorage
 
         return lineItems
             .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
-            .Select(item => new InvoiceLineItemDto
+            .Select((item, index) => new InvoiceLineItemDto
             {
+                SortOrder = index,
+                SourceKey = BuildSourceKey(null, index),
                 Name = item.Name!.Trim(),
                 Quantity = Math.Max(item.Quantity, 0),
                 Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
@@ -57,8 +59,13 @@ public static class InvoiceLineItemStorage
             var parsed = JsonSerializer.Deserialize<List<InvoiceLineItemDto>>(json, LegacyJsonOptions);
             return parsed?
                 .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Name))
-                .Select(item => new InvoiceLineItemDto
+                .Select((item, index) => new InvoiceLineItemDto
                 {
+                    Id = item.Id,
+                    SortOrder = item.SortOrder ?? index,
+                    SourceKey = string.IsNullOrWhiteSpace(item.SourceKey)
+                        ? BuildSourceKey(item.Id, item.SortOrder ?? index)
+                        : item.SourceKey,
                     Name = item.Name.Trim(),
                     Quantity = item.Quantity,
                     Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
@@ -95,4 +102,9 @@ public static class InvoiceLineItemStorage
             ? $"{Marker} {json}"
             : $"{baseNotes}\n{Marker} {json}";
     }
+
+    public static string BuildSourceKey(int? invoiceLineItemId, int sortOrder)
+        => invoiceLineItemId.HasValue && invoiceLineItemId.Value > 0
+            ? $"db:{invoiceLineItemId.Value}"
+            : $"legacy:{sortOrder}";
 }

@@ -12,6 +12,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -63,35 +64,7 @@ public class ActsController : ControllerBase
         var items = await query
             .Skip(skip)
             .Take(pageSize)
-            .Select(a => new ActDto
-            {
-                Id = a.Id,
-                Number = a.Number,
-                Title = a.Title,
-                Date = a.Date,
-                Amount = a.Amount,
-                InvoiceNumber = a.InvoiceNumber,
-                InvoiceId = a.InvoiceId,
-                ContractId = a.Invoice != null ? a.Invoice.ContractId : null,
-                CounterpartyInn = a.CounterpartyInn,
-                Status = a.Status,
-                ClientId = a.ClientId,
-                ClientName = a.Client != null ? a.Client.Name : null,
-                ResponsibleId = a.ResponsibleId,
-                ResponsibleName = a.Responsible != null ? a.Responsible.FullName : null,
-                Comment = a.Comment,
-                CreatedAt = a.CreatedAt,
-                UpdatedAt = a.UpdatedAt,
-                AuditCreatedByUserId = EF.Property<int?>(a, "CreatedByUserId"),
-                AuditCreatedByUserName = EF.Property<string?>(a, "CreatedByUserName"),
-                AuditUpdatedAt = EF.Property<DateTime?>(a, "UpdatedAt"),
-                AuditUpdatedByUserId = EF.Property<int?>(a, "UpdatedByUserId"),
-                AuditUpdatedByUserName = EF.Property<string?>(a, "UpdatedByUserName"),
-                AuditIsDeleted = EF.Property<bool>(a, "IsDeleted"),
-                AuditDeletedAt = EF.Property<DateTime?>(a, "DeletedAt"),
-                AuditDeletedByUserId = EF.Property<int?>(a, "DeletedByUserId"),
-                AuditDeletedByUserName = EF.Property<string?>(a, "DeletedByUserName"),
-            })
+            .Select(MapToDtoExpression)
             .ToListAsync(ct);
 
         return Ok(new { items, total, page, pageSize });
@@ -116,35 +89,7 @@ public class ActsController : ControllerBase
     {
         var dto = await _db.Acts.AsNoTracking()
             .Where(a => a.Id == id)
-            .Select(a => new ActDto
-            {
-                Id = a.Id,
-                Number = a.Number,
-                Title = a.Title,
-                Date = a.Date,
-                Amount = a.Amount,
-                InvoiceNumber = a.InvoiceNumber,
-                InvoiceId = a.InvoiceId,
-                ContractId = a.Invoice != null ? a.Invoice.ContractId : null,
-                CounterpartyInn = a.CounterpartyInn,
-                Status = a.Status,
-                ClientId = a.ClientId,
-                ClientName = a.Client != null ? a.Client.Name : null,
-                ResponsibleId = a.ResponsibleId,
-                ResponsibleName = a.Responsible != null ? a.Responsible.FullName : null,
-                Comment = a.Comment,
-                CreatedAt = a.CreatedAt,
-                UpdatedAt = a.UpdatedAt,
-                AuditCreatedByUserId = EF.Property<int?>(a, "CreatedByUserId"),
-                AuditCreatedByUserName = EF.Property<string?>(a, "CreatedByUserName"),
-                AuditUpdatedAt = EF.Property<DateTime?>(a, "UpdatedAt"),
-                AuditUpdatedByUserId = EF.Property<int?>(a, "UpdatedByUserId"),
-                AuditUpdatedByUserName = EF.Property<string?>(a, "UpdatedByUserName"),
-                AuditIsDeleted = EF.Property<bool>(a, "IsDeleted"),
-                AuditDeletedAt = EF.Property<DateTime?>(a, "DeletedAt"),
-                AuditDeletedByUserId = EF.Property<int?>(a, "DeletedByUserId"),
-                AuditDeletedByUserName = EF.Property<string?>(a, "DeletedByUserName"),
-            })
+            .Select(MapToDtoExpression)
             .FirstOrDefaultAsync(ct);
 
         return dto is null ? NotFound() : Ok(dto);
@@ -246,12 +191,19 @@ public class ActsController : ControllerBase
             if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
         }
 
+        var resolvedLineItems = await ResolveActLineItemsAsync(invoice, request, null, ct);
+        if (resolvedLineItems.Error is not null)
+        {
+            return resolvedLineItems.Error;
+        }
+
         var act = new Act
         {
             Number = request.Number.Trim(),
             Title = Normalize(request.Title),
             Date = request.Date.Date,
-            Amount = request.Amount,
+            Amount = resolvedLineItems.Amount,
+            CreationMode = resolvedLineItems.CreationMode,
             InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
             InvoiceId = request.InvoiceId,
             CounterpartyInn = Normalize(request.CounterpartyInn),
@@ -264,11 +216,13 @@ public class ActsController : ControllerBase
         };
 
         _db.Acts.Add(act);
+        SyncActLineItems(act, resolvedLineItems.LineItems);
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
+        await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
 
         return Created($"/api/acts/{act.Id}", Map(act));
     }
@@ -284,7 +238,9 @@ public class ActsController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var act = await _db.Acts.FirstOrDefaultAsync(a => a.Id == id, ct);
+        var act = await _db.Acts
+            .Include(a => a.LineItems)
+            .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (act is null)
         {
             return NotFound();
@@ -297,10 +253,17 @@ public class ActsController : ControllerBase
             if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
         }
 
+        var resolvedLineItems = await ResolveActLineItemsAsync(invoice, request, act, ct);
+        if (resolvedLineItems.Error is not null)
+        {
+            return resolvedLineItems.Error;
+        }
+
         act.Number = request.Number.Trim();
         act.Title = Normalize(request.Title);
         act.Date = request.Date.Date;
-        act.Amount = request.Amount;
+        act.Amount = resolvedLineItems.Amount;
+        act.CreationMode = resolvedLineItems.CreationMode;
         act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;
         act.InvoiceId = request.InvoiceId;
         act.CounterpartyInn = Normalize(request.CounterpartyInn);
@@ -309,12 +272,14 @@ public class ActsController : ControllerBase
         act.ResponsibleId = request.ResponsibleId;
         act.Comment = Normalize(request.Comment);
         act.UpdatedAt = DateTime.UtcNow;
+        SyncActLineItems(act, resolvedLineItems.LineItems);
 
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
+        await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
 
         return Ok(Map(act));
     }
@@ -333,6 +298,261 @@ public class ActsController : ControllerBase
         return NoContent();
     }
 
+    private static readonly System.Linq.Expressions.Expression<Func<Act, ActDto>> MapToDtoExpression = act => new ActDto
+    {
+        Id = act.Id,
+        Number = act.Number,
+        Title = act.Title,
+        Date = act.Date,
+        Amount = act.Amount,
+        CreationMode = act.CreationMode,
+        InvoiceNumber = act.InvoiceNumber,
+        InvoiceId = act.InvoiceId,
+        ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
+        CounterpartyInn = act.CounterpartyInn,
+        Status = act.Status,
+        ClientId = act.ClientId,
+        ClientName = act.Client != null ? act.Client.Name : null,
+        ResponsibleId = act.ResponsibleId,
+        ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
+        Comment = act.Comment,
+        LineItems = act.LineItems
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new ActLineItemDto
+            {
+                Id = item.Id,
+                InvoiceLineItemId = item.InvoiceLineItemId,
+                SourceKey = item.SourceKey,
+                SourceSortOrder = item.SourceSortOrder,
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
+            })
+            .ToList(),
+        CreatedAt = act.CreatedAt,
+        UpdatedAt = act.UpdatedAt,
+        AuditCreatedByUserId = EF.Property<int?>(act, "CreatedByUserId"),
+        AuditCreatedByUserName = EF.Property<string?>(act, "CreatedByUserName"),
+        AuditUpdatedAt = EF.Property<DateTime?>(act, "UpdatedAt"),
+        AuditUpdatedByUserId = EF.Property<int?>(act, "UpdatedByUserId"),
+        AuditUpdatedByUserName = EF.Property<string?>(act, "UpdatedByUserName"),
+        AuditIsDeleted = EF.Property<bool>(act, "IsDeleted"),
+        AuditDeletedAt = EF.Property<DateTime?>(act, "DeletedAt"),
+        AuditDeletedByUserId = EF.Property<int?>(act, "DeletedByUserId"),
+        AuditDeletedByUserName = EF.Property<string?>(act, "DeletedByUserName"),
+    };
+
+    private async Task<(ActionResult? Error, string CreationMode, decimal Amount, List<ActLineItemDraft> LineItems)> ResolveActLineItemsAsync(
+        Payment? invoice,
+        UpsertActRequest request,
+        Act? currentAct,
+        CancellationToken ct)
+    {
+        if (!ActCreationMode.IsValid(request.CreationMode))
+        {
+            return (ValidationError(nameof(request.CreationMode), "Некорректный режим создания акта."), ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
+        }
+
+        if (invoice is null)
+        {
+            if (request.LineItems.Count > 0)
+            {
+                return (BadRequest("Строки акта можно выбрать только для акта, привязанного к счету."), ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
+            }
+
+            return (null, ActCreationMode.Manual, request.Amount, new List<ActLineItemDraft>());
+        }
+
+        var sourceItems = await LoadInvoiceSourceLineItemsAsync(invoice.Id, invoice.SystemNotes, ct);
+        if (sourceItems.Count == 0)
+        {
+            return (null, ActCreationMode.Manual, request.Amount, new List<ActLineItemDraft>());
+        }
+
+        var creationMode = ActCreationMode.Normalize(request.CreationMode);
+        if (currentAct is not null
+            && creationMode == ActCreationMode.Manual
+            && request.LineItems.Count == 0
+            && currentAct.LineItems.Count > 0)
+        {
+            return (
+                null,
+                currentAct.CreationMode,
+                currentAct.Amount,
+                currentAct.LineItems
+                    .OrderBy(item => item.SortOrder)
+                    .ThenBy(item => item.Id)
+                    .Select(item => new ActLineItemDraft(
+                        item.InvoiceLineItemId,
+                        item.SourceKey,
+                        item.SourceSortOrder,
+                        item.Name,
+                        item.Quantity,
+                        item.Unit,
+                        item.Price))
+                    .ToList());
+        }
+
+        if (creationMode == ActCreationMode.Manual)
+        {
+            creationMode = request.LineItems.Count > 0 ? ActCreationMode.Partial : ActCreationMode.Full;
+        }
+
+        var usedQuantities = await _db.Set<ActLineItem>()
+            .AsNoTracking()
+            .Where(item => item.Act.InvoiceId == invoice.Id
+                && item.Act.Status != ActStatus.Terminated
+                && (currentAct == null || item.ActId != currentAct.Id))
+            .GroupBy(item => item.SourceKey)
+            .Select(group => new
+            {
+                SourceKey = group.Key,
+                Quantity = group.Sum(item => item.Quantity),
+            })
+            .ToDictionaryAsync(item => item.SourceKey, item => item.Quantity, ct);
+
+        var sourceByKey = sourceItems.ToDictionary(item => item.SourceKey, StringComparer.OrdinalIgnoreCase);
+        var remainingItems = sourceItems
+            .Select(item =>
+            {
+                var used = usedQuantities.GetValueOrDefault(item.SourceKey);
+                var remaining = Math.Max(0m, item.Quantity - used);
+                return new
+                {
+                    Item = item,
+                    Remaining = remaining,
+                };
+            })
+            .Where(item => item.Remaining > 0)
+            .ToDictionary(item => item.Item.SourceKey, item => item, StringComparer.OrdinalIgnoreCase);
+
+        var resolved = new List<ActLineItemDraft>();
+        if (creationMode == ActCreationMode.Full)
+        {
+            foreach (var remaining in remainingItems.Values.OrderBy(item => item.Item.SortOrder ?? int.MaxValue))
+            {
+                resolved.Add(new ActLineItemDraft(
+                    remaining.Item.Id,
+                    remaining.Item.SourceKey,
+                    remaining.Item.SortOrder,
+                    remaining.Item.Name,
+                    remaining.Remaining,
+                    remaining.Item.Unit,
+                    remaining.Item.Price));
+            }
+        }
+        else
+        {
+            var requestedItems = request.LineItems
+                .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.SourceKey) && item.Quantity > 0)
+                .GroupBy(item => item.SourceKey.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group => new
+                {
+                    SourceKey = group.Key,
+                    Quantity = group.Sum(item => item.Quantity),
+                })
+                .ToList();
+
+            if (requestedItems.Count == 0)
+            {
+                return (BadRequest("Для частичного акта выберите хотя бы одну услугу из счета."), creationMode, 0m, new List<ActLineItemDraft>());
+            }
+
+            foreach (var requested in requestedItems)
+            {
+                if (!remainingItems.TryGetValue(requested.SourceKey, out var remaining))
+                {
+                    return (BadRequest($"Позиция счета недоступна для актирования: {requested.SourceKey}."), creationMode, 0m, new List<ActLineItemDraft>());
+                }
+
+                if (requested.Quantity > remaining.Remaining)
+                {
+                    return (BadRequest($"Нельзя актировать больше остатка по позиции \"{remaining.Item.Name}\"."), creationMode, 0m, new List<ActLineItemDraft>());
+                }
+
+                resolved.Add(new ActLineItemDraft(
+                    remaining.Item.Id,
+                    sourceByKey[requested.SourceKey].SourceKey,
+                    remaining.Item.SortOrder,
+                    remaining.Item.Name,
+                    requested.Quantity,
+                    remaining.Item.Unit,
+                    remaining.Item.Price));
+            }
+        }
+
+        if (resolved.Count == 0)
+        {
+            return (BadRequest("По счету не осталось услуг, доступных для выставления акта."), creationMode, 0m, new List<ActLineItemDraft>());
+        }
+
+        var amount = resolved.Sum(item => item.Quantity * item.Price);
+        return (null, creationMode, amount, resolved);
+    }
+
+    private async Task<List<InvoiceLineItemDto>> LoadInvoiceSourceLineItemsAsync(int invoicePaymentId, string? invoiceSystemNotes, CancellationToken ct)
+    {
+        var storedItems = await _db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == invoicePaymentId)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new InvoiceLineItemDto
+            {
+                Id = item.Id,
+                SortOrder = item.SortOrder,
+                SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
+            })
+            .ToListAsync(ct);
+
+        return storedItems.Count > 0
+            ? storedItems
+            : InvoiceLineItemStorage.ExtractFromSystemNotes(invoiceSystemNotes);
+    }
+
+    private static void SyncActLineItems(Act act, IReadOnlyCollection<ActLineItemDraft> lineItems)
+    {
+        foreach (var existing in act.LineItems.ToList())
+        {
+            act.LineItems.Remove(existing);
+        }
+
+        var normalized = lineItems
+            .Where(item => item.Quantity > 0)
+            .OrderBy(item => item.SourceSortOrder ?? int.MaxValue)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        for (var index = 0; index < normalized.Count; index++)
+        {
+            var item = normalized[index];
+            act.LineItems.Add(new ActLineItem
+            {
+                SortOrder = index,
+                InvoiceLineItemId = item.InvoiceLineItemId,
+                SourceKey = item.SourceKey,
+                SourceSortOrder = item.SourceSortOrder,
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+    }
+
+    private ActionResult ValidationError(string field, string message)
+    {
+        ModelState.AddModelError(field, message);
+        return ValidationProblem(ModelState);
+    }
+
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -346,6 +566,7 @@ public class ActsController : ControllerBase
             Title = act.Title,
             Date = act.Date,
             Amount = act.Amount,
+            CreationMode = act.CreationMode,
             InvoiceNumber = act.InvoiceNumber,
             InvoiceId = act.InvoiceId,
             ContractId = act.Invoice?.ContractId,
@@ -356,6 +577,21 @@ public class ActsController : ControllerBase
             ResponsibleId = act.ResponsibleId,
             ResponsibleName = act.Responsible?.FullName,
             Comment = act.Comment,
+            LineItems = act.LineItems
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .Select(item => new ActLineItemDto
+                {
+                    Id = item.Id,
+                    InvoiceLineItemId = item.InvoiceLineItemId,
+                    SourceKey = item.SourceKey,
+                    SourceSortOrder = item.SourceSortOrder,
+                    Name = item.Name,
+                    Quantity = item.Quantity,
+                    Unit = item.Unit,
+                    Price = item.Price,
+                })
+                .ToList(),
             CreatedAt = act.CreatedAt,
             UpdatedAt = act.UpdatedAt,
             AuditCreatedByUserId = audit?.CreatedByUserId,
@@ -368,4 +604,13 @@ public class ActsController : ControllerBase
             AuditDeletedByUserName = audit?.DeletedByUserName,
         };
     }
+
+    private sealed record ActLineItemDraft(
+        int? InvoiceLineItemId,
+        string SourceKey,
+        int? SourceSortOrder,
+        string Name,
+        decimal Quantity,
+        string Unit,
+        decimal Price);
 }
