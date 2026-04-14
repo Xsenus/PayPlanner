@@ -11,6 +11,8 @@ public class ContractDto
     public DateTime Date { get; set; }
     public DateTime? StartDate { get; set; }
     public string? Description { get; set; }
+    public string BillingMode { get; set; } = ContractBillingMode.Fixed;
+    public bool IsOpenEnded { get; set; }
     public decimal? Amount { get; set; }
     public DateTime? ValidUntil { get; set; }
     public DateTime? TerminationDate { get; set; }

@@ -22,6 +22,12 @@ public class UpsertContractRequest
     [StringLength(2000)]
     public string? Description { get; set; }
 
+    [Required]
+    [StringLength(32)]
+    public string BillingMode { get; set; } = ContractBillingMode.Fixed;
+
+    public bool IsOpenEnded { get; set; }
+
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? Amount { get; set; }
 

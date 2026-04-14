@@ -667,6 +667,8 @@ export interface ContractClient {
   comment?: string | null;
 }
 
+export type ContractBillingMode = 'Fixed' | 'Actual';
+
 export interface Contract {
   id: number;
   number: string;
@@ -674,6 +676,8 @@ export interface Contract {
   date: string;
   startDate?: string | null;
   description?: string | null;
+  billingMode: ContractBillingMode;
+  isOpenEnded: boolean;
   amount?: number | null;
   validUntil?: string | null;
   terminationDate?: string | null;
@@ -704,6 +708,8 @@ export interface ContractInput {
   date: string;
   startDate?: string | null;
   description?: string | null;
+  billingMode: ContractBillingMode;
+  isOpenEnded: boolean;
   amount?: number | null;
   validUntil?: string | null;
   terminationDate?: string | null;

@@ -262,6 +262,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Title).HasMaxLength(200);
             entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.BillingMode).HasMaxLength(32).HasDefaultValue(ContractBillingMode.Fixed).IsRequired();
+            entity.Property(e => e.IsOpenEnded).HasDefaultValue(false);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.ValidUntil).HasColumnType("date");

@@ -21,6 +21,7 @@ import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Client, Contract } from '../../types';
+import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExecutionMetrics } from '../../utils/contracts';
 import { toRuDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
@@ -241,11 +242,19 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       case 'startDate':
         return formatDate(contract.startDate);
       case 'validUntil':
-        return formatDate(contract.validUntil);
+        return contract.isOpenEnded ? 'До исполнения обязательств' : formatDate(contract.validUntil);
       case 'terminationDate':
         return formatDate(contract.terminationDate);
       case 'amount':
-        return <span className="font-medium text-slate-900">{formatMoney(contract.amount)}</span>;
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium text-slate-900">{formatMoney(getContractEffectiveAmount(contract))}</span>
+            <span className="text-xs text-slate-500">
+              {getContractBillingModeLabel(contract.billingMode)}
+              {contract.billingMode === 'Fixed' ? ` · ${getContractExecutionMetrics(contract).label}` : ''}
+            </span>
+          </div>
+        );
       case 'description':
         return contract.description?.trim() ? (
           <div className="truncate text-slate-700" title={contract.description}>

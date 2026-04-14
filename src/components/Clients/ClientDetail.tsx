@@ -88,6 +88,7 @@ import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } 
 import { bindClientInvoiceModalApi } from '../../utils/clientInvoiceModalApi';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
+import { getContractEffectiveAmount } from '../../utils/contracts';
 import {
   ClientAddressEntriesForm,
   type AddressTypeOption,
@@ -1608,6 +1609,9 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     const normalizedPayload: ContractInput = {
       ...payload,
       clients: normalizedClients,
+      actIds: isEdit && selectedContract ? (selectedContract.actIds ?? []) : (payload.actIds ?? []),
+      invoiceIds: isEdit && selectedContract ? (selectedContract.invoiceIds ?? []) : (payload.invoiceIds ?? []),
+      paymentIds: isEdit && selectedContract ? (selectedContract.paymentIds ?? []) : (payload.paymentIds ?? []),
     };
     setContractSubmitting(true);
     setContractModalError(null);
@@ -4969,12 +4973,12 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                       )
                                     ) : column.key === 'amount' ? (
                                       <span className="font-semibold text-gray-900">
-                                        {contract.amount !== null && contract.amount !== undefined
-                                          ? formatCurrencySmart(contract.amount).full
+                                        {getContractEffectiveAmount(contract) !== null
+                                          ? formatCurrencySmart(getContractEffectiveAmount(contract) ?? 0).full
                                           : '—'}
                                       </span>
                                     ) : column.key === 'validUntil' ? (
-                                      <span className="text-gray-900">{contract.validUntil ? toRuDate(contract.validUntil) : '—'}</span>
+                                      <span className="text-gray-900">{contract.isOpenEnded ? 'До исполнения обязательств' : (contract.validUntil ? toRuDate(contract.validUntil) : '—')}</span>
                                     ) : (
                                       <span className="text-gray-900">{toRuDate(contract.createdAt)}</span>
                                     )}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { Contract, ContractClient, ContractInput } from '../../types';
+import type { Contract, ContractBillingMode, ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -23,6 +23,8 @@ type FormState = {
   number: string;
   title: string;
   date: string;
+  billingMode: ContractBillingMode;
+  isOpenEnded: boolean;
   amount: string;
   description: string;
   validUntil: string;
@@ -35,6 +37,8 @@ function normalizeContractToForm(contract: Contract | null): FormState {
       number: '',
       title: '',
       date: today,
+      billingMode: 'Fixed',
+      isOpenEnded: false,
       amount: '',
       description: '',
       validUntil: '',
@@ -45,12 +49,14 @@ function normalizeContractToForm(contract: Contract | null): FormState {
     number: contract.number ?? '',
     title: contract.title ?? '',
     date: toDateInputValue(contract.date) || toDateInputValue(new Date()),
+    billingMode: contract.billingMode ?? 'Fixed',
+    isOpenEnded: contract.isOpenEnded ?? false,
     amount:
-      contract.amount !== undefined && contract.amount !== null
+      contract.billingMode !== 'Actual' && contract.amount !== undefined && contract.amount !== null
         ? String(contract.amount)
         : '',
     description: contract.description ?? '',
-    validUntil: toDateInputValue(contract.validUntil) ?? '',
+    validUntil: contract.isOpenEnded ? '' : (toDateInputValue(contract.validUntil) ?? ''),
   };
 }
 
@@ -250,7 +256,7 @@ export function ContractModal({
     }
 
     let amountValue: number | undefined;
-    if (form.amount.trim()) {
+    if (form.billingMode === 'Fixed' && form.amount.trim()) {
       const normalized = form.amount.replace(/\s+/g, '').replace(',', '.');
       const parsed = Number(normalized);
       if (Number.isNaN(parsed)) {
@@ -264,13 +270,20 @@ export function ContractModal({
       amountValue = parsed;
     }
 
+    if (form.billingMode === 'Fixed' && amountValue === undefined) {
+      setLocalError('Укажите сумму договора');
+      return;
+    }
+
     const payload: ContractInput = {
       number: form.number.trim(),
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
+      billingMode: form.billingMode,
+      isOpenEnded: form.isOpenEnded,
       description: form.description.trim() ? form.description.trim() : undefined,
-      amount: amountValue,
-      validUntil: form.validUntil ? fromInputToApiDate(form.validUntil) ?? form.validUntil : undefined,
+      amount: form.billingMode === 'Fixed' ? amountValue : undefined,
+      validUntil: !form.isOpenEnded && form.validUntil ? fromInputToApiDate(form.validUntil) ?? form.validUntil : undefined,
       clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
       actIds: [],
       invoiceIds: [],
@@ -357,6 +370,23 @@ export function ContractModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Режим договора</span>
+              <select
+                value={form.billingMode}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    billingMode: event.target.value as ContractBillingMode,
+                    amount: event.target.value === 'Actual' ? '' : prev.amount,
+                  }))
+                }
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="Fixed">Фиксированная сумма</option>
+                <option value="Actual">Оплата по факту</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('contractAmount') ?? 'Сумма договора'}</span>
               <input
                 type="text"
@@ -364,7 +394,11 @@ export function ContractModal({
                 onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 placeholder="0,00"
+                disabled={form.billingMode === 'Actual'}
               />
+              {form.billingMode === 'Actual' && (
+                <span className="text-xs text-slate-500">Сумма будет считаться по привязанным счетам.</span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm sm:col-span-2">
               <span className="font-medium text-slate-700">{t('contractDescription') ?? 'Описание'}</span>
@@ -382,7 +416,23 @@ export function ContractModal({
                 value={form.validUntil}
                 onChange={(event) => setForm((prev) => ({ ...prev, validUntil: event.target.value }))}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                disabled={form.isOpenEnded}
               />
+            </label>
+            <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.isOpenEnded}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    isOpenEnded: event.target.checked,
+                    validUntil: event.target.checked ? '' : prev.validUntil,
+                  }))
+                }
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>До исполнения обязательств</span>
             </label>
         <div className="flex flex-col gap-2 text-sm sm:col-span-2">
           <div className="flex items-center justify-between">

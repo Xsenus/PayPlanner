@@ -4,7 +4,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { ContractClient, ContractInput } from '../../types';
+import type { ContractBillingMode, ContractClient, ContractInput } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
@@ -19,6 +19,8 @@ type FormState = {
   title: string;
   date: string;
   startDate: string;
+  billingMode: ContractBillingMode;
+  isOpenEnded: boolean;
   amount: string;
   description: string;
   validUntil: string;
@@ -32,6 +34,8 @@ const createInitialForm = (): FormState => {
     title: '',
     date: today,
     startDate: today,
+    billingMode: 'Fixed',
+    isOpenEnded: false,
     amount: '',
     description: '',
     validUntil: '',
@@ -201,7 +205,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     }
 
     let amountValue: number | undefined;
-    if (form.amount.trim()) {
+    if (form.billingMode === 'Fixed' && form.amount.trim()) {
       const parsed = Number(form.amount.replace(/\s+/g, '').replace(',', '.'));
       if (Number.isNaN(parsed) || parsed < 0) {
         setLocalError('Введите корректную сумму');
@@ -210,14 +214,21 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
       amountValue = parsed;
     }
 
+    if (form.billingMode === 'Fixed' && amountValue === undefined) {
+      setLocalError('Укажите сумму договора');
+      return;
+    }
+
     const payload: ContractInput = {
       number: form.number.trim(),
       title: form.title.trim() || undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
       startDate: form.startDate ? fromInputToApiDate(form.startDate) : undefined,
-      amount: amountValue,
+      billingMode: form.billingMode,
+      isOpenEnded: form.isOpenEnded,
+      amount: form.billingMode === 'Fixed' ? amountValue : undefined,
       description: form.description.trim() || undefined,
-      validUntil: form.validUntil ? fromInputToApiDate(form.validUntil) : undefined,
+      validUntil: !form.isOpenEnded && form.validUntil ? fromInputToApiDate(form.validUntil) : undefined,
       terminationDate: form.terminationDate ? fromInputToApiDate(form.terminationDate) : undefined,
       clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
       actIds: [],
@@ -290,8 +301,25 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               <input type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Режим договора</span>
+              <select
+                value={form.billingMode}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    billingMode: e.target.value as ContractBillingMode,
+                    amount: e.target.value === 'Actual' ? '' : prev.amount,
+                  }))
+                }
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="Fixed">Фиксированная сумма</option>
+                <option value="Actual">Оплата по факту</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Действует до</span>
-              <input type="date" value={form.validUntil} onChange={(e) => setForm((prev) => ({ ...prev, validUntil: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              <input type="date" value={form.validUntil} onChange={(e) => setForm((prev) => ({ ...prev, validUntil: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" disabled={form.isOpenEnded} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Дата расторжения</span>
@@ -299,7 +327,25 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Сумма договора</span>
-              <input type="text" value={form.amount} onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="0,00" />
+              <input type="text" value={form.amount} onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="0,00" disabled={form.billingMode === 'Actual'} />
+              {form.billingMode === 'Actual' && (
+                <span className="text-xs text-slate-500">Сумма будет считаться по сумме привязанных счетов.</span>
+              )}
+            </label>
+            <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.isOpenEnded}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    isOpenEnded: e.target.checked,
+                    validUntil: e.target.checked ? '' : prev.validUntil,
+                  }))
+                }
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>До исполнения обязательств</span>
             </label>
             <label className="flex flex-col gap-1 text-sm sm:col-span-2">
               <span className="font-medium text-slate-700">Название договора</span>

@@ -38,6 +38,10 @@ public class Contract
     /// </summary>
     public string? Description { get; set; }
 
+    public string BillingMode { get; set; } = ContractBillingMode.Fixed;
+
+    public bool IsOpenEnded { get; set; }
+
     /// <summary>
     /// Сумма договора (если применимо).
     /// </summary>

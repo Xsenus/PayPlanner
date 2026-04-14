@@ -107,7 +107,6 @@ public class ContractsController : ControllerBase
             AllowManualNumberEdit = rules.AllowManualNumberEdit,
         });
     }
-
     [HttpPost]
     public async Task<ActionResult<ContractDto>> Create([FromBody] UpsertContractRequest request, CancellationToken ct)
     {
@@ -122,10 +121,12 @@ public class ContractsController : ControllerBase
             Number = normalized.Number!,
             Title = Normalize(request.Title),
             Description = Normalize(request.Description),
-            Amount = request.Amount,
+            BillingMode = normalized.BillingMode!,
+            IsOpenEnded = normalized.IsOpenEnded,
+            Amount = normalized.Amount,
             Date = request.Date.Date,
             StartDate = request.StartDate?.Date,
-            ValidUntil = request.ValidUntil?.Date,
+            ValidUntil = normalized.ValidUntil,
             TerminationDate = request.TerminationDate?.Date,
             CreatedAt = DateTime.UtcNow,
         };
@@ -156,10 +157,12 @@ public class ContractsController : ControllerBase
         contract.Number = normalized.Number!;
         contract.Title = Normalize(request.Title);
         contract.Description = Normalize(request.Description);
-        contract.Amount = request.Amount;
+        contract.BillingMode = normalized.BillingMode!;
+        contract.IsOpenEnded = normalized.IsOpenEnded;
+        contract.Amount = normalized.Amount;
         contract.Date = request.Date.Date;
         contract.StartDate = request.StartDate?.Date;
-        contract.ValidUntil = request.ValidUntil?.Date;
+        contract.ValidUntil = normalized.ValidUntil;
         contract.TerminationDate = request.TerminationDate?.Date;
         contract.UpdatedAt = DateTime.UtcNow;
 
@@ -193,6 +196,8 @@ public class ContractsController : ControllerBase
         Number = contract.Number,
         Title = contract.Title,
         Description = contract.Description,
+        BillingMode = contract.BillingMode,
+        IsOpenEnded = contract.IsOpenEnded,
         Amount = contract.Amount,
         Date = contract.Date,
         StartDate = contract.StartDate,
@@ -224,17 +229,27 @@ public class ContractsController : ControllerBase
         PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
     };
 
-    private async Task<(ActionResult? Error, string? Number, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)>
+    private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)>
         ValidateAndNormalizePayload(UpsertContractRequest request, int? contractId, CancellationToken ct)
     {
         if (request.Date == default)
         {
-            return (ValidationError(nameof(request.Date), "Дата договора обязательна."), null, [], [], [], []);
+            return (ValidationError(nameof(request.Date), "Дата договора обязательна."), null, null, false, null, null, [], [], [], []);
         }
-
+        if (!ContractBillingMode.IsValid(request.BillingMode))
+        {
+            return (ValidationError(nameof(request.BillingMode), "Некорректный режим договора."), null, null, false, null, null, [], [], [], []);
+        }
+        var billingMode = ContractBillingMode.Normalize(request.BillingMode);
+        var isOpenEnded = request.IsOpenEnded;
+        var normalizedAmount = billingMode == ContractBillingMode.Fixed ? request.Amount : null;
+        var normalizedValidUntil = isOpenEnded ? null : request.ValidUntil?.Date;
+        if (billingMode == ContractBillingMode.Fixed && normalizedAmount is null)
+        {
+            return (ValidationError(nameof(request.Amount), "Для договора с фиксированной суммой нужно указать сумму."), null, null, false, null, null, [], [], [], []);
+        }
         var rules = await GetContractRulesSettingsAsync(ct);
         var number = Normalize(request.Number);
-
         if (!rules.AllowManualNumberEdit)
         {
             if (contractId.HasValue && contractId.Value > 0)
@@ -244,53 +259,45 @@ public class ContractsController : ControllerBase
                     .Select(x => x.Number)
                     .FirstOrDefaultAsync(ct);
             }
-
             if (string.IsNullOrEmpty(number) && rules.AutoGenerateWhenEmpty)
             {
                 number = await GenerateNextContractNumberAsync(request.Date.Date, contractId, ct);
             }
         }
-
         if (string.IsNullOrEmpty(number) && rules.AutoGenerateWhenEmpty)
         {
             number = await GenerateNextContractNumberAsync(request.Date.Date, contractId, ct);
         }
-
         if (string.IsNullOrEmpty(number))
         {
-            return (ValidationError(nameof(request.Number), "Номер договора обязателен."), null, [], [], [], []);
+            return (ValidationError(nameof(request.Number), "Номер договора обязателен."), null, null, false, null, null, [], [], [], []);
         }
-
         var duplicateNumberError = await EnsureContractNumberIsUniqueAsync(number, contractId, ct);
         if (duplicateNumberError is not null)
         {
-            return (duplicateNumberError, null, [], [], [], []);
+            return (duplicateNumberError, null, null, false, null, null, [], [], [], []);
         }
-
         var clients = request.Clients?.Where(x => x.ClientId > 0).GroupBy(x => x.ClientId)
             .Select(g => (ClientId: g.Key, Comment: Normalize(g.Last().Comment))).ToList() ?? [];
         if (clients.Count == 0)
         {
-            return (BadRequest("Необходимо выбрать хотя бы одного клиента."), null, [], [], [], []);
+            return (BadRequest("Необходимо выбрать хотя бы одного клиента."), null, null, false, null, null, [], [], [], []);
         }
-
         var clientIds = clients.Select(x => x.ClientId).ToList();
         var existingClients = await _db.Clients.AsNoTracking().Where(c => clientIds.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct);
         if (existingClients.Count != clientIds.Count)
         {
-            return (BadRequest($"Не найдены клиенты: {string.Join(", ", clientIds.Except(existingClients))}"), null, [], [], [], []);
+            return (BadRequest($"Не найдены клиенты: {string.Join(", ", clientIds.Except(existingClients))}"), null, null, false, null, null, [], [], [], []);
         }
-
         var actIds = NormalizeIds(request.ActIds);
         if (actIds.Count > 0)
         {
             var existing = await _db.Acts.AsNoTracking().Where(x => actIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
             if (existing.Count != actIds.Count)
             {
-                return (BadRequest($"Не найдены акты: {string.Join(", ", actIds.Except(existing))}"), null, [], [], [], []);
+                return (BadRequest($"Не найдены акты: {string.Join(", ", actIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
             }
         }
-
         var invoiceIds = NormalizeIds(request.InvoiceIds);
         if (invoiceIds.Count > 0)
         {
@@ -300,23 +307,32 @@ public class ContractsController : ControllerBase
                 .ToListAsync(ct);
             if (existing.Count != invoiceIds.Count)
             {
-                return (BadRequest($"Не найдены счета: {string.Join(", ", invoiceIds.Except(existing))}"), null, [], [], [], []);
+                return (BadRequest($"Не найдены счета: {string.Join(", ", invoiceIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
             }
         }
-
         var paymentIds = NormalizeIds(request.PaymentIds);
         if (paymentIds.Count > 0)
         {
             var existing = await _db.Payments.AsNoTracking().Where(x => paymentIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
             if (existing.Count != paymentIds.Count)
             {
-                return (BadRequest($"Не найдены начисления: {string.Join(", ", paymentIds.Except(existing))}"), null, [], [], [], []);
+                return (BadRequest($"Не найдены платежи: {string.Join(", ", paymentIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
             }
         }
-
-        return (null, number, clients, actIds, invoiceIds, paymentIds);
+        if (billingMode == ContractBillingMode.Fixed && normalizedAmount.HasValue)
+        {
+            var invoiceAmountTotal = invoiceIds.Count == 0
+                ? 0m
+                : await _db.Payments.AsNoTracking()
+                    .Where(x => invoiceIds.Contains(x.Id))
+                    .SumAsync(x => (decimal?)x.Amount, ct) ?? 0m;
+            if (invoiceAmountTotal > normalizedAmount.Value)
+            {
+                return (ValidationError(nameof(request.Amount), "Сумма привязанных счетов превышает сумму договора."), null, null, false, null, null, [], [], [], []);
+            }
+        }
+        return (null, number, billingMode, isOpenEnded, normalizedAmount, normalizedValidUntil, clients, actIds, invoiceIds, paymentIds);
     }
-
     private async Task<ActionResult?> EnsureContractNumberIsUniqueAsync(string number, int? excludeId, CancellationToken ct)
     {
         var exists = await _db.Contracts.AsNoTracking()

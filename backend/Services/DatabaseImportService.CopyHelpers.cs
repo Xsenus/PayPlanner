@@ -331,6 +331,8 @@ public sealed partial class DatabaseImportService
         target.Date = source.Date;
         target.StartDate = source.StartDate;
         target.Description = source.Description;
+        target.BillingMode = source.BillingMode;
+        target.IsOpenEnded = source.IsOpenEnded;
         target.Amount = source.Amount;
         target.ValidUntil = source.ValidUntil;
         target.TerminationDate = source.TerminationDate;

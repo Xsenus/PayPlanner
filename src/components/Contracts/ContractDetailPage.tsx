@@ -5,6 +5,7 @@ import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Client, Contract, ContractClient, ContractInput, Invoice, Payment } from '../../types';
+import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExecutionMetrics } from '../../utils/contracts';
 import { fromInputToApiDate, toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
@@ -286,7 +287,7 @@ export function ContractDetailPage({
 
         setContract(nextContract);
         setContractRules(nextRules);
-        setAmountInput(formatAmountInput(nextContract.amount));
+        setAmountInput(formatAmountInput(nextContract.billingMode === 'Fixed' ? nextContract.amount : null));
       } finally {
         if (!cancel) {
           setLoading(false);
@@ -559,14 +560,21 @@ export function ContractDetailPage({
       return;
     }
 
+    if (contract.billingMode === 'Fixed' && parsedAmount === null) {
+      toast.error('Укажите сумму договора', 'Договоры');
+      return;
+    }
+
     const payload: ContractInput = {
       number: contract.number,
       date: contract.date,
       startDate: contract.startDate,
       title: contract.title,
+      billingMode: contract.billingMode,
+      isOpenEnded: contract.isOpenEnded,
       description: contract.description,
-      amount: parsedAmount ?? undefined,
-      validUntil: contract.validUntil,
+      amount: contract.billingMode === 'Fixed' ? (parsedAmount ?? undefined) : undefined,
+      validUntil: contract.isOpenEnded ? undefined : contract.validUntil,
       terminationDate: contract.terminationDate,
       clients: (contract.clients ?? []).map((client) => ({
         clientId: client.id,
@@ -581,7 +589,7 @@ export function ContractDetailPage({
     try {
       const updatedContract = await apiService.updateContract(contract.id, payload);
       setContract(updatedContract);
-      setAmountInput(formatAmountInput(updatedContract.amount));
+      setAmountInput(formatAmountInput(updatedContract.billingMode === 'Fixed' ? updatedContract.amount : null));
       setEditMode(false);
       toast.success('Договор сохранён.', 'Договоры');
     } catch (error) {
@@ -624,6 +632,17 @@ export function ContractDetailPage({
       return { ...prev, clients: [...prev.clients, nextClient] };
     });
   };
+
+  const executionMetrics = getContractExecutionMetrics(contract ?? {
+    billingMode: 'Fixed',
+    amount: null,
+    invoiceAmountTotal: 0,
+  } as Contract);
+  const effectiveAmount = getContractEffectiveAmount(contract ?? {
+    billingMode: 'Fixed',
+    amount: null,
+    invoiceAmountTotal: 0,
+  } as Contract);
 
   if (loading || !contract) {
     return (
@@ -728,11 +747,38 @@ export function ContractDetailPage({
         </label>
 
         <label className="text-sm">
+          Режим договора
+          <select
+            value={contract.billingMode}
+            disabled={!editMode}
+            onChange={(event) => {
+              if (event.target.value === 'Actual') {
+                setAmountInput('');
+              }
+
+              setContract((prev) =>
+                prev
+                  ? {
+                    ...prev,
+                    billingMode: event.target.value as Contract['billingMode'],
+                    amount: event.target.value === 'Actual' ? null : prev.amount,
+                  }
+                  : prev,
+              );
+            }}
+            className="mt-1 w-full rounded border px-2 py-1"
+          >
+            <option value="Fixed">Фиксированная сумма</option>
+            <option value="Actual">Оплата по факту</option>
+          </select>
+        </label>
+
+        <label className="text-sm">
           Действует до
           <input
             type="date"
             value={toDateInputValue(contract.validUntil) ?? ''}
-            disabled={!editMode}
+            disabled={!editMode || contract.isOpenEnded}
             onChange={(event) =>
               setContract((prev) =>
                 prev ? { ...prev, validUntil: fromInputToApiDate(event.target.value) } : prev,
@@ -761,7 +807,7 @@ export function ContractDetailPage({
           Сумма договора
           <input
             value={amountInput}
-            disabled={!editMode}
+            disabled={!editMode || contract.billingMode === 'Actual'}
             onChange={(event) => {
               const nextValue = event.target.value;
               setAmountInput(nextValue);
@@ -774,6 +820,30 @@ export function ContractDetailPage({
             className="mt-1 w-full rounded border px-2 py-1"
             placeholder="0,00"
           />
+          {contract.billingMode === 'Actual' ? (
+            <div className="mt-1 text-xs text-slate-500">Сумма считается по привязанным счетам.</div>
+          ) : null}
+        </label>
+
+        <label className="flex items-center gap-3 rounded border px-3 py-2 text-sm md:col-span-2 lg:col-span-1">
+          <input
+            type="checkbox"
+            checked={contract.isOpenEnded}
+            disabled={!editMode}
+            onChange={(event) =>
+              setContract((prev) =>
+                prev
+                  ? {
+                    ...prev,
+                    isOpenEnded: event.target.checked,
+                    validUntil: event.target.checked ? null : prev.validUntil,
+                  }
+                  : prev,
+              )
+            }
+            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+          />
+          <span>До исполнения обязательств</span>
         </label>
 
         <label className="text-sm md:col-span-2 lg:col-span-3">
@@ -789,10 +859,11 @@ export function ContractDetailPage({
         </label>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма договора</div>
-          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.amount)}</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(effectiveAmount)}</div>
+          <div className="mt-1 text-xs text-slate-500">{getContractBillingModeLabel(contract.billingMode)}</div>
         </div>
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма счетов</div>
@@ -805,6 +876,14 @@ export function ContractDetailPage({
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма платежей</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.paymentAmountTotal)}</div>
+        </div>
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Исполнение</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{executionMetrics.label}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {executionMetrics.percent !== null ? `${executionMetrics.percent}%` : 'Сумма считается по счетам'}
+            {executionMetrics.delta !== null ? ` · Остаток ${formatAmount(executionMetrics.delta)}` : ''}
+          </div>
         </div>
       </div>
 
