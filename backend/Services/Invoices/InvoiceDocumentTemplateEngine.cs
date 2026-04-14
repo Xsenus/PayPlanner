@@ -200,7 +200,7 @@ public static class InvoiceDocumentTemplateEngine
         var directorShortName = BuildPersonShortName(director, directorFullName);
         var directorPosition = !string.IsNullOrWhiteSpace(director?.Position)
             ? director!.Position!
-            : "Руководитель";
+            : "Предприниматель";
         var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
 
         return new InvoiceDocumentRenderModel
@@ -825,13 +825,13 @@ public static class InvoiceDocumentTemplateEngine
   <meta charset="utf-8" />
   <title>{{document.title}}</title>
   <style>
-    @page { size: A4; margin: 40px 0; }
+    @page { size: A4; margin: 45px 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: #000000;
       font-family: Arial, "DejaVu Sans", sans-serif;
-      font-size: 14px;
+      font-size: 12px;
       line-height: 1.25;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
@@ -867,11 +867,11 @@ public static class InvoiceDocumentTemplateEngine
     .v-al-t { vertical-align: top; }
     .v-al-b { vertical-align: bottom; }
     .pad-t-5 { padding-top: 5px; }
-    .color-line { border-bottom: 2px solid #000000; }
+    .color-line { border-bottom: 1px solid #000000; }
     .doc-title {
-      font-size: 16px !important;
+      font-size: 14px !important;
       font-weight: 700;
-      line-height: 1.2;
+      line-height: 1.15;
     }
     .logo-wrap {
       text-align: center;
@@ -879,58 +879,58 @@ public static class InvoiceDocumentTemplateEngine
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 110px;
-      max-width: 210px;
+      max-height: 90px;
+      max-width: 180px;
       margin-left: auto;
       margin-right: auto;
       object-fit: contain;
     }
     .invoice-qr {
       display: block;
-      width: 140px;
-      height: 140px;
-      max-width: 140px;
-      max-height: 140px;
+      width: 150px;
+      height: 150px;
+      max-width: 150px;
+      max-height: 150px;
       margin-left: auto;
       object-fit: contain;
     }
     .bank-grid td {
-      padding: 2px 4px;
+      padding: 3px 5px;
       border: 1px solid #000000;
       vertical-align: top;
-      line-height: 1.05;
+      line-height: 1.15;
       font-size: 12px !important;
     }
     .bank-grid .bor0-b { border-bottom: 0; }
     .bank-grid .bor0-t { border-top: 0; }
     .doc-main-title {
-      margin: 8px 0 10px;
+      margin: 6px 0 8px;
       text-align: center;
-      font-size: 18px !important;
+      font-size: 16px !important;
       font-weight: 700;
     }
     .counterparty-table td {
-      padding: 2px 4px;
+      padding: 3px 4px;
       vertical-align: top;
       font-size: 12px !important;
     }
     .counterparty-label {
-      width: 13%;
-      color: #222222;
+      width: 16%;
+      color: #000000;
     }
     .counterparty-value {
       font-weight: 600;
     }
     .items-table {
       margin: 8px 0;
-      border: 2px solid #000000;
+      border: 1px solid #000000;
     }
     .items-table th,
     .items-table td {
       border: 1px solid #000000;
-      padding: 3px 5px;
+      padding: 4px 6px;
       vertical-align: top;
-      line-height: 1.18;
+      line-height: 1.25;
     }
     .items-table th {
       text-align: center;
@@ -938,21 +938,21 @@ public static class InvoiceDocumentTemplateEngine
       font-size: 12px !important;
     }
     .items-table .num {
-      width: 4%;
+      width: 5%;
       text-align: center;
     }
     .items-table .name {
-      width: 58%;
+      width: 55%;
       word-break: break-word;
     }
     .items-table .qty {
       width: 7%;
-      text-align: right;
+      text-align: center;
       white-space: nowrap;
     }
     .items-table .unit {
       width: 6%;
-      text-align: right;
+      text-align: center;
       white-space: nowrap;
     }
     .items-table .price,
@@ -962,62 +962,62 @@ public static class InvoiceDocumentTemplateEngine
       white-space: nowrap;
     }
     .totals-table td {
-      padding: 1px 0;
+      padding: 0;
       font-size: 12px !important;
     }
     .totals-label {
-      width: 82%;
+      width: 80%;
       text-align: right;
-      padding-right: 12px !important;
+      padding-right: 10px !important;
     }
     .totals-value {
-      width: 18%;
+      width: 20%;
       text-align: right;
       white-space: nowrap;
       font-weight: 700;
     }
     .summary-line {
-      margin-top: 8px;
+      margin-top: 6px;
     }
     .words {
       font-weight: 700;
     }
     .signature-table {
-      margin-top: 14px;
+      margin-top: 12px;
     }
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 60px;
+      height: 50px;
       vertical-align: bottom;
       position: relative;
       overflow: visible;
     }
     .signature-line .signature {
       max-width: 150px;
-      max-height: 36px;
+      max-height: 40px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: 8px;
+      bottom: 6px;
       transform: translateX(-50%);
       z-index: 2;
     }
     .signature-line .seal {
-      max-width: 120px;
-      max-height: 120px;
+      max-width: 110px;
+      max-height: 110px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: -30px;
+      bottom: -28px;
       transform: translateX(-50%);
-      opacity: 0.88;
+      opacity: 0.9;
       z-index: 1;
     }
     .signature-caption {
       padding-top: 3px;
       color: #222222;
-      font-size: 12px !important;
+      font-size: 11px !important;
     }
   </style>
 </head>
@@ -1091,7 +1091,7 @@ public static class InvoiceDocumentTemplateEngine
 
       <div class="color-line"></div>
 
-      <table class="counterparty-table" style="margin: 5px 0;">
+      <table class="counterparty-table" style="margin: 6px 0;">
         <tbody>
           <tr>
             <td class="counterparty-label">Поставщик<br/>(Исполнитель):</td>
@@ -1151,12 +1151,12 @@ public static class InvoiceDocumentTemplateEngine
       </div>
       <div class="words">{{invoice.totalWords}}</div>
 
-      <div class="color-line" style="margin: 5px 0;"></div>
+      <div class="color-line" style="margin: 6px 0;"></div>
 
       <table class="signature-table">
         <tbody>
           <tr>
-            <td class="font-b v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
+            <td class="v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
             <td style="width: 5%;"></td>
             <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}{{seller.sealHtml}}</td>
             <td style="width: 5%;"></td>
