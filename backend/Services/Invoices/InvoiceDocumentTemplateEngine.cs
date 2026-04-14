@@ -855,7 +855,7 @@ public static class InvoiceDocumentTemplateEngine
     .document-template tr,
     .document-template th,
     .document-template td {
-      font-size: 14px;
+      font-size: 13px;
     }
     .document-template table {
       width: 100%;
@@ -869,41 +869,43 @@ public static class InvoiceDocumentTemplateEngine
     .pad-t-5 { padding-top: 5px; }
     .color-line { border-bottom: 2px solid #000000; }
     .doc-title {
-      font-size: 19px !important;
+      font-size: 17px !important;
       font-weight: 700;
-      line-height: 1.22;
+      line-height: 1.2;
     }
     .logo-wrap {
-      text-align: right;
+      text-align: center;
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 110px;
-      max-width: 210px;
+      max-height: 120px;
+      max-width: 230px;
       margin-left: auto;
+      margin-right: auto;
       object-fit: contain;
     }
     .invoice-qr {
       display: block;
-      width: 148px;
-      height: 148px;
-      max-width: 148px;
-      max-height: 148px;
+      width: 150px;
+      height: 150px;
+      max-width: 150px;
+      max-height: 150px;
       margin-left: auto;
       object-fit: contain;
     }
     .bank-grid td {
-      padding: 3px 5px;
+      padding: 2px 5px;
       border: 1px solid #000000;
       vertical-align: top;
       line-height: 1.15;
+      font-size: 12px !important;
     }
     .bank-grid .bor0-b { border-bottom: 0; }
     .bank-grid .bor0-t { border-top: 0; }
     .doc-main-title {
-      margin: 12px 0 14px;
+      margin: 10px 0 12px;
       text-align: center;
-      font-size: 23px !important;
+      font-size: 19px !important;
       font-weight: 700;
     }
     .counterparty-table td {
@@ -911,7 +913,7 @@ public static class InvoiceDocumentTemplateEngine
       vertical-align: top;
     }
     .counterparty-label {
-      width: 15%;
+      width: 18%;
       color: #222222;
     }
     .counterparty-value {
@@ -924,20 +926,21 @@ public static class InvoiceDocumentTemplateEngine
     .items-table th,
     .items-table td {
       border: 1px solid #000000;
-      padding: 5px 6px;
+      padding: 4px 6px;
       vertical-align: top;
       line-height: 1.18;
     }
     .items-table th {
       text-align: center;
       font-weight: 700;
+      font-size: 12px !important;
     }
     .items-table .num {
       width: 5%;
       text-align: center;
     }
     .items-table .name {
-      width: 49%;
+      width: 55%;
       word-break: break-word;
     }
     .items-table .qty {
@@ -952,7 +955,7 @@ public static class InvoiceDocumentTemplateEngine
     }
     .items-table .price,
     .items-table .sum {
-      width: 15%;
+      width: 12%;
       text-align: right;
       white-space: nowrap;
     }
@@ -977,33 +980,33 @@ public static class InvoiceDocumentTemplateEngine
       font-weight: 700;
     }
     .signature-table {
-      margin-top: 8px;
+      margin-top: 12px;
     }
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 62px;
+      height: 56px;
       vertical-align: bottom;
       position: relative;
       overflow: visible;
     }
     .signature-line .signature {
       max-width: 150px;
-      max-height: 44px;
+      max-height: 40px;
       object-fit: contain;
       position: absolute;
-      left: 44%;
-      bottom: 8px;
+      left: 50%;
+      bottom: 6px;
       transform: translateX(-50%);
       z-index: 2;
     }
     .signature-line .seal {
-      max-width: 142px;
-      max-height: 142px;
+      max-width: 130px;
+      max-height: 130px;
       object-fit: contain;
       position: absolute;
-      left: 96%;
-      bottom: -22px;
+      left: 50%;
+      bottom: -36px;
       transform: translateX(-50%);
       opacity: 0.88;
       z-index: 1;
