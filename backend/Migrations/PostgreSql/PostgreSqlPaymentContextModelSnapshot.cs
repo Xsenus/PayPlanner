@@ -2730,7 +2730,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("RolePermissions");
                 });
 
-            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -2740,11 +2740,48 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<string>("ColorHex")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ServiceCategories");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
                         .HasMaxLength(7)
                         .HasColumnType("character varying(7)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<decimal>("DefaultPrice")
+                        .HasColumnType("numeric");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -2759,7 +2796,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_ServiceDictionaryItems_IsActive");
@@ -3785,6 +3828,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", "Category")
+                        .WithMany("Services")
+                        .HasForeignKey("CategoryId");
+
+                    b.Navigation("Category");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -3954,6 +4006,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Permissions");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
+                {
+                    b.Navigation("Services");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
