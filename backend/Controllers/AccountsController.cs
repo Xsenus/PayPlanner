@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -349,12 +350,16 @@ public class AccountsController : ControllerBase
                 .ThenBy(payment => payment.Id)
                 .ToList();
 
+            var visiblePayments = InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(payments)
+                ? payments.Where(payment => payment.DocumentKind != DocumentKind.Invoice).ToList()
+                : payments;
+
             return new AccountRegistryRowDto
             {
                 GroupKey = group.GroupKey,
                 AccountNumber = group.Representative.Number,
                 Invoice = invoice,
-                Payments = payments,
+                Payments = visiblePayments,
                 Acts = groupActs,
                 TotalAmount = group.TotalAmount,
                 DueDate = group.DueDate,

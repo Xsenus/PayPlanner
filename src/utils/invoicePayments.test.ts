@@ -3,7 +3,10 @@ import type { Invoice, Payment } from '../types';
 import {
   filterRelatedPaymentsForInvoice,
   filterRelatedPaymentsForInvoiceWithOptions,
+  filterRepresentativeInvoiceWhenInstallmentsExist,
   getInvoiceLegacyKey,
+  INSTALLMENT_PAYMENT_MARKER,
+  isInvoiceManagedPayment,
   isPaymentLinkedToInvoice,
 } from './invoicePayments';
 
@@ -119,5 +122,37 @@ describe('invoicePayments utilities', () => {
     );
 
     expect(result.map((payment) => payment.id)).toEqual([547]);
+  });
+
+  it('treats representative invoice and generated installment payments as invoice-managed', () => {
+    const invoicePayment = createPayment({ documentKind: 'Invoice' });
+    const installmentPayment = createPayment({
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1}`,
+    });
+    const standalonePayment = createPayment({ id: 901, systemNotes: 'manual note' });
+
+    expect(isInvoiceManagedPayment(invoicePayment)).toBe(true);
+    expect(isInvoiceManagedPayment(installmentPayment)).toBe(true);
+    expect(isInvoiceManagedPayment(standalonePayment)).toBe(false);
+  });
+
+  it('hides the representative invoice row when an installment schedule exists', () => {
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+    });
+    const installmentPayment = createPayment({
+      id: 548,
+      invoiceId: 30,
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1}`,
+    });
+
+    const result = filterRepresentativeInvoiceWhenInstallmentsExist([
+      representativeInvoice,
+      installmentPayment,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([548]);
   });
 });

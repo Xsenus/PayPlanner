@@ -5,6 +5,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -65,7 +66,8 @@ public class AccountsControllerTests
 
         Assert.Equal("partial", row.Status);
         Assert.True(row.IsOverdue);
-        Assert.Equal(7, row.Payments.Count);
+        Assert.Equal(6, row.Payments.Count);
+        Assert.DoesNotContain(row.Payments, payment => payment.DocumentKind == DocumentKind.Invoice);
     }
 
     [Fact]
@@ -93,7 +95,8 @@ public class AccountsControllerTests
         var row = Assert.Single(payload.Items);
 
         Assert.Equal("2", row.AccountNumber);
-        Assert.Equal(7, row.Payments.Count);
+        Assert.Equal(6, row.Payments.Count);
+        Assert.DoesNotContain(row.Payments, payment => payment.DocumentKind == DocumentKind.Invoice);
         Assert.Equal(new DateTime(2026, 6, 25), row.DueDate);
     }
 
@@ -189,17 +192,23 @@ public class AccountsControllerTests
         firstPaid.PaidDate = firstPaid.Date;
         firstPaid.LastPaymentDate = firstPaid.Date;
         firstPaid.IsPaid = true;
+        firstPaid.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 1";
 
         var secondPaid = CreateLinkedPayment(invoice, new DateTime(2026, 3, 4), 15_000m, PaymentStatus.Completed);
         secondPaid.PaidAmount = secondPaid.Amount;
         secondPaid.PaidDate = secondPaid.Date;
         secondPaid.LastPaymentDate = secondPaid.Date;
         secondPaid.IsPaid = true;
+        secondPaid.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 2";
 
         var overdue = CreateLinkedPayment(invoice, new DateTime(2026, 3, 25), 15_000m, PaymentStatus.Overdue);
+        overdue.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 3";
         var fourth = CreateLinkedPayment(invoice, new DateTime(2026, 4, 27), 15_000m, PaymentStatus.Pending);
+        fourth.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 4";
         var fifth = CreateLinkedPayment(invoice, new DateTime(2026, 5, 25), 15_000m, PaymentStatus.Pending);
+        fifth.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 5";
         var sixth = CreateLinkedPayment(invoice, new DateTime(2026, 6, 25), 11_000m, PaymentStatus.Pending);
+        sixth.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 6";
 
         db.Payments.AddRange(invoicePayment, firstPaid, secondPaid, overdue, fourth, fifth, sixth);
         await db.SaveChangesAsync();

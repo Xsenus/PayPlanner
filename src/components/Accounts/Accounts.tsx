@@ -47,6 +47,7 @@ import {
   peekInvoiceEditorDraft,
   type InvoiceEditorDraftState,
 } from '../../utils/invoiceEditorBridge';
+import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
@@ -1280,6 +1281,10 @@ export function Accounts({
   };
 
   const openPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
+    if (isInvoiceManagedPayment(payment)) {
+      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи счета');
+      return;
+    }
     setEditingPayment(payment);
     setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
     setPaymentModalType(payment.type ?? 'Income');
@@ -1306,6 +1311,10 @@ export function Accounts({
   };
 
   const handleDeletePayment = async (payment: Payment) => {
+    if (isInvoiceManagedPayment(payment)) {
+      toast.error('Счет и график рассрочки удаляются через раздел "Счета".', 'Платежи счета');
+      return;
+    }
     if (!canDelete) return;
     const approved = await confirm({
       title: 'Удаление платежа',
@@ -1490,7 +1499,7 @@ export function Accounts({
       type={paymentModalType}
       linkedInvoice={paymentModalInvoiceContext}
       onDelete={
-        canDelete
+        canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
           ? async (id) => {
               await apiService.deletePayment(id);
               toast.success('Платеж удален.');
@@ -2129,7 +2138,7 @@ export function Accounts({
                                           {(canEdit || canDelete) && (
                                             <td className="px-4 py-2">
                                               <div className="flex items-center justify-end gap-2">
-                                                {canEdit && (
+                                                {canEdit && !isInvoiceManagedPayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={() => openPaymentEditModal(payment, invoice)}
@@ -2140,7 +2149,7 @@ export function Accounts({
                                                     <Pencil className="h-4 w-4" />
                                                   </button>
                                                 )}
-                                                {canDelete && (
+                                                {canDelete && !isInvoiceManagedPayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={() => void handleDeletePayment(payment)}

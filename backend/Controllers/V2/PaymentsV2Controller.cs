@@ -156,6 +156,10 @@ public class PaymentsV2Controller : ControllerBase
     {
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
+        if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(entity))
+        {
+            return Conflict(new { message = InvoiceManagedPaymentRules.UpdateBlockedMessage });
+        }
 
         if (model.IncomeTypeId.HasValue)
         {
@@ -276,6 +280,10 @@ public class PaymentsV2Controller : ControllerBase
     {
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
+        if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(entity))
+        {
+            return Conflict(new { message = InvoiceManagedPaymentRules.DeleteBlockedMessage });
+        }
         _db.Payments.Remove(entity);
         await _db.SaveChangesAsync();
         return NoContent();

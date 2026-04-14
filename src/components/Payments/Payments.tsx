@@ -20,6 +20,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
+import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -667,6 +668,10 @@ export function Payments({
 
   const handleEditPayment = useCallback(
     (payment: Payment) => {
+      if (isInvoiceManagedPayment(payment)) {
+        toast.error('Счет и график рассрочки редактируются через раздел "Счета".', t('payments') ?? 'Платежи');
+        return;
+      }
       if (!paymentsPermissions.canEdit) {
         showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
         return;
@@ -675,11 +680,15 @@ export function Payments({
       setModalType(payment.type);
       setIsModalOpen(true);
     },
-    [paymentsPermissions.canEdit, showPermissionNotice, t],
+    [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
   );
 
   const handleDeletePayment = useCallback(
     async (payment: Payment) => {
+      if (isInvoiceManagedPayment(payment)) {
+        toast.error('Счет и график рассрочки удаляются через раздел "Счета".', t('payments') ?? 'Платежи');
+        return;
+      }
       if (!paymentsPermissions.canDelete) {
         showPermissionNotice(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
         return;
@@ -1141,6 +1150,8 @@ export function Payments({
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
+                canEditPayment={(payment) => !isInvoiceManagedPayment(payment)}
+                canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
                 columns={visiblePaymentColumns}
                 draggingColumn={draggingColumn}
                 onColumnDragStart={handleColumnDragStart}
@@ -1186,7 +1197,7 @@ export function Payments({
         payment={editingPayment}
         type={modalType}
         onDelete={
-          paymentsPermissions.canDelete
+          paymentsPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
             ? async (id) => {
                 try {
                   await apiService.deletePayment(id);

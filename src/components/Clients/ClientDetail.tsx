@@ -78,6 +78,7 @@ import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import {
@@ -2206,6 +2207,10 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setPayModalOpen(true);
   };
   const openEditPayment = (p: Payment) => {
+    if (isInvoiceManagedPayment(p)) {
+      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи');
+      return;
+    }
     if (!clientPermissions.canEdit) {
       showPermissionWarning(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
       return;
@@ -2292,7 +2297,13 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     }
   };
 
-  const removePayment = async (id: number) => {
+  const removePayment = async (target: Payment | number) => {
+    if (typeof target !== 'number' && isInvoiceManagedPayment(target)) {
+      toast.error('Счет и график рассрочки удаляются через раздел "Счета".', 'Платежи');
+      return false;
+    }
+
+    const id = typeof target === 'number' ? target : target.id;
     if (!clientPermissions.canDelete) {
       showPermissionWarning(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
       return;
@@ -4129,7 +4140,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                             {(clientPermissions.canEdit || clientPermissions.canDelete) && (
                               <td className="px-4 py-4">
                                 <div className="flex items-center justify-end gap-2">
-                                  {clientPermissions.canEdit ? (
+                                  {clientPermissions.canEdit && !isInvoiceManagedPayment(payment) ? (
                                     <button
                                       type="button"
                                       className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
@@ -4140,11 +4151,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                       <Edit size={16} />
                                     </button>
                                   ) : null}
-                                  {clientPermissions.canDelete ? (
+                                  {clientPermissions.canDelete && !isInvoiceManagedPayment(payment) ? (
                                     <button
                                       type="button"
                                       className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50"
-                                      onClick={() => removePayment(payment.id)}
+                                      onClick={() => removePayment(payment)}
                                       title="Удалить"
                                       aria-label="Удалить"
                                     >
@@ -5095,12 +5106,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               throw error;
             }
           }}
-          onDelete={async (id: number) => {
-            const removed = await removePayment(id);
-            if (removed) {
-              closePayModal();
-            }
-          }}
+          onDelete={
+            clientPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
+              ? async (id: number) => {
+                  const removed = await removePayment(editingPayment ?? id);
+                  if (removed) {
+                    closePayModal();
+                  }
+                }
+              : undefined
+          }
           type={editingPayment?.type ?? 'Income'}
           defaultClientId={clientId}
           defaultClientCaseId={selectedCaseId === 'all' ? undefined : Number(selectedCaseId)}

@@ -17,6 +17,7 @@ import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
@@ -253,6 +254,10 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleEditPayment = (payment: Payment) => {
+    if (isInvoiceManagedPayment(payment)) {
+      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи');
+      return;
+    }
     if (!calendarPermissions.canEdit) {
       showPermissionNotice(
         t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.',
@@ -265,6 +270,10 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleDeletePayment = async (payment: Payment) => {
+    if (isInvoiceManagedPayment(payment)) {
+      toast.error('Счет и график рассрочки удаляются через раздел "Счета".', 'Платежи');
+      return;
+    }
     if (!calendarPermissions.canDelete) {
       showPermissionNotice(
         t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.',
@@ -707,6 +716,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canAdd={calendarPermissions.canCreate}
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
+              canEditPayment={(payment) => !isInvoiceManagedPayment(payment)}
+              canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
               columns={visiblePaymentColumns}
               draggingColumn={draggingColumn}
               onColumnDragStart={handleColumnDragStart}
@@ -738,7 +749,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onCreateRemainder={createPayment}
           payment={editingPayment}
           onDelete={
-            calendarPermissions.canDelete
+            calendarPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
               ? async (id) => {
                   try {
                     await deletePayment(id);

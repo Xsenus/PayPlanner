@@ -34,6 +34,7 @@ import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { filterRepresentativeInvoiceWhenInstallmentsExist, isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type FormState = {
   number: string;
@@ -641,8 +642,12 @@ export function InvoiceModal({
   const [actsError, setActsError] = useState<string | null>(null);
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [numberEditedManually, setNumberEditedManually] = useState(false);
-  const [displayPayments, setDisplayPayments] = useState<Payment[]>(relatedPayments);
-  const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)));
+  const visibleRelatedPayments = useMemo(
+    () => filterRepresentativeInvoiceWhenInstallmentsExist(relatedPayments),
+    [relatedPayments],
+  );
+  const [displayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
+  const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)));
   const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
   const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
   const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
@@ -798,8 +803,8 @@ export function InvoiceModal({
     [clients],
   );
   const relatedInstallmentPlan = useMemo(
-    () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(relatedPayments)),
-    [relatedPayments],
+    () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)),
+    [visibleRelatedPayments],
   );
   const selectedResponsibleId = form.responsibleIds[0] ?? '';
   const selectedContract = useMemo(
@@ -1090,8 +1095,8 @@ export function InvoiceModal({
   }, [open, relatedInstallmentPlan, installmentPlanTouched, resumeDraft?.installmentPlan]);
 
   useEffect(() => {
-    setDisplayPayments(relatedPayments);
-  }, [relatedPayments]);
+    setDisplayPayments(visibleRelatedPayments);
+  }, [visibleRelatedPayments]);
 
   useEffect(() => {
     if (form.type !== 'Income' && installmentPlan) {
@@ -2866,7 +2871,7 @@ export function InvoiceModal({
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
-                        {(onEditRelatedPayment || onDeleteRelatedPayment) && (
+                        {(onEditRelatedPayment || onDeleteRelatedPayment) && !isInvoiceManagedPayment(payment) && (
                           <div className="flex items-center gap-2 self-end sm:self-start">
                             {onEditRelatedPayment && (
                               <button

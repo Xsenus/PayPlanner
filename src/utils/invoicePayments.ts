@@ -1,6 +1,8 @@
 import type { Invoice, Payment } from '../types';
 import { toDateInputValue } from './dateUtils';
 
+export const INSTALLMENT_PAYMENT_MARKER = '[pp:installment-payment]';
+
 export function normalizeInvoiceNumberKey(value?: string | null): string | null {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized) return null;
@@ -76,4 +78,22 @@ export function filterRelatedPaymentsForInvoiceWithOptions(
     const rightDate = toDateInputValue(right.plannedDate) || toDateInputValue(right.date) || '';
     return leftDate.localeCompare(rightDate) || left.id - right.id;
   });
+}
+
+export function isGeneratedInstallmentPayment(payment: Pick<Payment, 'systemNotes'>): boolean {
+  return Boolean(payment.systemNotes?.includes(INSTALLMENT_PAYMENT_MARKER));
+}
+
+export function isInvoiceManagedPayment(
+  payment: Pick<Payment, 'documentKind' | 'systemNotes'>,
+): boolean {
+  return payment.documentKind === 'Invoice' || isGeneratedInstallmentPayment(payment);
+}
+
+export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {
+  if (!payments.some(isGeneratedInstallmentPayment)) {
+    return payments;
+  }
+
+  return payments.filter((payment) => payment.documentKind !== 'Invoice');
 }

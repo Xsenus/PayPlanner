@@ -38,6 +38,8 @@ interface PaymentsTableProps {
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canEditPayment?: (payment: Payment) => boolean;
+  canDeletePayment?: (payment: Payment) => boolean;
   columns?: PaymentTableColumnDefinition[];
   draggingColumn?: PaymentTableColumnKey | null;
   onColumnDragStart?: (key: PaymentTableColumnKey, event: ReactDragEvent<HTMLElement>) => void;
@@ -67,6 +69,8 @@ export function PaymentsTable({
   canAdd,
   canEdit,
   canDelete,
+  canEditPayment,
+  canDeletePayment,
   columns,
   draggingColumn = null,
   onColumnDragStart,
@@ -223,6 +227,19 @@ export function PaymentsTable({
     [formatDate, onOpenClient, statusLabels, t],
   );
 
+  const isEditAllowed = useCallback(
+    (payment: Payment) => canEdit && (canEditPayment ? canEditPayment(payment) : true),
+    [canEdit, canEditPayment],
+  );
+
+  const isDeleteAllowed = useCallback(
+    (payment: Payment) => canDelete && (canDeletePayment ? canDeletePayment(payment) : true),
+    [canDelete, canDeletePayment],
+  );
+
+  const menuEditAllowed = menuState ? isEditAllowed(menuState.payment) : false;
+  const menuDeleteAllowed = menuState ? isDeleteAllowed(menuState.payment) : false;
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -290,11 +307,11 @@ export function PaymentsTable({
                   key={payment.id}
                   onContextMenu={(event) => openMenu(event, payment)}
                   onDoubleClick={() => {
-                    if (canEdit) onEditPayment(payment);
+                    if (isEditAllowed(payment)) onEditPayment(payment);
                   }}
                   className="cursor-default transition-colors hover:bg-gray-50/60"
                   title={
-                    canAdd || canEdit || canDelete
+                    canAdd || isEditAllowed(payment) || isDeleteAllowed(payment)
                       ? t('contextMenuHint') ?? 'ПКМ для действий'
                       : undefined
                   }>
@@ -348,14 +365,14 @@ export function PaymentsTable({
               type="button"
               onClick={() => {
                 closeMenu();
-                if (canEdit) onEditPayment(menuState.payment);
+                if (menuEditAllowed) onEditPayment(menuState.payment);
               }}
               className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
-                canEdit ? 'text-gray-700 hover:bg-gray-100' : 'cursor-not-allowed text-gray-400'
+                menuEditAllowed ? 'text-gray-700 hover:bg-gray-100' : 'cursor-not-allowed text-gray-400'
               }`}
-              disabled={!canEdit}
+              disabled={!menuEditAllowed}
               title={
-                !canEdit
+                !menuEditAllowed
                   ? t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.'
                   : undefined
               }>
@@ -366,15 +383,15 @@ export function PaymentsTable({
               type="button"
               onClick={async () => {
                 closeMenu();
-                if (!canDelete) return;
+                if (!menuDeleteAllowed) return;
                 await onDeletePayment?.(menuState.payment);
               }}
               className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
-                canDelete ? 'text-red-600 hover:bg-red-50' : 'cursor-not-allowed text-gray-400'
+                menuDeleteAllowed ? 'text-red-600 hover:bg-red-50' : 'cursor-not-allowed text-gray-400'
               }`}
-              disabled={!canDelete}
+              disabled={!menuDeleteAllowed}
               title={
-                !canDelete
+                !menuDeleteAllowed
                   ? t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.'
                   : undefined
               }>

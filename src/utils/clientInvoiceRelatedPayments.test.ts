@@ -140,6 +140,34 @@ describe('clientInvoiceRelatedPayments', () => {
     expect(collectClientInvoiceRelatedPayments(null, [createPayment()])).toEqual([]);
   });
 
+  it('hides the representative invoice row when installment schedule payments exist', () => {
+    const invoice = createInvoice({ id: 551, invoiceEntityId: 111, number: '30' });
+    const representativeInvoice = createPayment({
+      id: 551,
+      invoiceId: 111,
+      documentKind: 'Invoice',
+      description: 'Представляющая запись счета №30',
+      plannedDate: '2026-04-08',
+      date: '2026-04-08',
+    });
+    const installmentPayment = createPayment({
+      id: 552,
+      invoiceId: 111,
+      amount: 6_000,
+      description: 'Рассрочка 1/3',
+      plannedDate: '2026-04-09',
+      date: '2026-04-09',
+      systemNotes: '[pp:installment-payment] {"sequence":1}',
+    });
+
+    const result = collectClientInvoiceRelatedPayments(invoice, [
+      representativeInvoice,
+      installmentPayment,
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual([552]);
+  });
+
   it('loads related payments for the client invoice with the full lookup window', async () => {
     const invoice = createInvoice({ id: 528, invoiceEntityId: 24, number: '24', clientCaseIds: [701] });
     const representativePayment = createPayment({
@@ -219,5 +247,34 @@ describe('clientInvoiceRelatedPayments', () => {
     });
 
     expect(result.map((item) => item.id)).toEqual([530, 531]);
+  });
+
+  it('hides the representative invoice row after remote lookup when installment payments exist', async () => {
+    const invoice = createInvoice({ id: 551, invoiceEntityId: 111, number: '30', clientCaseIds: [701] });
+    const representativePayment = createPayment({
+      id: 551,
+      invoiceId: 111,
+      documentKind: 'Invoice',
+      description: 'Представляющая запись счета №30',
+      plannedDate: '2026-04-08',
+      date: '2026-04-08',
+    });
+    const installmentPayment = createPayment({
+      id: 552,
+      invoiceId: 111,
+      amount: 6_000,
+      description: 'Рассрочка 1/3',
+      systemNotes: '[pp:installment-payment] {"sequence":1}',
+    });
+    const fetchPayments = vi.fn().mockResolvedValue([representativePayment, installmentPayment]);
+
+    const result = await loadClientInvoiceRelatedPayments({
+      invoice,
+      clientId: 42,
+      visiblePayments: [],
+      fetchPayments,
+    });
+
+    expect(result.map((item) => item.id)).toEqual([552]);
   });
 });

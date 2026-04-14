@@ -1,5 +1,8 @@
 import type { Invoice, Payment } from '../types';
-import { filterRelatedPaymentsForInvoiceWithOptions } from './invoicePayments';
+import {
+  filterRelatedPaymentsForInvoiceWithOptions,
+  filterRepresentativeInvoiceWhenInstallmentsExist,
+} from './invoicePayments';
 
 export const CLIENT_INVOICE_LOOKUP_FROM = '1900-01-01';
 export const CLIENT_INVOICE_LOOKUP_TO = '2100-12-31';
@@ -27,9 +30,11 @@ export function collectClientInvoiceRelatedPayments(
     return [];
   }
 
-  return filterRelatedPaymentsForInvoiceWithOptions(payments, invoice, {
+  const relatedPayments = filterRelatedPaymentsForInvoiceWithOptions(payments, invoice, {
     includeCurrentInvoiceRecord: true,
   });
+
+  return filterRepresentativeInvoiceWhenInstallmentsExist(relatedPayments);
 }
 
 interface LoadClientInvoiceRelatedPaymentsOptions {

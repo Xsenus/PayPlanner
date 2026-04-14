@@ -16,6 +16,7 @@ import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getVisibleSystemNoteLines } from '../../utils/systemNotes';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -1086,7 +1087,7 @@ export function PaymentModal({
     setSyncDateWithPayment(true);
   };
 
-  const canDelete = !!payment && !!onDelete;
+  const canDelete = !!payment && !!onDelete && !isInvoiceManagedPayment(payment);
   if (!isOpen) return null;
 
   const amountNum = parseDecimal(formData.amount);
