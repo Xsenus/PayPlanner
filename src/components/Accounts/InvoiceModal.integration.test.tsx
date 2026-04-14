@@ -360,7 +360,7 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: true });
+      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: false });
     });
   });
 });
