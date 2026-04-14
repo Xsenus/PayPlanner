@@ -555,6 +555,19 @@ export interface ServiceDictionaryItem {
   id: number;
   name: string;
   description: string;
+  unit?: string;
+  defaultPrice?: number;
+  categoryId?: number | null;
+  category?: ServiceCategoryDictionaryItem | null;
+  colorHex: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface ServiceCategoryDictionaryItem {
+  id: number;
+  name: string;
+  description: string;
   colorHex: string;
   isActive: boolean;
   createdAt: string;

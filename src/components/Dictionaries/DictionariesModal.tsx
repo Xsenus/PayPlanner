@@ -7,6 +7,7 @@ import type {
   IncomeType,
   PaymentSource,
   ServiceDictionaryItem,
+  ServiceCategoryDictionaryItem,
 } from '../../types';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
@@ -194,6 +195,7 @@ type VisibleKind =
   | 'income-expense'
   | 'payment-sources'
   | 'services'
+  | 'service-categories'
   | 'client-statuses'
   | 'countries'
   | 'base-currencies'
@@ -205,11 +207,14 @@ type VisibleKind =
   | 'invoice-units'
   | 'invoice-item-names';
 type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | LooseDictItem;
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;
   name: string;
+  unit?: string;
+  defaultPrice?: number;
+  categoryId?: number | null;
   description: string;
   colorHex: string;
   isActive: boolean;
@@ -231,6 +236,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
   { value: 'services', label: 'Услуги' },
+  { value: 'service-categories', label: 'Категории услуг' },
   { value: 'client-statuses', label: 'Статус клиента' },
   { value: 'countries', label: 'Страны' },
   { value: 'base-currencies', label: 'Базовые валюты' },
@@ -254,6 +260,8 @@ function defaultColor(kind: VisibleKind): string {
     case 'payment-sources':
       return '#8B5CF6';
     case 'services':
+      return '#0EA5E9';
+    case 'service-categories':
       return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
@@ -304,6 +312,9 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
   return {
     id: x.id,
     name: x.name,
+    unit: 'unit' in x && typeof x.unit === 'string' ? x.unit : undefined,
+    defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
+    categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
     description: x.description ?? '',
     colorHex: x.colorHex ?? defaultColor(kind),
     isActive: !!x.isActive,
@@ -333,6 +344,7 @@ export default function DictionariesModal({
     'income-expense': [],
     'payment-sources': [],
     'services': [],
+    'service-categories': [],
     'client-statuses': [],
     'countries': [],
     'base-currencies': [],
@@ -350,6 +362,12 @@ export default function DictionariesModal({
     null,
   );
   const [searchQuery, setSearchQuery] = useState('');
+  const serviceCategories = useMemo(
+    () => (data['service-categories'] ?? [])
+      .map((row) => row.item)
+      .filter((item) => item.isActive),
+    [data],
+  );
 
   const visibleTabs = useMemo(
     () => (onlyTab ? TABS.filter((t) => t.value === onlyTab) : TABS),
@@ -411,13 +429,26 @@ export default function DictionariesModal({
   }, [activeTab, data, searchQuery]);
 
   const addNew = (kind: VisibleKind) => {
+    const baseItem: Omit<FullDictItem, 'id' | 'createdAt'> = {
+      name: '',
+      description: '',
+      colorHex: defaultColor(kind),
+      isActive: true,
+    };
+    if (supportsServiceFields(kind)) {
+      baseItem.unit = 'шт';
+      baseItem.defaultPrice = 0;
+    }
+    if (supportsServiceCategory(kind)) {
+      baseItem.categoryId = serviceCategories[0]?.id ?? null;
+    }
     setData((prev) => ({
       ...prev,
       [kind]: [
         {
           _key: makeKey(),
           mode: 'new' as const,
-          item: { name: '', description: '', colorHex: defaultColor(kind), isActive: true },
+          item: baseItem,
         },
         ...prev[kind],
       ],
@@ -458,6 +489,14 @@ export default function DictionariesModal({
     return k;
   }
 
+  function supportsServiceFields(kind: VisibleKind): boolean {
+    return kind === 'services' || kind === 'invoice-item-names';
+  }
+
+  function supportsServiceCategory(kind: VisibleKind): boolean {
+    return kind === 'services';
+  }
+
   async function saveNew(
     kind: VisibleKind,
     idx: number,
@@ -483,6 +522,15 @@ export default function DictionariesModal({
             isActive: item.isActive,
             description: item.description,
             colorHex: item.colorHex,
+            ...(supportsServiceFields(kind)
+              ? {
+                  unit: item.unit ?? 'шт',
+                  defaultPrice: item.defaultPrice ?? 0,
+                }
+              : {}),
+            ...(supportsServiceCategory(kind)
+              ? { categoryId: item.categoryId ?? null }
+              : {}),
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
       setData((prev) => {
@@ -519,6 +567,15 @@ export default function DictionariesModal({
             isActive: item.isActive,
             description: item.description,
             colorHex: item.colorHex,
+            ...(supportsServiceFields(kind)
+              ? {
+                  unit: item.unit ?? 'шт',
+                  defaultPrice: item.defaultPrice ?? 0,
+                }
+              : {}),
+            ...(supportsServiceCategory(kind)
+              ? { categoryId: item.categoryId ?? null }
+              : {}),
           });
       const normalized = normalize(kind, updated as ApiVisibleItem);
       setData((prev) => {
@@ -578,6 +635,48 @@ export default function DictionariesModal({
               onChange={(e) => set({ name: e.target.value })}
             />
           </div>
+
+          {supportsServiceCategory(kind) && (
+            <div className="sm:col-span-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-600">Категория</label>
+                <select
+                  value={local.categoryId ?? ''}
+                  onChange={(e) =>
+                    set({
+                      categoryId: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">Без категории</option>
+                  {serviceCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {supportsServiceFields(kind) && (
+            <div className="sm:col-span-3 grid grid-cols-2 gap-2">
+              <TextInput
+                label="Ед."
+                placeholder="шт"
+                value={local.unit ?? ''}
+                onChange={(e) => set({ unit: e.target.value })}
+              />
+              <TextInput
+                label="Цена"
+                placeholder="0"
+                inputMode="decimal"
+                value={local.defaultPrice ?? 0}
+                onChange={(e) => set({ defaultPrice: Number(e.target.value.replace(',', '.')) || 0 })}
+              />
+            </div>
+          )}
 
           <div className="sm:col-span-3">
             <TextInput
@@ -651,6 +750,46 @@ export default function DictionariesModal({
               onChange={(e) => set({ name: e.target.value })}
             />
           </div>
+
+          {supportsServiceCategory(kind) && (
+            <div className="sm:col-span-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-600">Категория</label>
+                <select
+                  value={local.categoryId ?? ''}
+                  onChange={(e) =>
+                    set({
+                      categoryId: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">Без категории</option>
+                  {serviceCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {supportsServiceFields(kind) && (
+            <div className="sm:col-span-3 grid grid-cols-2 gap-2">
+              <TextInput
+                label="Ед."
+                value={local.unit ?? ''}
+                onChange={(e) => set({ unit: e.target.value })}
+              />
+              <TextInput
+                label="Цена"
+                inputMode="decimal"
+                value={local.defaultPrice ?? 0}
+                onChange={(e) => set({ defaultPrice: Number(e.target.value.replace(',', '.')) || 0 })}
+              />
+            </div>
+          )}
 
           <div className="sm:col-span-3">
             <TextInput
@@ -726,6 +865,9 @@ export default function DictionariesModal({
     onPick?: () => void;
     kind: VisibleKind;
   }) {
+    const categoryLabel = kind === 'services' && item.categoryId
+      ? serviceCategories.find((category) => category.id === item.categoryId)?.name
+      : null;
     return (
       <div
         className={`grid grid-cols-12 items-center gap-3 rounded-xl border p-3 ${
@@ -744,6 +886,16 @@ export default function DictionariesModal({
           {item.description.trim() && (
             <div className={`mt-1 text-xs ${item.isActive ? 'text-gray-600' : 'text-gray-400'}`}>
               {item.description}
+            </div>
+          )}
+          {categoryLabel && (
+            <div className={`mt-1 text-xs ${item.isActive ? 'text-gray-600' : 'text-gray-400'}`}>
+              Категория: {categoryLabel}
+            </div>
+          )}
+          {supportsServiceFields(kind) && (
+            <div className={`mt-1 text-xs ${item.isActive ? 'text-gray-600' : 'text-gray-400'}`}>
+              Ед.: {item.unit || 'шт'} · Цена: {item.defaultPrice ?? 0}
             </div>
           )}
           {!item.isActive && <div className="text-xs text-gray-500">Не активно</div>}

@@ -51,7 +51,19 @@ public sealed partial class DatabaseImportService
         target.CreatedAt = source.CreatedAt;
     }
 
-    private static void CopyServiceDictionaryItem(ServiceDictionaryItem source, ServiceDictionaryItem target)
+    private static void CopyServiceDictionaryItem(ServiceDictionaryItem source, ServiceDictionaryItem target, ImportMaps maps)
+    {
+        target.Name = source.Name.Trim();
+        target.Description = source.Description;
+        target.Unit = string.IsNullOrWhiteSpace(source.Unit) ? "шт" : source.Unit;
+        target.DefaultPrice = source.DefaultPrice;
+        target.ColorHex = source.ColorHex;
+        target.IsActive = source.IsActive;
+        target.CreatedAt = source.CreatedAt;
+        target.CategoryId = source.CategoryId.HasValue ? MapId(maps.ServiceCategories, source.CategoryId.Value) : null;
+    }
+
+    private static void CopyServiceCategory(ServiceCategoryDictionaryItem source, ServiceCategoryDictionaryItem target)
     {
         target.Name = source.Name.Trim();
         target.Description = source.Description;

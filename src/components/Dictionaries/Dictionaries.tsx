@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource, ServiceDictionaryItem } from '../../types';
+import type { ClientStatus, DealType, IncomeType, PaymentSource, ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
@@ -21,6 +21,7 @@ type VisibleKind =
   | 'income-expense'
   | 'payment-sources'
   | 'services'
+  | 'service-categories'
   | 'client-statuses'
   | 'countries'
   | 'base-currencies'
@@ -32,13 +33,14 @@ type VisibleKind =
   | 'invoice-units'
   | 'invoice-item-names';
 type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | LooseDictItem;
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;
   name: string;
   unit?: string;
   defaultPrice?: number;
+  categoryId?: number | null;
   description: string;
   colorHex: string;
   isActive: boolean;
@@ -60,6 +62,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
   { value: 'services', label: 'Услуги' },
+  { value: 'service-categories', label: 'Категории услуг' },
   { value: 'client-statuses', label: 'Статус клиента' },
   { value: 'countries', label: 'Страны' },
   { value: 'base-currencies', label: 'Базовые валюты' },
@@ -83,6 +86,8 @@ function defaultColor(kind: VisibleKind): string {
     case 'payment-sources':
       return '#8B5CF6';
     case 'services':
+      return '#0EA5E9';
+    case 'service-categories':
       return '#0EA5E9';
     case 'client-statuses':
       return '#2563EB';
@@ -141,6 +146,7 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     name: x.name,
     unit: 'unit' in x && typeof x.unit === 'string' ? x.unit : undefined,
     defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
+    categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
     description,
     colorHex,
     isActive,
@@ -149,7 +155,11 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
 }
 
 function supportsInvoiceItemTemplateFields(kind: VisibleKind): boolean {
-  return kind === 'invoice-item-names';
+  return kind === 'invoice-item-names' || kind === 'services';
+}
+
+function supportsServiceCategory(kind: VisibleKind): boolean {
+  return kind === 'services';
 }
 
 export const Dictionaries = () => {
@@ -162,6 +172,7 @@ export const Dictionaries = () => {
     'income-expense': [],
     'payment-sources': [],
     'services': [],
+    'service-categories': [],
     'client-statuses': [],
     'countries': [],
     'base-currencies': [],
@@ -177,6 +188,10 @@ export const Dictionaries = () => {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: VisibleKind; id: number } | null>(
     null,
+  );
+  const serviceCategories = React.useMemo(
+    () => (data['service-categories'] ?? []).map((row) => row.item).filter((item) => item.isActive),
+    [data],
   );
 
   const loadKind = useCallback(async (kind: VisibleKind) => {
@@ -223,6 +238,7 @@ export const Dictionaries = () => {
             name: '',
             unit: supportsInvoiceItemTemplateFields(kind) ? 'шт' : undefined,
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? 0 : undefined,
+            categoryId: supportsServiceCategory(kind) ? (serviceCategories[0]?.id ?? null) : undefined,
             description: '',
             colorHex: defaultColor(kind),
             isActive: true,
@@ -297,6 +313,7 @@ export const Dictionaries = () => {
             colorHex: item.colorHex,
             unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
+            categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
       setData((prev) => {
@@ -334,6 +351,9 @@ export const Dictionaries = () => {
             isActive: item.isActive,
             description: item.description,
             colorHex: item.colorHex,
+            unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
+            defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
+            categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
           });
       const normalized = normalize(kind, updated as ApiVisibleItem);
       setData((prev) => {
@@ -398,6 +418,24 @@ export const Dictionaries = () => {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
             />
           </div>
+
+          {supportsServiceCategory(kind) && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Категория</label>
+              <select
+                value={local.categoryId ?? ''}
+                onChange={(e) => set({ categoryId: e.target.value ? Number(e.target.value) : null })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="">Без категории</option>
+                {serviceCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="lg:col-span-3">
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Цвет</label>
@@ -505,6 +543,24 @@ export const Dictionaries = () => {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
             />
           </div>
+
+          {supportsServiceCategory(kind) && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Категория</label>
+              <select
+                value={local.categoryId ?? ''}
+                onChange={(e) => set({ categoryId: e.target.value ? Number(e.target.value) : null })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="">Без категории</option>
+                {serviceCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="lg:col-span-3">
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Цвет</label>
@@ -633,6 +689,11 @@ export const Dictionaries = () => {
             <div
               className={`mt-1.5 text-xs ${item.isActive ? 'text-slate-600' : 'text-slate-400'}`}>
               {item.description}
+            </div>
+          )}
+          {supportsServiceCategory(kind) && item.categoryId && (
+            <div className="mt-1.5 text-xs text-slate-600">
+              Категория: {serviceCategories.find((category) => category.id === item.categoryId)?.name ?? '—'}
             </div>
           )}
           {supportsInvoiceItemTemplateFields(kind) && (

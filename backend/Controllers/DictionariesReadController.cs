@@ -130,7 +130,20 @@ public class DictionariesReadController : ControllerBase
     public async Task<IActionResult> Services(CancellationToken ct)
     {
         var result = await SqliteRetryHelper.ExecuteAsync(
-            _ => _db.Services.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _ => _db.Services.AsNoTracking()
+                .Include(x => x.Category)
+                .OrderBy(x => x.Name)
+                .ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
+    [HttpGet("service-categories")]
+    public async Task<IActionResult> ServiceCategories(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.ServiceCategories.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
             _logger,
             ct);
         return Ok(result);

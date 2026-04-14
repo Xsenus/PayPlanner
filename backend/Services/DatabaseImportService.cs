@@ -21,6 +21,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         public Dictionary<int, int> IncomeTypes { get; } = [];
         public Dictionary<int, int> PaymentSources { get; } = [];
         public Dictionary<int, int> Services { get; } = [];
+        public Dictionary<int, int> ServiceCategories { get; } = [];
         public Dictionary<int, int> PaymentStatuses { get; } = [];
         public Dictionary<int, int> ClientStatuses { get; } = [];
         public Dictionary<int, int> Countries { get; } = [];
@@ -165,9 +166,15 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             ImportEntitiesAsync(source, target, table, ctx => ctx.PaymentSources.AsNoTracking(), ctx => ctx.PaymentSources,
                 x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name), CopyPaymentSource, maps.PaymentSources, cancellationToken));
 
+        await RunTableAsync(result, target, "ServiceCategoryDictionaryItems", "Категории услуг", table =>
+            ImportEntitiesAsync(source, target, table, ctx => ctx.ServiceCategories.AsNoTracking(), ctx => ctx.ServiceCategories,
+                x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name), CopyServiceCategory, maps.ServiceCategories, cancellationToken));
+
         await RunTableAsync(result, target, "ServiceDictionaryItems", "Справочник услуг", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Services.AsNoTracking(), ctx => ctx.Services,
-                x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name), CopyServiceDictionaryItem, maps.Services, cancellationToken));
+                x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name),
+                (sourceItem, targetItem) => CopyServiceDictionaryItem(sourceItem, targetItem, maps),
+                maps.Services, cancellationToken));
 
         await RunTableAsync(result, target, "PaymentStatuses", "Статусы платежей", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.PaymentStatuses.AsNoTracking(), ctx => ctx.PaymentStatuses,

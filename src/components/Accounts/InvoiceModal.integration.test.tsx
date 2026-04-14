@@ -22,7 +22,8 @@ vi.mock('../../hooks/useTranslation', () => ({
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
     invoiceUnits: [],
-    invoiceItemNames: [],
+    services: [],
+    serviceCategories: [],
   }),
 }));
 

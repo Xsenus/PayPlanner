@@ -663,9 +663,15 @@ export function InvoiceModal({
     [],
   );
 
-  const { invoiceUnits, invoiceItemNames } = useDictionaries();
+  const { invoiceUnits, services, serviceCategories } = useDictionaries();
   const unitOptions = useMemo(() => invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceUnits]);
-  const lineItemNameOptions = useMemo(() => invoiceItemNames.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceItemNames]);
+  const serviceCategoryById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const category of serviceCategories) {
+      map.set(category.id, category.name);
+    }
+    return map;
+  }, [serviceCategories]);
 
   const handleLineItemPriceChange = (id: string, rawValue: string) => {
     updateLineItem(id, { price: formatMoneyInputValue(rawValue) });
@@ -679,7 +685,7 @@ export function InvoiceModal({
   const applyLineItemTemplate = (id: string, name: string) => {
     const normalized = name.trim().toLowerCase();
     if (!normalized) return;
-    const template = invoiceItemNames.find((item) => item.name.trim().toLowerCase() === normalized);
+    const template = services.find((item) => item.name.trim().toLowerCase() === normalized);
     if (!template) return;
     updateLineItem(id, {
       unit: template.unit?.trim() || undefined,
@@ -2774,9 +2780,13 @@ export function InvoiceModal({
                             ))}
                           </datalist>
                           <datalist id="invoice-line-item-names">
-                            {lineItemNameOptions.map((name) => (
-                              <option key={name} value={name} />
-                            ))}
+                            {services.map((service) => {
+                              const categoryLabel = service.categoryId ? serviceCategoryById.get(service.categoryId) : null;
+                              const label = categoryLabel ? `${categoryLabel} • ${service.name}` : service.name;
+                              return (
+                                <option key={`${service.id}-${service.name}`} value={service.name} label={label} />
+                              );
+                            })}
                           </datalist>
                           <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>

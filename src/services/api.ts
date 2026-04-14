@@ -14,6 +14,7 @@ export type DictKind =
   | 'income-types'
   | 'payment-sources'
   | 'services'
+  | 'service-categories'
   | 'client-statuses'
   | 'payment-statuses'
   | 'countries'
@@ -34,6 +35,8 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? PaymentSource
   : K extends 'services'
   ? ServiceDictionaryItem
+  : K extends 'service-categories'
+  ? ServiceCategoryDictionaryItem
   : K extends 'client-statuses'
   ? ClientStatus
   : K extends 'countries'
@@ -1457,12 +1460,12 @@ export class ApiService {
     });
   }
 
-  async getSimpleDictionaryDuplicates(kind: 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes' | 'invoice-units' | 'invoice-item-names') {
+  async getSimpleDictionaryDuplicates(kind: 'countries' | 'base-currencies' | 'service-languages' | 'service-categories' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes' | 'invoice-units' | 'invoice-item-names') {
     return this.request<SimpleDictionaryDuplicateGroup[]>(`/dictionaries/simple/${kind}/duplicates`);
   }
 
   async mergeSimpleDictionaryDuplicates(
-    kind: 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes' | 'invoice-units' | 'invoice-item-names',
+    kind: 'countries' | 'base-currencies' | 'service-languages' | 'service-categories' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes' | 'invoice-units' | 'invoice-item-names',
     payload: MergeSimpleDictionaryDuplicatesPayload,
   ) {
     return this.request<SimpleDictionaryMergeResult>(`/dictionaries/simple/${kind}/merge`, {
@@ -2000,6 +2003,7 @@ import type {
   IncomeType,
   PaymentSource,
   ServiceDictionaryItem,
+  ServiceCategoryDictionaryItem,
   PaymentStatusEntity,
   ClientStatus,
   MonthlyStats,

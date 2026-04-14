@@ -7,6 +7,7 @@ import type {
   PaymentSource,
   PaymentStatusEntity,
   ServiceDictionaryItem,
+  ServiceCategoryDictionaryItem,
 } from '../types';
 import type { BaseDictItem } from '../types/dictionaries';
 
@@ -17,6 +18,7 @@ export function useDictionaries() {
   const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
   const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
   const [services, setServices] = useState<ServiceDictionaryItem[]>([]);
+  const [serviceCategories, setServiceCategories] = useState<ServiceCategoryDictionaryItem[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<PaymentStatusEntity[]>([]);
   const [clientStatuses, setClientStatuses] = useState<ClientStatus[]>([]);
   const [countries, setCountries] = useState<BaseDictItem[]>([]);
@@ -35,12 +37,13 @@ export function useDictionaries() {
     setLoading(true);
     setError(null);
     try {
-      const [deal, incIncome, incExpense, sources, servicesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp, invoiceUnitsResp, invoiceItemNamesResp] = await Promise.all([
+      const [deal, incIncome, incExpense, sources, servicesResp, serviceCategoriesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp, invoiceUnitsResp, invoiceItemNamesResp] = await Promise.all([
         apiService.getDict('deal-types'),
         apiService.getIncomeTypes('Income'),
         apiService.getIncomeTypes('Expense'),
         apiService.getDict('payment-sources'),
         apiService.getDict('services'),
+        apiService.getDict('service-categories'),
         apiService.getDict('payment-statuses'),
         apiService.getDict('client-statuses'),
         apiService.getDict('countries'),
@@ -63,6 +66,7 @@ export function useDictionaries() {
 
       setPaymentSources(sources ?? []);
       setServices((servicesResp ?? []).filter((service) => service.isActive !== false));
+      setServiceCategories((serviceCategoriesResp ?? []).filter((item) => item.isActive !== false));
       setPaymentStatuses(statuses ?? []);
       setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
       setCountries((countriesResp ?? []).filter((item) => item.isActive !== false));
@@ -96,6 +100,7 @@ export function useDictionaries() {
     incomeTypes,
     paymentSources,
     services,
+    serviceCategories,
     paymentStatuses,
     clientStatuses,
     countries,

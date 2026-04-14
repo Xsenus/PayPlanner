@@ -1765,6 +1765,7 @@ public class PaymentContext : DbContext
     /// Справочник услуг.
     /// </summary>
     public DbSet<ServiceDictionaryItem> Services { get; set; }
+    public DbSet<ServiceCategoryDictionaryItem> ServiceCategories { get; set; }
 
     public DbSet<CountryDictionaryItem> Countries { get; set; }
     public DbSet<BaseCurrencyDictionaryItem> BaseCurrencies { get; set; }

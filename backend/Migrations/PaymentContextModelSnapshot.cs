@@ -2661,10 +2661,42 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ServiceCategories");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CategoryId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ColorHex")
@@ -2673,6 +2705,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DefaultPrice")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -2688,7 +2723,13 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_ServiceDictionaryItems_IsActive");
@@ -3695,6 +3736,15 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", "Category")
+                        .WithMany("Services")
+                        .HasForeignKey("CategoryId");
+
+                    b.Navigation("Category");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -3864,6 +3914,11 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Permissions");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
+                {
+                    b.Navigation("Services");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>

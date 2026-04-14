@@ -92,6 +92,22 @@ public class DictionariesAdminController : ControllerBase
                 (x, v) => ((ServiceLanguageDictionaryItem)x).IsActive = v,
                 x => _db.ServiceLanguages.Add((ServiceLanguageDictionaryItem)x),
                 x => _db.ServiceLanguages.Remove((ServiceLanguageDictionaryItem)x)),
+            "service-categories" => new(
+                ct => _db.ServiceCategories.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
+                ct => _db.ServiceCategories.Select(item => (object)item).ToListAsync(ct),
+                (_, __) => { },
+                _ => string.Empty,
+                x => ((ServiceCategoryDictionaryItem)x).Id,
+                x => ((ServiceCategoryDictionaryItem)x).Name,
+                x => ((ServiceCategoryDictionaryItem)x).Description,
+                x => ((ServiceCategoryDictionaryItem)x).ColorHex,
+                x => ((ServiceCategoryDictionaryItem)x).IsActive,
+                (x, v) => ((ServiceCategoryDictionaryItem)x).Name = v,
+                (x, v) => ((ServiceCategoryDictionaryItem)x).Description = v,
+                (x, v) => ((ServiceCategoryDictionaryItem)x).ColorHex = v,
+                (x, v) => ((ServiceCategoryDictionaryItem)x).IsActive = v,
+                x => _db.ServiceCategories.Add((ServiceCategoryDictionaryItem)x),
+                x => _db.ServiceCategories.Remove((ServiceCategoryDictionaryItem)x)),
             "organization-forms" => new(
                 ct => _db.OrganizationForms.AsNoTracking().Select(item => (object)item).ToListAsync(ct),
                 ct => _db.OrganizationForms.Select(item => (object)item).ToListAsync(ct),
@@ -310,6 +326,10 @@ public class DictionariesAdminController : ControllerBase
     [HttpPost("services")]
     public async Task<IActionResult> CreateService([FromBody] ServiceDictionaryItem m)
     {
+        if (m.CategoryId.HasValue && !await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.Id == m.CategoryId.Value))
+        {
+            return BadRequest($"Unknown serviceCategoryId {m.CategoryId.Value}");
+        }
         _db.Services.Add(m);
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/services/{m.Id}", m);
@@ -319,7 +339,17 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.Services.FindAsync(id);
         if (e is null) return NotFound();
-        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        if (m.CategoryId.HasValue && !await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.Id == m.CategoryId.Value))
+        {
+            return BadRequest($"Unknown serviceCategoryId {m.CategoryId.Value}");
+        }
+        e.Name = m.Name;
+        e.Description = m.Description;
+        e.Unit = m.Unit;
+        e.DefaultPrice = m.DefaultPrice;
+        e.ColorHex = m.ColorHex;
+        e.IsActive = m.IsActive;
+        e.CategoryId = m.CategoryId;
         await _db.SaveChangesAsync();
         return Ok(e);
     }
@@ -338,6 +368,44 @@ public class DictionariesAdminController : ControllerBase
     public async Task<IActionResult> ToggleService(int id)
     {
         var e = await _db.Services.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // ServiceCategoryDictionaryItem
+    [HttpPost("service-categories")]
+    public async Task<IActionResult> CreateServiceCategory([FromBody] ServiceCategoryDictionaryItem m)
+    {
+        _db.ServiceCategories.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/service-categories/{m.Id}", m);
+    }
+    [HttpPut("service-categories/{id:int}")]
+    public async Task<IActionResult> UpdateServiceCategory(int id, [FromBody] ServiceCategoryDictionaryItem m)
+    {
+        var e = await _db.ServiceCategories.FindAsync(id);
+        if (e is null) return NotFound();
+        e.Name = m.Name; e.Description = m.Description; e.ColorHex = m.ColorHex; e.IsActive = m.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+    [HttpDelete("service-categories/{id:int}")]
+    public async Task<IActionResult> DeleteServiceCategory(int id)
+    {
+        var e = await _db.ServiceCategories.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.Services.AsNoTracking().AnyAsync(s => s.CategoryId == id))
+            return InUseError(e.Name);
+        _db.ServiceCategories.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+    [HttpPost("service-categories/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleServiceCategory(int id)
+    {
+        var e = await _db.ServiceCategories.FindAsync(id);
         if (e is null) return NotFound();
         e.IsActive = !e.IsActive;
         await _db.SaveChangesAsync();
