@@ -857,6 +857,7 @@ export interface Invoice {
   clientCases?: InvoiceClientCaseLink[];
   clientCaseReference?: string | null;
   description?: string | null;
+  isNotForAccounting?: boolean | null;
   actReference?: string | null;
   actId?: number | null;
   actNumber?: string | null;
@@ -910,6 +911,7 @@ export interface InvoiceInput {
   clientCaseIds?: number[];
   clientCaseReference?: string | null;
   description?: string | null;
+  isNotForAccounting?: boolean | null;
   actReference?: string | null;
   actId?: number | null;
   actIds?: number[];

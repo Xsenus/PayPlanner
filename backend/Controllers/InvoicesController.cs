@@ -311,6 +311,7 @@ public class InvoicesController : ControllerBase
             Status = request.Status,
             Type = request.Type,
             Description = Normalize(request.Description) ?? string.Empty,
+            IsNotForAccounting = request.IsNotForAccounting,
             ClientCaseReference = Normalize(request.ClientCaseReference),
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
@@ -458,6 +459,7 @@ public class InvoicesController : ControllerBase
         payment.Status = request.Status;
         payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
+        payment.IsNotForAccounting = request.IsNotForAccounting;
         payment.ClientCaseReference = Normalize(request.ClientCaseReference);
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
@@ -1829,6 +1831,7 @@ public class InvoicesController : ControllerBase
         ClientCaseTitle = x.Payment.ClientCase != null ? x.Payment.ClientCase.Title : null,
         ClientCaseReference = x.Payment.ClientCaseReference,
         Description = x.Payment.Description,
+        IsNotForAccounting = x.Payment.IsNotForAccounting,
         ActReference = x.Payment.Notes,
         ActId = x.Act != null ? x.Act.Id : (int?)null,
         ActNumber = x.Act != null ? x.Act.Number : null,
@@ -1888,6 +1891,7 @@ public class InvoicesController : ControllerBase
             ClientCaseTitle = raw.ClientCaseTitle,
             ClientCaseReference = raw.ClientCaseReference,
             Description = raw.Description,
+            IsNotForAccounting = raw.IsNotForAccounting,
             ActReference = raw.ActReference,
             ActId = raw.ActId,
             ActNumber = raw.ActNumber,
@@ -3381,6 +3385,7 @@ public class InvoicesController : ControllerBase
         public string? ClientCaseTitle { get; init; }
         public string? ClientCaseReference { get; init; }
         public string? Description { get; init; }
+        public bool IsNotForAccounting { get; init; }
         public string? ActReference { get; init; }
         public int? ActId { get; init; }
         public string? ActNumber { get; init; }

@@ -135,6 +135,9 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("Email: client@example.com", content.Content);
         Assert.Contains("Договор: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
         Assert.Contains("Дело: Дело о взыскании задолженности", content.Content);
+        Assert.Contains("Комментарий для клиента:</strong> Тестовый счет", content.Content);
+        Assert.Contains("Срок оплаты:</strong> 12.04.2026", content.Content);
+        Assert.Contains("Счет не для бухгалтерии", content.Content);
     }
 
     [Fact]
@@ -352,6 +355,7 @@ public class InvoiceDocumentTemplateTests
             Status = PaymentStatus.Pending,
             Type = PaymentType.Income,
             Description = "Тестовый счет",
+            IsNotForAccounting = true,
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();

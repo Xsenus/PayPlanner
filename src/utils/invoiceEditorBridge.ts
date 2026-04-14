@@ -17,6 +17,7 @@ export interface InvoiceEditorFormDraft {
   contractId: string;
   clientCaseReference: string;
   description: string;
+  isNotForAccounting: boolean;
   actReference: string;
   paidDate: string;
   responsibleIds: string[];
@@ -65,6 +66,10 @@ function readString(value: unknown): string {
 
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function readBoolean(value: unknown): boolean {
+  return value === true;
 }
 
 function readNumberArray(value: unknown): number[] {
@@ -179,6 +184,7 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
       contractId: readString(form.contractId),
       clientCaseReference: readString(form.clientCaseReference),
       description: readString(form.description),
+      isNotForAccounting: readBoolean(form.isNotForAccounting),
       actReference: readString(form.actReference),
       paidDate: readString(form.paidDate),
       responsibleIds: readStringArray(form.responsibleIds),

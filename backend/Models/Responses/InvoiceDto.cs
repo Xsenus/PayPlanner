@@ -31,6 +31,7 @@ public class InvoiceDto
     public List<InvoiceClientCaseDto> ClientCases { get; set; } = new();
     public string? ClientCaseReference { get; set; }
     public string? Description { get; set; }
+    public bool IsNotForAccounting { get; set; }
     public string? ActReference { get; set; }
     public int? ActId { get; set; }
     public string? ActNumber { get; set; }

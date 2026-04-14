@@ -49,6 +49,7 @@ type FormState = {
   contractId: string;
   clientCaseReference: string;
   description: string;
+  isNotForAccounting: boolean;
   actReference: string;
   paidDate: string;
   responsibleIds: string[];
@@ -212,6 +213,7 @@ function normalizeInvoiceToForm(
       contractId: '',
       clientCaseReference: '',
       description: '',
+      isNotForAccounting: false,
       actReference: '',
       paidDate: '',
       responsibleIds: defaultResponsibleId ? [String(defaultResponsibleId)] : [],
@@ -230,6 +232,7 @@ function normalizeInvoiceToForm(
     contractId: invoice.contractId ? String(invoice.contractId) : '',
     clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
+    isNotForAccounting: Boolean(invoice.isNotForAccounting),
     actReference: invoice.actReference ?? '',
     paidDate: toDateInputValue(invoice.paidDate) || '',
     responsibleIds: (invoice.responsibles ?? []).map((item) => String(item.id)).slice(0, 1),
@@ -1581,6 +1584,12 @@ export function InvoiceModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleBooleanChange = (field: keyof Pick<FormState, 'isNotForAccounting'>) => (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    setForm((prev) => ({ ...prev, [field]: event.target.checked }));
+  };
+
   const handleResponsibleChange = (value: string) => {
     setForm((prev) => ({
       ...prev,
@@ -1624,6 +1633,7 @@ export function InvoiceModal({
       clientCaseIds,
       clientCaseReference: form.clientCaseReference.trim() ? form.clientCaseReference.trim() : undefined,
       description: form.description.trim() ? form.description.trim() : undefined,
+      isNotForAccounting: form.isNotForAccounting,
       actReference: form.actReference.trim() ? form.actReference.trim() : undefined,
       actId: actIds[0] ?? null,
       actIds,
@@ -2627,6 +2637,8 @@ export function InvoiceModal({
                 <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}:</span> {form.actReference || '—'}</p>
                 <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
                 <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
+                <p><span className="text-slate-500">Комментарий для клиента:</span> {form.description || '—'}</p>
+                <p><span className="text-slate-500">Не для бухгалтерии:</span> {form.isNotForAccounting ? 'Да' : 'Нет'}</p>
                 <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
                 <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
               </div>
@@ -2827,14 +2839,29 @@ export function InvoiceModal({
                             </div>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDescription') ?? 'Описание счёта'}</span>
+                              <span className="font-medium text-slate-700">Комментарий для клиента</span>
                               <textarea
                                 value={form.description}
                                 onChange={handleChange('description')}
                                 rows={3}
                                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                placeholder={t('invoiceDescriptionHint') ?? 'Например: счёт на оплату аренды офиса за июль.'}
+                                placeholder="Этот комментарий будет напечатан ниже таблицы счета."
                               />
+                            </label>
+
+                            <label className="inline-flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={form.isNotForAccounting}
+                                onChange={handleBooleanChange('isNotForAccounting')}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span>
+                                <span className="block font-medium text-slate-800">Счет не для бухгалтерии</span>
+                                <span className="mt-1 block text-xs text-slate-500">
+                                  В печатной форме появится отдельная пометка для клиента.
+                                </span>
+                              </span>
                             </label>
                           </div>
                         </section>

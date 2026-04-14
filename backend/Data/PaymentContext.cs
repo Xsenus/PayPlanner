@@ -535,6 +535,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.IsNotForAccounting).HasDefaultValue(false);
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);
             entity.Property(p => p.Account).HasMaxLength(120);

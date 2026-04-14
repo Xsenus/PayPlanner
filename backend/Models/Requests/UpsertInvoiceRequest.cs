@@ -42,6 +42,8 @@ public class UpsertInvoiceRequest
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    public bool IsNotForAccounting { get; set; }
+
     [MaxLength(300)]
     public string? ActReference { get; set; }
 

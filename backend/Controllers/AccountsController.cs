@@ -83,6 +83,7 @@ public class AccountsController : ControllerBase
                 ClientCaseTitle = payment.ClientCase != null ? payment.ClientCase.Title : null,
                 ClientCaseReference = payment.ClientCaseReference,
                 Description = payment.Description,
+                IsNotForAccounting = payment.IsNotForAccounting,
                 ActReference = payment.Notes,
                 ResponsibleId = payment.Responsibles.Select(link => (int?)link.UserId).FirstOrDefault(),
                 ResponsibleName = payment.Responsibles
@@ -613,6 +614,7 @@ public class AccountsController : ControllerBase
             ClientCaseTitle = representative.ClientCaseTitle,
             ClientCaseReference = representative.ClientCaseReference,
             Description = representative.Description,
+            IsNotForAccounting = representative.IsNotForAccounting,
             ActReference = representative.ActReference,
             ResponsibleId = representative.ResponsibleId,
             ResponsibleName = representative.ResponsibleName,
@@ -949,6 +951,7 @@ public class AccountsController : ControllerBase
         public string? ClientCaseTitle { get; init; }
         public string? ClientCaseReference { get; init; }
         public string? Description { get; init; }
+        public bool IsNotForAccounting { get; init; }
         public string? ActReference { get; init; }
         public int? ResponsibleId { get; init; }
         public string? ResponsibleName { get; init; }

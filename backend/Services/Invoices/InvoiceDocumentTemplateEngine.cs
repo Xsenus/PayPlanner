@@ -136,6 +136,9 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "invoice.amount", Category = "Счет", Description = "Сумма счета", IsRepeating = false },
             new() { Key = "invoice.amountWords", Category = "Счет", Description = "Сумма прописью", IsRepeating = false },
             new() { Key = "invoice.description", Category = "Счет", Description = "Описание счета", IsRepeating = false },
+            new() { Key = "invoice.clientCommentHtml", Category = "Счет", Description = "HTML-блок комментария для клиента", IsRepeating = false },
+            new() { Key = "invoice.dueDateHtml", Category = "Счет", Description = "HTML-блок срока оплаты", IsRepeating = false },
+            new() { Key = "invoice.notForAccountingHtml", Category = "Счет", Description = "HTML-блок пометки, что счет не для бухгалтерии", IsRepeating = false },
             new() { Key = "invoice.total", Category = "Счет", Description = "Итого по позициям", IsRepeating = false },
             new() { Key = "invoice.totalWords", Category = "Счет", Description = "Итого прописью", IsRepeating = false },
             new() { Key = "invoice.itemsCount", Category = "Счет", Description = "Количество наименований в счете", IsRepeating = false },
@@ -210,6 +213,16 @@ public static class InvoiceDocumentTemplateEngine
             ? director!.Position!
             : "Предприниматель";
         var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
+        var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
+        var dueDateHtml = !hasInstallmentSchedule && payment.Date.Date != invoiceDate.Date
+            ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(payment.Date.ToString("dd.MM.yyyy", RuCulture))}</div>"
+            : string.Empty;
+        var clientCommentHtml = string.IsNullOrWhiteSpace(payment.Description)
+            ? string.Empty
+            : $"<div class=\"invoice-meta-line\"><strong>Комментарий для клиента:</strong> {Encode(payment.Description)}</div>";
+        var notForAccountingHtml = payment.IsNotForAccounting
+            ? "<div class=\"invoice-meta-line invoice-flag\">Счет не для бухгалтерии</div>"
+            : string.Empty;
 
         return new InvoiceDocumentRenderModel
         {
@@ -223,6 +236,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.amount"] = Encode(FormatMoney(payment.Amount)),
                 ["invoice.amountWords"] = Encode(SpellMoney(payment.Amount)),
                 ["invoice.description"] = Encode(payment.Description),
+                ["invoice.clientCommentHtml"] = clientCommentHtml,
+                ["invoice.dueDateHtml"] = dueDateHtml,
+                ["invoice.notForAccountingHtml"] = notForAccountingHtml,
                 ["invoice.total"] = Encode(FormatMoney(total)),
                 ["invoice.totalWords"] = Encode(SpellMoney(total)),
                 ["invoice.itemsCount"] = Encode(normalizedLineItems.Count.ToString(CultureInfo.InvariantCulture)),
@@ -1110,6 +1126,17 @@ public static class InvoiceDocumentTemplateEngine
     .words {
       font-weight: 700;
     }
+    .invoice-meta {
+      margin-top: 6px;
+      line-height: 1.35;
+    }
+    .invoice-meta-line {
+      margin-top: 2px;
+    }
+    .invoice-flag {
+      font-weight: 700;
+      text-transform: uppercase;
+    }
     .installment-schedule {
       margin-top: 6px;
     }
@@ -1289,6 +1316,11 @@ public static class InvoiceDocumentTemplateEngine
         Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.
       </div>
       <div class="words">{{invoice.totalWords}}</div>
+      <div class="invoice-meta">
+        {{invoice.clientCommentHtml}}
+        {{invoice.dueDateHtml}}
+        {{invoice.notForAccountingHtml}}
+      </div>
       {{invoice.installmentScheduleHtml}}
 
       <div class="color-line" style="margin: 6px 0;"></div>

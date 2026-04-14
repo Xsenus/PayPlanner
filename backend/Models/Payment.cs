@@ -189,6 +189,11 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public string Notes { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Признак, что счет носит сервисный характер и не предназначен для бухгалтерии.
+        /// </summary>
+        public bool IsNotForAccounting { get; set; }
+
         public string? ClientCaseReference { get; set; }
 
         /// <summary>
