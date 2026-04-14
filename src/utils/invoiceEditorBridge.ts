@@ -28,6 +28,7 @@ export interface InvoiceEditorLineItemDraft {
   quantity: string;
   unit: string;
   price: string;
+  serviceCategoryId: string;
 }
 
 export interface InvoiceEditorActDraft {
@@ -136,6 +137,7 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
           quantity: readString(item.quantity),
           unit: readString(item.unit),
           price: readString(item.price),
+          serviceCategoryId: readString(item.serviceCategoryId),
         }))
     : [];
 

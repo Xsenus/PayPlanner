@@ -7,10 +7,16 @@ import { apiService } from '../../services/api';
 
 const {
   confirmMock,
+  invoiceUnitsMock,
+  serviceCategoriesMock,
+  servicesMock,
   toastErrorMock,
   toastSuccessMock,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
+  invoiceUnitsMock: [] as any[],
+  serviceCategoriesMock: [] as any[],
+  servicesMock: [] as any[],
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
 }));
@@ -21,9 +27,9 @@ vi.mock('../../hooks/useTranslation', () => ({
 
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
-    invoiceUnits: [],
-    services: [],
-    serviceCategories: [],
+    invoiceUnits: invoiceUnitsMock,
+    services: servicesMock,
+    serviceCategories: serviceCategoriesMock,
   }),
 }));
 
@@ -88,6 +94,9 @@ vi.mock('../../utils/invoiceEditorBridge', () => ({
 describe('InvoiceModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
+    invoiceUnitsMock.splice(0, invoiceUnitsMock.length);
+    serviceCategoriesMock.splice(0, serviceCategoriesMock.length);
+    servicesMock.splice(0, servicesMock.length);
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     vi.restoreAllMocks();
@@ -282,6 +291,56 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText(/Настроено платежей:\s*2,/)).toBeTruthy();
     expect(screen.getByText('Рассрочка 1/2')).toBeTruthy();
     expect(screen.getByText('Рассрочка 2/2')).toBeTruthy();
+  });
+
+  it('filters services by selected category and applies the matching template', async () => {
+    invoiceUnitsMock.push({ name: 'шт' }, { name: 'усл.ед.' }, { name: 'час' });
+    serviceCategoriesMock.push(
+      { id: 1, name: 'Арбитраж', description: '', colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
+      { id: 2, name: 'Гражданские дела', description: '', colorHex: '#1d4ed8', isActive: true, createdAt: '2026-04-01' },
+    );
+    servicesMock.push(
+      { id: 1, name: 'Консультация', description: '', unit: 'час', defaultPrice: 5000, categoryId: 1, colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
+      { id: 2, name: 'Экспертиза', description: '', unit: 'усл.ед.', defaultPrice: 12000, categoryId: 1, colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
+      { id: 3, name: 'Консультация', description: '', unit: 'усл.ед.', defaultPrice: 8000, categoryId: 2, colorHex: '#1d4ed8', isActive: true, createdAt: '2026-04-01' },
+      { id: 4, name: 'Составление иска', description: '', unit: 'усл.ед.', defaultPrice: 15000, categoryId: 2, colorHex: '#1d4ed8', isActive: true, createdAt: '2026-04-01' },
+    );
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const categorySelect = await screen.findByLabelText('Категория услуги');
+    fireEvent.change(categorySelect, { target: { value: '2' } });
+
+    const nameInput = screen.getByLabelText('Наименование услуги') as HTMLInputElement;
+    const datalistId = nameInput.getAttribute('list');
+    expect(datalistId).toBeTruthy();
+
+    const datalist = document.getElementById(datalistId!);
+    expect(datalist).toBeTruthy();
+
+    const optionValues = Array.from(datalist!.querySelectorAll('option')).map((option) => option.getAttribute('value'));
+    expect(optionValues).toEqual(['Консультация', 'Составление иска']);
+
+    fireEvent.change(nameInput, { target: { value: 'Консультация' } });
+    fireEvent.blur(nameInput);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Единица измерения') as HTMLInputElement).value).toBe('усл.ед.');
+      expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('8 000.00');
+    });
   });
 
   it('downloads document variant without signature and seal on demand', async () => {

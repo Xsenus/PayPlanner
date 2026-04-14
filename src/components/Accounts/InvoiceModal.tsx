@@ -16,6 +16,7 @@ import type {
   Payment,
   PaymentKind,
   PaymentStatus,
+  ServiceDictionaryItem,
 } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -59,6 +60,7 @@ type LineItem = {
   quantity: string;
   unit: string;
   price: string;
+  serviceCategoryId: string;
 };
 
 type DraftActForm = {
@@ -130,6 +132,10 @@ function formatMoneyDisplayValue(value: string | number | null | undefined): str
   return formatMoneyValue(value);
 }
 
+function normalizeLookupName(value: string | null | undefined): string {
+  return String(value ?? '').trim().toLocaleLowerCase('ru');
+}
+
 function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
   if (source && source.length > 0) {
     return source.map((item, index) => ({
@@ -138,6 +144,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       quantity: String(item.quantity ?? 0),
       unit: item.unit ?? 'шт',
       price: formatMoneyValue(item.price),
+      serviceCategoryId: '',
     }));
   }
 
@@ -148,6 +155,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       quantity: '1',
       unit: 'шт',
       price: formatMoneyValue(fallbackAmount ?? 0),
+      serviceCategoryId: '',
     },
   ];
 }
@@ -670,13 +678,49 @@ export function InvoiceModal({
 
   const { invoiceUnits, services, serviceCategories } = useDictionaries();
   const unitOptions = useMemo(() => invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceUnits]);
+  const sortedServiceCategories = useMemo(
+    () => [...serviceCategories].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
+    [serviceCategories],
+  );
+  const sortedServices = useMemo(
+    () => [...services].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
+    [services],
+  );
   const serviceCategoryById = useMemo(() => {
     const map = new Map<number, string>();
-    for (const category of serviceCategories) {
+    for (const category of sortedServiceCategories) {
       map.set(category.id, category.name);
     }
     return map;
-  }, [serviceCategories]);
+  }, [sortedServiceCategories]);
+  const servicesByCategoryId = useMemo(() => {
+    const map = new Map<string, ServiceDictionaryItem[]>();
+    for (const service of sortedServices) {
+      const key = service.categoryId ? String(service.categoryId) : '';
+      const bucket = map.get(key);
+      if (bucket) {
+        bucket.push(service);
+      } else {
+        map.set(key, [service]);
+      }
+    }
+    return map;
+  }, [sortedServices]);
+
+  const findServiceTemplate = useCallback((name: string, serviceCategoryId?: string) => {
+    const normalizedName = normalizeLookupName(name);
+    if (!normalizedName) return null;
+
+    const exactMatches = sortedServices.filter((item) => normalizeLookupName(item.name) === normalizedName);
+    if (!exactMatches.length) return null;
+
+    if (serviceCategoryId) {
+      const categoryMatch = exactMatches.find((item) => String(item.categoryId ?? '') === serviceCategoryId);
+      if (categoryMatch) return categoryMatch;
+    }
+
+    return exactMatches[0] ?? null;
+  }, [sortedServices]);
 
   const handleLineItemPriceChange = (id: string, rawValue: string) => {
     updateLineItem(id, { price: formatMoneyInputValue(rawValue) });
@@ -688,16 +732,39 @@ export function InvoiceModal({
   };
 
   const applyLineItemTemplate = (id: string, name: string) => {
-    const normalized = name.trim().toLowerCase();
-    if (!normalized) return;
-    const template = services.find((item) => item.name.trim().toLowerCase() === normalized);
+    const currentLineItem = lineItems.find((item) => item.id === id);
+    const template = findServiceTemplate(name, currentLineItem?.serviceCategoryId);
     if (!template) return;
-    updateLineItem(id, {
-      unit: template.unit?.trim() || undefined,
-      price: template.defaultPrice !== undefined && template.defaultPrice !== null
-        ? formatMoneyDisplayValue(template.defaultPrice)
-        : undefined,
-    });
+
+    const patch: Partial<LineItem> = {
+      serviceCategoryId: template.categoryId ? String(template.categoryId) : '',
+    };
+
+    if (template.unit?.trim()) {
+      patch.unit = template.unit.trim();
+    }
+
+    if (template.defaultPrice !== undefined && template.defaultPrice !== null) {
+      patch.price = formatMoneyDisplayValue(template.defaultPrice);
+    }
+
+    updateLineItem(id, patch);
+  };
+
+  const handleLineItemCategoryChange = (id: string, serviceCategoryId: string) => {
+    const currentLineItem = lineItems.find((item) => item.id === id);
+    const template = currentLineItem ? findServiceTemplate(currentLineItem.name, serviceCategoryId) : null;
+    const patch: Partial<LineItem> = { serviceCategoryId };
+
+    if (template?.unit?.trim()) {
+      patch.unit = template.unit.trim();
+    }
+
+    if (template?.defaultPrice !== undefined && template?.defaultPrice !== null) {
+      patch.price = formatMoneyDisplayValue(template.defaultPrice);
+    }
+
+    updateLineItem(id, patch);
   };
 
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
@@ -1200,6 +1267,22 @@ export function InvoiceModal({
     setLineItems((prev) => prev.map((item) => (item.unit.trim() ? item : { ...item, unit: unitOptions[0] })));
   }, [unitOptions]);
 
+  useEffect(() => {
+    if (!sortedServices.length) return;
+
+    setLineItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.serviceCategoryId) return item;
+        const template = findServiceTemplate(item.name);
+        if (!template?.categoryId) return item;
+        changed = true;
+        return { ...item, serviceCategoryId: String(template.categoryId) };
+      });
+      return changed ? next : prev;
+    });
+  }, [findServiceTemplate, sortedServices.length]);
+
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
       const next = prev.map((item) => (item.id === id ? { ...item, ...patch } : item));
@@ -1217,6 +1300,7 @@ export function InvoiceModal({
         quantity: '1',
         unit: unitOptions[0] || 'шт',
         price: formatMoneyDisplayValue(0),
+        serviceCategoryId: '',
       },
     ]);
   };
@@ -2769,29 +2853,93 @@ export function InvoiceModal({
                             </button>
                           </header>
                           <div className="space-y-2">
-                            {lineItems.map((item) => (
-                              <div key={item.id} className="flex items-center gap-2">
-                                <input type="text" list="invoice-line-item-names" value={item.name} onChange={(event) => updateLineItem(item.id, { name: event.target.value })} onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)} placeholder="Наименование" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.quantity} onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })} placeholder="Кол-во" className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm" />
-                                <input type="text" list="invoice-line-item-units" value={item.unit} onChange={(event) => updateLineItem(item.id, { unit: event.target.value })} placeholder="Ед." className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                                <input type="text" inputMode="decimal" value={item.price} onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)} onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)} placeholder="0.00" className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums" />
-<button type="button" onClick={() => { void removeLineItem(item.id); }} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" aria-label="Удалить" title="Удалить позицию"><X className="h-4 w-4" /></button>
-                              </div>
-                            ))}
+                            {lineItems.map((item) => {
+                              const datalistId = `invoice-line-item-names-${item.id}`;
+                              const lineItemServices = item.serviceCategoryId
+                                ? servicesByCategoryId.get(item.serviceCategoryId) ?? []
+                                : sortedServices;
+
+                              return (
+                                <div key={item.id} className="grid gap-2 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_4.5rem_7rem_8rem_auto]">
+                                  <select
+                                    value={item.serviceCategoryId}
+                                    onChange={(event) => handleLineItemCategoryChange(item.id, event.target.value)}
+                                    aria-label="Категория услуги"
+                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                  >
+                                    <option value="">Все категории</option>
+                                    {sortedServiceCategories.map((category) => (
+                                      <option key={category.id} value={String(category.id)}>
+                                        {category.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div>
+                                    <input
+                                      type="text"
+                                      list={datalistId}
+                                      value={item.name}
+                                      onChange={(event) => updateLineItem(item.id, { name: event.target.value })}
+                                      onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)}
+                                      placeholder="Наименование"
+                                      aria-label="Наименование услуги"
+                                      className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                    />
+                                    <datalist id={datalistId}>
+                                      {lineItemServices.map((service) => {
+                                        const categoryLabel = service.categoryId ? serviceCategoryById.get(service.categoryId) : null;
+                                        const label = item.serviceCategoryId || !categoryLabel ? service.name : `${categoryLabel} • ${service.name}`;
+                                        return (
+                                          <option key={`${service.id}-${service.name}`} value={service.name} label={label} />
+                                        );
+                                      })}
+                                    </datalist>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={item.quantity}
+                                    onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })}
+                                    placeholder="Кол-во"
+                                    aria-label="Количество"
+                                    className="rounded-lg border border-slate-300 px-2 py-2 text-center text-sm"
+                                  />
+                                  <input
+                                    type="text"
+                                    list="invoice-line-item-units"
+                                    value={item.unit}
+                                    onChange={(event) => updateLineItem(item.id, { unit: event.target.value })}
+                                    placeholder="Ед."
+                                    aria-label="Единица измерения"
+                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                  />
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={item.price}
+                                    onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)}
+                                    onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)}
+                                    placeholder="0.00"
+                                    aria-label="Цена"
+                                    className="rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => { void removeLineItem(item.id); }}
+                                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 md:justify-self-start"
+                                    aria-label="Удалить"
+                                    title="Удалить позицию"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                           <datalist id="invoice-line-item-units">
                             {unitOptions.map((unit) => (
                               <option key={unit} value={unit} />
                             ))}
-                          </datalist>
-                          <datalist id="invoice-line-item-names">
-                            {services.map((service) => {
-                              const categoryLabel = service.categoryId ? serviceCategoryById.get(service.categoryId) : null;
-                              const label = categoryLabel ? `${categoryLabel} • ${service.name}` : service.name;
-                              return (
-                                <option key={`${service.id}-${service.name}`} value={service.name} label={label} />
-                              );
-                            })}
                           </datalist>
                           <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>
