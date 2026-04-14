@@ -232,6 +232,46 @@ public class ActsControllerTests
         Assert.Equal(3_000m, dto.Amount);
     }
 
+    [Fact]
+    public async Task GetDocument_RendersActLineItems_AsHtml()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoicePayment = await CreateInvoiceAsync(
+            db,
+            "INV-104",
+            new DateTime(2026, 4, 15),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Подготовка заявления", Quantity = 1m, Unit = "усл.ед.", Price = 9_000m, SortOrder = 0 },
+                new InvoiceLineItem { Name = "Выезд в суд", Quantity = 1m, Unit = "усл.ед.", Price = 6_000m, SortOrder = 1 },
+            ]);
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+        var createRequest = new UpsertActRequest
+        {
+            Number = "ACT-104",
+            Date = new DateTime(2026, 4, 16),
+            Amount = 0m,
+            InvoiceId = invoicePayment.Id,
+            ClientId = client.Id,
+            Status = ActStatus.Created,
+            CreationMode = ActCreationMode.Full,
+        };
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+
+        var documentResult = await controller.GetDocument(dto.Id, "html", true, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(documentResult);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("ACT-104", content.Content);
+        Assert.Contains("Подготовка заявления", content.Content);
+        Assert.Contains("Выезд в суд", content.Content);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

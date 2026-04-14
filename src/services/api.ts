@@ -1135,6 +1135,29 @@ export class ApiService {
     return response.blob();
   }
 
+  async downloadActDocument(
+    id: number,
+    format: 'word' | 'pdf' | 'html' = 'word',
+    options?: { includeSignatureAndSeal?: boolean },
+  ) {
+    const token = getAuthToken();
+    const query = buildQuery({
+      format,
+      includeSignatureAndSeal: options?.includeSignatureAndSeal,
+    });
+    const response = await fetch(`${API_BASE_URL}/acts/${id}/document${query}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response.blob();
+  }
+
   async sendInvoiceByEmail(
     id: number,
     payload?: { email?: string; subject?: string; message?: string; format?: 'word' | 'pdf' },

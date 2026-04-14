@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +16,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
@@ -21,13 +26,21 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class ActsController : ControllerBase
 {
+    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
+    private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
+    private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
 
-    public ActsController(PaymentContext db, IFormRequirementsService formRequirements)
+    public ActsController(
+        PaymentContext db,
+        IFormRequirementsService formRequirements,
+        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
+        _invoiceDocumentPdfService = invoiceDocumentPdfService;
     }
 
     [HttpGet]
@@ -298,6 +311,53 @@ public class ActsController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("{id:int}/document")]
+    public async Task<IActionResult> GetDocument(
+        int id,
+        [FromQuery] string? format = "word",
+        [FromQuery] bool? includeSignatureAndSeal = null,
+        CancellationToken ct = default)
+    {
+        var act = await LoadActDocumentAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(format);
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            act.LineItems
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .ToList(),
+            mainCompany,
+            includeSignatureAndSeal ?? true);
+
+        if (normalizedFormat == "html")
+        {
+            return Content(documentHtml, "text/html; charset=utf-8");
+        }
+
+        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
+        var fileName = $"act-{SanitizeFilePart(act.Number)}.{ext}";
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                var pdfBytes = await RenderDocumentPdfAsync(documentHtml, ct);
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+        }
+
+        return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
+    }
+
     private static readonly System.Linq.Expressions.Expression<Func<Act, ActDto>> MapToDtoExpression = act => new ActDto
     {
         Id = act.Id,
@@ -343,6 +403,20 @@ public class ActsController : ControllerBase
         AuditDeletedByUserId = EF.Property<int?>(act, "DeletedByUserId"),
         AuditDeletedByUserName = EF.Property<string?>(act, "DeletedByUserName"),
     };
+
+    private async Task<Act?> LoadActDocumentAsync(int id, CancellationToken ct)
+    {
+        return await _db.Acts
+            .AsNoTracking()
+            .Include(act => act.Client)
+            .Include(act => act.Responsible)
+            .Include(act => act.LineItems)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.Client)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.ExpenseClient)
+            .FirstOrDefaultAsync(act => act.Id == id, ct);
+    }
 
     private async Task<(ActionResult? Error, string CreationMode, decimal Amount, List<ActLineItemDraft> LineItems)> ResolveActLineItemsAsync(
         Payment? invoice,
@@ -545,6 +619,94 @@ public class ActsController : ControllerBase
                 CreatedAt = DateTime.UtcNow,
             });
         }
+    }
+
+    private Task<byte[]> RenderDocumentPdfAsync(string documentHtml, CancellationToken ct)
+    {
+        if (_invoiceDocumentPdfService is null)
+        {
+            throw new InvalidOperationException(
+                "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения.");
+        }
+
+        return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
+    }
+
+    private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting =>
+                setting.Key == LegacyMainCompanySettingKey
+                || setting.Key == MainCompanyIdsSettingKey
+                || setting.Key == DefaultMainCompanyIdSettingKey)
+            .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, ct);
+
+        int? companyId = null;
+        if (settings.TryGetValue(DefaultMainCompanyIdSettingKey, out var rawDefaultId)
+            && int.TryParse(rawDefaultId, out var parsedDefaultId)
+            && parsedDefaultId > 0)
+        {
+            companyId = parsedDefaultId;
+        }
+        else if (settings.TryGetValue(LegacyMainCompanySettingKey, out var rawLegacyId)
+            && int.TryParse(rawLegacyId, out var parsedLegacyId)
+            && parsedLegacyId > 0)
+        {
+            companyId = parsedLegacyId;
+        }
+        else if (settings.TryGetValue(MainCompanyIdsSettingKey, out var rawIds)
+            && !string.IsNullOrWhiteSpace(rawIds))
+        {
+            try
+            {
+                var parsedIds = JsonSerializer.Deserialize<List<int>>(rawIds);
+                companyId = parsedIds?.FirstOrDefault(value => value > 0);
+            }
+            catch (JsonException)
+            {
+                companyId = null;
+            }
+        }
+
+        if (!companyId.HasValue || companyId.Value <= 0)
+        {
+            return null;
+        }
+
+        return await _db.LegalEntities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(entity => entity.Id == companyId.Value, ct);
+    }
+
+    private static string NormalizeDocumentFormat(string? format)
+    {
+        if (string.Equals(format, "html", StringComparison.OrdinalIgnoreCase))
+        {
+            return "html";
+        }
+
+        if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "pdf";
+        }
+
+        return "word";
+    }
+
+    private static string SanitizeFilePart(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "export";
+        }
+
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(invalid, '-');
+        }
+
+        return value.Trim();
     }
 
     private ActionResult ValidationError(string field, string message)

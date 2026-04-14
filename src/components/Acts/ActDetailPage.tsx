@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2, Pencil, Save, Search, UserRound } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Pencil, Printer, Save, Search, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
@@ -43,6 +43,36 @@ function normalizeActToForm(act: Act): FormState {
   };
 }
 
+function downloadBlob(fileName: string, blob: Blob) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
+
+function openBlobInWindow(blob: Blob, targetWindow: Window | null, options?: { autoPrint?: boolean }) {
+  const href = URL.createObjectURL(blob);
+  const nextWindow = targetWindow ?? window.open('', '_blank', 'width=1180,height=900');
+  if (nextWindow) {
+    nextWindow.location.href = href;
+  }
+
+  const cleanup = () => URL.revokeObjectURL(href);
+  if (options?.autoPrint && nextWindow) {
+    nextWindow.onload = () => {
+      nextWindow.focus();
+      nextWindow.print();
+      window.setTimeout(cleanup, 60_000);
+    };
+  } else {
+    window.setTimeout(cleanup, 60_000);
+  }
+}
+
 export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProps) {
   const { t } = useTranslation();
   const [act, setAct] = useState<Act | null>(null);
@@ -62,13 +92,12 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
       setLoading(true);
       setError(null);
       try {
-        const [actsData, clientsData, responsiblesData] = await Promise.all([
-          apiService.getActs({ page: 1, pageSize: 1000 }),
+        const [target, clientsData, responsiblesData] = await Promise.all([
+          apiService.getAct(actId),
           apiService.getClients(),
           apiService.getActResponsibles(),
         ]);
         if (cancelled) return;
-        const target = (actsData.items ?? []).find((item) => item.id === actId) ?? null;
         if (!target) {
           setError('Акт не найден');
           setAct(null);
@@ -152,6 +181,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
       amount: parsedAmount,
+      creationMode: act.creationMode ?? undefined,
+      invoiceId: act.invoiceId ?? undefined,
       invoiceNumber: form.invoiceNumber.trim() ? form.invoiceNumber.trim() : undefined,
       counterpartyInn: form.counterpartyInn.trim() ? form.counterpartyInn.trim() : undefined,
       status: form.status,
@@ -173,6 +204,37 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
       setSaving(false);
     }
   };
+
+  const handlePrint = async () => {
+    if (!act) return;
+    setError(null);
+    try {
+      const previewWindow = window.open('', '_blank', 'width=1180,height=900');
+      const blob = await apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true });
+      openBlobInWindow(blob, previewWindow, { autoPrint: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось открыть документ акта');
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!act) return;
+    setError(null);
+    try {
+      const blob = await apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true });
+      downloadBlob(`act-${act.number || act.id}.pdf`, blob);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось скачать документ акта');
+    }
+  };
+
+  const lineItems = act.lineItems ?? [];
+  const creationModeLabel =
+    act.creationMode === 'Full'
+      ? 'Полностью по счету'
+      : act.creationMode === 'Partial'
+        ? 'Частично по счету'
+        : 'Ручной акт';
 
   if (loading || !form || !act) {
     return (
@@ -196,6 +258,24 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
           </button>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handlePrint()}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <Printer className="h-4 w-4" />
+              Печать
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleDownloadPdf()}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              Скачать PDF
+            </button>
+
             {!editMode ? (
               <button
                 type="button"
@@ -338,6 +418,50 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
               <span className="font-medium text-slate-700">Комментарий</span>
               <textarea value={form.comment} onChange={handleChange('comment')} disabled={!editMode} className="min-h-[96px] rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
             </label>
+          </div>
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Позиции акта</h2>
+                <p className="text-sm text-slate-500">Режим: {creationModeLabel}</p>
+              </div>
+              <div className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 shadow-sm">
+                Сумма акта: {Number(act.amount ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+              </div>
+            </div>
+
+            {lineItems.length > 0 ? (
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">№</th>
+                      <th className="px-4 py-3">Услуга</th>
+                      <th className="px-4 py-3 text-right">Кол-во</th>
+                      <th className="px-4 py-3 text-center">Ед.</th>
+                      <th className="px-4 py-3 text-right">Цена</th>
+                      <th className="px-4 py-3 text-right">Сумма</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {lineItems.map((item, index) => (
+                      <tr key={item.id ?? item.sourceKey ?? index}>
+                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                        <td className="px-4 py-3 text-slate-900">{item.name}</td>
+                        <td className="px-4 py-3 text-right text-slate-700">{Number(item.quantity ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}</td>
+                        <td className="px-4 py-3 text-center text-slate-700">{item.unit}</td>
+                        <td className="px-4 py-3 text-right text-slate-700">{Number(item.price ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</td>
+                        <td className="px-4 py-3 text-right font-medium text-slate-900">{Number((item.quantity ?? 0) * (item.price ?? 0)).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-500">
+                У этого акта пока нет отдельных строк. Для старых актов документ будет построен по общей сумме.
+              </div>
+            )}
           </div>
         </div>
       </div>
