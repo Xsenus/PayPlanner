@@ -1729,28 +1729,7 @@ export function InvoiceModal({
     return previewWindow;
   };
 
-  const buildAutoPrintHtml = (html: string) => {
-    const autoPrintScript = `
-      <script>
-        window.addEventListener('load', function () {
-          window.setTimeout(function () {
-            try {
-              window.focus();
-              window.print();
-            } catch (error) {
-              console.error('print failed', error);
-            }
-          }, 120);
-        });
-      </script>
-    `;
-
-    if (html.includes('</body>')) {
-      return html.replace('</body>', `${autoPrintScript}</body>`);
-    }
-
-    return `${html}${autoPrintScript}`;
-  };
+  const buildAutoPrintHtml = (html: string) => html;
 
   const openHtmlInWindow = (html: string, previewWindow?: Window | null) => {
     if (!previewWindow || previewWindow.closed) {
@@ -1761,21 +1740,47 @@ export function InvoiceModal({
     previewWindow.document.write(buildAutoPrintHtml(html));
     previewWindow.document.close();
   };
+  void openHtmlInWindow;
 
-  const openBlobInWindow = (blob: Blob, previewWindow?: Window | null) => {
+  const openBlobInWindow = (
+    blob: Blob,
+    previewWindow?: Window | null,
+    options?: { autoPrint?: boolean },
+  ) => {
     if (typeof window === 'undefined') return;
     const href = URL.createObjectURL(blob);
+    let targetWindow = previewWindow && !previewWindow.closed
+      ? previewWindow
+      : null;
 
-    if (previewWindow && !previewWindow.closed) {
-      previewWindow.location.href = href;
-    } else {
-      const nextWindow = window.open(href, '_blank', 'width=1180,height=900');
+    if (!targetWindow) {
+      const nextWindow = window.open('', '_blank', 'width=1180,height=900');
       if (!nextWindow) {
         URL.revokeObjectURL(href);
         throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
       }
+
+      targetWindow = nextWindow;
     }
 
+    if (options?.autoPrint) {
+      targetWindow.onload = () => {
+        window.setTimeout(() => {
+          try {
+            targetWindow?.focus();
+            targetWindow?.print();
+          } catch (error) {
+            console.error('pdf print failed', error);
+          } finally {
+            if (targetWindow) {
+              targetWindow.onload = null;
+            }
+          }
+        }, 250);
+      };
+    }
+
+    targetWindow.location.href = href;
     window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
   };
 
@@ -1813,9 +1818,8 @@ export function InvoiceModal({
     let previewWindow: Window | null | undefined;
     try {
       previewWindow = openPendingDocumentWindow();
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
-      const html = await blob.text();
-      openHtmlInWindow(html, previewWindow);
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf');
+      openBlobInWindow(blob, previewWindow, { autoPrint: true });
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.close();
