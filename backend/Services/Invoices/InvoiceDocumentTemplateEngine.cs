@@ -1013,13 +1013,18 @@ public static class InvoiceDocumentTemplateEngine
       transform: translateX(-50%);
       z-index: 2;
     }
-    .signature-line .seal {
-      max-width: 105px;
-      max-height: 105px;
+    .seal-slot {
+      position: relative;
+      height: 48px;
+      vertical-align: bottom;
+    }
+    .seal-slot .seal {
+      max-width: 110px;
+      max-height: 110px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: -18px;
+      top: -18px;
       transform: translateX(-50%);
       opacity: 0.9;
       z-index: 1;
@@ -1168,16 +1173,16 @@ public static class InvoiceDocumentTemplateEngine
         <tbody>
           <tr>
             <td class="v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
-            <td style="width: 5%;"></td>
-            <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}{{seller.sealHtml}}</td>
-            <td style="width: 5%;"></td>
-            <td class="signature-line text-c v-al-b" style="width: 35%;">{{seller.documentDirectorShortName}}</td>
+            <td style="width: 4%;"></td>
+            <td class="signature-line text-c" style="width: 34%;">{{seller.signatureHtml}}</td>
+            <td class="seal-slot text-c" style="width: 8%;">{{seller.sealHtml}}</td>
+            <td class="signature-line text-c v-al-b" style="width: 34%;">{{seller.documentDirectorShortName}}</td>
           </tr>
           <tr>
-            <td colspan="2" style="width: 25%;"></td>
-            <td class="text-c signature-caption" style="width: 35%;">подпись</td>
-            <td style="width: 5%;"></td>
-            <td class="text-c signature-caption" style="width: 35%;">расшифровка подписи</td>
+            <td colspan="2" style="width: 24%;"></td>
+            <td class="text-c signature-caption" style="width: 34%;">подпись</td>
+            <td style="width: 8%;"></td>
+            <td class="text-c signature-caption" style="width: 34%;">расшифровка подписи</td>
           </tr>
         </tbody>
       </table>
