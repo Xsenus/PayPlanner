@@ -311,6 +311,61 @@ public class PaymentsControllerTests
         Assert.Equal(2, response.Summary.IncomeCount);
     }
 
+    [Fact]
+    public async Task Delete_RemovesOnlyStandalonePayment_WhenPaymentIsNotPartOfInvoiceAggregate()
+    {
+        await using var db = await CreateContextAsync();
+
+        var standalonePayment = CreatePayment(new DateTime(2026, 4, 20), 4_500m, "РћР±С‹С‡РЅС‹Р№ РїР»Р°С‚РµР¶");
+        var unrelatedPayment = CreatePayment(new DateTime(2026, 4, 21), 7_500m, "РџРѕСЃР»РµРґСѓСЋС‰РёР№ РїР»Р°С‚РµР¶");
+
+        db.Payments.AddRange(standalonePayment, unrelatedPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Delete(standalonePayment.Id, CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        Assert.IsType<NoContentResult>(actionResult);
+        Assert.Null(await db.Payments.FindAsync(standalonePayment.Id));
+        Assert.NotNull(await db.Payments.FindAsync(unrelatedPayment.Id));
+    }
+
+    [Fact]
+    public async Task Delete_RemovesInvoiceAggregate_WhenTargetIsInvoiceDocument()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Delete(invoice.ParentPaymentId, CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        Assert.IsType<NoContentResult>(actionResult);
+        Assert.Empty(await db.Payments.Where(payment => payment.InvoiceId == invoice.InvoiceEntityId).ToListAsync());
+        Assert.Null(await db.Invoices.FindAsync(invoice.InvoiceEntityId));
+        Assert.NotNull(await db.Payments.FindAsync(invoice.UnrelatedPaymentId));
+    }
+
+    [Fact]
+    public async Task Delete_RemovesInvoiceAggregate_WhenTargetIsGeneratedInstallmentPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Delete(invoice.InstallmentPaymentIds[0], CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        Assert.IsType<NoContentResult>(actionResult);
+        Assert.Empty(await db.Payments.Where(payment => payment.InvoiceId == invoice.InvoiceEntityId).ToListAsync());
+        Assert.Null(await db.Invoices.FindAsync(invoice.InvoiceEntityId));
+        Assert.NotNull(await db.Payments.FindAsync(invoice.UnrelatedPaymentId));
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -323,6 +378,44 @@ public class PaymentsControllerTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static async Task<InvoiceAggregateIds> CreateInvoiceAggregateAsync(PaymentContext db)
+    {
+        var invoice = new Invoice
+        {
+            Number = "30",
+            Date = new DateTime(2026, 4, 8),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDate = new DateTime(2026, 4, 8);
+        var parentPayment = CreatePayment(invoiceDate, 18_000m, "РЎС‡РµС‚ в„–30");
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var installmentOne = CreatePayment(invoiceDate, 6_000m, "Р Р°СЃСЃСЂРѕС‡РєР° 1/3");
+        installmentOne.InvoiceId = invoice.Id;
+        installmentOne.SystemNotes = $"{InstallmentPaymentMarker}\nРџР»Р°С‚С‘Р¶ 1/3";
+
+        var installmentTwo = CreatePayment(invoiceDate.AddMonths(1), 6_000m, "Р Р°СЃСЃСЂРѕС‡РєР° 2/3");
+        installmentTwo.InvoiceId = invoice.Id;
+        installmentTwo.SystemNotes = $"{InstallmentPaymentMarker}\nРџР»Р°С‚С‘Р¶ 2/3";
+
+        var unrelatedPayment = CreatePayment(invoiceDate, 2_000m, "РћР±С‹С‡РЅС‹Р№ РїР»Р°С‚РµР¶");
+
+        db.Payments.AddRange(parentPayment, installmentOne, installmentTwo, unrelatedPayment);
+        await db.SaveChangesAsync();
+
+        return new InvoiceAggregateIds(
+            invoice.Id,
+            parentPayment.Id,
+            new[] { installmentOne.Id, installmentTwo.Id },
+            unrelatedPayment.Id);
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)
@@ -341,6 +434,12 @@ public class PaymentsControllerTests
             Type = PaymentType.Income,
         };
     }
+
+    private sealed record InvoiceAggregateIds(
+        int InvoiceEntityId,
+        int ParentPaymentId,
+        int[] InstallmentPaymentIds,
+        int UnrelatedPaymentId);
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService
     {

@@ -14,6 +14,7 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class PaymentsController : ControllerBase
 {
+    private const string InstallmentPaymentMarker = "[pp:installment-payment]";
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
     public PaymentsController(PaymentContext db, IFormRequirementsService formRequirements)
@@ -630,12 +631,51 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var e = await _db.Payments.FindAsync(id);
-        if (e is null) return NotFound();
-        _db.Payments.Remove(e);
-        await _db.SaveChangesAsync();
+        var payment = await _db.Payments
+            .Include(item => item.Invoice)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (payment is null) return NotFound();
+
+        if (IsInvoiceAggregatePayment(payment))
+        {
+            var invoiceId = payment.InvoiceId!.Value;
+            var paymentsToDelete = await _db.Payments
+                .Where(item => item.InvoiceId == invoiceId)
+                .ToListAsync(ct);
+
+            _db.Payments.RemoveRange(paymentsToDelete);
+
+            var invoice = await _db.Invoices
+                .FirstOrDefaultAsync(item => item.Id == invoiceId, ct);
+            if (invoice is not null)
+            {
+                _db.Invoices.Remove(invoice);
+            }
+        }
+        else
+        {
+            _db.Payments.Remove(payment);
+        }
+
+        await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    private static bool IsInvoiceAggregatePayment(Payment payment)
+    {
+        if (!payment.InvoiceId.HasValue || payment.InvoiceId.Value <= 0)
+        {
+            return false;
+        }
+
+        if (payment.DocumentKind == DocumentKind.Invoice)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(payment.SystemNotes)
+               && payment.SystemNotes.Contains(InstallmentPaymentMarker, StringComparison.Ordinal);
     }
 }
