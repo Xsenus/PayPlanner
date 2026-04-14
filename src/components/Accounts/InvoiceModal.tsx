@@ -712,7 +712,9 @@ export function InvoiceModal({
       setDocumentPreviewLoading(true);
       setDocumentPreviewError(null);
       try {
-        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html');
+        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html', {
+          includeSignatureAndSeal: true,
+        });
         const html = await blob.text();
         if (!active) return;
         setDocumentPreviewHtml(html);
@@ -1818,7 +1820,9 @@ export function InvoiceModal({
     let previewWindow: Window | null | undefined;
     try {
       previewWindow = openPendingDocumentWindow();
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf');
+      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf', {
+        includeSignatureAndSeal: true,
+      });
       openBlobInWindow(blob, previewWindow, { autoPrint: true });
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {

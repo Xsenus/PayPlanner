@@ -323,7 +323,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('opens print window before requesting printable html document', async () => {
+  it('opens print window before requesting printable pdf document', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
     const openMock = vi.mocked(window.open);
@@ -360,7 +360,7 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'html');
+      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: true });
     });
   });
 });

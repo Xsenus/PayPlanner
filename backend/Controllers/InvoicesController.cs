@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Globalization;
 using System.Text;
 using System.Net;
 using System.IO;
@@ -35,6 +36,7 @@ public class InvoicesController : ControllerBase
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
+    private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
 
     public InvoicesController(
         PaymentContext db,
@@ -1171,12 +1173,14 @@ public class InvoicesController : ControllerBase
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
+        var installmentScheduleHtml = await BuildInstallmentScheduleHtmlAsync(payment, ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
             lineItems,
             mainCompany,
-            shouldIncludeSignatureAndSeal);
+            shouldIncludeSignatureAndSeal,
+            installmentScheduleHtml);
 
         if (normalizedFormat == "html")
         {
@@ -1237,12 +1241,14 @@ public class InvoicesController : ControllerBase
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, null);
         var mainCompany = await LoadMainCompanyAsync(ct);
+        var installmentScheduleHtml = await BuildInstallmentScheduleHtmlAsync(payment, ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
             lineItems,
             mainCompany,
-            documentSettings.PrintWithSignatureAndSealByDefault);
+            documentSettings.PrintWithSignatureAndSealByDefault,
+            installmentScheduleHtml);
         byte[] bytes;
         string fileName;
         string contentType;
@@ -3093,6 +3099,59 @@ public class InvoicesController : ControllerBase
             .FirstOrDefaultAsync(p => p.Id == id, ct);
     }
 
+    private async Task<string> BuildInstallmentScheduleHtmlAsync(Payment payment, CancellationToken ct)
+    {
+        var invoiceId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (!invoiceId.HasValue)
+        {
+            return string.Empty;
+        }
+
+        var installments = await _db.Payments
+            .AsNoTracking()
+            .Where(p =>
+                p.InvoiceId == invoiceId.Value
+                && p.Id != payment.Id
+                && p.SystemNotes.Contains(InstallmentPaymentMarker))
+            .Select(p => new { p.Id, p.Date, p.Amount, p.SystemNotes })
+            .ToListAsync(ct);
+
+        if (installments.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var items = new List<InstallmentScheduleItem>(installments.Count);
+        foreach (var installment in installments)
+        {
+            var metadata = ExtractInstallmentPaymentMetadata(installment.SystemNotes);
+            var date = metadata?.Item.Date != default ? metadata.Item.Date : installment.Date;
+            var amount = metadata?.Item.Payment > 0m ? metadata.Item.Payment : installment.Amount;
+            var sequence = metadata?.Item.Sequence ?? 0;
+            items.Add(new InstallmentScheduleItem(sequence, date, amount, installment.Id));
+        }
+
+        var orderedItems = items
+            .OrderBy(item => item.Sequence == 0 ? int.MaxValue : item.Sequence)
+            .ThenBy(item => item.Date)
+            .ThenBy(item => item.Id)
+            .ToList();
+
+        var builder = new StringBuilder();
+        builder.Append("<div class=\"installment-schedule\">");
+        builder.Append("<div class=\"installment-title\">ГРАФИК ПЛАТЕЖЕЙ:</div>");
+        var index = 1;
+        foreach (var item in orderedItems)
+        {
+            var amountText = item.Amount.ToString("N0", RuCulture);
+            builder.Append($"<div class=\"installment-item\">{index}. {item.Date:dd.MM.yyyy} - {amountText} руб.</div>");
+            index++;
+        }
+        builder.Append("</div>");
+
+        return builder.ToString();
+    }
+
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
     {
         var settings = await _db.SystemSettings
@@ -3262,6 +3321,8 @@ public class InvoicesController : ControllerBase
         public decimal Payment { get; init; }
         public decimal Balance { get; init; }
     }
+
+    private sealed record InstallmentScheduleItem(int Sequence, DateTime Date, decimal Amount, int Id);
 
     private sealed class InvoiceProjectionRaw
     {

@@ -116,9 +116,10 @@ public static class InvoiceDocumentTemplateEngine
         Payment payment,
         IReadOnlyCollection<InvoiceLineItemDto> lineItems,
         LegalEntity? mainCompany,
-        bool includeSignatureAndSeal = true)
+        bool includeSignatureAndSeal = true,
+        string? installmentScheduleHtml = null)
     {
-        var model = BuildRenderModel(payment, lineItems, mainCompany, includeSignatureAndSeal);
+        var model = BuildRenderModel(payment, lineItems, mainCompany, includeSignatureAndSeal, installmentScheduleHtml);
         var rendered = RenderLineItems(templateHtml, model.LineItems);
         return ReplaceTokens(rendered, model.Tokens);
     }
@@ -139,6 +140,7 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "invoice.totalWords", Category = "Счет", Description = "Итого прописью", IsRepeating = false },
             new() { Key = "invoice.itemsCount", Category = "Счет", Description = "Количество наименований в счете", IsRepeating = false },
             new() { Key = "invoice.vatText", Category = "Счет", Description = "Строка по НДС", IsRepeating = false },
+            new() { Key = "invoice.installmentScheduleHtml", Category = "Счет", Description = "HTML-блок графика платежей (если есть рассрочка)", IsRepeating = false },
             new() { Key = "invoice.qrCodeHtml", Category = "Счет", Description = "HTML-блок QR-кода для оплаты", IsRepeating = false },
             new() { Key = "seller.shortName", Category = "Продавец", Description = "Краткое название продавца", IsRepeating = false },
             new() { Key = "seller.fullName", Category = "Продавец", Description = "Полное название продавца", IsRepeating = false },
@@ -175,7 +177,8 @@ public static class InvoiceDocumentTemplateEngine
         Payment payment,
         IReadOnlyCollection<InvoiceLineItemDto> lineItems,
         LegalEntity? mainCompany,
-        bool includeSignatureAndSeal)
+        bool includeSignatureAndSeal,
+        string? installmentScheduleHtml)
     {
         var invoiceDate = (payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date).Date;
         var number = payment.Invoice?.Number ?? payment.Account ?? "—";
@@ -220,6 +223,7 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.itemsCount"] = Encode(normalizedLineItems.Count.ToString(CultureInfo.InvariantCulture)),
                 ["invoice.vatText"] = "Без налога (НДС): —",
                 ["invoice.qrCodeHtml"] = qrCodeHtml,
+                ["invoice.installmentScheduleHtml"] = installmentScheduleHtml ?? string.Empty,
                 ["seller.shortName"] = Encode(seller.ShortName),
                 ["seller.fullName"] = Encode(seller.FullName),
                 ["seller.inn"] = Encode(seller.Inn),
@@ -982,20 +986,26 @@ public static class InvoiceDocumentTemplateEngine
     .words {
       font-weight: 700;
     }
+    .installment-schedule {
+      margin-top: 6px;
+    }
+    .installment-title {
+      font-weight: 700;
+    }
     .signature-table {
       margin-top: 12px;
     }
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 50px;
+      height: 48px;
       vertical-align: bottom;
       position: relative;
       overflow: visible;
     }
     .signature-line .signature {
       max-width: 150px;
-      max-height: 40px;
+      max-height: 38px;
       object-fit: contain;
       position: absolute;
       left: 50%;
@@ -1004,12 +1014,12 @@ public static class InvoiceDocumentTemplateEngine
       z-index: 2;
     }
     .signature-line .seal {
-      max-width: 110px;
-      max-height: 110px;
+      max-width: 105px;
+      max-height: 105px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: -28px;
+      bottom: -18px;
       transform: translateX(-50%);
       opacity: 0.9;
       z-index: 1;
@@ -1150,6 +1160,7 @@ public static class InvoiceDocumentTemplateEngine
         Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.
       </div>
       <div class="words">{{invoice.totalWords}}</div>
+      {{invoice.installmentScheduleHtml}}
 
       <div class="color-line" style="margin: 6px 0;"></div>
 
