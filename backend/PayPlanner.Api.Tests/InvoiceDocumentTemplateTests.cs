@@ -119,6 +119,25 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_RendersExtendedBuyerBlock_WhenContractAndCaseAreLinked()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("Адрес: Самара, ул. Тестовая, д. 1", content.Content);
+        Assert.Contains("Паспорт 1234 567890", content.Content);
+        Assert.Contains("Тел.: +7 999 123-45-67", content.Content);
+        Assert.Contains("Email: client@example.com", content.Content);
+        Assert.Contains("Договор: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
+        Assert.Contains("Дело: Дело о взыскании задолженности", content.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_UsesDefaultMainCompanyFromNewSettingsStorage()
     {
         await using var db = await CreateContextAsync();
@@ -269,9 +288,19 @@ public class InvoiceDocumentTemplateTests
             Name = "Тестовый клиент",
             Address = "Самара, ул. Тестовая, д. 1",
             Email = "client@example.com",
+            Phone = "+7 999 123-45-67",
+            Company = "ООО Тестовый заказчик",
         };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
+
+        db.AddressRecords.Add(new AddressRecord
+        {
+            ClientId = client.Id,
+            Type = AddressType.Registration,
+            Value = "Самара, ул. Тестовая, д. 1",
+            IsPrimary = true,
+        });
 
         db.ClientPassports.Add(new ClientPassport
         {
@@ -289,6 +318,23 @@ public class InvoiceDocumentTemplateTests
             Date = new DateTime(2026, 4, 2),
         };
         db.Invoices.Add(invoice);
+
+        var contract = new Contract
+        {
+            Number = "DOG-42",
+            Date = new DateTime(2026, 3, 15),
+            Title = "Договор на сопровождение",
+            BillingMode = ContractBillingMode.Fixed,
+        };
+        db.Contracts.Add(contract);
+
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело о взыскании задолженности",
+            Status = ClientCaseStatus.Open,
+        };
+        db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
 
         var payment = new Payment
@@ -297,6 +343,8 @@ public class InvoiceDocumentTemplateTests
             AccountDate = invoice.Date,
             InvoiceId = invoice.Id,
             ClientId = client.Id,
+            ContractId = contract.Id,
+            ClientCaseId = clientCase.Id,
             DocumentKind = DocumentKind.Invoice,
             Date = new DateTime(2026, 4, 12),
             PlannedDate = new DateTime(2026, 4, 12),
@@ -307,6 +355,12 @@ public class InvoiceDocumentTemplateTests
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
+
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = payment.Id,
+            ClientCaseId = clientCase.Id,
+        });
 
         db.InvoiceLineItems.Add(new InvoiceLineItem
         {

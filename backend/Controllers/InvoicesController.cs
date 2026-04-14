@@ -3115,9 +3115,17 @@ public class InvoicesController : ControllerBase
             .AsNoTracking()
             .Include(p => p.Invoice)
             .Include(p => p.Client)
+                .ThenInclude(client => client!.Addresses)
+            .Include(p => p.Client)
                 .ThenInclude(client => client!.Passports)
             .Include(p => p.ExpenseClient)
+                .ThenInclude(client => client!.Addresses)
+            .Include(p => p.ExpenseClient)
                 .ThenInclude(client => client!.Passports)
+            .Include(p => p.Contract)
+            .Include(p => p.ClientCase)
+            .Include(p => p.InvoiceClientCases)
+                .ThenInclude(link => link.ClientCase)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
     }
 

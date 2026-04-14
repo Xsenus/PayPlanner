@@ -162,7 +162,12 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "buyer.name", Category = "Покупатель", Description = "ФИО или название покупателя", IsRepeating = false },
             new() { Key = "buyer.address", Category = "Покупатель", Description = "Адрес покупателя", IsRepeating = false },
             new() { Key = "buyer.passport", Category = "Покупатель", Description = "Паспортные данные покупателя", IsRepeating = false },
+            new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
+            new() { Key = "buyer.email", Category = "Покупатель", Description = "Email покупателя", IsRepeating = false },
+            new() { Key = "buyer.contract", Category = "Покупатель", Description = "Связанный договор покупателя", IsRepeating = false },
+            new() { Key = "buyer.case", Category = "Покупатель", Description = "Связанное дело покупателя", IsRepeating = false },
             new() { Key = "buyer.requisites", Category = "Покупатель", Description = "Полные реквизиты покупателя одной строкой", IsRepeating = false },
+            new() { Key = "buyer.requisitesHtml", Category = "Покупатель", Description = "Полные реквизиты покупателя с переносами строк", IsRepeating = false },
             new() { Key = "lineItems", Category = "Позиции", Description = "Повторяемый блок. Используйте {{#lineItems}} ... {{/lineItems}}", IsRepeating = true },
             new() { Key = "index", Category = "Позиции", Description = "Номер строки внутри блока lineItems", IsRepeating = true },
             new() { Key = "name", Category = "Позиции", Description = "Название позиции", IsRepeating = true },
@@ -248,7 +253,12 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),
+                ["buyer.phone"] = Encode(buyer.Phone),
+                ["buyer.email"] = Encode(buyer.Email),
+                ["buyer.contract"] = Encode(buyer.Contract),
+                ["buyer.case"] = Encode(buyer.Case),
                 ["buyer.requisites"] = Encode(buyer.Requisites),
+                ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
             },
             LineItems = normalizedLineItems
                 .Select((item, index) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -342,19 +352,48 @@ public static class InvoiceDocumentTemplateEngine
             directClient?.Name,
             payment.CounterpartyName,
             isExpense ? "Контрагент" : "Клиент");
-
-        var address = directClient?.Address ?? string.Empty;
+        var company = directClient?.Company ?? string.Empty;
+        var address = ResolveBuyerAddress(directClient);
         var passport = BuildPassport(primaryPassport);
+        var phone = directClient?.Phone ?? string.Empty;
+        var email = directClient?.Email ?? string.Empty;
+        var contract = BuildBuyerContract(payment.Contract);
+        var clientCase = BuildBuyerCase(payment);
 
-        var requisitesParts = new List<string> { name };
+        var requisitesLines = new List<string> { name };
+        if (!string.IsNullOrWhiteSpace(company) && !string.Equals(company, name, StringComparison.OrdinalIgnoreCase))
+        {
+            requisitesLines.Add(company);
+        }
+
         if (!string.IsNullOrWhiteSpace(address))
         {
-            requisitesParts.Add(address);
+            requisitesLines.Add($"Адрес: {address}");
         }
 
         if (!string.IsNullOrWhiteSpace(passport))
         {
-            requisitesParts.Add(passport);
+            requisitesLines.Add(passport);
+        }
+
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            requisitesLines.Add($"Тел.: {phone}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            requisitesLines.Add($"Email: {email}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract))
+        {
+            requisitesLines.Add(contract);
+        }
+
+        if (!string.IsNullOrWhiteSpace(clientCase))
+        {
+            requisitesLines.Add(clientCase);
         }
 
         return new BuyerInfo
@@ -362,8 +401,88 @@ public static class InvoiceDocumentTemplateEngine
             Name = name,
             Address = address,
             Passport = passport,
-            Requisites = string.Join(", ", requisitesParts.Where(static part => !string.IsNullOrWhiteSpace(part))),
+            Phone = phone,
+            Email = email,
+            Contract = contract,
+            Case = clientCase,
+            Requisites = string.Join(", ", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
+            RequisitesHtml = string.Join("<br/>", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part)).Select(Encode)),
         };
+    }
+
+    private static string ResolveBuyerAddress(Client? client)
+    {
+        if (client is null)
+        {
+            return string.Empty;
+        }
+
+        var normalizedAddress = client.Addresses
+            .OrderByDescending(address => address.IsPrimary)
+            .ThenBy(address => address.Type == AddressType.Registration ? 0 : address.Type == AddressType.Actual ? 1 : 2)
+            .Select(address => FirstNotEmpty(address.UnrestrictedValue, address.Value))
+            .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
+
+        return FirstNotEmpty(normalizedAddress, client.Address);
+    }
+
+    private static string BuildBuyerContract(Contract? contract)
+    {
+        if (contract is null)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(contract.Number))
+        {
+            parts.Add($"Договор № {contract.Number}");
+        }
+
+        if (contract.Date != default)
+        {
+            parts.Add($"от {contract.Date:dd.MM.yyyy}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract.Title))
+        {
+            parts.Add(contract.Title.Trim());
+        }
+
+        return parts.Count == 0
+            ? string.Empty
+            : $"Договор: {string.Join(" ", parts)}";
+    }
+
+    private static string BuildBuyerCase(Payment payment)
+    {
+        var labels = new List<string>();
+
+        if (payment.InvoiceClientCases.Count > 0)
+        {
+            labels.AddRange(payment.InvoiceClientCases
+                .Where(link => link.ClientCase is not null)
+                .OrderByDescending(link => link.ClientCase!.CreatedAt)
+                .ThenByDescending(link => link.ClientCaseId)
+                .Select(link => link.ClientCase!.Title?.Trim())
+                .Where(title => !string.IsNullOrWhiteSpace(title))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+
+        if (labels.Count == 0 && !string.IsNullOrWhiteSpace(payment.ClientCase?.Title))
+        {
+            labels.Add(payment.ClientCase.Title.Trim());
+        }
+
+        if (labels.Count == 0 && !string.IsNullOrWhiteSpace(payment.ClientCaseReference))
+        {
+            labels.Add(payment.ClientCaseReference.Trim());
+        }
+
+        return labels.Count == 0
+            ? string.Empty
+            : $"Дело: {string.Join("; ", labels)}";
     }
 
     private static string BuildPassport(ClientPassport? passport)
@@ -718,7 +837,12 @@ public static class InvoiceDocumentTemplateEngine
         public string Name { get; init; } = string.Empty;
         public string Address { get; init; } = string.Empty;
         public string Passport { get; init; } = string.Empty;
+        public string Phone { get; init; } = string.Empty;
+        public string Email { get; init; } = string.Empty;
+        public string Contract { get; init; } = string.Empty;
+        public string Case { get; init; } = string.Empty;
         public string Requisites { get; init; } = string.Empty;
+        public string RequisitesHtml { get; init; } = string.Empty;
     }
 
     private sealed class BankAccountInfo
@@ -1114,7 +1238,7 @@ public static class InvoiceDocumentTemplateEngine
           </tr>
           <tr>
             <td class="counterparty-label pad-t-5">Покупатель<br/>(Заказчик):</td>
-            <td class="counterparty-value pad-t-5">{{buyer.requisites}}</td>
+            <td class="counterparty-value pad-t-5">{{buyer.requisitesHtml}}</td>
           </tr>
         </tbody>
       </table>
