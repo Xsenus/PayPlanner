@@ -855,7 +855,7 @@ public static class InvoiceDocumentTemplateEngine
     .document-template tr,
     .document-template th,
     .document-template td {
-      font-size: 13px;
+      font-size: 12px;
     }
     .document-template table {
       width: 100%;
@@ -869,55 +869,57 @@ public static class InvoiceDocumentTemplateEngine
     .pad-t-5 { padding-top: 5px; }
     .color-line { border-bottom: 2px solid #000000; }
     .doc-title {
-      font-size: 17px !important;
+      font-size: 16px !important;
       font-weight: 700;
       line-height: 1.2;
     }
     .logo-wrap {
       text-align: center;
+      vertical-align: top;
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 120px;
-      max-width: 230px;
+      max-height: 110px;
+      max-width: 210px;
       margin-left: auto;
       margin-right: auto;
       object-fit: contain;
     }
     .invoice-qr {
       display: block;
-      width: 150px;
-      height: 150px;
-      max-width: 150px;
-      max-height: 150px;
+      width: 140px;
+      height: 140px;
+      max-width: 140px;
+      max-height: 140px;
       margin-left: auto;
       object-fit: contain;
     }
     .bank-grid td {
-      padding: 2px 5px;
+      padding: 2px 4px;
       border: 1px solid #000000;
       vertical-align: top;
-      line-height: 1.15;
+      line-height: 1.05;
       font-size: 12px !important;
     }
     .bank-grid .bor0-b { border-bottom: 0; }
     .bank-grid .bor0-t { border-top: 0; }
     .doc-main-title {
-      margin: 10px 0 12px;
+      margin: 8px 0 10px;
       text-align: center;
-      font-size: 19px !important;
+      font-size: 18px !important;
       font-weight: 700;
     }
     .counterparty-table td {
-      padding: 3px 4px;
+      padding: 2px 4px;
       vertical-align: top;
+      font-size: 12px !important;
     }
     .counterparty-label {
-      width: 18%;
+      width: 13%;
       color: #222222;
     }
     .counterparty-value {
-      font-weight: 700;
+      font-weight: 600;
     }
     .items-table {
       margin: 8px 0;
@@ -926,7 +928,7 @@ public static class InvoiceDocumentTemplateEngine
     .items-table th,
     .items-table td {
       border: 1px solid #000000;
-      padding: 4px 6px;
+      padding: 3px 5px;
       vertical-align: top;
       line-height: 1.18;
     }
@@ -936,20 +938,20 @@ public static class InvoiceDocumentTemplateEngine
       font-size: 12px !important;
     }
     .items-table .num {
-      width: 5%;
+      width: 4%;
       text-align: center;
     }
     .items-table .name {
-      width: 55%;
+      width: 58%;
       word-break: break-word;
     }
     .items-table .qty {
-      width: 8%;
+      width: 7%;
       text-align: right;
       white-space: nowrap;
     }
     .items-table .unit {
-      width: 7%;
+      width: 6%;
       text-align: right;
       white-space: nowrap;
     }
@@ -961,6 +963,7 @@ public static class InvoiceDocumentTemplateEngine
     }
     .totals-table td {
       padding: 1px 0;
+      font-size: 12px !important;
     }
     .totals-label {
       width: 82%;
@@ -980,33 +983,33 @@ public static class InvoiceDocumentTemplateEngine
       font-weight: 700;
     }
     .signature-table {
-      margin-top: 12px;
+      margin-top: 14px;
     }
     .signature-line {
       border-bottom: 1px solid #000000;
       text-align: center;
-      height: 56px;
+      height: 60px;
       vertical-align: bottom;
       position: relative;
       overflow: visible;
     }
     .signature-line .signature {
       max-width: 150px;
-      max-height: 40px;
+      max-height: 36px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: 6px;
+      bottom: 8px;
       transform: translateX(-50%);
       z-index: 2;
     }
     .signature-line .seal {
-      max-width: 130px;
-      max-height: 130px;
+      max-width: 120px;
+      max-height: 120px;
       object-fit: contain;
       position: absolute;
       left: 50%;
-      bottom: -36px;
+      bottom: -30px;
       transform: translateX(-50%);
       opacity: 0.88;
       z-index: 1;
