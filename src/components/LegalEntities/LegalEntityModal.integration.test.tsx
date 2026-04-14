@@ -272,6 +272,10 @@ describe('LegalEntityModal integration', () => {
         hidePageNavigation
         hideFormActions
         hideDadataSection
+        hideMetaInfo
+        hideAuditSection
+        hideDictionaryButtons
+        compactReadOnlyView
       />,
     );
 
@@ -279,6 +283,13 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByRole('button', { name: 'Назад' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
     expect(screen.queryByText('Заполнить по данным DaData')).toBeNull();
+    expect(screen.queryByText('Создано')).toBeNull();
+    expect(screen.queryByText('Справочник банков')).toBeNull();
+    expect(screen.queryByText('Действия')).toBeNull();
+    expect(screen.queryByText('+ Добавить телефон')).toBeNull();
+    expect(screen.queryByText('+ Добавить email')).toBeNull();
+    expect(screen.queryByText('Справочник')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Найти адрес' })).toBeNull();
     expect(screen.getByDisplayValue('ИП Кожеваткин Андрей Владимирович')).toHaveProperty('disabled', true);
     expect(screen.getByDisplayValue('633009620345')).toHaveProperty('disabled', true);
   });

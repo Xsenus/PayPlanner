@@ -169,6 +169,10 @@ export function CompanyProfile() {
           hidePageNavigation={isReadOnlyProfile}
           hideFormActions={isReadOnlyProfile}
           hideDadataSection={isReadOnlyProfile}
+          hideMetaInfo={isReadOnlyProfile}
+          hideAuditSection={isReadOnlyProfile}
+          hideDictionaryButtons={isReadOnlyProfile}
+          compactReadOnlyView={isReadOnlyProfile}
         />
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">

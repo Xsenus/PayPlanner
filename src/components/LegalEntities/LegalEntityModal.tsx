@@ -71,6 +71,10 @@ interface LegalEntityModalProps {
   hidePageNavigation?: boolean;
   hideFormActions?: boolean;
   hideDadataSection?: boolean;
+  hideMetaInfo?: boolean;
+  hideAuditSection?: boolean;
+  hideDictionaryButtons?: boolean;
+  compactReadOnlyView?: boolean;
 }
 
 interface LegalEntityImageFieldProps {
@@ -80,6 +84,7 @@ interface LegalEntityImageFieldProps {
   persistedValue: string;
   changed: boolean;
   readOnly: boolean;
+  compactDisplay?: boolean;
   onUpload: (file: File | null) => Promise<void>;
   onRemove: () => Promise<void>;
   onRestore: () => void;
@@ -205,6 +210,7 @@ function LegalEntityImageField({
   persistedValue,
   changed,
   readOnly,
+  compactDisplay = false,
   onUpload,
   onRemove,
   onRestore,
@@ -222,11 +228,11 @@ function LegalEntityImageField({
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="text-sm font-semibold text-slate-700">{title}</div>
       <div
-        className={`relative mt-4 flex min-h-[220px] items-center justify-center overflow-hidden rounded-2xl px-4 py-5 ${
+        className={`relative mt-4 flex items-center justify-center overflow-hidden rounded-2xl ${
           hasImage
             ? 'border border-slate-200 bg-slate-50/80'
             : 'border border-dashed border-slate-300 bg-slate-50/40'
-        }`}>
+        } ${compactDisplay ? 'min-h-[260px] p-3' : 'min-h-[220px] px-4 py-5'}`}>
         {hasImage ? (
           <>
             {canRemove ? (
@@ -245,7 +251,9 @@ function LegalEntityImageField({
               <img
                 src={value}
                 alt={alt}
-                className="max-h-28 max-w-full rounded-2xl border border-slate-200 bg-white p-2 object-contain shadow-sm"
+                className={`w-full rounded-2xl border border-slate-200 bg-white object-contain shadow-sm ${
+                  compactDisplay ? 'h-[230px] p-1' : 'max-h-36 p-3'
+                }`}
               />
               {showReplaceHint ? (
                 <p className="text-center text-xs text-slate-500">
@@ -542,6 +550,10 @@ export function LegalEntityModal({
   hidePageNavigation = false,
   hideFormActions = false,
   hideDadataSection = false,
+  hideMetaInfo = false,
+  hideAuditSection = false,
+  hideDictionaryButtons = false,
+  compactReadOnlyView = false,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -1599,6 +1611,7 @@ export function LegalEntityModal({
             {t('legalEntityClientsHint') || 'Выберите клиентов, которые относятся к этому юридическому лицу.'}
           </p>
         </div>
+        {!compactReadOnlyView ? (
         <button
           type="button"
           onClick={() => setPickerOpen(true)}
@@ -1607,6 +1620,7 @@ export function LegalEntityModal({
           <Plus className="h-4 w-4" />
           {t('addClient') || 'Добавить клиента'}
         </button>
+        ) : null}
       </div>
 
       <div className="mt-3 overflow-x-auto">
@@ -1615,14 +1629,14 @@ export function LegalEntityModal({
             <col style={{ width: '28%' }} />
             <col style={{ width: '20%' }} />
             <col style={{ width: '36%' }} />
-            <col style={{ width: '16%' }} />
+            {!compactReadOnlyView ? <col style={{ width: '16%' }} /> : null}
           </colgroup>
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-3 py-2 text-left">ФИО</th>
               <th className="px-3 py-2 text-left">Компания</th>
               <th className="px-3 py-2 text-left">Контакты</th>
-              <th className="px-3 py-2 text-right">Действия</th>
+              {!compactReadOnlyView ? <th className="px-3 py-2 text-right">Действия</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -1637,20 +1651,22 @@ export function LegalEntityModal({
                   <div>{client.phone || '—'}</div>
                   <div>{client.email || '—'}</div>
                 </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveClient(client.id)}
-                    disabled={readOnly}
-                    className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60">
-                    <X className="h-4 w-4" />
-                  </button>
-                </td>
+                {!compactReadOnlyView ? (
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveClient(client.id)}
+                      disabled={readOnly}
+                      className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             ))}
             {selectedClients.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={compactReadOnlyView ? 3 : 4} className="px-3 py-6 text-center text-slate-500">
                   {t('nothingFound') || 'Ничего не найдено'}
                 </td>
               </tr>
@@ -1759,7 +1775,7 @@ export function LegalEntityModal({
               </button>
             )}
             <h2 className="text-xl font-semibold text-gray-900">{resolvedTitle}</h2>
-            {initial && (
+            {initial && !hideMetaInfo && (
               <p className="mt-1 text-sm text-gray-500">
                 {(t('createdAt') || 'Создано')}: {new Date(initial.createdAt).toLocaleString()}
                 {initial.updatedAt ? (
@@ -1785,7 +1801,7 @@ export function LegalEntityModal({
           </div>
         )}
 
-        {initial ? (
+        {initial && !hideAuditSection ? (
           <div className="mx-6 mt-4">
             <ObjectAuditLauncher
               objectType="legal-entity"
@@ -1950,15 +1966,17 @@ export function LegalEntityModal({
                       <div key={item.key}>
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <label className="block text-sm font-medium text-gray-700">{item.label}</label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDictModalTab(item.dict as LegalEntityDictTab);
-                              setDictModalOpen(true);
-                            }}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-700">
-                            Справочник
+                          {!hideDictionaryButtons ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDictModalTab(item.dict as LegalEntityDictTab);
+                                setDictModalOpen(true);
+                              }}
+                              className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                              Справочник
                           </button>
+                          ) : null}
                         </div>
                         <select
                           name={item.key}
@@ -1983,7 +2001,14 @@ export function LegalEntityModal({
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <label className="block text-sm font-medium text-gray-700">Система налогообложения</label>
-                      <button type="button" onClick={() => { setDictModalTab('tax-systems'); setDictModalOpen(true); }} className="text-xs font-medium text-blue-600 hover:text-blue-700">Справочник</button>
+                      {!hideDictionaryButtons ? (
+                        <button
+                          type="button"
+                          onClick={() => { setDictModalTab('tax-systems'); setDictModalOpen(true); }}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                          Справочник
+                        </button>
+                      ) : null}
                     </div>
                     <select name="taxSystem" value={formState.taxSystem} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">Не выбрано</option>
@@ -1994,7 +2019,14 @@ export function LegalEntityModal({
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <label className="block text-sm font-medium text-gray-700">Режим налогообложения</label>
-                      <button type="button" onClick={() => { setDictModalTab('tax-system-modes'); setDictModalOpen(true); }} className="text-xs font-medium text-blue-600 hover:text-blue-700">Справочник</button>
+                      {!hideDictionaryButtons ? (
+                        <button
+                          type="button"
+                          onClick={() => { setDictModalTab('tax-system-modes'); setDictModalOpen(true); }}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                          Справочник
+                        </button>
+                      ) : null}
                     </div>
                     <select name="taxSystemMode" value={formState.taxSystemMode} onChange={handleInputChange} disabled={readOnly} className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">Не выбрано</option>
@@ -2071,6 +2103,7 @@ export function LegalEntityModal({
                 <ClientAddressEntriesForm
                   entries={addressEntries}
                   canEdit={!readOnly}
+                  compactReadOnly={compactReadOnlyView}
                   dateInputClassName={DATE_INPUT_CLASS}
                   addressTypeOptions={[...ADDRESS_TYPE_OPTIONS]}
                   suggestionsByIndex={addressSuggestionsByIndex}
@@ -2088,16 +2121,16 @@ export function LegalEntityModal({
                 <div className="grid gap-6 md:grid-cols-2">
                   <div>
                     <div className="mb-2 text-sm font-medium text-gray-700">Телефоны</div>
-                    <button type="button" onClick={() => setContactPhones((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить телефон</button>
+                    {!compactReadOnlyView ? <button type="button" onClick={() => setContactPhones((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить телефон</button> : null}
                     <div className="space-y-2">
-                      {contactPhones.map((v, idx) => <div key={`ph-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactPhones((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /><button type="button" disabled={readOnly} onClick={() => setContactPhones((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button></div>)}
+                      {contactPhones.map((v, idx) => <div key={`ph-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactPhones((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />{!compactReadOnlyView ? <button type="button" disabled={readOnly} onClick={() => setContactPhones((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button> : null}</div>)}
                     </div>
                   </div>
                   <div>
                     <div className="mb-2 text-sm font-medium text-gray-700">Email</div>
-                    <button type="button" onClick={() => setContactEmails((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить email</button>
+                    {!compactReadOnlyView ? <button type="button" onClick={() => setContactEmails((prev) => [...prev, ''])} disabled={readOnly} className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">+ Добавить email</button> : null}
                     <div className="space-y-2">
-                      {contactEmails.map((v, idx) => <div key={`em-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactEmails((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /><button type="button" disabled={readOnly} onClick={() => setContactEmails((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button></div>)}
+                      {contactEmails.map((v, idx) => <div key={`em-${idx}`} className="flex gap-2"><input value={v} disabled={readOnly} onChange={(e) => setContactEmails((prev) => prev.map((x, i) => i===idx?e.target.value:x))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />{!compactReadOnlyView ? <button type="button" disabled={readOnly} onClick={() => setContactEmails((prev) => prev.filter((_, i) => i!==idx))} className="rounded-xl border border-rose-200 px-3 text-rose-600">✕</button> : null}</div>)}
                     </div>
                   </div>
                 </div>
@@ -2124,6 +2157,7 @@ export function LegalEntityModal({
           <div className="mt-6">
             <LegalEntityFinanceSection
               readOnly={readOnly}
+              compactReadOnly={compactReadOnlyView}
               bankAccounts={bankAccounts}
               cashRegisters={cashRegisters}
               cards={cards}
@@ -2141,6 +2175,7 @@ export function LegalEntityModal({
               persistedValue={persistedLogoDataUrl}
               changed={logoChanged}
               readOnly={readOnly}
+              compactDisplay={compactReadOnlyView}
               onUpload={async (file) => {
                 await handleImageUpload(file, setLogoDataUrl, setLogoChanged, 'logo');
               }}
@@ -2156,6 +2191,7 @@ export function LegalEntityModal({
               persistedValue={persistedSealDataUrl}
               changed={sealChanged}
               readOnly={readOnly}
+              compactDisplay={compactReadOnlyView}
               onUpload={async (file) => {
                 await handleImageUpload(file, setSealDataUrl, setSealChanged, 'seal');
               }}
@@ -2171,6 +2207,7 @@ export function LegalEntityModal({
               persistedValue={persistedDirectorSignatureDataUrl}
               changed={directorSignatureChanged}
               readOnly={readOnly}
+              compactDisplay={compactReadOnlyView}
               onUpload={async (file) => {
                 await handleImageUpload(file, setDirectorSignatureDataUrl, setDirectorSignatureChanged, 'signature');
               }}
@@ -2228,17 +2265,14 @@ export function LegalEntityModal({
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Фамилия</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Швыдченко" value={documentDirector.lastName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'lastName', e.target.value)} disabled={readOnly} /></label>
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Имя</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Сергей" value={documentDirector.firstName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'firstName', e.target.value)} disabled={readOnly} /></label>
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Отчество</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Николаевич" value={documentDirector.middleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'middleName', e.target.value)} disabled={readOnly} /></label>
-                <label className="flex items-center gap-2 text-base text-slate-700"><input type="checkbox" checked={documentDirector.noMiddleName} onChange={(e) => updatePersonInfo(setDocumentDirector, 'noMiddleName', e.target.checked)} disabled={readOnly} className="h-5 w-5" /> Нет отчества</label>
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-2xl font-semibold text-slate-900">Главный бухгалтер (для документов)</h3>
-              <div className="mt-4 flex items-center justify-between text-base text-slate-700"><span>Совпадает с руководителем</span><label className="flex items-center gap-2"><input type="checkbox" checked={false} readOnly className="h-5 w-5" /> ✓ Активно</label></div>
               <div className="mt-4 grid gap-4">
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Фамилия</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Швыдченко" value={chiefAccountant.lastName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'lastName', e.target.value)} disabled={readOnly} /></label>
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Имя</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Сергей" value={chiefAccountant.firstName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'firstName', e.target.value)} disabled={readOnly} /></label>
                 <label className="block text-sm text-slate-600"><span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Отчество</span><input className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Николаевич" value={chiefAccountant.middleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'middleName', e.target.value)} disabled={readOnly} /></label>
-                <label className="flex items-center gap-2 text-base text-slate-700"><input type="checkbox" checked={chiefAccountant.noMiddleName} onChange={(e) => updatePersonInfo(setChiefAccountant, 'noMiddleName', e.target.checked)} disabled={readOnly} className="h-5 w-5" /> Нет отчества</label>
               </div>
             </div>
           </div>

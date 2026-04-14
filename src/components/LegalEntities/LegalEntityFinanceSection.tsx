@@ -25,6 +25,7 @@ type FinanceTab = 'bankAccounts' | 'cashRegisters' | 'cards';
 
 interface LegalEntityFinanceSectionProps {
   readOnly: boolean;
+  compactReadOnly?: boolean;
   bankAccounts: LegalEntityBankAccount[];
   cashRegisters: LegalEntityCashRegister[];
   cards: LegalEntityCard[];
@@ -282,6 +283,7 @@ function mapFormToCard(form: CardFormState): LegalEntityCard {
 
 export function LegalEntityFinanceSection({
   readOnly,
+  compactReadOnly = false,
   bankAccounts,
   cashRegisters,
   cards,
@@ -609,6 +611,10 @@ export function LegalEntityFinanceSection({
   );
 
   const renderBankDirectoryHint = () => {
+    if (compactReadOnly) {
+      return null;
+    }
+
     if (activeTab !== 'bankAccounts' && activeTab !== 'cards') {
       return null;
     }
@@ -652,13 +658,15 @@ export function LegalEntityFinanceSection({
               <th className="px-4 py-3 font-semibold">Валюта</th>
               <th className="px-4 py-3 font-semibold">Р/с</th>
               <th className="px-4 py-3 font-semibold">Тип</th>
-              <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              {!compactReadOnly ? (
+                <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {bankAccounts.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={compactReadOnly ? 6 : 7} className="px-4 py-12 text-center text-sm text-slate-500">
                   Банковские счета пока не добавлены.
                 </td>
               </tr>
@@ -671,30 +679,32 @@ export function LegalEntityFinanceSection({
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.currency)}</td>
                   <td className="px-4 py-3 font-mono text-slate-700">{formatOptional(item.accountNumber)}</td>
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.accountType)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => openEditBankAccount(index)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Редактировать счет"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => {
-                          void deleteBankAccount(index);
-                        }}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Удалить счет"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+                  {!compactReadOnly ? (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => openEditBankAccount(index)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Редактировать счет"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            void deleteBankAccount(index);
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Удалить счет"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
@@ -715,13 +725,15 @@ export function LegalEntityFinanceSection({
               <th className="px-4 py-3 font-semibold">Доступ</th>
               <th className="px-4 py-3 font-semibold">Для учета</th>
               <th className="px-4 py-3 font-semibold">Тип</th>
-              <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              {!compactReadOnly ? (
+                <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {cashRegisters.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={compactReadOnly ? 5 : 6} className="px-4 py-12 text-center text-sm text-slate-500">
                   Кассы пока не добавлены.
                 </td>
               </tr>
@@ -737,30 +749,32 @@ export function LegalEntityFinanceSection({
                       ? 'Основная'
                       : formatOptional(item.accountType)}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => openEditCashRegister(index)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Редактировать кассу"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => {
-                          void deleteCashRegister(index);
-                        }}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Удалить кассу"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+                  {!compactReadOnly ? (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => openEditCashRegister(index)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Редактировать кассу"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            void deleteCashRegister(index);
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Удалить кассу"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
@@ -782,13 +796,15 @@ export function LegalEntityFinanceSection({
               <th className="px-4 py-3 font-semibold">Номер карты или счета</th>
               <th className="px-4 py-3 font-semibold">Держатель</th>
               <th className="px-4 py-3 font-semibold">Для учета</th>
-              <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              {!compactReadOnly ? (
+                <th className="px-4 py-3 font-semibold text-right">Действия</th>
+              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {cards.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={compactReadOnly ? 6 : 7} className="px-4 py-12 text-center text-sm text-slate-500">
                   Карты пока не добавлены.
                 </td>
               </tr>
@@ -801,30 +817,32 @@ export function LegalEntityFinanceSection({
                   <td className="px-4 py-3 font-mono text-slate-700">{formatOptional(item.number)}</td>
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.holder)}</td>
                   <td className="px-4 py-3 text-slate-700">{formatBool(item.accountingEnabled, 'Да', 'Нет')}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => openEditCard(index)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Редактировать карту"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => {
-                          void deleteCard(index);
-                        }}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Удалить карту"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+                  {!compactReadOnly ? (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => openEditCard(index)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Редактировать карту"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            void deleteCard(index);
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Удалить карту"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
