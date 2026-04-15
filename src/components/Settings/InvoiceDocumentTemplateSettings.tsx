@@ -44,6 +44,8 @@ const PREVIEW_HTML_TOKEN_KEYS = new Set([
   'seller.sealHtml',
   'seller.signatureHtml',
   'invoice.qrCodeHtml',
+  'buyer.requisitesHtml',
+  'buyer.foundationRowHtml',
 ]);
 
 const PREVIEW_TOKENS: Record<string, string> = {
@@ -79,10 +81,14 @@ const PREVIEW_TOKENS: Record<string, string> = {
   'seller.signatureHtml': '<div style="font-style:italic;color:#334155;font-size:18px;">А. В. Кожеваткин</div>',
   'buyer.name': 'Губанова Оксана Ивановна',
   'buyer.address': 'Самарская область, р-н Безенчукский, пгт Безенчук, ул. Тимирязева, д. 17',
-  'buyer.passport': 'Паспорт серия 36 17 № 441597',
+  'buyer.passport': 'Паспорт 36 17 № 441597',
   'buyer.inn': '633123456789',
   'buyer.snils': '123-456-789 00',
-  'buyer.requisites': 'Губанова Оксана Ивановна, Адрес: Самарская область, р-н Безенчукский, пгт Безенчук, ул. Тимирязева, д. 17, Паспорт серия 36 17 № 441597, ИНН: 633123456789, СНИЛС: 123-456-789 00',
+  'buyer.contract': 'Договор: Договор № 1-03/04-26 от 03.04.2026 БАНКРОТСТВО',
+  'buyer.foundation': 'Договор № 1-03/04-26 от 03.04.2026 БАНКРОТСТВО',
+  'buyer.requisites': 'Губанова Оксана Ивановна, ИНН 633123456789, СНИЛС 123-456-789 00, Паспорт 36 17 № 441597, Самарская область, р-н Безенчукский, пгт Безенчук, ул. Тимирязева, д. 17',
+  'buyer.requisitesHtml': 'Губанова Оксана Ивановна, ИНН 633123456789, СНИЛС 123-456-789 00<br/>Паспорт 36 17 № 441597<br/>Самарская область, р-н Безенчукский, пгт Безенчук, ул. Тимирязева, д. 17',
+  'buyer.foundationRowHtml': '<tr><td class="counterparty-label pad-t-5">Основание:</td><td class="counterparty-value pad-t-5">Договор № 1-03/04-26 от 03.04.2026 БАНКРОТСТВО</td></tr>',
 };
 
 const PREVIEW_LINE_ITEMS = [

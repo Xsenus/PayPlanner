@@ -172,9 +172,11 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
             new() { Key = "buyer.email", Category = "Покупатель", Description = "Email покупателя", IsRepeating = false },
             new() { Key = "buyer.contract", Category = "Покупатель", Description = "Связанный договор покупателя", IsRepeating = false },
+            new() { Key = "buyer.foundation", Category = "Покупатель", Description = "Основание счета по покупателю", IsRepeating = false },
             new() { Key = "buyer.case", Category = "Покупатель", Description = "Связанное дело покупателя", IsRepeating = false },
             new() { Key = "buyer.requisites", Category = "Покупатель", Description = "Полные реквизиты покупателя одной строкой", IsRepeating = false },
             new() { Key = "buyer.requisitesHtml", Category = "Покупатель", Description = "Полные реквизиты покупателя с переносами строк", IsRepeating = false },
+            new() { Key = "buyer.foundationRowHtml", Category = "Покупатель", Description = "HTML-строка основания для таблицы покупателя", IsRepeating = false },
             new() { Key = "lineItems", Category = "Позиции", Description = "Повторяемый блок. Используйте {{#lineItems}} ... {{/lineItems}}", IsRepeating = true },
             new() { Key = "index", Category = "Позиции", Description = "Номер строки внутри блока lineItems", IsRepeating = true },
             new() { Key = "name", Category = "Позиции", Description = "Название позиции", IsRepeating = true },
@@ -278,9 +280,11 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.phone"] = Encode(buyer.Phone),
                 ["buyer.email"] = Encode(buyer.Email),
                 ["buyer.contract"] = Encode(buyer.Contract),
+                ["buyer.foundation"] = Encode(buyer.Foundation),
                 ["buyer.case"] = Encode(buyer.Case),
                 ["buyer.requisites"] = Encode(buyer.Requisites),
                 ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
+                ["buyer.foundationRowHtml"] = BuildBuyerFoundationRowHtml(buyer.Foundation),
             },
             LineItems = normalizedLineItems
                 .Select((item, index) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -391,31 +395,27 @@ public static class InvoiceDocumentTemplateEngine
         var contract = string.IsNullOrWhiteSpace(contractValue)
             ? string.Empty
             : $"Договор: {contractValue}";
-        var foundation = string.IsNullOrWhiteSpace(contractValue)
-            ? string.Empty
-            : $"Основание: {contractValue}";
+        var foundation = contractValue;
         var clientCase = BuildBuyerCase(payment);
-
-        var requisitesLines = new List<string> { name };
-
+        var headlineParts = new List<string> { name };
         if (!string.IsNullOrWhiteSpace(inn))
         {
-            requisitesLines.Add($"ИНН {inn}");
+            headlineParts.Add($"ИНН {inn}");
         }
 
         if (!string.IsNullOrWhiteSpace(snils))
         {
-            requisitesLines.Add($"СНИЛС {snils}");
+            headlineParts.Add($"СНИЛС {snils}");
         }
+
+        var requisitesLines = new List<string>
+        {
+            string.Join(", ", headlineParts.Where(static part => !string.IsNullOrWhiteSpace(part))),
+        };
 
         if (!string.IsNullOrWhiteSpace(company) && !string.Equals(company, name, StringComparison.OrdinalIgnoreCase))
         {
             requisitesLines.Add(company);
-        }
-
-        if (!string.IsNullOrWhiteSpace(address))
-        {
-            requisitesLines.Add($"Адрес: {address}");
         }
 
         if (!string.IsNullOrWhiteSpace(passport))
@@ -423,24 +423,9 @@ public static class InvoiceDocumentTemplateEngine
             requisitesLines.Add(passport);
         }
 
-        if (!string.IsNullOrWhiteSpace(phone))
+        if (!string.IsNullOrWhiteSpace(address))
         {
-            requisitesLines.Add($"Тел.: {phone}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(email))
-        {
-            requisitesLines.Add($"Email: {email}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(foundation))
-        {
-            requisitesLines.Add(foundation);
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientCase))
-        {
-            requisitesLines.Add(clientCase);
+            requisitesLines.Add(address);
         }
 
         return new BuyerInfo
@@ -453,6 +438,7 @@ public static class InvoiceDocumentTemplateEngine
             Phone = phone,
             Email = email,
             Contract = contract,
+            Foundation = foundation,
             Case = clientCase,
             Requisites = string.Join(", ", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
             RequisitesHtml = string.Join("<br/>", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part)).Select(Encode)),
@@ -534,6 +520,21 @@ public static class InvoiceDocumentTemplateEngine
             : $"Дело: {string.Join("; ", labels)}";
     }
 
+    private static string BuildBuyerFoundationRowHtml(string foundation)
+    {
+        if (string.IsNullOrWhiteSpace(foundation))
+        {
+            return string.Empty;
+        }
+
+        return $"""
+          <tr>
+            <td class="counterparty-label pad-t-5">Основание:</td>
+            <td class="counterparty-value pad-t-5">{Encode(foundation)}</td>
+          </tr>
+        """;
+    }
+
     private static string BuildPassport(ClientPassport? passport)
     {
         if (passport is null)
@@ -574,20 +575,23 @@ public static class InvoiceDocumentTemplateEngine
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(series) || !string.IsNullOrWhiteSpace(number))
         {
-            var passportIdentityParts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(series))
+            var passportIdentity = string.Empty;
+            if (!string.IsNullOrWhiteSpace(series) && !string.IsNullOrWhiteSpace(number))
             {
-                passportIdentityParts.Add($"серия {series.Trim()}");
+                passportIdentity = $"Паспорт {series.Trim()} № {number.Trim()}";
+            }
+            else if (!string.IsNullOrWhiteSpace(series))
+            {
+                passportIdentity = $"Паспорт {series.Trim()}";
+            }
+            else if (!string.IsNullOrWhiteSpace(number))
+            {
+                passportIdentity = $"Паспорт № {number.Trim()}";
             }
 
-            if (!string.IsNullOrWhiteSpace(number))
+            if (!string.IsNullOrWhiteSpace(passportIdentity))
             {
-                passportIdentityParts.Add($"номер {number.Trim()}");
-            }
-
-            if (passportIdentityParts.Count > 0)
-            {
-                parts.Add($"Паспорт: {string.Join(" ", passportIdentityParts)}");
+                parts.Add(passportIdentity);
             }
         }
 
@@ -1000,6 +1004,7 @@ public static class InvoiceDocumentTemplateEngine
         public string Phone { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
         public string Contract { get; init; } = string.Empty;
+        public string Foundation { get; init; } = string.Empty;
         public string Case { get; init; } = string.Empty;
         public string Requisites { get; init; } = string.Empty;
         public string RequisitesHtml { get; init; } = string.Empty;
@@ -1182,17 +1187,39 @@ public static class InvoiceDocumentTemplateEngine
       font-weight: 700;
       line-height: 1.15;
     }
-    .logo-wrap {
-      text-align: center;
+    .header-table {
+      table-layout: fixed;
+    }
+    .seller-title-cell {
+      padding: 2px 0 8px;
+      vertical-align: middle;
+    }
+    .bank-cell {
       vertical-align: top;
+    }
+    .brand-column {
+      width: 165px;
+      padding-left: 10px;
+      vertical-align: top;
+    }
+    .brand-stack {
+      width: 150px;
+      margin-left: auto;
+    }
+    .logo-wrap {
+      min-height: 88px;
+      padding-top: 2px;
+      text-align: center;
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 90px;
-      max-width: 180px;
-      margin-left: auto;
-      margin-right: auto;
+      max-height: 82px;
+      max-width: 150px;
+      margin: 0 auto;
       object-fit: contain;
+    }
+    .qr-wrap {
+      margin-top: 10px;
     }
     .invoice-qr {
       display: block;
@@ -1200,7 +1227,7 @@ public static class InvoiceDocumentTemplateEngine
       height: 150px;
       max-width: 150px;
       max-height: 150px;
-      margin-left: auto;
+      margin: 0 auto;
       object-fit: contain;
     }
     .bank-grid td {
@@ -1355,23 +1382,25 @@ public static class InvoiceDocumentTemplateEngine
 <body>
   <div class="page-content">
     <div class="document-template invoice-template">
-      <table style="margin-bottom: 10px;">
+      <table class="header-table" style="margin: 0 0 10px;">
         <tbody>
           <tr>
-            <td class="doc-title" style="width: 60%; vertical-align: middle; padding: 2px 0;">
+            <td class="doc-title seller-title-cell">
               {{seller.fullName}}
             </td>
-            <td class="logo-wrap" style="width: 40%; vertical-align: middle;">
-              {{seller.logoHtml}}
+            <td class="brand-column" rowspan="2">
+              <div class="brand-stack">
+                <div class="logo-wrap">
+                  {{seller.logoHtml}}
+                </div>
+                <div class="qr-wrap">
+                  {{invoice.qrCodeHtml}}
+                </div>
+              </div>
             </td>
           </tr>
-        </tbody>
-      </table>
-
-      <table style="margin: 0 0 10px;">
-        <tbody>
           <tr>
-            <td>
+            <td class="bank-cell">
               <table class="bank-grid">
                 <tbody>
                   <tr>
@@ -1409,9 +1438,6 @@ public static class InvoiceDocumentTemplateEngine
                 </tbody>
               </table>
             </td>
-            <td style="width: 150px; vertical-align: top;">
-              {{invoice.qrCodeHtml}}
-            </td>
           </tr>
         </tbody>
       </table>
@@ -1432,6 +1458,7 @@ public static class InvoiceDocumentTemplateEngine
             <td class="counterparty-label pad-t-5">Покупатель<br/>(Заказчик):</td>
             <td class="counterparty-value pad-t-5">{{buyer.requisitesHtml}}</td>
           </tr>
+          {{buyer.foundationRowHtml}}
         </tbody>
       </table>
 
