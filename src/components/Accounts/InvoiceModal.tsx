@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
@@ -31,6 +31,7 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { CaseModal } from '../Clients/CaseModal';
 import { ContractModal } from '../Contracts/ContractModal';
+import { InvoiceLineItemLookupDialog } from './InvoiceLineItemLookupDialog';
 import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
@@ -71,6 +72,15 @@ type DraftActForm = {
   amount: string;
   comment: string;
 };
+
+type LineItemLookupState =
+  | { kind: 'category'; lineItemId: string }
+  | { kind: 'service'; lineItemId: string }
+  | null;
+
+const LINE_ITEM_GRID_TEMPLATE =
+  'md:grid-cols-[minmax(14rem,1.1fr)_minmax(19rem,1.8fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.8fr)_minmax(8.5rem,0.8fr)_2.75rem]';
+const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[68rem]';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -150,7 +160,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       id: `${Date.now()}-${index}`,
       name: item.name ?? '',
       quantity: String(item.quantity ?? 0),
-      unit: item.unit ?? 'шт',
+      unit: item.unit ?? 'С€С‚',
       price: formatMoneyValue(item.price),
       serviceCategoryId: '',
     }));
@@ -161,7 +171,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       id: `${Date.now()}-base`,
       name: '',
       quantity: '1',
-      unit: 'шт',
+      unit: 'С€С‚',
       price: formatMoneyValue(fallbackAmount ?? 0),
       serviceCategoryId: '',
     },
@@ -319,34 +329,34 @@ function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
 function actLabel(act: ActOption | null): string {
   if (!act) return '';
   const parts: string[] = [];
-  if (act.number) parts.push(`№${act.number}`);
+  if (act.number) parts.push(`в„–${act.number}`);
   if (act.title) parts.push(act.title);
-  return parts.join(' · ');
+  return parts.join(' В· ');
 }
 
 function clientCaseLabel(clientCase: ClientCaseOption | null): string {
   if (!clientCase) return '';
-  return clientCase.title?.trim() || `Дело #${clientCase.id}`;
+  return clientCase.title?.trim() || `Р”РµР»Рѕ #${clientCase.id}`;
 }
 
 function clientCaseStatusLabel(statusRaw?: string | null): string {
   const status = (statusRaw ?? '').trim();
   const normalized = status.toLowerCase();
 
-  if (!normalized) return 'Без статуса';
-  if (normalized.includes('open')) return 'Открыто';
-  if (normalized.includes('onhold') || normalized.includes('hold')) return 'Приостановлено';
-  if (normalized.includes('closed')) return 'Закрыто';
-  if (normalized.includes('в работе') || normalized.includes('актив')) return 'Открыто';
-  if (normalized.includes('ожид')) return 'Приостановлено';
-  if (normalized.includes('закры')) return 'Закрыто';
+  if (!normalized) return 'Р‘РµР· СЃС‚Р°С‚СѓСЃР°';
+  if (normalized.includes('open')) return 'РћС‚РєСЂС‹С‚Рѕ';
+  if (normalized.includes('onhold') || normalized.includes('hold')) return 'РџСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ';
+  if (normalized.includes('closed')) return 'Р—Р°РєСЂС‹С‚Рѕ';
+  if (normalized.includes('РІ СЂР°Р±РѕС‚Рµ') || normalized.includes('Р°РєС‚РёРІ')) return 'РћС‚РєСЂС‹С‚Рѕ';
+  if (normalized.includes('РѕР¶РёРґ')) return 'РџСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ';
+  if (normalized.includes('Р·Р°РєСЂС‹')) return 'Р—Р°РєСЂС‹С‚Рѕ';
 
   return status;
 }
 
 function contractLabel(contract: Contract | null): string {
-  if (!contract) return 'Без договора';
-  return contract.title?.trim() ? `${contract.number} — ${contract.title}` : contract.number;
+  if (!contract) return 'Р‘РµР· РґРѕРіРѕРІРѕСЂР°';
+  return contract.title?.trim() ? `${contract.number} вЂ” ${contract.title}` : contract.number;
 }
 
 function sortContractsByRecency(source: Contract[]): Contract[] {
@@ -427,9 +437,9 @@ function resolveOutstandingAmount(payment: Payment): number {
 function paymentSourceLabel(payment: Payment): string {
   const description = payment.description?.trim();
   if (description) return description;
-  if (payment.documentKind === 'Invoice' && payment.account) return `Счет №${payment.account}`;
-  if (payment.account) return `Платеж по счету №${payment.account}`;
-  return `Платеж #${payment.id}`;
+  if (payment.documentKind === 'Invoice' && payment.account) return `РЎС‡РµС‚ в„–${payment.account}`;
+  if (payment.account) return `РџР»Р°С‚РµР¶ РїРѕ СЃС‡РµС‚Сѓ в„–${payment.account}`;
+  return `РџР»Р°С‚РµР¶ #${payment.id}`;
 }
 
 function deriveInvoiceStatusFromPayments(
@@ -478,28 +488,28 @@ function deriveInvoiceStatusFromPayments(
 function invoiceStatusLabel(status: PaymentStatus): string {
   switch (status) {
     case 'Completed':
-      return 'Оплачен';
+      return 'РћРїР»Р°С‡РµРЅ';
     case 'Processing':
-      return 'Частично оплачен';
+      return 'Р§Р°СЃС‚РёС‡РЅРѕ РѕРїР»Р°С‡РµРЅ';
     case 'Overdue':
-      return 'Просрочен';
+      return 'РџСЂРѕСЃСЂРѕС‡РµРЅ';
     case 'Cancelled':
-      return 'Отменен';
+      return 'РћС‚РјРµРЅРµРЅ';
     case 'Pending':
     default:
-      return 'Не оплачен';
+      return 'РќРµ РѕРїР»Р°С‡РµРЅ';
   }
 }
 
 function parseStatusTimelineEntry(note: string, payment: Payment, index: number): StatusTimelineEntry | null {
-  const trimmed = note.trim().replace(/^[•*-]\s*/u, '');
+  const trimmed = note.trim().replace(/^[вЂў*-]\s*/u, '');
   if (!trimmed) return null;
 
-  if (!/статус|оплач|остаток|срок|планов|дата платежа|перенес|перенос|частич/iu.test(trimmed)) {
+  if (!/СЃС‚Р°С‚СѓСЃ|РѕРїР»Р°С‡|РѕСЃС‚Р°С‚РѕРє|СЃСЂРѕРє|РїР»Р°РЅРѕРІ|РґР°С‚Р° РїР»Р°С‚РµР¶Р°|РїРµСЂРµРЅРµСЃ|РїРµСЂРµРЅРѕСЃ|С‡Р°СЃС‚РёС‡/iu.test(trimmed)) {
     return null;
   }
 
-  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4}) \((\d{2}):(\d{2}):(\d{2})\)\s*[—-]\s*(.+?):\s*(.+)$/u);
+  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4}) \((\d{2}):(\d{2}):(\d{2})\)\s*[вЂ”-]\s*(.+?):\s*(.+)$/u);
   if (match) {
     const [, day, month, year, hour, minute, second, author, message] = match;
     const sortValue = Date.UTC(
@@ -526,9 +536,9 @@ function parseStatusTimelineEntry(note: string, payment: Payment, index: number)
   return {
     key: `${payment.id}-${index}-${trimmed}`,
     title: trimmed,
-    description: 'Системное изменение по связанному платежу',
+    description: 'РЎРёСЃС‚РµРјРЅРѕРµ РёР·РјРµРЅРµРЅРёРµ РїРѕ СЃРІСЏР·Р°РЅРЅРѕРјСѓ РїР»Р°С‚РµР¶Сѓ',
     sourceLabel: paymentSourceLabel(payment),
-    timestampLabel: formatDate(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt) || 'Без даты',
+    timestampLabel: formatDate(payment.lastPaymentDate ?? payment.paidDate ?? payment.createdAt) || 'Р‘РµР· РґР°С‚С‹',
     sortValue: fallbackTimestamp,
     isCurrent: false,
   };
@@ -558,21 +568,21 @@ function buildInvoiceStatusSnapshot(
     ? rawOutstandingAmount
     : Math.max(totalAmount - paidAmount, 0);
 
-  let reason = 'Связанные платежи по счету еще не созданы.';
+  let reason = 'РЎРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїРѕ СЃС‡РµС‚Сѓ РµС‰Рµ РЅРµ СЃРѕР·РґР°РЅС‹.';
   if (status === 'Completed') {
-    reason = 'Все связанные платежи проведены, остатка к оплате нет.';
+    reason = 'Р’СЃРµ СЃРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїСЂРѕРІРµРґРµРЅС‹, РѕСЃС‚Р°С‚РєР° Рє РѕРїР»Р°С‚Рµ РЅРµС‚.';
   } else if (status === 'Cancelled') {
-    reason = 'Все связанные платежи по счету отменены.';
+    reason = 'Р’СЃРµ СЃРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїРѕ СЃС‡РµС‚Сѓ РѕС‚РјРµРЅРµРЅС‹.';
   } else if (status === 'Overdue') {
     reason = paidAmount > 0 && totalAmount > 0
-      ? `По счету есть оплаты на ${formatCurrencySmart(paidAmount).short}, но остаток ${formatCurrencySmart(outstandingAmount).short} уже просрочен.`
-      : 'Срок оплаты истек, а связанные платежи по счету еще не закрыты.';
+      ? `РџРѕ СЃС‡РµС‚Сѓ РµСЃС‚СЊ РѕРїР»Р°С‚С‹ РЅР° ${formatCurrencySmart(paidAmount).short}, РЅРѕ РѕСЃС‚Р°С‚РѕРє ${formatCurrencySmart(outstandingAmount).short} СѓР¶Рµ РїСЂРѕСЃСЂРѕС‡РµРЅ.`
+      : 'РЎСЂРѕРє РѕРїР»Р°С‚С‹ РёСЃС‚РµРє, Р° СЃРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїРѕ СЃС‡РµС‚Сѓ РµС‰Рµ РЅРµ Р·Р°РєСЂС‹С‚С‹.';
   } else if (status === 'Processing') {
     reason = totalAmount > 0
-      ? `По счету оплачено ${formatCurrencySmart(paidAmount).short} из ${formatCurrencySmart(totalAmount).short}. Остаток ${formatCurrencySmart(outstandingAmount).short} еще не закрыт.`
-      : 'По счету есть частичная оплата, но он еще не закрыт полностью.';
+      ? `РџРѕ СЃС‡РµС‚Сѓ РѕРїР»Р°С‡РµРЅРѕ ${formatCurrencySmart(paidAmount).short} РёР· ${formatCurrencySmart(totalAmount).short}. РћСЃС‚Р°С‚РѕРє ${formatCurrencySmart(outstandingAmount).short} РµС‰Рµ РЅРµ Р·Р°РєСЂС‹С‚.`
+      : 'РџРѕ СЃС‡РµС‚Сѓ РµСЃС‚СЊ С‡Р°СЃС‚РёС‡РЅР°СЏ РѕРїР»Р°С‚Р°, РЅРѕ РѕРЅ РµС‰Рµ РЅРµ Р·Р°РєСЂС‹С‚ РїРѕР»РЅРѕСЃС‚СЊСЋ.';
   } else if (sourcePayments.length > 0) {
-    reason = 'Связанные платежи созданы, но оплаты по счету пока не поступили.';
+    reason = 'РЎРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё СЃРѕР·РґР°РЅС‹, РЅРѕ РѕРїР»Р°С‚С‹ РїРѕ СЃС‡РµС‚Сѓ РїРѕРєР° РЅРµ РїРѕСЃС‚СѓРїРёР»Рё.';
   }
 
   const historyEntries = payments
@@ -588,12 +598,12 @@ function buildInvoiceStatusSnapshot(
 
   const currentEntry: StatusTimelineEntry = {
     key: `current-${fallbackStatus}-${paidAmount}-${outstandingAmount}`,
-    title: `Текущий статус: ${invoiceStatusLabel(fallbackStatus)}`,
+    title: `РўРµРєСѓС‰РёР№ СЃС‚Р°С‚СѓСЃ: ${invoiceStatusLabel(fallbackStatus)}`,
     description: reason,
     sourceLabel: sourcePayments.length > 0
-      ? `Связанных платежей: ${sourcePayments.length}`
-      : 'Статус пока определяется по самому счету',
-    timestampLabel: historyEntries[0]?.timestampLabel ?? 'Сейчас',
+      ? `РЎРІСЏР·Р°РЅРЅС‹С… РїР»Р°С‚РµР¶РµР№: ${sourcePayments.length}`
+      : 'РЎС‚Р°С‚СѓСЃ РїРѕРєР° РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РїРѕ СЃР°РјРѕРјСѓ СЃС‡РµС‚Сѓ',
+    timestampLabel: historyEntries[0]?.timestampLabel ?? 'РЎРµР№С‡Р°СЃ',
     sortValue: historyEntries[0]?.sortValue ?? Date.now(),
     isCurrent: true,
   };
@@ -650,6 +660,8 @@ export function InvoiceModal({
     normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
+  const [lineItemLookupQuery, setLineItemLookupQuery] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerSearch, setClientPickerSearch] = useState('');
@@ -740,6 +752,57 @@ export function InvoiceModal({
     }
     return map;
   }, [sortedServices]);
+  const activeLineItemLookup = useMemo(() => {
+    if (!lineItemLookupState) {
+      return null;
+    }
+
+    return lineItems.find((item) => item.id === lineItemLookupState.lineItemId) ?? null;
+  }, [lineItemLookupState, lineItems]);
+  const lineItemCategoryLookupOptions = useMemo(
+    () =>
+      sortedServiceCategories.map((category) => ({
+        value: String(category.id),
+        label: category.name,
+        description: category.description?.trim() || undefined,
+        keywords: [category.name, category.description ?? ''],
+      })),
+    [sortedServiceCategories],
+  );
+  const lineItemServiceLookupOptions = useMemo(() => {
+    if (!activeLineItemLookup) {
+      return [];
+    }
+
+    const source = activeLineItemLookup.serviceCategoryId
+      ? servicesByCategoryId.get(activeLineItemLookup.serviceCategoryId) ?? []
+      : sortedServices;
+
+    return source.map((service) => {
+      const categoryLabel = service.categoryId ? serviceCategoryById.get(service.categoryId) : null;
+      const descriptionParts = [
+        categoryLabel ? `РљР°С‚РµРіРѕСЂРёСЏ: ${categoryLabel}` : null,
+        service.unit?.trim() ? `Р•Рґ.: ${service.unit.trim()}` : null,
+        service.defaultPrice !== undefined && service.defaultPrice !== null
+          ? `Р¦РµРЅР° РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: ${formatCurrencySmart(service.defaultPrice).full}`
+          : null,
+        service.description?.trim() || null,
+      ].filter(Boolean);
+
+      return {
+        value: String(service.id),
+        label: service.name,
+        description: descriptionParts.join(' В· ') || undefined,
+        keywords: [
+          service.name,
+          categoryLabel ?? '',
+          service.unit ?? '',
+          service.description ?? '',
+          service.defaultPrice !== undefined && service.defaultPrice !== null ? String(service.defaultPrice) : '',
+        ],
+      };
+    });
+  }, [activeLineItemLookup, serviceCategoryById, servicesByCategoryId, sortedServices]);
 
   const findServiceTemplate = useCallback((name: string, serviceCategoryId?: string) => {
     const normalizedName = normalizeLookupName(name);
@@ -801,6 +864,66 @@ export function InvoiceModal({
     updateLineItem(id, patch);
   };
 
+  const openLineItemLookup = (lookup: Exclude<LineItemLookupState, null>) => {
+    setLineItemLookupQuery('');
+    setLineItemLookupState(lookup);
+  };
+
+  const closeLineItemLookup = () => {
+    setLineItemLookupState(null);
+    setLineItemLookupQuery('');
+  };
+
+  const handleLineItemServiceSelect = (serviceId: string) => {
+    const currentLineItemId = lineItemLookupState?.lineItemId;
+    if (!currentLineItemId) {
+      return;
+    }
+
+    const selectedService = sortedServices.find((service) => String(service.id) === serviceId);
+    if (!selectedService) {
+      return;
+    }
+
+    const patch: Partial<LineItem> = {
+      name: selectedService.name,
+      serviceCategoryId: selectedService.categoryId ? String(selectedService.categoryId) : '',
+    };
+
+    if (selectedService.unit?.trim()) {
+      patch.unit = selectedService.unit.trim();
+    }
+
+    if (selectedService.defaultPrice !== undefined && selectedService.defaultPrice !== null) {
+      patch.price = formatMoneyDisplayValue(selectedService.defaultPrice);
+    }
+
+    updateLineItem(currentLineItemId, patch);
+    closeLineItemLookup();
+  };
+
+  const applyCustomLineItemServiceName = () => {
+    const currentLineItemId = lineItemLookupState?.lineItemId;
+    const trimmedQuery = lineItemLookupQuery.trim();
+    if (!currentLineItemId || !trimmedQuery) {
+      return;
+    }
+
+    updateLineItem(currentLineItemId, { name: trimmedQuery });
+    applyLineItemTemplate(currentLineItemId, trimmedQuery);
+    closeLineItemLookup();
+  };
+
+  const clearLineItemServiceName = () => {
+    const currentLineItemId = lineItemLookupState?.lineItemId;
+    if (!currentLineItemId) {
+      return;
+    }
+
+    updateLineItem(currentLineItemId, { name: '' });
+    closeLineItemLookup();
+  };
+
   const [actDropdownOpen, setActDropdownOpen] = useState(false);
 
   useEffect(() => {
@@ -832,7 +955,7 @@ export function InvoiceModal({
         setDocumentPreviewHtml(html);
       } catch (err) {
         if (!active) return;
-        setDocumentPreviewError(err instanceof Error ? err.message : 'Не удалось загрузить печатный шаблон счета.');
+        setDocumentPreviewError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РїРµС‡Р°С‚РЅС‹Р№ С€Р°Р±Р»РѕРЅ СЃС‡РµС‚Р°.');
         setDocumentPreviewHtml('');
       } finally {
         if (active) {
@@ -885,10 +1008,10 @@ export function InvoiceModal({
   const caseOwnerClientId = isIncome ? form.clientId : form.expenseClientId;
   const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
   const selectedResponsibleSourceClient = selectedCaseOwnerClient ?? selectedClient;
-  const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
-  const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
-  const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
-  const counterpartyOpenCardLabel = isIncome ? 'Открыть карточку клиента' : 'Открыть карточку поставщика';
+  const counterpartyLabel = isIncome ? 'РљР»РёРµРЅС‚' : 'РџРѕСЃС‚Р°РІС‰РёРє';
+  const counterpartyBlockTitle = isIncome ? 'РљР»РёРµРЅС‚ Рё РґРѕРіРѕРІРѕСЂ' : 'РџРѕСЃС‚Р°РІС‰РёРє Рё РґРѕРіРѕРІРѕСЂ';
+  const counterpartyPlaceholder = isIncome ? 'Р’С‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°' : 'Р’С‹Р±РµСЂРёС‚Рµ РїРѕСЃС‚Р°РІС‰РёРєР°';
+  const counterpartyOpenCardLabel = isIncome ? 'РћС‚РєСЂС‹С‚СЊ РєР°СЂС‚РѕС‡РєСѓ РєР»РёРµРЅС‚Р°' : 'РћС‚РєСЂС‹С‚СЊ РєР°СЂС‚РѕС‡РєСѓ РїРѕСЃС‚Р°РІС‰РёРєР°';
   const clientLookupOptions = useMemo(
     () =>
       clients.map((client) => ({
@@ -897,8 +1020,8 @@ export function InvoiceModal({
         description: [
           client.company,
           client.clientStatus?.name,
-          client.responsibleUserName ? `Ответственный: ${client.responsibleUserName}` : null,
-        ].filter(Boolean).join(' · '),
+          client.responsibleUserName ? `РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№: ${client.responsibleUserName}` : null,
+        ].filter(Boolean).join(' В· '),
         keywords: [client.company ?? '', client.clientStatus?.name ?? '', client.phone ?? '', client.email ?? ''],
       })),
     [clients],
@@ -1056,7 +1179,7 @@ export function InvoiceModal({
         if (!cancelled && requestRevision === contractOptionsRevisionRef.current) {
           setContractOptions([]);
           setContractsLoadedClientId(requestClientId);
-          setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры');
+          setContractsError(error instanceof Error ? error.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РґРѕРіРѕРІРѕСЂС‹');
         }
       } finally {
         if (!cancelled) setContractsLoading(false);
@@ -1116,9 +1239,9 @@ export function InvoiceModal({
       setForm((prev) => ({ ...prev, contractId: String(created.id) }));
       lastAutoContractClientIdRef.current = form.clientId;
       setCreateContractOpen(false);
-      toast.success('Договор создан и выбран в счете.', 'Договоры');
+      toast.success('Р”РѕРіРѕРІРѕСЂ СЃРѕР·РґР°РЅ Рё РІС‹Р±СЂР°РЅ РІ СЃС‡РµС‚Рµ.', 'Р”РѕРіРѕРІРѕСЂС‹');
     } catch (error) {
-      setCreateContractError(extractDisplayErrorMessage(error, 'Не удалось создать договор'));
+      setCreateContractError(extractDisplayErrorMessage(error, 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РґРѕРіРѕРІРѕСЂ'));
     } finally {
       setCreateContractSubmitting(false);
     }
@@ -1154,7 +1277,7 @@ export function InvoiceModal({
       } catch (error) {
         if (!cancelled) {
           setClientCaseOptions([]);
-          setClientCasesError(error instanceof Error ? error.message : 'Не удалось загрузить дела');
+          setClientCasesError(error instanceof Error ? error.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РґРµР»Р°');
         }
       } finally {
         if (!cancelled) setClientCasesLoading(false);
@@ -1257,7 +1380,7 @@ export function InvoiceModal({
 
     toast.error(
       errorMessage,
-      mode === 'edit' ? 'Не удалось обновить счет' : 'Не удалось создать счет',
+      mode === 'edit' ? 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЃС‡РµС‚' : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ СЃС‡РµС‚',
     );
     lastErrorToastRef.current = errorMessage;
   }, [errorMessage, mode, toast]);
@@ -1272,7 +1395,7 @@ export function InvoiceModal({
       return;
     }
 
-    toast.error(localError, 'Проверьте данные счета');
+    toast.error(localError, 'РџСЂРѕРІРµСЂСЊС‚Рµ РґР°РЅРЅС‹Рµ СЃС‡РµС‚Р°');
     lastLocalErrorToastRef.current = localError;
   }, [localError, toast]);
 
@@ -1288,7 +1411,7 @@ export function InvoiceModal({
           setForm((prev) => ({ ...prev, number: next.nextNumber || prev.number }));
         }
       } catch {
-        // noop: оставляем номер как есть
+        // noop: РѕСЃС‚Р°РІР»СЏРµРј РЅРѕРјРµСЂ РєР°Рє РµСЃС‚СЊ
       }
     }
 
@@ -1339,7 +1462,7 @@ export function InvoiceModal({
         id: `${Date.now()}-${prev.length}`,
         name: '',
         quantity: '1',
-        unit: unitOptions[0] || 'шт',
+        unit: unitOptions[0] || 'С€С‚',
         price: formatMoneyDisplayValue(0),
         serviceCategoryId: '',
       },
@@ -1348,10 +1471,10 @@ export function InvoiceModal({
 
   const removeLineItem = async (id: string) => {
     const accepted = await confirm({
-      title: 'Удалить позицию',
-      description: 'Точно ли хотите удалить позицию?',
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
+      title: 'РЈРґР°Р»РёС‚СЊ РїРѕР·РёС†РёСЋ',
+      description: 'РўРѕС‡РЅРѕ Р»Рё С…РѕС‚РёС‚Рµ СѓРґР°Р»РёС‚СЊ РїРѕР·РёС†РёСЋ?',
+      confirmLabel: 'РЈРґР°Р»РёС‚СЊ',
+      cancelLabel: 'РћС‚РјРµРЅР°',
       variant: 'danger',
     });
     if (!accepted) return;
@@ -1400,7 +1523,7 @@ export function InvoiceModal({
         setActsError(null);
       } catch (err) {
         if (cancelled) return;
-        setActsError(err instanceof Error ? err.message : 'Не удалось загрузить акты');
+        setActsError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ Р°РєС‚С‹');
         setActOptions([]);
       } finally {
         if (!cancelled) {
@@ -1417,7 +1540,7 @@ export function InvoiceModal({
 
   const handleActSelect = (act: ActOption) => {
     if (!selectedActs.some((item) => item.id === act.id) && selectedActs.length >= invoiceRules.maxActsPerInvoice) {
-      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+      toast.error(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxActsPerInvoice} Р°РєС‚Р°(РѕРІ).`, 'РћРіСЂР°РЅРёС‡РµРЅРёРµ СЃС‡С‘С‚Р°');
       return;
     }
 
@@ -1495,7 +1618,7 @@ export function InvoiceModal({
 
   const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
     if (!selectedClientCaseIds.includes(clientCase.id) && selectedClientCaseIds.length >= invoiceRules.maxClientCasesPerInvoice) {
-      toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+      toast.error(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxClientCasesPerInvoice} РґРµР»Р°(РґРµР»).`, 'РћРіСЂР°РЅРёС‡РµРЅРёРµ СЃС‡С‘С‚Р°');
       return;
     }
 
@@ -1520,7 +1643,7 @@ export function InvoiceModal({
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
     if (!caseOwnerClientId) {
-      throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
+      throw new Error(isIncome ? 'РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°' : 'РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°, Рє РєРѕС‚РѕСЂРѕРјСѓ РѕС‚РЅРѕСЃРёС‚СЃСЏ СЂР°СЃС…РѕРґ');
     }
 
     const created = await apiService.createCase({
@@ -1537,7 +1660,7 @@ export function InvoiceModal({
     setSelectedClientCaseIds((prev) => {
       if (prev.includes(created.id)) return prev;
       if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
-        toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+        toast.error(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxClientCasesPerInvoice} РґРµР»Р°(РґРµР»).`, 'РћРіСЂР°РЅРёС‡РµРЅРёРµ СЃС‡С‘С‚Р°');
         return prev;
       }
 
@@ -1549,13 +1672,13 @@ export function InvoiceModal({
 
   const handleCreateAct = async () => {
     if (!draftAct.number.trim()) {
-      setCreateActError(t('actNumber') ?? 'Номер акта обязателен');
+      setCreateActError(t('actNumber') ?? 'РќРѕРјРµСЂ Р°РєС‚Р° РѕР±СЏР·Р°С‚РµР»РµРЅ');
       return;
     }
 
     const actAmount = parseMoneyInput(draftAct.amount || form.amount);
     if (!Number.isFinite(actAmount) || actAmount < 0) {
-      setCreateActError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      setCreateActError(t('invoiceAmount') ?? 'Р’РІРµРґРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ СЃСѓРјРјСѓ');
       return;
     }
 
@@ -1590,7 +1713,7 @@ export function InvoiceModal({
       setSelectedActs((prev) => {
         if (prev.some((item) => item.id === option.id)) return prev;
         if (prev.length >= invoiceRules.maxActsPerInvoice) {
-          toast.error(`В счёте можно выбрать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`, 'Ограничение счёта');
+          toast.error(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxActsPerInvoice} Р°РєС‚Р°(РѕРІ).`, 'РћРіСЂР°РЅРёС‡РµРЅРёРµ СЃС‡С‘С‚Р°');
           return prev;
         }
 
@@ -1606,7 +1729,7 @@ export function InvoiceModal({
         comment: '',
       });
     } catch (err) {
-      setCreateActError(err instanceof Error ? err.message : 'Не удалось создать акт');
+      setCreateActError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р°РєС‚');
     } finally {
       setCreatingAct(false);
     }
@@ -1692,7 +1815,7 @@ export function InvoiceModal({
         .map((item) => ({
           name: item.name.trim(),
           quantity: parseMoneyInput(item.quantity),
-          unit: item.unit.trim() || 'шт',
+          unit: item.unit.trim() || 'С€С‚',
           price: parseMoneyInput(item.price),
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
@@ -1718,15 +1841,15 @@ export function InvoiceModal({
       return { cancelled: false, dueDateOverride: expectedDueDate };
     }
 
-    const currentDueDateLabel = formatDate(currentDueDate) || 'не указан';
+    const currentDueDateLabel = formatDate(currentDueDate) || 'РЅРµ СѓРєР°Р·Р°РЅ';
     const expectedDueDateLabel = formatDate(expectedDueDate);
     const accepted = await confirm({
-      title: 'Срок оплаты по рассрочке',
+      title: 'РЎСЂРѕРє РѕРїР»Р°С‚С‹ РїРѕ СЂР°СЃСЃСЂРѕС‡РєРµ',
       description:
-        `Срок оплаты счета (${currentDueDateLabel}) не совпадает с последней датой платежа по рассрочке (${expectedDueDateLabel}). `
-        + `Установить срок оплаты ${expectedDueDateLabel} и продолжить сохранение?`,
-      confirmLabel: 'Установить и сохранить',
-      cancelLabel: 'Отмена',
+        `РЎСЂРѕРє РѕРїР»Р°С‚С‹ СЃС‡РµС‚Р° (${currentDueDateLabel}) РЅРµ СЃРѕРІРїР°РґР°РµС‚ СЃ РїРѕСЃР»РµРґРЅРµР№ РґР°С‚РѕР№ РїР»Р°С‚РµР¶Р° РїРѕ СЂР°СЃСЃСЂРѕС‡РєРµ (${expectedDueDateLabel}). `
+        + `РЈСЃС‚Р°РЅРѕРІРёС‚СЊ СЃСЂРѕРє РѕРїР»Р°С‚С‹ ${expectedDueDateLabel} Рё РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЃРѕС…СЂР°РЅРµРЅРёРµ?`,
+      confirmLabel: 'РЈСЃС‚Р°РЅРѕРІРёС‚СЊ Рё СЃРѕС…СЂР°РЅРёС‚СЊ',
+      cancelLabel: 'РћС‚РјРµРЅР°',
     });
 
     if (!accepted) {
@@ -1760,41 +1883,41 @@ export function InvoiceModal({
 
     const number = form.number.trim();
     if (!number) {
-      setLocalError(t('invoiceNumber') ?? 'Номер счёта обязателен');
+      setLocalError(t('invoiceNumber') ?? 'РќРѕРјРµСЂ СЃС‡С‘С‚Р° РѕР±СЏР·Р°С‚РµР»РµРЅ');
       return;
     }
     if (!form.date) {
-      setLocalError(t('invoiceDate') ?? 'Дата обязательна');
+      setLocalError(t('invoiceDate') ?? 'Р”Р°С‚Р° РѕР±СЏР·Р°С‚РµР»СЊРЅР°');
       return;
     }
     if (!form.clientId) {
-      setLocalError(`Выберите ${counterpartyLabel.toLocaleLowerCase('ru')}`);
+      setLocalError(`Р’С‹Р±РµСЂРёС‚Рµ ${counterpartyLabel.toLocaleLowerCase('ru')}`);
       return;
     }
 
     if (!isIncome && selectedClientCaseIds.length > 0 && !form.expenseClientId) {
-      setLocalError('Выберите клиента, к делу которого относится расход');
+      setLocalError('Р’С‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°, Рє РґРµР»Сѓ РєРѕС‚РѕСЂРѕРіРѕ РѕС‚РЅРѕСЃРёС‚СЃСЏ СЂР°СЃС…РѕРґ');
       return;
     }
 
     const parsedAmount = parseMoneyInput(form.amount);
     if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
-      setLocalError(t('invoiceAmount') ?? 'Введите корректную сумму');
+      setLocalError(t('invoiceAmount') ?? 'Р’РІРµРґРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ СЃСѓРјРјСѓ');
       return;
     }
 
     if (installmentPlanAmountMismatch) {
-      setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
+      setLocalError('РЎСѓРјРјР° СЃС‡РµС‚Р° РёР·РјРµРЅРёР»Р°СЃСЊ РїРѕСЃР»Рµ РЅР°СЃС‚СЂРѕР№РєРё СЂР°СЃСЃСЂРѕС‡РєРё. РџРµСЂРµСЃС‡РёС‚Р°Р№С‚Рµ РіСЂР°С„РёРє.');
       return;
     }
 
     if (selectedClientCaseIds.length > invoiceRules.maxClientCasesPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`);
+      setLocalError(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxClientCasesPerInvoice} РґРµР»Р°(РґРµР»).`);
       return;
     }
 
     if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
-      setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
+      setLocalError(`Р’ СЃС‡С‘С‚Рµ РјРѕР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РЅРµ Р±РѕР»РµРµ ${invoiceRules.maxActsPerInvoice} Р°РєС‚Р°(РѕРІ).`);
       return;
     }
 
@@ -1813,7 +1936,7 @@ export function InvoiceModal({
         setLocalError(
           extractDisplayErrorMessage(
             err,
-            mode === 'edit' ? 'Не удалось сохранить счет' : 'Не удалось создать счет',
+            mode === 'edit' ? 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЃС‡РµС‚' : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ СЃС‡РµС‚',
           ),
         );
       }
@@ -1847,12 +1970,12 @@ export function InvoiceModal({
         await onRefreshRequested?.();
         setInstallmentModalOpen(false);
         if (nextPlan) {
-          toast.success(`График рассрочки сохранен: ${nextPlan.items.length} платежей.`);
+          toast.success(`Р“СЂР°С„РёРє СЂР°СЃСЃСЂРѕС‡РєРё СЃРѕС…СЂР°РЅРµРЅ: ${nextPlan.items.length} РїР»Р°С‚РµР¶РµР№.`);
         } else {
-          toast.success('График рассрочки удален.');
+          toast.success('Р“СЂР°С„РёРє СЂР°СЃСЃСЂРѕС‡РєРё СѓРґР°Р»РµРЅ.');
         }
       } catch (error) {
-        const message = extractDisplayErrorMessage(error, 'Не удалось сохранить график рассрочки.');
+        const message = extractDisplayErrorMessage(error, 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РіСЂР°С„РёРє СЂР°СЃСЃСЂРѕС‡РєРё.');
         setLocalError(message);
         toast.error(message);
       }
@@ -1864,11 +1987,11 @@ export function InvoiceModal({
     if (nextPlan) {
       toast.success(
         mode === 'create'
-          ? `График сохранен в форме счета: ${nextPlan.items.length} платежей. Чтобы создать платежи, сохраните счет.`
-          : `График рассрочки сохранен в счете: ${nextPlan.items.length} платежей.`,
+          ? `Р“СЂР°С„РёРє СЃРѕС…СЂР°РЅРµРЅ РІ С„РѕСЂРјРµ СЃС‡РµС‚Р°: ${nextPlan.items.length} РїР»Р°С‚РµР¶РµР№. Р§С‚РѕР±С‹ СЃРѕР·РґР°С‚СЊ РїР»Р°С‚РµР¶Рё, СЃРѕС…СЂР°РЅРёС‚Рµ СЃС‡РµС‚.`
+          : `Р“СЂР°С„РёРє СЂР°СЃСЃСЂРѕС‡РєРё СЃРѕС…СЂР°РЅРµРЅ РІ СЃС‡РµС‚Рµ: ${nextPlan.items.length} РїР»Р°С‚РµР¶РµР№.`,
       );
     } else {
-      toast.success(mode === 'create' ? 'График удален из формы счета.' : 'График рассрочки обновлен.');
+      toast.success(mode === 'create' ? 'Р“СЂР°С„РёРє СѓРґР°Р»РµРЅ РёР· С„РѕСЂРјС‹ СЃС‡РµС‚Р°.' : 'Р“СЂР°С„РёРє СЂР°СЃСЃСЂРѕС‡РєРё РѕР±РЅРѕРІР»РµРЅ.');
     }
   };
 
@@ -1892,7 +2015,7 @@ export function InvoiceModal({
     if (typeof window === 'undefined') return;
     const previewWindow = window.open('', '_blank', 'width=1180,height=900');
     if (!previewWindow) {
-      throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
+      throw new Error('Р‘СЂР°СѓР·РµСЂ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» РѕРєРЅРѕ PDF. Р Р°Р·СЂРµС€РёС‚Рµ РІСЃРїР»С‹РІР°СЋС‰РёРµ РѕРєРЅР° Рё РїРѕРІС‚РѕСЂРёС‚Рµ.');
     }
 
     previewWindow.document.open();
@@ -1901,7 +2024,7 @@ export function InvoiceModal({
       <html lang="ru">
         <head>
           <meta charset="utf-8" />
-          <title>Подготавливаем PDF…</title>
+          <title>РџРѕРґРіРѕС‚Р°РІР»РёРІР°РµРј PDFвЂ¦</title>
           <style>
             body {
               margin: 0;
@@ -1924,7 +2047,7 @@ export function InvoiceModal({
           </style>
         </head>
         <body>
-          <div class="box">Подготавливаем PDF-документ…</div>
+          <div class="box">РџРѕРґРіРѕС‚Р°РІР»РёРІР°РµРј PDF-РґРѕРєСѓРјРµРЅС‚вЂ¦</div>
         </body>
       </html>
     `);
@@ -1937,7 +2060,7 @@ export function InvoiceModal({
 
   const openHtmlInWindow = (html: string, previewWindow?: Window | null) => {
     if (!previewWindow || previewWindow.closed) {
-      throw new Error('Окно печати было закрыто до загрузки документа. Повторите ещё раз.');
+      throw new Error('РћРєРЅРѕ РїРµС‡Р°С‚Рё Р±С‹Р»Рѕ Р·Р°РєСЂС‹С‚Рѕ РґРѕ Р·Р°РіСЂСѓР·РєРё РґРѕРєСѓРјРµРЅС‚Р°. РџРѕРІС‚РѕСЂРёС‚Рµ РµС‰С‘ СЂР°Р·.');
     }
 
     previewWindow.document.open();
@@ -1961,7 +2084,7 @@ export function InvoiceModal({
       const nextWindow = window.open('', '_blank', 'width=1180,height=900');
       if (!nextWindow) {
         URL.revokeObjectURL(href);
-        throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
+        throw new Error('Р‘СЂР°СѓР·РµСЂ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» РѕРєРЅРѕ PDF. Р Р°Р·СЂРµС€РёС‚Рµ РІСЃРїР»С‹РІР°СЋС‰РёРµ РѕРєРЅР° Рё РїРѕРІС‚РѕСЂРёС‚Рµ.');
       }
 
       targetWindow = nextWindow;
@@ -2015,7 +2138,7 @@ export function InvoiceModal({
 
   const handlePrintDocument = async () => {
     if (!invoice?.id) {
-      toast.error('Сначала сохраните счёт, затем можно печатать документ.');
+      toast.error('РЎРЅР°С‡Р°Р»Р° СЃРѕС…СЂР°РЅРёС‚Рµ СЃС‡С‘С‚, Р·Р°С‚РµРј РјРѕР¶РЅРѕ РїРµС‡Р°С‚Р°С‚СЊ РґРѕРєСѓРјРµРЅС‚.');
       return;
     }
 
@@ -2030,7 +2153,7 @@ export function InvoiceModal({
       if (previewWindow && !previewWindow.closed) {
         previewWindow.close();
       }
-      toast.error(getDocumentActionErrorMessage(err, 'Не удалось сформировать PDF документа.'));
+      toast.error(getDocumentActionErrorMessage(err, 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃС„РѕСЂРјРёСЂРѕРІР°С‚СЊ PDF РґРѕРєСѓРјРµРЅС‚Р°.'));
     }
   };
 
@@ -2039,7 +2162,7 @@ export function InvoiceModal({
     includeSignatureAndSeal: boolean,
   ) => {
     if (!invoice?.id) {
-      toast.error('Сначала сохраните счёт, затем можно скачать документ.');
+      toast.error('РЎРЅР°С‡Р°Р»Р° СЃРѕС…СЂР°РЅРёС‚Рµ СЃС‡С‘С‚, Р·Р°С‚РµРј РјРѕР¶РЅРѕ СЃРєР°С‡Р°С‚СЊ РґРѕРєСѓРјРµРЅС‚.');
       return;
     }
 
@@ -2051,25 +2174,25 @@ export function InvoiceModal({
       downloadBlob(`invoice-${form.number || 'export'}.${extension}`, blob);
       setDownloadMenuOpen(false);
     } catch (err) {
-      toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));
+      toast.error(getDocumentActionErrorMessage(err, 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ РґРѕРєСѓРјРµРЅС‚.'));
     }
   };
 
 
   const handlePageAction = async (action: 'send' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
-      send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
-      copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
-      paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
-      cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
-      delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+      send: { title: 'РћС‚РїСЂР°РІРёС‚СЊ СЃС‡С‘С‚', message: 'РЎС„РѕСЂРјРёСЂРѕРІР°С‚СЊ РґРѕРєСѓРјРµРЅС‚ WORD Рё РѕС‚РїСЂР°РІРёС‚СЊ РЅР° email РєР»РёРµРЅС‚Р°?', confirmLabel: 'РћС‚РїСЂР°РІРёС‚СЊ' },
+      copy: { title: 'РљРѕРїРёСЏ СЃС‡С‘С‚Р°', message: 'РЎРѕР·РґР°С‚СЊ РєРѕРїРёСЋ С‚РµРєСѓС‰РµРіРѕ СЃС‡С‘С‚Р°?', confirmLabel: 'РљРѕРїРёСЂРѕРІР°С‚СЊ' },
+      paid: { title: 'РћС‚РјРµС‚РёС‚СЊ РѕРїР»Р°С‡РµРЅРЅС‹Рј', message: 'РћС‚РјРµС‚РёС‚СЊ СЃС‡С‘С‚ РєР°Рє РѕРїР»Р°С‡РµРЅРЅС‹Р№?', confirmLabel: 'РћРїР»Р°С‡РµРЅ' },
+      cancel: { title: 'РћС‚РјРµРЅРёС‚СЊ СЃС‡С‘С‚', message: 'РџРѕРґС‚РІРµСЂРґРёС‚Рµ РѕС‚РјРµРЅСѓ СЃС‡С‘С‚Р°.', confirmLabel: 'РћС‚РјРµРЅРёС‚СЊ' },
+      delete: { title: 'РЈРґР°Р»РёС‚СЊ СЃС‡С‘С‚', message: 'РЈРґР°Р»РёС‚СЊ СЃС‡С‘С‚ Р±РµР· РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ?', confirmLabel: 'РЈРґР°Р»РёС‚СЊ' },
     }[action];
 
     const accepted = await confirm({
       title: actionMeta.title,
       description: actionMeta.message,
       confirmLabel: actionMeta.confirmLabel,
-      cancelLabel: 'Отмена',
+      cancelLabel: 'РћС‚РјРµРЅР°',
       variant: action === 'cancel' || action === 'delete' ? 'danger' : 'primary',
     });
     if (!accepted) return;
@@ -2077,14 +2200,14 @@ export function InvoiceModal({
     try {
       if (action === 'send') {
         if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно отправить документ.');
+          throw new Error('РЎРЅР°С‡Р°Р»Р° СЃРѕС…СЂР°РЅРёС‚Рµ СЃС‡С‘С‚, Р·Р°С‚РµРј РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ РґРѕРєСѓРјРµРЅС‚.');
         }
         await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
         toast.success(
           selectedClient?.email
-            ? `Документ WORD отправлен на ${selectedClient.email}.`
-            : 'Документ WORD отправлен клиенту по email.',
-          'Счет отправлен',
+            ? `Р”РѕРєСѓРјРµРЅС‚ WORD РѕС‚РїСЂР°РІР»РµРЅ РЅР° ${selectedClient.email}.`
+            : 'Р”РѕРєСѓРјРµРЅС‚ WORD РѕС‚РїСЂР°РІР»РµРЅ РєР»РёРµРЅС‚Сѓ РїРѕ email.',
+          'РЎС‡РµС‚ РѕС‚РїСЂР°РІР»РµРЅ',
         );
         return;
       }
@@ -2093,10 +2216,10 @@ export function InvoiceModal({
         const payload = buildInvoicePayload({
           replaceInstallmentPlan: Boolean(installmentPlan ?? relatedInstallmentPlan),
         });
-        payload.number = `${form.number || 'Счёт'} (копия)`;
+        payload.number = `${form.number || 'РЎС‡С‘С‚'} (РєРѕРїРёСЏ)`;
         await apiService.createInvoice(payload);
         await onRefreshRequested?.();
-        toast.success('Создана копия текущего счета.', 'Копия создана');
+        toast.success('РЎРѕР·РґР°РЅР° РєРѕРїРёСЏ С‚РµРєСѓС‰РµРіРѕ СЃС‡РµС‚Р°.', 'РљРѕРїРёСЏ СЃРѕР·РґР°РЅР°');
         return;
       }
 
@@ -2118,8 +2241,8 @@ export function InvoiceModal({
         )));
         await onRefreshRequested?.();
         toast.success(
-          action === 'paid' ? 'Статус счета обновлен: оплачен.' : 'Статус счета обновлен: отменен.',
-          'Счет обновлен',
+          action === 'paid' ? 'РЎС‚Р°С‚СѓСЃ СЃС‡РµС‚Р° РѕР±РЅРѕРІР»РµРЅ: РѕРїР»Р°С‡РµРЅ.' : 'РЎС‚Р°С‚СѓСЃ СЃС‡РµС‚Р° РѕР±РЅРѕРІР»РµРЅ: РѕС‚РјРµРЅРµРЅ.',
+          'РЎС‡РµС‚ РѕР±РЅРѕРІР»РµРЅ',
         );
         return;
       }
@@ -2127,12 +2250,12 @@ export function InvoiceModal({
       if (action === 'delete' && invoice?.id) {
         await apiService.deleteInvoice(invoice.id);
         await onRefreshRequested?.();
-        toast.success('Счет удален.');
+        toast.success('РЎС‡РµС‚ СѓРґР°Р»РµРЅ.');
         deferClose(onClose);
         return;
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось выполнить действие по счету.');
+      toast.error(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РґРµР№СЃС‚РІРёРµ РїРѕ СЃС‡РµС‚Сѓ.');
     }
   };
 
@@ -2140,11 +2263,11 @@ export function InvoiceModal({
   const lineItemsCount = lineItems.filter((item) => item.name.trim()).length;
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
-    Pending: { label: 'Создан', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Processing: { label: 'В работе', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
-    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
-    Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
-    Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
+    Pending: { label: 'РЎРѕР·РґР°РЅ', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'Р’ СЂР°Р±РѕС‚Рµ', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Completed: { label: 'РћРїР»Р°С‡РµРЅ', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'РћС‚РјРµРЅРµРЅ', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+    Overdue: { label: 'РџСЂРѕСЃСЂРѕС‡РµРЅ', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
   };
   const relatedPaymentStatusMeta: Record<PaymentStatus, string> = {
     Pending: 'bg-slate-100 text-slate-700',
@@ -2154,25 +2277,25 @@ export function InvoiceModal({
     Overdue: 'bg-amber-100 text-amber-700',
   };
   const relatedPaymentStatusLabel: Record<PaymentStatus, string> = {
-    Pending: t('pending') ?? 'Ожидается',
-    Processing: t('processingStatus') ?? 'В обработке',
-    Completed: t('completedStatus') ?? 'Оплачен',
-    Cancelled: t('cancelledStatus') ?? 'Отменён',
-    Overdue: t('overdue') ?? 'Просрочен',
+    Pending: t('pending') ?? 'РћР¶РёРґР°РµС‚СЃСЏ',
+    Processing: t('processingStatus') ?? 'Р’ РѕР±СЂР°Р±РѕС‚РєРµ',
+    Completed: t('completedStatus') ?? 'РћРїР»Р°С‡РµРЅ',
+    Cancelled: t('cancelledStatus') ?? 'РћС‚РјРµРЅС‘РЅ',
+    Overdue: t('overdue') ?? 'РџСЂРѕСЃСЂРѕС‡РµРЅ',
   };
   const invoiceStatusMeta: Record<PaymentStatus, { label: string; className: string }> = {
-    Pending: { label: 'Не оплачен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Processing: { label: 'Частично оплачен', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
-    Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
-    Cancelled: { label: 'Отменен', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Overdue: { label: 'Просрочен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
+    Pending: { label: 'РќРµ РѕРїР»Р°С‡РµРЅ', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Processing: { label: 'Р§Р°СЃС‚РёС‡РЅРѕ РѕРїР»Р°С‡РµРЅ', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Completed: { label: 'РћРїР»Р°С‡РµРЅ', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    Cancelled: { label: 'РћС‚РјРµРЅРµРЅ', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    Overdue: { label: 'РџСЂРѕСЃСЂРѕС‡РµРЅ', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
   };
   const invoicePaymentStatusLabel: Record<PaymentStatus, string> = {
-    Pending: 'Не оплачен',
-    Processing: 'Частично оплачен',
-    Completed: 'Оплачен',
-    Cancelled: t('cancelledStatus') ?? 'Отменён',
-    Overdue: t('overdue') ?? 'Просрочен',
+    Pending: 'РќРµ РѕРїР»Р°С‡РµРЅ',
+    Processing: 'Р§Р°СЃС‚РёС‡РЅРѕ РѕРїР»Р°С‡РµРЅ',
+    Completed: 'РћРїР»Р°С‡РµРЅ',
+    Cancelled: t('cancelledStatus') ?? 'РћС‚РјРµРЅС‘РЅ',
+    Overdue: t('overdue') ?? 'РџСЂРѕСЃСЂРѕС‡РµРЅ',
   };
   const currentStatusMeta = invoiceStatusMeta[effectiveInvoiceStatus] ?? invoiceStatusMeta.Pending;
   void statusMeta;
@@ -2191,10 +2314,10 @@ export function InvoiceModal({
     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Статус счета</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">РЎС‚Р°С‚СѓСЃ СЃС‡РµС‚Р°</p>
           <span
             className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
-            title="Количество связанных платежей"
+            title="РљРѕР»РёС‡РµСЃС‚РІРѕ СЃРІСЏР·Р°РЅРЅС‹С… РїР»Р°С‚РµР¶РµР№"
           >
             {statusSnapshot.sourcePayments.length}
           </span>
@@ -2207,11 +2330,11 @@ export function InvoiceModal({
         <p className="text-center text-sm text-slate-600">{statusSnapshot.reason}</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
-            <div className="text-[11px] uppercase tracking-wide text-slate-500">Оплачено</div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">РћРїР»Р°С‡РµРЅРѕ</div>
             <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.paidAmount).full}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center">
-            <div className="text-[11px] uppercase tracking-wide text-slate-500">Остаток</div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">РћСЃС‚Р°С‚РѕРє</div>
             <div className="mt-1 font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.outstandingAmount).full}</div>
           </div>
         </div>
@@ -2220,12 +2343,12 @@ export function InvoiceModal({
       <div className="mt-4 border-t border-slate-200 pt-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Хроника статуса</p>
-            <p className="mt-1 text-xs text-slate-500">Изменения собираются по связанным платежам и самому счету.</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">РҐСЂРѕРЅРёРєР° СЃС‚Р°С‚СѓСЃР°</p>
+            <p className="mt-1 text-xs text-slate-500">РР·РјРµРЅРµРЅРёСЏ СЃРѕР±РёСЂР°СЋС‚СЃСЏ РїРѕ СЃРІСЏР·Р°РЅРЅС‹Рј РїР»Р°С‚РµР¶Р°Рј Рё СЃР°РјРѕРјСѓ СЃС‡РµС‚Сѓ.</p>
           </div>
           <span
             className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700"
-            title="Количество записей в хронике"
+            title="РљРѕР»РёС‡РµСЃС‚РІРѕ Р·Р°РїРёСЃРµР№ РІ С…СЂРѕРЅРёРєРµ"
           >
             {statusSnapshot.timeline.length}
           </span>
@@ -2266,33 +2389,33 @@ export function InvoiceModal({
       isDeleted={invoice.auditIsDeleted}
       deletedAt={invoice.auditDeletedAt}
       deletedByUserName={invoice.auditDeletedByUserName}
-      triggerTitle="Аудит счета"
-      triggerDescription="Паспорт счета и история изменений открываются в отдельном окне."
-      title="История счета"
-      subtitle="Здесь собраны базовые audit-данные и все изменения по выбранному счету."
+      triggerTitle="РђСѓРґРёС‚ СЃС‡РµС‚Р°"
+      triggerDescription="РџР°СЃРїРѕСЂС‚ СЃС‡РµС‚Р° Рё РёСЃС‚РѕСЂРёСЏ РёР·РјРµРЅРµРЅРёР№ РѕС‚РєСЂС‹РІР°СЋС‚СЃСЏ РІ РѕС‚РґРµР»СЊРЅРѕРј РѕРєРЅРµ."
+      title="РСЃС‚РѕСЂРёСЏ СЃС‡РµС‚Р°"
+      subtitle="Р—РґРµСЃСЊ СЃРѕР±СЂР°РЅС‹ Р±Р°Р·РѕРІС‹Рµ audit-РґР°РЅРЅС‹Рµ Рё РІСЃРµ РёР·РјРµРЅРµРЅРёСЏ РїРѕ РІС‹Р±СЂР°РЅРЅРѕРјСѓ СЃС‡РµС‚Сѓ."
     />
   ) : null;
   const documentsSection = (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
       <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {t('invoiceDocumentsTitle') ?? 'Связанные документы'}
+          {t('invoiceDocumentsTitle') ?? 'РЎРІСЏР·Р°РЅРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹'}
         </span>
       </header>
       <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="space-y-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="font-medium text-slate-700">{t('cases') ?? 'Дела'}</span>
+              <span className="font-medium text-slate-700">{t('cases') ?? 'Р”РµР»Р°'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите дело клиента, к которому относится счёт.
+                Р’С‹Р±РµСЂРёС‚Рµ РґРµР»Рѕ РєР»РёРµРЅС‚Р°, Рє РєРѕС‚РѕСЂРѕРјСѓ РѕС‚РЅРѕСЃРёС‚СЃСЏ СЃС‡С‘С‚.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                title="Выбрать дело"
-                aria-label="Выбрать дело"
+                title="Р’С‹Р±СЂР°С‚СЊ РґРµР»Рѕ"
+                aria-label="Р’С‹Р±СЂР°С‚СЊ РґРµР»Рѕ"
                 onClick={() => {
                   setCaseDropdownOpen((prev) => !prev);
                   setActDropdownOpen(false);
@@ -2304,8 +2427,8 @@ export function InvoiceModal({
               </button>
               <button
                 type="button"
-                title="Создать дело"
-                aria-label="Создать дело"
+                title="РЎРѕР·РґР°С‚СЊ РґРµР»Рѕ"
+                aria-label="РЎРѕР·РґР°С‚СЊ РґРµР»Рѕ"
                 onClick={() => setCreateCaseOpen(true)}
                 disabled={!caseOwnerClientId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2318,11 +2441,11 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!caseOwnerClientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                {isIncome ? 'Сначала выберите клиента.' : 'Сначала выберите клиента, к которому относится расход.'}
+                {isIncome ? 'РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°.' : 'РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°, Рє РєРѕС‚РѕСЂРѕРјСѓ РѕС‚РЅРѕСЃРёС‚СЃСЏ СЂР°СЃС…РѕРґ.'}
               </div>
             ) : selectedClientCaseIds.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Дела еще не добавлены в счет.
+                Р”РµР»Р° РµС‰Рµ РЅРµ РґРѕР±Р°РІР»РµРЅС‹ РІ СЃС‡РµС‚.
               </div>
             ) : (
               <div className="space-y-2">
@@ -2343,7 +2466,7 @@ export function InvoiceModal({
                         type="button"
                         onClick={() => removeSelectedClientCase(id)}
                         className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
-                        aria-label={t('clear') ?? 'Очистить'}
+                        aria-label={t('clear') ?? 'РћС‡РёСЃС‚РёС‚СЊ'}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -2357,12 +2480,12 @@ export function InvoiceModal({
           {caseDropdownOpen && (
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите дело</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р’С‹Р±РµСЂРёС‚Рµ РґРµР»Рѕ</span>
                 <button
                   type="button"
                   onClick={() => setCaseDropdownOpen(false)}
                   className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                  aria-label={t('clear') ?? 'Очистить'}
+                  aria-label={t('clear') ?? 'РћС‡РёСЃС‚РёС‚СЊ'}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -2370,13 +2493,13 @@ export function InvoiceModal({
               <div className="max-h-56 overflow-auto p-2">
                 {clientCasesLoading ? (
                   <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Р—Р°РіСЂСѓР·РєР°...'}
                   </div>
                 ) : clientCasesError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{clientCasesError}</div>
                 ) : clientCaseOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У выбранного клиента пока нет дел.
+                    РЈ РІС‹Р±СЂР°РЅРЅРѕРіРѕ РєР»РёРµРЅС‚Р° РїРѕРєР° РЅРµС‚ РґРµР».
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2410,12 +2533,12 @@ export function InvoiceModal({
           )}
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">Комментарий по делу</span>
+            <span className="font-medium text-slate-700">РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїРѕ РґРµР»Сѓ</span>
             <textarea
               value={form.clientCaseReference}
               onChange={handleChange('clientCaseReference')}
               rows={2}
-              placeholder="Например: дело ожидает подтверждения документов"
+              placeholder="РќР°РїСЂРёРјРµСЂ: РґРµР»Рѕ РѕР¶РёРґР°РµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ РґРѕРєСѓРјРµРЅС‚РѕРІ"
               className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </label>
@@ -2424,16 +2547,16 @@ export function InvoiceModal({
         <div className="space-y-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="font-medium text-slate-700">{t('acts') ?? 'Акты'}</span>
+              <span className="font-medium text-slate-700">{t('acts') ?? 'РђРєС‚С‹'}</span>
               <p className="mt-1 text-xs text-slate-500">
-                Выберите акт {isIncome ? 'клиента' : 'поставщика'} из списка или создайте новый.
+                Р’С‹Р±РµСЂРёС‚Рµ Р°РєС‚ {isIncome ? 'РєР»РёРµРЅС‚Р°' : 'РїРѕСЃС‚Р°РІС‰РёРєР°'} РёР· СЃРїРёСЃРєР° РёР»Рё СЃРѕР·РґР°Р№С‚Рµ РЅРѕРІС‹Р№.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                title="Выбрать акт"
-                aria-label="Выбрать акт"
+                title="Р’С‹Р±СЂР°С‚СЊ Р°РєС‚"
+                aria-label="Р’С‹Р±СЂР°С‚СЊ Р°РєС‚"
                 onClick={() => {
                   setActDropdownOpen((prev) => !prev);
                   setCaseDropdownOpen(false);
@@ -2445,8 +2568,8 @@ export function InvoiceModal({
               </button>
               <button
                 type="button"
-                title="Создать акт"
-                aria-label="Создать акт"
+                title="РЎРѕР·РґР°С‚СЊ Р°РєС‚"
+                aria-label="РЎРѕР·РґР°С‚СЊ Р°РєС‚"
                 onClick={() => {
                   setDraftAct((prev) => ({
                     ...prev,
@@ -2467,11 +2590,11 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!form.clientId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}.
+                РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ {counterpartyLabel.toLocaleLowerCase('ru')}.
               </div>
             ) : selectedActs.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Акты еще не добавлены в счет.
+                РђРєС‚С‹ РµС‰Рµ РЅРµ РґРѕР±Р°РІР»РµРЅС‹ РІ СЃС‡РµС‚.
               </div>
             ) : (
               <div className="space-y-2">
@@ -2483,14 +2606,14 @@ export function InvoiceModal({
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{actLabel(act)}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                        {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => removeSelectedAct(act.id)}
                       className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100"
-                      aria-label={t('clear') ?? 'Очистить'}
+                      aria-label={t('clear') ?? 'РћС‡РёСЃС‚РёС‚СЊ'}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -2503,12 +2626,12 @@ export function InvoiceModal({
           {actDropdownOpen && (
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выберите акт</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Р’С‹Р±РµСЂРёС‚Рµ Р°РєС‚</span>
                 <button
                   type="button"
                   onClick={() => setActDropdownOpen(false)}
                   className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                  aria-label={t('clear') ?? 'Очистить'}
+                  aria-label={t('clear') ?? 'РћС‡РёСЃС‚РёС‚СЊ'}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -2516,13 +2639,13 @@ export function InvoiceModal({
               <div className="max-h-56 overflow-auto p-2">
                 {actsLoading ? (
                   <div className="flex items-center gap-2 px-2 py-3 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Загрузка...'}
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('loading') ?? 'Р—Р°РіСЂСѓР·РєР°...'}
                   </div>
                 ) : actsError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{actsError}</div>
                 ) : actOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У выбранного {counterpartyLabel.toLocaleLowerCase('ru')} пока нет актов.
+                    РЈ РІС‹Р±СЂР°РЅРЅРѕРіРѕ {counterpartyLabel.toLocaleLowerCase('ru')} РїРѕРєР° РЅРµС‚ Р°РєС‚РѕРІ.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2545,7 +2668,7 @@ export function InvoiceModal({
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-slate-900">{actLabel(act)}</span>
                             <span className="mt-1 block text-xs text-slate-500">
-                              {formatDate(act.date)} · {formatCurrencySmart(act.amount ?? 0).full}
+                              {formatDate(act.date)} В· {formatCurrencySmart(act.amount ?? 0).full}
                             </span>
                           </span>
                         </button>
@@ -2558,12 +2681,12 @@ export function InvoiceModal({
           )}
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}</span>
+            <span className="font-medium text-slate-700">{t('invoiceManualActLabel') ?? 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїРѕ Р°РєС‚Сѓ'}</span>
             <textarea
               value={form.actReference}
               onChange={handleChange('actReference')}
               rows={2}
-              placeholder={t('invoiceActManualPlaceholder') ?? 'Например: акт будет подписан позже'}
+              placeholder={t('invoiceActManualPlaceholder') ?? 'РќР°РїСЂРёРјРµСЂ: Р°РєС‚ Р±СѓРґРµС‚ РїРѕРґРїРёСЃР°РЅ РїРѕР·Р¶Рµ'}
               className="min-h-[96px] resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </label>
@@ -2571,6 +2694,19 @@ export function InvoiceModal({
       </div>
     </section>
   );
+  const lineItemLookupQueryTrimmed = lineItemLookupQuery.trim();
+  const activeLineItemCategoryLabel = activeLineItemLookup?.serviceCategoryId
+    ? serviceCategoryById.get(Number(activeLineItemLookup.serviceCategoryId)) ?? 'Все категории'
+    : 'Все категории';
+  const activeLineItemSelectedServiceId = activeLineItemLookup
+    ? String(findServiceTemplate(activeLineItemLookup.name, activeLineItemLookup.serviceCategoryId)?.id ?? '')
+    : '';
+  const canApplyCustomServiceName = lineItemLookupState?.kind === 'service'
+    && Boolean(lineItemLookupQueryTrimmed)
+    && !lineItemServiceLookupOptions.some(
+      (option) => normalizeLookupName(option.label) === normalizeLookupName(lineItemLookupQueryTrimmed),
+    );
+
   if (!open) return null;
 
   const content = (
@@ -2584,21 +2720,21 @@ export function InvoiceModal({
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
-              Назад
+              РќР°Р·Р°Рґ
             </button>
           )}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
               {isPageMode && pageViewMode
-                ? `Счёт №${form.number || '—'} от ${formatDate(form.date) || '—'}`
+                ? `РЎС‡С‘С‚ в„–${form.number || 'вЂ”'} РѕС‚ ${formatDate(form.date) || 'вЂ”'}`
                 : mode === 'edit'
-                ? t('invoiceEdit') ?? 'Редактировать счёт'
-                : t('invoiceCreate') ?? 'Создать счёт'}
+                ? t('invoiceEdit') ?? 'Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃС‡С‘С‚'
+                : t('invoiceCreate') ?? 'РЎРѕР·РґР°С‚СЊ СЃС‡С‘С‚'}
             </h2>
             <p className="text-sm text-slate-500">
               {isPageMode && pageViewMode
-                ? 'Просмотр счёта с действиями и документом для печати/отправки'
-                : t('invoiceModalSubtitle') ?? 'Укажите параметры счёта'}
+                ? 'РџСЂРѕСЃРјРѕС‚СЂ СЃС‡С‘С‚Р° СЃ РґРµР№СЃС‚РІРёСЏРјРё Рё РґРѕРєСѓРјРµРЅС‚РѕРј РґР»СЏ РїРµС‡Р°С‚Рё/РѕС‚РїСЂР°РІРєРё'
+                : t('invoiceModalSubtitle') ?? 'РЈРєР°Р¶РёС‚Рµ РїР°СЂР°РјРµС‚СЂС‹ СЃС‡С‘С‚Р°'}
             </p>
           </div>
         </div>
@@ -2610,8 +2746,8 @@ export function InvoiceModal({
                 type="button"
                 onClick={() => setPageViewMode(false)}
                 className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
-                aria-label="Редактировать счёт"
-                title="Редактировать счёт"
+                aria-label="Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃС‡С‘С‚"
+                title="Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃС‡С‘С‚"
               >
                 <Pencil className="h-4 w-4" />
               </button>
@@ -2624,14 +2760,14 @@ export function InvoiceModal({
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+                  {mode === 'edit' ? 'РЎРѕС…СЂР°РЅРёС‚СЊ' : t('invoiceCreate') ?? 'РЎРѕР·РґР°С‚СЊ СЃС‡С‘С‚'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPageViewMode(true)}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
                 >
-                  {t('cancel') ?? 'Отмена'}
+                  {t('cancel') ?? 'РћС‚РјРµРЅР°'}
                 </button>
               </>
             )}
@@ -2642,7 +2778,7 @@ export function InvoiceModal({
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-            aria-label={t('close') ?? 'Закрыть'}
+            aria-label={t('close') ?? 'Р—Р°РєСЂС‹С‚СЊ'}
           >
             <X className="h-5 w-5" />
           </button>
@@ -2655,12 +2791,12 @@ export function InvoiceModal({
             <section className="rounded-xl border border-slate-300 bg-white p-3">
               <div className="mb-3 flex items-center justify-between gap-3 px-1">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Печатный шаблон счета</h3>
+                  <h3 className="text-sm font-semibold text-slate-900">РџРµС‡Р°С‚РЅС‹Р№ С€Р°Р±Р»РѕРЅ СЃС‡РµС‚Р°</h3>
                 </div>
                 {documentPreviewLoading ? (
                   <span className="inline-flex items-center gap-2 text-xs text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Загружаем шаблон…
+                    Р—Р°РіСЂСѓР¶Р°РµРј С€Р°Р±Р»РѕРЅвЂ¦
                   </span>
                 ) : null}
               </div>
@@ -2672,14 +2808,14 @@ export function InvoiceModal({
                   </div>
                 ) : documentPreviewHtml ? (
                   <iframe
-                    title={`Печатный шаблон счета ${form.number || ''}`.trim()}
+                    title={`РџРµС‡Р°С‚РЅС‹Р№ С€Р°Р±Р»РѕРЅ СЃС‡РµС‚Р° ${form.number || ''}`.trim()}
                     srcDoc={documentPreviewHtml}
                     sandbox="allow-same-origin"
                     className="h-[72rem] w-full bg-white"
                   />
                 ) : (
                   <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-slate-500">
-                    Подготовка печатного шаблона…
+                    РџРѕРґРіРѕС‚РѕРІРєР° РїРµС‡Р°С‚РЅРѕРіРѕ С€Р°Р±Р»РѕРЅР°вЂ¦
                   </div>
                 )}
               </div>
@@ -2694,8 +2830,8 @@ export function InvoiceModal({
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
-                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />Ссылка на счет</div>
-                <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
+                <div className="mb-2 flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />РЎСЃС‹Р»РєР° РЅР° СЃС‡РµС‚</div>
+                <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || 'вЂ”'}</a>
               </div>
 
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
@@ -2710,12 +2846,12 @@ export function InvoiceModal({
                       {selectedClient.name}
                     </button>
                   ) : (
-                    selectedClient?.name || '—'
+                    selectedClient?.name || 'вЂ”'
                   )}
                 </p>
                 {!isIncome && (
                   <p>
-                    <span className="text-slate-500">Клиент расхода:</span>{' '}
+                    <span className="text-slate-500">РљР»РёРµРЅС‚ СЂР°СЃС…РѕРґР°:</span>{' '}
                     {selectedExpenseClient && onOpenClient ? (
                       <button
                         type="button"
@@ -2725,21 +2861,21 @@ export function InvoiceModal({
                         {selectedExpenseClient.name}
                       </button>
                     ) : (
-                      selectedExpenseClient?.name || '—'
+                      selectedExpenseClient?.name || 'вЂ”'
                     )}
                   </p>
                 )}
-                <p><span className="text-slate-500">Договор:</span> {contractLabel(selectedContract)}</p>
-                <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
-                <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
-                <p><span className="text-slate-500">{t('acts') ?? 'Акты'}:</span> {selectedActsSummary || '—'}</p>
-                <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}:</span> {form.actReference || '—'}</p>
-                <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
-                <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>
-                <p><span className="text-slate-500">Комментарий для клиента:</span> {form.description || '—'}</p>
-                <p><span className="text-slate-500">Не для бухгалтерии:</span> {form.isNotForAccounting ? 'Да' : 'Нет'}</p>
-                <p><span className="text-slate-500">Дата оплаты:</span> {formatDate(form.paidDate) || '—'}</p>
-                <p><span className="text-slate-500">Позиции:</span> {lineItemsCount}</p>
+                <p><span className="text-slate-500">Р”РѕРіРѕРІРѕСЂ:</span> {contractLabel(selectedContract)}</p>
+                <p><span className="text-slate-500">{t('cases') ?? 'Р”РµР»Р°'}:</span> {selectedClientCasesSummary || 'вЂ”'}</p>
+                <p><span className="text-slate-500">РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїРѕ РґРµР»Сѓ:</span> {form.clientCaseReference || 'вЂ”'}</p>
+                <p><span className="text-slate-500">{t('acts') ?? 'РђРєС‚С‹'}:</span> {selectedActsSummary || 'вЂ”'}</p>
+                <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїРѕ Р°РєС‚Сѓ'}:</span> {form.actReference || 'вЂ”'}</p>
+                <p><span className="text-slate-500">Р”Р°С‚Р° РІС‹СЃС‚Р°РІР»РµРЅРёСЏ:</span> {formatDate(form.date) || 'вЂ”'}</p>
+                <p><span className="text-slate-500">РЎСЂРѕРє РѕРїР»Р°С‚С‹:</span> {formatDate(form.dueDate) || 'вЂ”'}</p>
+                <p><span className="text-slate-500">РљРѕРјРјРµРЅС‚Р°СЂРёР№ РґР»СЏ РєР»РёРµРЅС‚Р°:</span> {form.description || 'вЂ”'}</p>
+                <p><span className="text-slate-500">РќРµ РґР»СЏ Р±СѓС…РіР°Р»С‚РµСЂРёРё:</span> {form.isNotForAccounting ? 'Р”Р°' : 'РќРµС‚'}</p>
+                <p><span className="text-slate-500">Р”Р°С‚Р° РѕРїР»Р°С‚С‹:</span> {formatDate(form.paidDate) || 'вЂ”'}</p>
+                <p><span className="text-slate-500">РџРѕР·РёС†РёРё:</span> {lineItemsCount}</p>
               </div>
 
               {auditInfoSection}
@@ -2747,15 +2883,15 @@ export function InvoiceModal({
           </div>
 
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-7">
-            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
-            <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />РћС‚РїСЂР°РІРёС‚СЊ</button>
+            <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />РџРµС‡Р°С‚СЊ</button>
             <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
                 onClick={() => setDownloadMenuOpen((prev) => !prev)}
                 className="inline-flex w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
               >
-                <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
+                <Download className="h-4 w-4" />РЎРєР°С‡Р°С‚СЊ<ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
                 <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
@@ -2764,7 +2900,7 @@ export function InvoiceModal({
                     onClick={() => void handleDownloadDocument('pdf', false)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>PDF без подписи и печати</span>
+                    <span>PDF Р±РµР· РїРѕРґРїРёСЃРё Рё РїРµС‡Р°С‚Рё</span>
                     <span className="text-xs text-slate-400">.pdf</span>
                   </button>
                   <button
@@ -2772,7 +2908,7 @@ export function InvoiceModal({
                     onClick={() => void handleDownloadDocument('pdf', true)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>PDF с подписью и печатью</span>
+                    <span>PDF СЃ РїРѕРґРїРёСЃСЊСЋ Рё РїРµС‡Р°С‚СЊСЋ</span>
                     <span className="text-xs text-slate-400">.pdf</span>
                   </button>
                   <div className="my-1 border-t border-slate-100" />
@@ -2781,7 +2917,7 @@ export function InvoiceModal({
                     onClick={() => void handleDownloadDocument('word', false)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>Word без подписи и печати</span>
+                    <span>Word Р±РµР· РїРѕРґРїРёСЃРё Рё РїРµС‡Р°С‚Рё</span>
                     <span className="text-xs text-slate-400">.doc</span>
                   </button>
                   <button
@@ -2789,16 +2925,16 @@ export function InvoiceModal({
                     onClick={() => void handleDownloadDocument('word', true)}
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <span>Word с подписью и печатью</span>
+                    <span>Word СЃ РїРѕРґРїРёСЃСЊСЋ Рё РїРµС‡Р°С‚СЊСЋ</span>
                     <span className="text-xs text-slate-400">.doc</span>
                   </button>
                 </div>
               ) : null}
             </div>
-            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
-            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
-            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
-            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />РљРѕРїРёСЂРѕРІР°С‚СЊ</button>
+            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />РћРїР»Р°С‡РµРЅ</button>
+            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />РћС‚РјРµРЅРµРЅ</button>
+            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />РЈРґР°Р»РёС‚СЊ</button>
           </div>
         </div>
       ) : (
@@ -2808,7 +2944,7 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceMainDetailsTitle') ?? 'Основные параметры'}
+                              {t('invoiceMainDetailsTitle') ?? 'РћСЃРЅРѕРІРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹'}
                             </span>
               
                           </header>
@@ -2816,10 +2952,10 @@ export function InvoiceModal({
                           <div className="mt-4 space-y-4">
                             <div className="flex flex-col gap-2">
                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                <span className="font-medium text-slate-700">{t('invoiceType') ?? 'Тип счёта'}</span>
+                                <span className="font-medium text-slate-700">{t('invoiceType') ?? 'РўРёРї СЃС‡С‘С‚Р°'}</span>
                                 {lockType && mode === 'edit' && (
                                   <span className="text-xs text-slate-500">
-                                    {t('invoiceTypeEditHint') ?? 'Можно изменить тип, если счёт попал не в ту группу.'}
+                                    {t('invoiceTypeEditHint') ?? 'РњРѕР¶РЅРѕ РёР·РјРµРЅРёС‚СЊ С‚РёРї, РµСЃР»Рё СЃС‡С‘С‚ РїРѕРїР°Р» РЅРµ РІ С‚Сѓ РіСЂСѓРїРїСѓ.'}
                                   </span>
                                 )}
                               </div>
@@ -2831,8 +2967,8 @@ export function InvoiceModal({
                                     }`}
                                   >
                                     {form.type === 'Income'
-                                      ? t('invoiceTypeIncome') ?? 'Доходные счета'
-                                      : t('invoiceTypeExpense') ?? 'Расходные счета'}
+                                      ? t('invoiceTypeIncome') ?? 'Р”РѕС…РѕРґРЅС‹Рµ СЃС‡РµС‚Р°'
+                                      : t('invoiceTypeExpense') ?? 'Р Р°СЃС…РѕРґРЅС‹Рµ СЃС‡РµС‚Р°'}
                                   </span>
                                 ) : (
                                   <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1">
@@ -2850,8 +2986,8 @@ export function InvoiceModal({
                                           }`}
                                         >
                                           {option === 'Income'
-                                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Доходные'
-                                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Расходные'}
+                                            ? t('invoiceTypeIncomeShort') ?? t('invoiceTypeIncome') ?? 'Р”РѕС…РѕРґРЅС‹Рµ'
+                                            : t('invoiceTypeExpenseShort') ?? t('invoiceTypeExpense') ?? 'Р Р°СЃС…РѕРґРЅС‹Рµ'}
                                         </button>
                                       );
                                     })}
@@ -2862,7 +2998,7 @@ export function InvoiceModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'Номер счёта'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceNumber') ?? 'РќРѕРјРµСЂ СЃС‡С‘С‚Р°'}</span>
                                 <input
                                   type="text"
                                   value={form.number}
@@ -2873,14 +3009,14 @@ export function InvoiceModal({
                               </label>
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
-                                  {t('invoiceAmount') ?? 'Сумма'}
+                                  {t('invoiceAmount') ?? 'РЎСѓРјРјР°'}
                                   {isIncome && (
                                     <button
                                       type="button"
                                       onClick={handleOpenInstallmentCalculator}
                                       className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
                                     >
-                                      {installmentPlan ? 'Изменить рассрочку' : (t('invoiceInstallmentButton') ?? 'Рассрочка')}
+                                      {installmentPlan ? 'РР·РјРµРЅРёС‚СЊ СЂР°СЃСЃСЂРѕС‡РєСѓ' : (t('invoiceInstallmentButton') ?? 'Р Р°СЃСЃСЂРѕС‡РєР°')}
                                     </button>
                                   )}
                                 </span>
@@ -2895,8 +3031,8 @@ export function InvoiceModal({
                                 {isIncome && installmentPlan ? (
                                   <span className={`text-xs ${installmentPlanAmountMismatch ? 'text-amber-600' : 'text-slate-500'}`}>
                                     {installmentPlanAmountMismatch
-                                      ? 'Сумма изменилась, пересчитайте рассрочку.'
-                                      : `Настроено платежей: ${installmentPlan.items.length}, к оплате ${formatCurrencySmart(installmentPlan.toPay).short}.`}
+                                      ? 'РЎСѓРјРјР° РёР·РјРµРЅРёР»Р°СЃСЊ, РїРµСЂРµСЃС‡РёС‚Р°Р№С‚Рµ СЂР°СЃСЃСЂРѕС‡РєСѓ.'
+                                      : `РќР°СЃС‚СЂРѕРµРЅРѕ РїР»Р°С‚РµР¶РµР№: ${installmentPlan.items.length}, Рє РѕРїР»Р°С‚Рµ ${formatCurrencySmart(installmentPlan.toPay).short}.`}
                                   </span>
                                 ) : null}
                               </label>
@@ -2904,32 +3040,32 @@ export function InvoiceModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'РЎС‚Р°С‚СѓСЃ'}</span>
                                 <select
                                   value={form.status}
                                   onChange={handleChange('status')}
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                 >
-                                  <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается'}</option>
-                                  <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
-                                  <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
-                                  <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
-                                  <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
+                                  <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'РћР¶РёРґР°РµС‚СЃСЏ'}</option>
+                                  <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'РћРїР»Р°С‡РµРЅ'}</option>
+                                  <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'РџСЂРѕСЃСЂРѕС‡РµРЅ'}</option>
+                                  <option value="Processing">{t('processingStatus') ?? 'Р’ РѕР±СЂР°Р±РѕС‚РєРµ'}</option>
+                                  <option value="Cancelled">{t('cancelledStatus') ?? 'РћС‚РјРµРЅС‘РЅ'}</option>
                                 </select>
                               </label>
 
                               <LookupSelect
-                                label={t('invoiceResponsible') ?? 'Ответственный'}
+                                label={t('invoiceResponsible') ?? 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№'}
                                 value={selectedResponsibleId}
                                 onChange={handleResponsibleChange}
                                 options={responsibleOptions}
-                                placeholder={t('actResponsibleNotSelected') ?? 'Не указан'}
-                                title="Выбор ответственного"
-                                searchPlaceholder="Поиск ответственного"
-                                emptyOptionLabel={t('actResponsibleNotSelected') ?? 'Не указан'}
+                                placeholder={t('actResponsibleNotSelected') ?? 'РќРµ СѓРєР°Р·Р°РЅ'}
+                                title="Р’С‹Р±РѕСЂ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅРѕРіРѕ"
+                                searchPlaceholder="РџРѕРёСЃРє РѕС‚РІРµС‚СЃС‚РІРµРЅРЅРѕРіРѕ"
+                                emptyOptionLabel={t('actResponsibleNotSelected') ?? 'РќРµ СѓРєР°Р·Р°РЅ'}
                                 helperText={
                                   selectedClient?.responsibleUserName
-                                    ? `По клиенту: ${selectedClient.responsibleUserName}`
+                                    ? `РџРѕ РєР»РёРµРЅС‚Сѓ: ${selectedClient.responsibleUserName}`
                                     : undefined
                                 }
                                 disabled={lookupsLoading}
@@ -2938,13 +3074,13 @@ export function InvoiceModal({
                             </div>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">Комментарий для клиента</span>
+                              <span className="font-medium text-slate-700">РљРѕРјРјРµРЅС‚Р°СЂРёР№ РґР»СЏ РєР»РёРµРЅС‚Р°</span>
                               <textarea
                                 value={form.description}
                                 onChange={handleChange('description')}
                                 rows={3}
                                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                placeholder="Этот комментарий будет напечатан ниже таблицы счета."
+                                placeholder="Р­С‚РѕС‚ РєРѕРјРјРµРЅС‚Р°СЂРёР№ Р±СѓРґРµС‚ РЅР°РїРµС‡Р°С‚Р°РЅ РЅРёР¶Рµ С‚Р°Р±Р»РёС†С‹ СЃС‡РµС‚Р°."
                               />
                             </label>
 
@@ -2956,9 +3092,9 @@ export function InvoiceModal({
                                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                               />
                               <span>
-                                <span className="block font-medium text-slate-800">Счет не для бухгалтерии</span>
+                                <span className="block font-medium text-slate-800">РЎС‡РµС‚ РЅРµ РґР»СЏ Р±СѓС…РіР°Р»С‚РµСЂРёРё</span>
                                 <span className="mt-1 block text-xs text-slate-500">
-                                  В печатной форме появится отдельная пометка для клиента.
+                                  Р’ РїРµС‡Р°С‚РЅРѕР№ С„РѕСЂРјРµ РїРѕСЏРІРёС‚СЃСЏ РѕС‚РґРµР»СЊРЅР°СЏ РїРѕРјРµС‚РєР° РґР»СЏ РєР»РёРµРЅС‚Р°.
                                 </span>
                               </span>
                             </label>
@@ -2969,131 +3105,149 @@ export function InvoiceModal({
 
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                           <header className="mb-3 flex items-center justify-between">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">РџРѕР·РёС†РёРё СЃС‡РµС‚Р°</span>
                             <button
                               type="button"
                               onClick={addLineItem}
                               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              + Добавить
+                              + Р”РѕР±Р°РІРёС‚СЊ
                             </button>
                           </header>
-                          <div className="space-y-2">
-                            <div className="hidden items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_5rem_7rem_8rem_8rem_auto]">
-                              <span>Категория</span>
-                              <span>Наименование</span>
-                              <span className="text-center">Кол-во</span>
-                              <span>Ед.</span>
-                              <span className="text-right">Цена</span>
-                              <span className="text-right">Сумма</span>
-                              <span className="sr-only">Действия</span>
-                            </div>
-                            {lineItems.map((item) => {
-                              const datalistId = `invoice-line-item-names-${item.id}`;
-                              const lineItemServices = item.serviceCategoryId
-                                ? servicesByCategoryId.get(item.serviceCategoryId) ?? []
-                                : sortedServices;
-                              const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price);
+                          <div className="-mx-1 overflow-x-auto px-1">
+                            <div className={`space-y-3 ${LINE_ITEM_GRID_MIN_WIDTH_CLASS}`}>
+                              <div className={`hidden items-center gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid ${LINE_ITEM_GRID_TEMPLATE}`}>
+                                <span>Категория</span>
+                                <span>Наименование</span>
+                                <span className="text-center">Кол-во</span>
+                                <span>Ед.</span>
+                                <span className="text-right">Цена</span>
+                                <span className="text-right">Сумма</span>
+                                <span className="sr-only">Действия</span>
+                              </div>
+                              {lineItems.map((item) => {
+                                const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price);
+                                const categoryLabel = item.serviceCategoryId
+                                  ? serviceCategoryById.get(Number(item.serviceCategoryId)) ?? 'Категория не найдена'
+                                  : 'Все категории';
 
-                              return (
-                                <div key={item.id} className="grid gap-2 md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_5rem_7rem_8rem_8rem_auto]">
-                                  <select
-                                    value={item.serviceCategoryId}
-                                    onChange={(event) => handleLineItemCategoryChange(item.id, event.target.value)}
-                                    aria-label="Категория услуги"
-                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 ${LINE_ITEM_GRID_TEMPLATE}`}
                                   >
-                                    <option value="">Все категории</option>
-                                    {sortedServiceCategories.map((category) => (
-                                      <option key={category.id} value={String(category.id)}>
-                                        {category.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <div>
-                                    <input
-                                      type="text"
-                                      list={datalistId}
-                                      value={item.name}
-                                      onChange={(event) => updateLineItem(item.id, { name: event.target.value })}
-                                      onBlur={(event) => applyLineItemTemplate(item.id, event.target.value)}
-                                      placeholder="Наименование"
-                                      aria-label="Наименование услуги"
-                                      className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                                    />
-                                    <datalist id={datalistId}>
-                                      {lineItemServices.map((service) => {
-                                        const categoryLabel = service.categoryId ? serviceCategoryById.get(service.categoryId) : null;
-                                        const label = item.serviceCategoryId || !categoryLabel ? service.name : `${categoryLabel} • ${service.name}`;
-                                        return (
-                                          <option key={`${service.id}-${service.name}`} value={service.name} label={label} />
-                                        );
-                                      })}
-                                    </datalist>
+                                    <div className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Категория</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openLineItemLookup({ kind: 'category', lineItemId: item.id })}
+                                        aria-label="Категория услуги"
+                                        title={categoryLabel}
+                                        className="flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                      >
+                                        <span className="min-w-0 flex-1 truncate">{categoryLabel}</span>
+                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                                      </button>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Наименование</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openLineItemLookup({ kind: 'service', lineItemId: item.id })}
+                                        aria-label="Наименование услуги"
+                                        title={item.name || 'Выберите или введите наименование'}
+                                        className="flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                      >
+                                        <span className={`min-w-0 flex-1 truncate ${item.name.trim() ? 'text-slate-700' : 'text-slate-400'}`}>
+                                          {item.name.trim() || 'Наименование'}
+                                        </span>
+                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                                      </button>
+                                    </div>
+
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Кол-во</span>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={item.quantity}
+                                        onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })}
+                                        placeholder="Кол-во"
+                                        aria-label="Количество"
+                                        className="w-full rounded-lg border border-slate-300 px-2 py-2 text-center text-sm"
+                                      />
+                                    </label>
+
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Ед.</span>
+                                      <input
+                                        type="text"
+                                        list="invoice-line-item-units"
+                                        value={item.unit}
+                                        onChange={(event) => updateLineItem(item.id, { unit: event.target.value })}
+                                        placeholder="Ед."
+                                        aria-label="Единица измерения"
+                                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                      />
+                                    </label>
+
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Цена</span>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={item.price}
+                                        onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)}
+                                        onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)}
+                                        placeholder="0.00"
+                                        aria-label="Цена"
+                                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
+                                      />
+                                    </label>
+
+                                    <div className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Сумма</span>
+                                      <output
+                                        aria-label="Сумма позиции"
+                                        className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700"
+                                      >
+                                        {lineItemTotal}
+                                      </output>
+                                    </div>
+
+                                    <div className="flex items-end justify-end md:justify-start">
+                                      <button
+                                        type="button"
+                                        onClick={() => { void removeLineItem(item.id); }}
+                                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                                        aria-label="Удалить"
+                                        title="Удалить позицию"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                    </div>
                                   </div>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={item.quantity}
-                                    onChange={(event) => updateLineItem(item.id, { quantity: event.target.value })}
-                                    placeholder="Кол-во"
-                                    aria-label="Количество"
-                                    className="rounded-lg border border-slate-300 px-2 py-2 text-center text-sm"
-                                  />
-                                  <input
-                                    type="text"
-                                    list="invoice-line-item-units"
-                                    value={item.unit}
-                                    onChange={(event) => updateLineItem(item.id, { unit: event.target.value })}
-                                    placeholder="Ед."
-                                    aria-label="Единица измерения"
-                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                                  />
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={item.price}
-                                    onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)}
-                                    onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)}
-                                    placeholder="0.00"
-                                    aria-label="Цена"
-                                    className="rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
-                                  />
-                                  <output
-                                    aria-label="Сумма позиции"
-                                    className="inline-flex min-h-10 items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700"
-                                  >
-                                    {lineItemTotal}
-                                  </output>
-                                  <button
-                                    type="button"
-                                    onClick={() => { void removeLineItem(item.id); }}
-                                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 md:justify-self-start"
-                                    aria-label="Удалить"
-                                    title="Удалить позицию"
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                           <datalist id="invoice-line-item-units">
                             {unitOptions.map((unit) => (
                               <option key={unit} value={unit} />
                             ))}
                           </datalist>
-                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">Итого: {formatMoneyDisplayValue(form.amount)}</div>
+                          <div className="mt-3 text-right text-sm font-semibold text-slate-700">РС‚РѕРіРѕ: {formatMoneyDisplayValue(form.amount)}</div>
                         </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <header className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Платежи по счёту
+                      РџР»Р°С‚РµР¶Рё РїРѕ СЃС‡С‘С‚Сѓ
                     </span>
                     <p className="mt-1 text-sm text-slate-500">
-                      Здесь отображаются связанные календарные платежи и оплаты по текущему счёту.
+                      Р—РґРµСЃСЊ РѕС‚РѕР±СЂР°Р¶Р°СЋС‚СЃСЏ СЃРІСЏР·Р°РЅРЅС‹Рµ РєР°Р»РµРЅРґР°СЂРЅС‹Рµ РїР»Р°С‚РµР¶Рё Рё РѕРїР»Р°С‚С‹ РїРѕ С‚РµРєСѓС‰РµРјСѓ СЃС‡С‘С‚Сѓ.
                     </p>
                   </div>
                   {canShowRelatedPaymentActions && (
@@ -3103,23 +3257,23 @@ export function InvoiceModal({
                       className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
                     >
                       <Plus className="h-4 w-4" />
-                      Добавить платеж
+                      Р”РѕР±Р°РІРёС‚СЊ РїР»Р°С‚РµР¶
                     </button>
                   )}
                 </header>
 
                 {!canManageRelatedPayments ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    Сначала сохраните счёт, после этого здесь можно будет создавать и редактировать связанные платежи.
+                    РЎРЅР°С‡Р°Р»Р° СЃРѕС…СЂР°РЅРёС‚Рµ СЃС‡С‘С‚, РїРѕСЃР»Рµ СЌС‚РѕРіРѕ Р·РґРµСЃСЊ РјРѕР¶РЅРѕ Р±СѓРґРµС‚ СЃРѕР·РґР°РІР°С‚СЊ Рё СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё.
                   </div>
                 ) : paymentsLoading ? (
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {t('loading') ?? 'Загрузка...'}
+                    {t('loading') ?? 'Р—Р°РіСЂСѓР·РєР°...'}
                   </div>
                 ) : displayPayments.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    Связанные платежи пока не добавлены.
+                    РЎРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїРѕРєР° РЅРµ РґРѕР±Р°РІР»РµРЅС‹.
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -3153,12 +3307,12 @@ export function InvoiceModal({
                             ) : null}
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
-                            {payment.description?.trim() || 'Без описания'}
+                            {payment.description?.trim() || 'Р‘РµР· РѕРїРёСЃР°РЅРёСЏ'}
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                            <span>План: {formatDate(payment.plannedDate || payment.date) || '—'}</span>
-                            <span>Факт: {formatDate(payment.paidDate || payment.lastPaymentDate) || '—'}</span>
-                            {payment.account && <span>Счёт: {payment.account}</span>}
+                            <span>РџР»Р°РЅ: {formatDate(payment.plannedDate || payment.date) || 'вЂ”'}</span>
+                            <span>Р¤Р°РєС‚: {formatDate(payment.paidDate || payment.lastPaymentDate) || 'вЂ”'}</span>
+                            {payment.account && <span>РЎС‡С‘С‚: {payment.account}</span>}
                           </div>
                         </div>
                         {(onEditRelatedPayment || onDeleteRelatedPayment) && !isInvoiceManagedPayment(payment) && (
@@ -3168,8 +3322,8 @@ export function InvoiceModal({
                                 type="button"
                                 onClick={() => onEditRelatedPayment(payment)}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
-                                title={t('edit') ?? 'Редактировать'}
-                                aria-label={t('edit') ?? 'Редактировать'}
+                                title={t('edit') ?? 'Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ'}
+                                aria-label={t('edit') ?? 'Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ'}
                               >
                                 <Pencil className="h-4 w-4" />
                               </button>
@@ -3181,8 +3335,8 @@ export function InvoiceModal({
                                   void onDeleteRelatedPayment(payment);
                                 }}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-red-600 transition hover:bg-red-50"
-                                title={t('delete') ?? 'Удалить'}
-                                aria-label={t('delete') ?? 'Удалить'}
+                                title={t('delete') ?? 'РЈРґР°Р»РёС‚СЊ'}
+                                aria-label={t('delete') ?? 'РЈРґР°Р»РёС‚СЊ'}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -3225,7 +3379,7 @@ export function InvoiceModal({
                                 </button>
                               </div>
                               {lookupsLoading && (
-                                <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
+                                <span className="text-xs text-slate-500">{t('loading') ?? 'Р—Р°РіСЂСѓР·РєР°...'}</span>
                               )}
                               {lookupsError && (
                                 <span className="text-xs text-rose-600">{lookupsError}</span>
@@ -3237,7 +3391,7 @@ export function InvoiceModal({
                                   )}
                                   {selectedClient.responsibleUserName && (
                                     <p className="text-xs text-slate-600">
-                                      Ответственный: {selectedClient.responsibleUserName}
+                                      РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№: {selectedClient.responsibleUserName}
                                     </p>
                                   )}
                                   {selectedClient.clientStatus?.description && (
@@ -3259,17 +3413,17 @@ export function InvoiceModal({
                             {!isIncome && (
                               <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
                                 <LookupSelect
-                                  label="Клиент и дело расхода"
+                                  label="РљР»РёРµРЅС‚ Рё РґРµР»Рѕ СЂР°СЃС…РѕРґР°"
                                   value={form.expenseClientId}
                                   onChange={handleExpenseClientChange}
                                   options={clientLookupOptions}
-                                  placeholder="Выберите клиента, к делу которого относится расход"
-                                  title="Выбор клиента для расхода"
-                                  dictionaryLabel="Справочник"
-                                  searchPlaceholder="Поиск клиента"
-                                  emptyOptionLabel="Без привязки к клиенту"
-                                  emptyOptionDescription="Использовать для общих расходов без конкретного дела"
-                                  helperText="Эта привязка нужна для аналитики расходов, долгов и рентабельности дела."
+                                  placeholder="Р’С‹Р±РµСЂРёС‚Рµ РєР»РёРµРЅС‚Р°, Рє РґРµР»Сѓ РєРѕС‚РѕСЂРѕРіРѕ РѕС‚РЅРѕСЃРёС‚СЃСЏ СЂР°СЃС…РѕРґ"
+                                  title="Р’С‹Р±РѕСЂ РєР»РёРµРЅС‚Р° РґР»СЏ СЂР°СЃС…РѕРґР°"
+                                  dictionaryLabel="РЎРїСЂР°РІРѕС‡РЅРёРє"
+                                  searchPlaceholder="РџРѕРёСЃРє РєР»РёРµРЅС‚Р°"
+                                  emptyOptionLabel="Р‘РµР· РїСЂРёРІСЏР·РєРё Рє РєР»РёРµРЅС‚Сѓ"
+                                  emptyOptionDescription="РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РґР»СЏ РѕР±С‰РёС… СЂР°СЃС…РѕРґРѕРІ Р±РµР· РєРѕРЅРєСЂРµС‚РЅРѕРіРѕ РґРµР»Р°"
+                                  helperText="Р­С‚Р° РїСЂРёРІСЏР·РєР° РЅСѓР¶РЅР° РґР»СЏ Р°РЅР°Р»РёС‚РёРєРё СЂР°СЃС…РѕРґРѕРІ, РґРѕР»РіРѕРІ Рё СЂРµРЅС‚Р°Р±РµР»СЊРЅРѕСЃС‚Рё РґРµР»Р°."
                                   disabled={lookupsLoading}
                                   buttonClassName="bg-white"
                                 />
@@ -3280,7 +3434,7 @@ export function InvoiceModal({
                                     )}
                                     {selectedExpenseClient.responsibleUserName && (
                                       <p className="text-xs text-slate-600">
-                                        Ответственный: {selectedExpenseClient.responsibleUserName}
+                                        РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№: {selectedExpenseClient.responsibleUserName}
                                       </p>
                                     )}
                                     {selectedExpenseClient.clientStatus?.description && (
@@ -3292,7 +3446,7 @@ export function InvoiceModal({
                             )}
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">Договор</span>
+                              <span className="font-medium text-slate-700">Р”РѕРіРѕРІРѕСЂ</span>
                               <div className="flex items-stretch gap-2">
                                 <select
                                   value={form.contractId}
@@ -3300,10 +3454,10 @@ export function InvoiceModal({
                                   className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   disabled={!form.clientId || contractsLoading}
                                 >
-                                  <option value="">Без договора</option>
+                                  <option value="">Р‘РµР· РґРѕРіРѕРІРѕСЂР°</option>
                                   {contractOptions.map((contract) => (
                                     <option key={contract.id} value={String(contract.id)}>
-                                      {contract.number}{contract.title ? ` — ${contract.title}` : ''}
+                                      {contract.number}{contract.title ? ` вЂ” ${contract.title}` : ''}
                                     </option>
                                   ))}
                                 </select>
@@ -3315,17 +3469,17 @@ export function InvoiceModal({
                                   }}
                                   disabled={!form.clientId}
                                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                  aria-label="Добавить договор"
-                                  title="Добавить договор"
+                                  aria-label="Р”РѕР±Р°РІРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
+                                  title="Р”РѕР±Р°РІРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
                                 >
                                   <Plus className="h-4 w-4" />
                                 </button>
                               </div>
-                              {contractsLoading && <span className="text-xs text-slate-500">Загрузка договоров...</span>}
+                              {contractsLoading && <span className="text-xs text-slate-500">Р—Р°РіСЂСѓР·РєР° РґРѕРіРѕРІРѕСЂРѕРІ...</span>}
                               {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
                               {!form.clientId && (
                                 <span className="text-xs text-slate-500">
-                                  Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}, затем можно будет быстро создать договор.
+                                  РЎРЅР°С‡Р°Р»Р° РІС‹Р±РµСЂРёС‚Рµ {counterpartyLabel.toLocaleLowerCase('ru')}, Р·Р°С‚РµРј РјРѕР¶РЅРѕ Р±СѓРґРµС‚ Р±С‹СЃС‚СЂРѕ СЃРѕР·РґР°С‚СЊ РґРѕРіРѕРІРѕСЂ.
                                 </span>
                               )}
                             </label>
@@ -3336,13 +3490,13 @@ export function InvoiceModal({
               <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
                           <header className="flex flex-col gap-1 border-b border-slate-200 pb-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {t('invoiceScheduleTitle') ?? 'Сроки и оплата'}
+                              {t('invoiceScheduleTitle') ?? 'РЎСЂРѕРєРё Рё РѕРїР»Р°С‚Р°'}
                             </span>
               
                           </header>
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Дата выставления'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Р”Р°С‚Р° РІС‹СЃС‚Р°РІР»РµРЅРёСЏ'}</span>
                               <input
                                 type="date"
                                 value={form.date}
@@ -3353,7 +3507,7 @@ export function InvoiceModal({
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Срок оплаты'}</span>
+                              <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'РЎСЂРѕРє РѕРїР»Р°С‚С‹'}</span>
                               <input
                                 type="date"
                                 value={form.dueDate}
@@ -3363,7 +3517,7 @@ export function InvoiceModal({
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
-                              <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Дата оплаты'}</span>
+                              <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Р”Р°С‚Р° РѕРїР»Р°С‚С‹'}</span>
                               <input
                                 type="date"
                                 value={form.paidDate}
@@ -3387,7 +3541,7 @@ export function InvoiceModal({
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {mode === 'edit' ? 'Сохранить' : t('invoiceCreate') ?? 'Создать счёт'}
+                {mode === 'edit' ? 'РЎРѕС…СЂР°РЅРёС‚СЊ' : t('invoiceCreate') ?? 'РЎРѕР·РґР°С‚СЊ СЃС‡С‘С‚'}
               </button>
               <button
                 type="button"
@@ -3400,19 +3554,74 @@ export function InvoiceModal({
                 }}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
               >
-                {t('cancel') ?? 'Отмена'}
+                {t('cancel') ?? 'РћС‚РјРµРЅР°'}
               </button>
             </div>
           )}
       </form>
       )}
 
+      <InvoiceLineItemLookupDialog
+        open={lineItemLookupState?.kind === 'category'}
+        title="Выбор категории услуги"
+        description="Выберите категорию из справочника для текущей позиции счёта."
+        query={lineItemLookupQuery}
+        value={activeLineItemLookup?.serviceCategoryId ?? ''}
+        options={lineItemCategoryLookupOptions}
+        searchPlaceholder="Поиск категории"
+        maxWidthClassName="max-w-2xl"
+        clearActionLabel="Все категории"
+        clearActionDescription="Оставить позицию без конкретной категории."
+        noOptionsText="Категории не найдены"
+        onQueryChange={setLineItemLookupQuery}
+        onClose={closeLineItemLookup}
+        onSelect={(value) => {
+          if (!lineItemLookupState?.lineItemId) {
+            return;
+          }
+          handleLineItemCategoryChange(lineItemLookupState.lineItemId, value);
+          closeLineItemLookup();
+        }}
+        onClear={() => {
+          if (!lineItemLookupState?.lineItemId) {
+            return;
+          }
+          handleLineItemCategoryChange(lineItemLookupState.lineItemId, '');
+          closeLineItemLookup();
+        }}
+      />
+
+      <InvoiceLineItemLookupDialog
+        open={lineItemLookupState?.kind === 'service'}
+        title="Выбор наименования услуги"
+        description={
+          activeLineItemCategoryLabel === 'Все категории'
+            ? 'Можно искать по всем услугам или ввести своё наименование.'
+            : `Категория: ${activeLineItemCategoryLabel}. Можно выбрать из найденных услуг или ввести своё наименование.`
+        }
+        query={lineItemLookupQuery}
+        value={activeLineItemSelectedServiceId}
+        options={lineItemServiceLookupOptions}
+        searchPlaceholder="Поиск наименования"
+        maxWidthClassName="max-w-4xl"
+        clearActionLabel="Очистить наименование"
+        clearActionDescription="Оставить позицию без выбранного шаблона услуги."
+        customActionLabel={canApplyCustomServiceName ? `Использовать: ${lineItemLookupQueryTrimmed}` : undefined}
+        customActionDescription={canApplyCustomServiceName ? 'Сохранить введённый текст как наименование позиции.' : undefined}
+        noOptionsText="Подходящие услуги не найдены"
+        onQueryChange={setLineItemLookupQuery}
+        onClose={closeLineItemLookup}
+        onSelect={handleLineItemServiceSelect}
+        onClear={clearLineItemServiceName}
+        onSelectCustomQuery={canApplyCustomServiceName ? applyCustomLineItemServiceName : undefined}
+      />
+
       {clientPickerOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-base font-semibold text-slate-900">
-                Выбор {counterpartyLabel.toLocaleLowerCase('ru')}
+                Р’С‹Р±РѕСЂ {counterpartyLabel.toLocaleLowerCase('ru')}
               </h3>
               <button type="button" onClick={() => setClientPickerOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
@@ -3422,7 +3631,7 @@ export function InvoiceModal({
               type="text"
               value={clientPickerSearch}
               onChange={(event) => setClientPickerSearch(event.target.value)}
-              placeholder={t('search') ?? 'Поиск'}
+              placeholder={t('search') ?? 'РџРѕРёСЃРє'}
               className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
             <div className="max-h-72 overflow-auto rounded-lg border border-slate-200">
@@ -3473,39 +3682,39 @@ export function InvoiceModal({
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-slate-900">{t('actCreate') ?? 'Создать акт'}</h3>
+              <h3 className="text-base font-semibold text-slate-900">{t('actCreate') ?? 'РЎРѕР·РґР°С‚СЊ Р°РєС‚'}</h3>
               <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'Номер акта'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actNumber') ?? 'РќРѕРјРµСЂ Р°РєС‚Р°'}</span>
                 <input value={draftAct.number} onChange={(e) => setDraftAct((prev) => ({ ...prev, number: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Р”Р°С‚Р°'}</span>
                 <input type="date" value={draftAct.date} onChange={(e) => setDraftAct((prev) => ({ ...prev, date: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'РќР°Р·РІР°РЅРёРµ'}</span>
                 <input value={draftAct.title} onChange={(e) => setDraftAct((prev) => ({ ...prev, title: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'Сумма'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('invoiceAmount') ?? 'РЎСѓРјРјР°'}</span>
                 <input value={draftAct.amount} onChange={(e) => setDraftAct((prev) => ({ ...prev, amount: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
+                <span className="mb-1 block font-medium text-slate-700">{t('actComment') ?? 'РљРѕРјРјРµРЅС‚Р°СЂРёР№'}</span>
                 <textarea value={draftAct.comment} onChange={(e) => setDraftAct((prev) => ({ ...prev, comment: e.target.value }))} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
             </div>
             {createActError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{createActError}</div>}
             <div className="mt-4 flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'Отмена'}</button>
+              <button type="button" onClick={() => setCreateActOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">{t('cancel') ?? 'РћС‚РјРµРЅР°'}</button>
               <button type="button" onClick={() => void handleCreateAct()} disabled={creatingAct} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {creatingAct && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t('actCreate') ?? 'Создать акт'}
+                {t('actCreate') ?? 'РЎРѕР·РґР°С‚СЊ Р°РєС‚'}
               </button>
             </div>
           </div>
@@ -3540,3 +3749,4 @@ export function InvoiceModal({
     </div>
   );
 }
+

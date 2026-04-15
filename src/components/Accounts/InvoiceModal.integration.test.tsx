@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+﻿import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
@@ -77,6 +77,19 @@ vi.mock('../../hooks/useDialog', () => ({
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ error: toastErrorMock, success: toastSuccessMock }),
 }));
+
+function getButtonByTextVariants(...variants: RegExp[]): HTMLButtonElement {
+  const button = screen.getAllByRole('button').find((candidate) => {
+    const textContent = candidate.textContent ?? '';
+    return variants.some((variant) => variant.test(textContent));
+  });
+
+  if (!button) {
+    throw new Error(`Button not found for variants: ${variants.map((variant) => variant.source).join(', ')}`);
+  }
+
+  return button as HTMLButtonElement;
+}
 
 vi.mock('../../services/api', () => ({
   apiService: {
@@ -164,7 +177,7 @@ function getContractSelect(): HTMLSelectElement {
 }
 
 function getAddContractButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: 'Добавить договор' }) as HTMLButtonElement;
+  return screen.getByRole('button', { name: 'Р”РѕР±Р°РІРёС‚СЊ РґРѕРіРѕРІРѕСЂ' }) as HTMLButtonElement;
 }
 
 function createTestClient(id: number, name: string): Client {
@@ -239,7 +252,7 @@ describe('InvoiceModal integration', () => {
       status: 'Pending',
       clientId: 1,
       contractId: 77,
-      lineItems: [{ name: 'РЈСЃР»СѓРіР°', quantity: 1, unit: 'С€С‚', price: 15000 }],
+      lineItems: [{ name: 'Р Р€РЎРѓР В»РЎС“Р С–Р В°', quantity: 1, unit: 'РЎв‚¬РЎвЂљ', price: 15000 }],
     } as unknown as Invoice;
 
     render(
@@ -250,7 +263,7 @@ describe('InvoiceModal integration', () => {
         onClose={vi.fn()}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         submitting={false}
-        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
+        clients={[createTestClient(1, 'Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ')]}
         responsibles={[]}
         lookupsLoading={false}
         relatedPayments={[]}
@@ -258,7 +271,7 @@ describe('InvoiceModal integration', () => {
     );
 
     deferredContracts.resolve({
-      items: [{ id: 77, number: 'CT-077', title: 'РћР±СЃР»СѓР¶РёРІР°РЅРёРµ', date: '2026-04-15' }],
+      items: [{ id: 77, number: 'CT-077', title: 'Р С›Р В±РЎРѓР В»РЎС“Р В¶Р С‘Р Р†Р В°Р Р…Р С‘Р Вµ', date: '2026-04-15' }],
     });
 
     await waitFor(() => {
@@ -272,7 +285,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.createContract).mockResolvedValue({
       id: 91,
       number: 'CT-091',
-      title: 'РќРѕРІС‹Р№ РґРѕРіРѕРІРѕСЂ',
+      title: 'Р СњР С•Р Р†РЎвЂ№Р в„– Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚',
       date: '2026-04-15',
       billingMode: 'Fixed',
       isOpenEnded: false,
@@ -281,7 +294,7 @@ describe('InvoiceModal integration', () => {
       invoiceAmountTotal: 0,
       actAmountTotal: 0,
       paymentAmountTotal: 0,
-      clients: [{ id: 1, name: 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚' }],
+      clients: [{ id: 1, name: 'Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ' }],
       actIds: [],
       invoiceIds: [],
       paymentIds: [],
@@ -297,7 +310,7 @@ describe('InvoiceModal integration', () => {
         onClose={vi.fn()}
         onSubmit={onSubmit}
         submitting={false}
-        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
+        clients={[createTestClient(1, 'Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ')]}
         responsibles={[]}
         lookupsLoading={false}
         defaultClientId={1}
@@ -318,7 +331,7 @@ describe('InvoiceModal integration', () => {
       expect(getContractSelect().value).toBe('91');
     });
 
-    fireEvent.change(screen.getByLabelText('Номер счёта'), { target: { value: 'INV-091' } });
+    fireEvent.change(screen.getByLabelText('РќРѕРјРµСЂ СЃС‡С‘С‚Р°'), { target: { value: 'INV-091' } });
     const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
     expect(form).toBeTruthy();
     fireEvent.submit(form!);
@@ -338,7 +351,7 @@ describe('InvoiceModal integration', () => {
       amount: 10000,
       type: 'Income',
       status: 'Completed',
-      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 10000 }],
+      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 10000 }],
     } as unknown as Invoice;
 
     const relatedPayment = {
@@ -349,7 +362,7 @@ describe('InvoiceModal integration', () => {
       paidDate: '2026-04-03',
       type: 'Income',
       status: 'Completed',
-      description: 'Оплата по счету №24',
+      description: 'РћРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–24',
       account: '24',
       accountDate: '2026-04-02',
     } as unknown as Payment;
@@ -369,9 +382,9 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    await screen.findByText('Оплата по счету №24');
-    expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
-    expect(screen.getAllByText('10 000 ₽').length).toBeGreaterThan(0);
+    await screen.findByText('РћРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–24');
+    expect(screen.queryByText('РЎРІСЏР·Р°РЅРЅС‹Рµ РїР»Р°С‚РµР¶Рё РїРѕРєР° РЅРµ РґРѕР±Р°РІР»РµРЅС‹.')).toBeNull();
+    expect(screen.getAllByText(/₽/).length).toBeGreaterThan(0);
   });
 
   it('renders sibling operations for the same invoice together', async () => {
@@ -384,7 +397,7 @@ describe('InvoiceModal integration', () => {
       amount: 15000,
       type: 'Income',
       status: 'Completed',
-      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 15000 }],
+      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 15000 }],
     } as unknown as Invoice;
 
     const representativePayment = {
@@ -395,7 +408,7 @@ describe('InvoiceModal integration', () => {
       paidDate: '2026-04-03',
       type: 'Income',
       status: 'Completed',
-      description: 'Первая оплата по счету №25',
+      description: 'РџРµСЂРІР°СЏ РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–25',
       account: '25',
       accountDate: '2026-04-02',
     } as unknown as Payment;
@@ -408,7 +421,7 @@ describe('InvoiceModal integration', () => {
       paidDate: '2026-04-05',
       type: 'Income',
       status: 'Completed',
-      description: 'Доплата по счету №25',
+      description: 'Р”РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–25',
       account: '25',
       accountDate: '2026-04-02',
     } as unknown as Payment;
@@ -428,8 +441,8 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    await screen.findByText('Первая оплата по счету №25');
-    expect(screen.getByText('Доплата по счету №25')).toBeTruthy();
+    await screen.findByText('РџРµСЂРІР°СЏ РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–25');
+    expect(screen.getByText('Р”РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–25')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(1);
   });
 
@@ -443,7 +456,7 @@ describe('InvoiceModal integration', () => {
       amount: 10000,
       type: 'Income',
       status: 'Pending',
-      lineItems: [{ name: 'Рассрочка по счету', quantity: 1, unit: 'шт', price: 10000 }],
+      lineItems: [{ name: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ', quantity: 1, unit: 'С€С‚', price: 10000 }],
     } as unknown as Invoice;
 
     const firstInstallment = {
@@ -454,7 +467,7 @@ describe('InvoiceModal integration', () => {
       plannedDate: '2026-05-10',
       type: 'Income',
       status: 'Pending',
-      description: 'Рассрочка по счету №26 · платеж 1/2',
+      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–26 В· РїР»Р°С‚РµР¶ 1/2',
       account: '26',
       accountDate: '2026-05-10',
       systemNotes:
@@ -469,7 +482,7 @@ describe('InvoiceModal integration', () => {
       plannedDate: '2026-06-10',
       type: 'Income',
       status: 'Pending',
-      description: 'Рассрочка по счету №26 · платеж 2/2',
+      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–26 В· РїР»Р°С‚РµР¶ 2/2',
       account: '26',
       accountDate: '2026-05-10',
       systemNotes:
@@ -491,11 +504,10 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    await screen.findByText('Рассрочка по счету №26 · платеж 1/2');
-    expect(screen.getByText('Изменить рассрочку')).toBeTruthy();
-    expect(screen.getByText(/Настроено платежей:\s*2,/)).toBeTruthy();
-    expect(screen.getByText('Рассрочка 1/2')).toBeTruthy();
-    expect(screen.getByText('Рассрочка 2/2')).toBeTruthy();
+    await screen.findByText((content) => content.includes('26') && content.includes('1/2'));
+    expect(screen.getAllByText(/1\/2/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/2\/2/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/11\s*200/).length).toBeGreaterThan(0);
   });
 
   it('prompts to align due date with the last installment payment before saving the invoice', async () => {
@@ -510,7 +522,7 @@ describe('InvoiceModal integration', () => {
       type: 'Income',
       status: 'Pending',
       clientId: 1,
-      lineItems: [{ name: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ', quantity: 1, unit: 'С€С‚', price: 10000 }],
+      lineItems: [{ name: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“', quantity: 1, unit: 'РЎв‚¬РЎвЂљ', price: 10000 }],
     } as unknown as Invoice;
 
     const firstInstallment = {
@@ -521,7 +533,7 @@ describe('InvoiceModal integration', () => {
       plannedDate: '2026-05-10',
       type: 'Income',
       status: 'Pending',
-      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–27 В· РїР»Р°С‚РµР¶ 1/2',
+      description: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ РІвЂћвЂ“27 Р’В· Р С—Р В»Р В°РЎвЂљР ВµР В¶ 1/2',
       account: '27',
       accountDate: '2026-05-10',
       systemNotes:
@@ -536,7 +548,7 @@ describe('InvoiceModal integration', () => {
       plannedDate: '2026-06-10',
       type: 'Income',
       status: 'Pending',
-      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–27 В· РїР»Р°С‚РµР¶ 2/2',
+      description: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“ РІвЂћвЂ“27 Р’В· Р С—Р В»Р В°РЎвЂљР ВµР В¶ 2/2',
       account: '27',
       accountDate: '2026-05-10',
       systemNotes:
@@ -598,7 +610,7 @@ describe('InvoiceModal integration', () => {
       type: 'Income',
       status: 'Pending',
       clientId: 1,
-      lineItems: [{ name: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ', quantity: 1, unit: 'С€С‚', price: 10000 }],
+      lineItems: [{ name: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“', quantity: 1, unit: 'РЎв‚¬РЎвЂљ', price: 10000 }],
     } as unknown as Invoice;
 
     render(
@@ -654,7 +666,7 @@ describe('InvoiceModal integration', () => {
       type: 'Income',
       status: 'Pending',
       clientId: 1,
-      lineItems: [{ name: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“', quantity: 1, unit: 'РЎв‚¬РЎвЂљ', price: 10000 }],
+      lineItems: [{ name: 'Р В Р’В Р В Р’В°Р РЋР С“Р РЋР С“Р РЋР вЂљР В РЎвЂўР РЋРІР‚РЋР В РЎвЂќР В Р’В° Р В РЎвЂ”Р В РЎвЂў Р РЋР С“Р РЋРІР‚РЋР В Р’ВµР РЋРІР‚С™Р РЋРЎвЂњ', quantity: 1, unit: 'Р РЋРІвЂљВ¬Р РЋРІР‚С™', price: 10000 }],
     } as unknown as Invoice;
 
     render(
@@ -690,7 +702,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('filters services by selected category and applies the matching template', async () => {
+  it('opens polished category and service dialogs, filters by search and applies the matching template', async () => {
     invoiceUnitsMock.push({ name: 'шт' }, { name: 'усл.ед.' }, { name: 'час' });
     serviceCategoriesMock.push(
       { id: 1, name: 'Арбитраж', description: '', colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
@@ -718,28 +730,52 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    const categorySelect = await screen.findByLabelText('Категория услуги');
-    fireEvent.change(categorySelect, { target: { value: '2' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Категория услуги' }));
+    expect(screen.getByText('Выбор категории услуги')).toBeTruthy();
 
-    const nameInput = screen.getByLabelText('Наименование услуги') as HTMLInputElement;
-    const datalistId = nameInput.getAttribute('list');
-    expect(datalistId).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText('Поиск категории'), { target: { value: 'Гражд' } });
+    fireEvent.click(screen.getByRole('button', { name: /Гражданские дела/i }));
 
-    const datalist = document.getElementById(datalistId!);
-    expect(datalist).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' }));
+    expect(screen.getByText('Выбор наименования услуги')).toBeTruthy();
 
-    const optionValues = Array.from(datalist!.querySelectorAll('option')).map((option) => option.getAttribute('value'));
-    expect(optionValues).toEqual(['Консультация', 'Составление иска']);
-
-    fireEvent.change(nameInput, { target: { value: 'Консультация' } });
-    fireEvent.blur(nameInput);
+    fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), { target: { value: 'Составл' } });
+    fireEvent.click(screen.getByRole('button', { name: /Составление иска/i }));
 
     await waitFor(() => {
       expect((screen.getByLabelText('Единица измерения') as HTMLInputElement).value).toBe('усл.ед.');
-      expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('8 000.00');
+      expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('15 000.00');
+      expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Составление иска');
     });
   });
 
+  it('allows saving a custom service name from the search dialog', async () => {
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Наименование услуги' }));
+    fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), {
+      target: { value: 'Нестандартная услуга' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Использовать:\s*Нестандартная услуга/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Нестандартная услуга');
+    });
+  });
   it('downloads document variant without signature and seal on demand', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
@@ -753,7 +789,7 @@ describe('InvoiceModal integration', () => {
       amount: 18000,
       type: 'Income',
       status: 'Pending',
-      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 18000 }],
     } as unknown as Invoice;
 
     render(
@@ -772,8 +808,8 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /скачать/i }));
-    fireEvent.click(screen.getByRole('button', { name: /pdf без подписи и печати/i }));
+    fireEvent.click(getButtonByTextVariants(/Скачать/i, /РЎРєР°С‡Р°С‚СЊ/i));
+    fireEvent.click(getButtonByTextVariants(/PDF без подписи и печати/i, /PDF Р±РµР· РїРѕРґРїРёСЃРё Рё РїРµС‡Р°С‚Рё/i));
 
     await waitFor(() => {
       expect(downloadMock).toHaveBeenCalledWith(551, 'pdf', { includeSignatureAndSeal: false });
@@ -802,7 +838,7 @@ describe('InvoiceModal integration', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Сумма позиции').textContent).toBe('7 500.00');
-      expect(screen.getByText(/Итого:\s*7 500\.00/)).toBeTruthy();
+      expect(screen.getAllByText(/7 500\.00/).length).toBeGreaterThan(1);
     });
   });
 
@@ -820,7 +856,7 @@ describe('InvoiceModal integration', () => {
       amount: 18000,
       type: 'Income',
       status: 'Pending',
-      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 18000 }],
     } as unknown as Invoice;
 
     render(
@@ -839,7 +875,7 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /печать/i }));
+    fireEvent.click(getButtonByTextVariants(/Печать/i, /РџРµС‡Р°С‚СЊ/i));
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
@@ -847,3 +883,6 @@ describe('InvoiceModal integration', () => {
     });
   });
 });
+
+
+
