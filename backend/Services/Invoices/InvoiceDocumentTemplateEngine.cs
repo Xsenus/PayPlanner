@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,6 +14,12 @@ public static class InvoiceDocumentTemplateEngine
 {
     public const string DefaultTemplateKey = "invoice-standard";
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
+    private static readonly HashSet<string> LegacyManagedStandardTemplateFingerprints = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ba913b728b9bc5352ce6affa7845f5b7e89889420470a2179d12f9a223d6abe0",
+        "8c5beee74da7dafc884bfc05d78b4681371f0bc9874540b0676d1e1c15bce7e4",
+        "92ca4fb24fbf8673ebc6256a299fdb9580ef9f3a64f78a3e3db7209bc226b18f",
+    };
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
@@ -25,6 +32,7 @@ public static class InvoiceDocumentTemplateEngine
         {
             ActiveTemplateKey = DefaultTemplateKey,
             PrintWithSignatureAndSealByDefault = false,
+            StandardTemplateFingerprint = CurrentDefaultTemplateFingerprint,
             Templates =
             [
                 new InvoiceDocumentTemplateStorageItem
@@ -40,7 +48,8 @@ public static class InvoiceDocumentTemplateEngine
 
     public static InvoiceDocumentTemplateSettingsDto CreateResponse(InvoiceDocumentTemplateSettingsStorage storage)
     {
-        var templates = storage.Templates
+        var normalizedStorage = NormalizeStorage(storage);
+        var templates = normalizedStorage.Templates
             .Where(static item => !string.IsNullOrWhiteSpace(item.Key) && !string.IsNullOrWhiteSpace(item.Name) && !string.IsNullOrWhiteSpace(item.Html))
             .GroupBy(item => item.Key.Trim(), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
@@ -65,7 +74,7 @@ public static class InvoiceDocumentTemplateEngine
         return new InvoiceDocumentTemplateSettingsDto
         {
             ActiveTemplateKey = activeTemplateKey,
-            PrintWithSignatureAndSealByDefault = storage.PrintWithSignatureAndSealByDefault,
+            PrintWithSignatureAndSealByDefault = normalizedStorage.PrintWithSignatureAndSealByDefault,
             Templates = templates,
             Tokens = GetAvailableTokens(),
             DefaultTemplateHtml = DefaultTemplateHtml,
@@ -85,10 +94,16 @@ public static class InvoiceDocumentTemplateEngine
             })
             .ToList();
 
+        var standardTemplate = templates.FirstOrDefault(item =>
+            string.Equals(item.Key, DefaultTemplateKey, StringComparison.OrdinalIgnoreCase));
+
         return new InvoiceDocumentTemplateSettingsStorage
         {
             ActiveTemplateKey = request.ActiveTemplateKey.Trim(),
             PrintWithSignatureAndSealByDefault = request.PrintWithSignatureAndSealByDefault,
+            StandardTemplateFingerprint = ResolveManagedStandardTemplateFingerprint(
+                standardTemplate?.Html,
+                currentFingerprint: null),
             Templates = templates,
         };
     }
@@ -953,6 +968,87 @@ public static class InvoiceDocumentTemplateEngine
             ? string.Empty
             : char.ToUpper(value[0], RuCulture) + value[1..];
 
+    private static string CurrentDefaultTemplateFingerprint
+        => ComputeTemplateFingerprint(DefaultTemplateHtml);
+
+    private static InvoiceDocumentTemplateSettingsStorage NormalizeStorage(InvoiceDocumentTemplateSettingsStorage storage)
+    {
+        var normalized = new InvoiceDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = storage.ActiveTemplateKey,
+            PrintWithSignatureAndSealByDefault = storage.PrintWithSignatureAndSealByDefault,
+            StandardTemplateFingerprint = string.IsNullOrWhiteSpace(storage.StandardTemplateFingerprint)
+                ? null
+                : storage.StandardTemplateFingerprint.Trim(),
+            Templates = storage.Templates
+                .Select(item => new InvoiceDocumentTemplateStorageItem
+                {
+                    Key = item.Key,
+                    Name = item.Name,
+                    Description = item.Description,
+                    Html = item.Html,
+                })
+                .ToList(),
+        };
+
+        var standardTemplate = normalized.Templates.FirstOrDefault(item =>
+            string.Equals(item.Key, DefaultTemplateKey, StringComparison.OrdinalIgnoreCase));
+
+        if (standardTemplate is null)
+        {
+            normalized.StandardTemplateFingerprint = null;
+            return normalized;
+        }
+
+        var managedFingerprint = ResolveManagedStandardTemplateFingerprint(
+            standardTemplate.Html,
+            normalized.StandardTemplateFingerprint);
+
+        if (string.IsNullOrWhiteSpace(managedFingerprint))
+        {
+            normalized.StandardTemplateFingerprint = null;
+            return normalized;
+        }
+
+        if (!string.Equals(managedFingerprint, CurrentDefaultTemplateFingerprint, StringComparison.OrdinalIgnoreCase))
+        {
+            standardTemplate.Html = DefaultTemplateHtml;
+        }
+
+        normalized.StandardTemplateFingerprint = CurrentDefaultTemplateFingerprint;
+        return normalized;
+    }
+
+    private static string? ResolveManagedStandardTemplateFingerprint(string? templateHtml, string? currentFingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(templateHtml))
+        {
+            return null;
+        }
+
+        var actualFingerprint = ComputeTemplateFingerprint(templateHtml);
+        if (string.Equals(actualFingerprint, CurrentDefaultTemplateFingerprint, StringComparison.OrdinalIgnoreCase))
+        {
+            return CurrentDefaultTemplateFingerprint;
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentFingerprint)
+            && string.Equals(actualFingerprint, currentFingerprint.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return actualFingerprint;
+        }
+
+        return LegacyManagedStandardTemplateFingerprints.Contains(actualFingerprint)
+            ? actualFingerprint
+            : null;
+    }
+
+    private static string ComputeTemplateFingerprint(string templateHtml)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(templateHtml.Trim()));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
 
@@ -969,6 +1065,7 @@ public static class InvoiceDocumentTemplateEngine
     {
         public string ActiveTemplateKey { get; set; } = string.Empty;
         public bool PrintWithSignatureAndSealByDefault { get; set; }
+        public string? StandardTemplateFingerprint { get; set; }
         public List<InvoiceDocumentTemplateStorageItem> Templates { get; set; } = new();
     }
 
@@ -1187,39 +1284,16 @@ public static class InvoiceDocumentTemplateEngine
       font-weight: 700;
       line-height: 1.15;
     }
-    .header-table {
-      table-layout: fixed;
-    }
-    .seller-title-cell {
-      padding: 2px 0 8px;
-      vertical-align: middle;
-    }
-    .bank-cell {
-      vertical-align: top;
-    }
-    .brand-column {
-      width: 165px;
-      padding-left: 10px;
-      vertical-align: top;
-    }
-    .brand-stack {
-      width: 150px;
-      margin-left: auto;
-    }
     .logo-wrap {
-      min-height: 88px;
-      padding-top: 2px;
       text-align: center;
     }
     .logo-wrap .logo {
       display: block;
-      max-height: 82px;
-      max-width: 150px;
-      margin: 0 auto;
+      max-height: 90px;
+      max-width: 180px;
+      margin-left: auto;
+      margin-right: auto;
       object-fit: contain;
-    }
-    .qr-wrap {
-      margin-top: 10px;
     }
     .invoice-qr {
       display: block;
@@ -1227,7 +1301,7 @@ public static class InvoiceDocumentTemplateEngine
       height: 150px;
       max-width: 150px;
       max-height: 150px;
-      margin: 0 auto;
+      margin-left: auto;
       object-fit: contain;
     }
     .bank-grid td {
@@ -1382,25 +1456,23 @@ public static class InvoiceDocumentTemplateEngine
 <body>
   <div class="page-content">
     <div class="document-template invoice-template">
-      <table class="header-table" style="margin: 0 0 10px;">
+      <table style="margin-bottom: 10px;">
         <tbody>
           <tr>
-            <td class="doc-title seller-title-cell">
+            <td class="doc-title" style="width: 60%; vertical-align: middle; padding: 2px 0;">
               {{seller.fullName}}
             </td>
-            <td class="brand-column" rowspan="2">
-              <div class="brand-stack">
-                <div class="logo-wrap">
-                  {{seller.logoHtml}}
-                </div>
-                <div class="qr-wrap">
-                  {{invoice.qrCodeHtml}}
-                </div>
-              </div>
+            <td class="logo-wrap" style="width: 40%; vertical-align: middle;">
+              {{seller.logoHtml}}
             </td>
           </tr>
+        </tbody>
+      </table>
+
+      <table style="margin: 0 0 10px;">
+        <tbody>
           <tr>
-            <td class="bank-cell">
+            <td>
               <table class="bank-grid">
                 <tbody>
                   <tr>
@@ -1437,6 +1509,9 @@ public static class InvoiceDocumentTemplateEngine
                   </tr>
                 </tbody>
               </table>
+            </td>
+            <td style="width: 150px; vertical-align: top;">
+              {{invoice.qrCodeHtml}}
             </td>
           </tr>
         </tbody>

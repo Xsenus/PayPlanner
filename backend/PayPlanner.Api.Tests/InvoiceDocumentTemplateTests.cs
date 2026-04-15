@@ -34,6 +34,8 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("{{invoice.number}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{buyer.foundationRowHtml}}", dto.DefaultTemplateHtml);
+        Assert.Contains("{{invoice.qrCodeHtml}}", dto.DefaultTemplateHtml);
+        Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", dto.DefaultTemplateHtml);
     }
 
     [Fact]
@@ -141,7 +143,9 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("Комментарий для клиента:</strong> Тестовый счет", content.Content);
         Assert.Contains("Срок оплаты:</strong> 12.04.2026", content.Content);
         Assert.Contains("Счет не для бухгалтерии", content.Content);
-        Assert.Contains("class=\"brand-column\" rowspan=\"2\"", content.Content);
+        Assert.Contains("class=\"logo-wrap\" style=\"width: 40%; vertical-align: middle;\"", content.Content);
+        Assert.Contains("<td style=\"width: 150px; vertical-align: top;\">", content.Content);
+        Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
         Assert.DoesNotContain("Дело:", content.Content);
         Assert.DoesNotContain("Тел.:", content.Content);
         Assert.DoesNotContain("Email:", content.Content);
@@ -156,6 +160,73 @@ public class InvoiceDocumentTemplateTests
         Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
         Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
         Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+    }
+
+    [Fact]
+    public async Task GetDocument_UpgradesLegacyManagedStandardTemplateLayout_WhenStoredTemplateMatchesBrokenDefault()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var saveAction = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                        Name = "РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ СЃС‡РµС‚",
+                        Html = BuildLegacyBrokenManagedDefaultTemplateHtml(),
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(saveAction.Result);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("class=\"logo-wrap\" style=\"width: 40%; vertical-align: middle;\"", content.Content);
+        Assert.Contains("<td style=\"width: 150px; vertical-align: top;\">", content.Content);
+        Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_PreservesCustomizedStandardTemplate_WhenStoredHtmlDiffersFromManagedVersions()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var saveAction = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                        Name = "РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ СЃС‡РµС‚",
+                        Html = "<html><body>custom-standard-{{invoice.number}}</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(saveAction.Result);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("custom-standard-25", content.Content);
     }
 
     [Fact]
@@ -516,6 +587,205 @@ public class InvoiceDocumentTemplateTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static string BuildLegacyBrokenManagedDefaultTemplateHtml()
+    {
+        var currentDefaultHtml = InvoiceDocumentTemplateEngine.CreateDefaultSettings().DefaultTemplateHtml;
+        var fixedHeaderCss = """
+    .logo-wrap {
+      text-align: center;
+    }
+    .logo-wrap .logo {
+      display: block;
+      max-height: 90px;
+      max-width: 180px;
+      margin-left: auto;
+      margin-right: auto;
+      object-fit: contain;
+    }
+    .invoice-qr {
+      display: block;
+      width: 150px;
+      height: 150px;
+      max-width: 150px;
+      max-height: 150px;
+      margin-left: auto;
+      object-fit: contain;
+    }
+""";
+        var brokenHeaderCss = """
+    .header-table {
+      table-layout: fixed;
+    }
+    .seller-title-cell {
+      padding: 2px 0 8px;
+      vertical-align: middle;
+    }
+    .bank-cell {
+      vertical-align: top;
+    }
+    .brand-column {
+      width: 165px;
+      padding-left: 10px;
+      vertical-align: top;
+    }
+    .brand-stack {
+      width: 150px;
+      margin-left: auto;
+    }
+    .logo-wrap {
+      min-height: 88px;
+      padding-top: 2px;
+      text-align: center;
+    }
+    .logo-wrap .logo {
+      display: block;
+      max-height: 82px;
+      max-width: 150px;
+      margin: 0 auto;
+      object-fit: contain;
+    }
+    .qr-wrap {
+      margin-top: 10px;
+    }
+    .invoice-qr {
+      display: block;
+      width: 150px;
+      height: 150px;
+      max-width: 150px;
+      max-height: 150px;
+      margin: 0 auto;
+      object-fit: contain;
+    }
+""";
+        var fixedHeaderHtml = """
+      <table style="margin-bottom: 10px;">
+        <tbody>
+          <tr>
+            <td class="doc-title" style="width: 60%; vertical-align: middle; padding: 2px 0;">
+              {{seller.fullName}}
+            </td>
+            <td class="logo-wrap" style="width: 40%; vertical-align: middle;">
+              {{seller.logoHtml}}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style="margin: 0 0 10px;">
+        <tbody>
+          <tr>
+            <td>
+              <table class="bank-grid">
+                <tbody>
+                  <tr>
+                    <td colspan="2" rowspan="2" class="v-al-t bor0-b" style="width: 50%;">
+                      {{seller.bankName}}
+                    </td>
+                    <td style="width: 15%;">Р‘РРљ</td>
+                    <td class="bor0-b" style="width: 35%;">{{seller.bik}}</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td rowspan="2" class="v-al-t bor0-t" style="width: 35%;">{{seller.corrAccountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Р‘Р°РЅРє РїРѕР»СѓС‡Р°С‚РµР»СЏ</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td style="width: 25%;">РРќРќ {{seller.inn}}</td>
+                    <td style="width: 25%;">РљРџРџ {{seller.kppOrDash}}</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td rowspan="4" class="v-al-t" style="width: 35%;">{{seller.accountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td rowspan="2" colspan="2" class="v-al-t bor0-b" style="width: 50%;">{{seller.fullName}}</td>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">РџРѕР»СѓС‡Р°С‚РµР»СЊ</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+            <td style="width: 150px; vertical-align: top;">
+              {{invoice.qrCodeHtml}}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+""";
+        var brokenHeaderHtml = """
+      <table class="header-table" style="margin: 0 0 10px;">
+        <tbody>
+          <tr>
+            <td class="doc-title seller-title-cell">
+              {{seller.fullName}}
+            </td>
+            <td class="brand-column" rowspan="2">
+              <div class="brand-stack">
+                <div class="logo-wrap">
+                  {{seller.logoHtml}}
+                </div>
+                <div class="qr-wrap">
+                  {{invoice.qrCodeHtml}}
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="bank-cell">
+              <table class="bank-grid">
+                <tbody>
+                  <tr>
+                    <td colspan="2" rowspan="2" class="v-al-t bor0-b" style="width: 50%;">
+                      {{seller.bankName}}
+                    </td>
+                    <td style="width: 15%;">Р‘РРљ</td>
+                    <td class="bor0-b" style="width: 35%;">{{seller.bik}}</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td rowspan="2" class="v-al-t bor0-t" style="width: 35%;">{{seller.corrAccountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Р‘Р°РЅРє РїРѕР»СѓС‡Р°С‚РµР»СЏ</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td style="width: 25%;">РРќРќ {{seller.inn}}</td>
+                    <td style="width: 25%;">РљРџРџ {{seller.kppOrDash}}</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td rowspan="4" class="v-al-t" style="width: 35%;">{{seller.accountNumber}}</td>
+                  </tr>
+                  <tr>
+                    <td rowspan="2" colspan="2" class="v-al-t bor0-b" style="width: 50%;">{{seller.fullName}}</td>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">РџРѕР»СѓС‡Р°С‚РµР»СЊ</td>
+                    <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+""";
+
+        return currentDefaultHtml
+            .Replace(fixedHeaderCss, brokenHeaderCss, StringComparison.Ordinal)
+            .Replace(fixedHeaderHtml, brokenHeaderHtml, StringComparison.Ordinal);
     }
 
     private static InvoicesController CreateController(
