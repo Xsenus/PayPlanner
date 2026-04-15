@@ -170,6 +170,88 @@ public class InvoicesControllerValidationTests
         Assert.Equal(new DateTime(2026, 6, 10), storedInvoicePayment.Date);
     }
 
+    [Fact]
+    public async Task Update_PreservesExistingInstallmentSchedule_WhenInstallmentPlanIsOmitted()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ");
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var createRequest = CreateRequest("34", clientId, new DateTime(2026, 4, 10));
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var invoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+
+        var updateRequest = CreateRequest("34", clientId, new DateTime(2026, 4, 10));
+        updateRequest.DueDate = new DateTime(2026, 6, 10);
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        Assert.IsType<InvoiceDto>(ok.Value);
+
+        var storedInstallments = await db.Payments
+            .AsNoTracking()
+            .Where(payment =>
+                payment.InvoiceId == invoicePayment.InvoiceId
+                && payment.Id != invoicePayment.Id
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains("[pp:installment-payment]"))
+            .OrderBy(payment => payment.Date)
+            .ToListAsync();
+
+        Assert.Equal(2, storedInstallments.Count);
+        Assert.Equal(new DateTime(2026, 5, 10), storedInstallments[0].Date);
+        Assert.Equal(new DateTime(2026, 6, 10), storedInstallments[1].Date);
+    }
+
+    [Fact]
+    public async Task Update_RemovesExistingInstallmentSchedule_WhenReplaceInstallmentPlanRequestedWithNullPlan()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ");
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var createRequest = CreateRequest("35", clientId, new DateTime(2026, 4, 10));
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var invoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+
+        var updateRequest = CreateRequest("35", clientId, new DateTime(2026, 4, 10));
+        updateRequest.DueDate = new DateTime(2026, 6, 10);
+        updateRequest.ReplaceInstallmentPlan = true;
+        updateRequest.InstallmentPlan = null;
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        Assert.IsType<InvoiceDto>(ok.Value);
+
+        var storedInstallmentCount = await db.Payments
+            .AsNoTracking()
+            .CountAsync(payment =>
+                payment.InvoiceId == invoicePayment.InvoiceId
+                && payment.Id != invoicePayment.Id
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains("[pp:installment-payment]"));
+
+        Assert.Equal(0, storedInstallmentCount);
+    }
+
     private static UpsertInvoiceRequest CreateRequest(string number, int clientId, DateTime date)
     {
         return new UpsertInvoiceRequest

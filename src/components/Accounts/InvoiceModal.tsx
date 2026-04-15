@@ -1619,21 +1619,27 @@ export function InvoiceModal({
     return Math.abs(parseMoneyInput(form.amount) - installmentPlan.total) > 0.009;
   }, [form.amount, installmentPlan]);
 
+  type BuildInvoicePayloadOptions = {
+    statusOverride?: PaymentStatus;
+    planOverride?: InstallmentPlanInput | null;
+    dueDateOverride?: string | null;
+    replaceInstallmentPlan?: boolean;
+  };
 
   const buildInvoicePayload = useCallback((
-    statusOverride?: PaymentStatus,
-    planOverride?: InstallmentPlanInput | null,
-    dueDateOverride?: string | null,
+    options: BuildInvoicePayloadOptions = {},
   ): InvoiceInput => {
+    const { statusOverride, planOverride, dueDateOverride, replaceInstallmentPlan } = options;
     const safeAmount = parseMoneyInput(form.amount);
     const clientCaseIds = selectedClientCaseIds.filter((id) => Number.isFinite(id) && id > 0);
     const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
     const effectiveInstallmentPlan = planOverride === undefined ? installmentPlan : planOverride;
     const effectiveDueDate = dueDateOverride === undefined ? form.dueDate : (dueDateOverride ?? '');
-    const shouldIncludeInstallmentPlan =
-      mode === 'create'
+    const shouldReplaceInstallmentPlan =
+      replaceInstallmentPlan
+      ?? (mode === 'create'
         ? Boolean(effectiveInstallmentPlan)
-        : installmentPlanTouched || Boolean(relatedInstallmentPlan) || Boolean(effectiveInstallmentPlan);
+        : installmentPlanTouched);
 
     return {
       number: form.number.trim() || String(invoice?.number ?? ''),
@@ -1663,11 +1669,12 @@ export function InvoiceModal({
           price: parseMoneyInput(item.price),
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
-      installmentPlan: shouldIncludeInstallmentPlan
+      replaceInstallmentPlan: shouldReplaceInstallmentPlan || undefined,
+      installmentPlan: shouldReplaceInstallmentPlan
         ? (effectiveInstallmentPlan ? cloneInstallmentPlan(effectiveInstallmentPlan) : null)
         : undefined,
     };
-  }, [form, installmentPlan, installmentPlanTouched, invoice?.number, lineItems, mode, relatedInstallmentPlan, selectedActs, selectedClientCaseIds]);
+  }, [form, installmentPlan, installmentPlanTouched, invoice?.number, lineItems, mode, selectedActs, selectedClientCaseIds]);
 
   const resolveInstallmentDueDateForSave = useCallback(async (
     planOverride?: InstallmentPlanInput | null,
@@ -1769,7 +1776,7 @@ export function InvoiceModal({
       return;
     }
 
-    const payload = buildInvoicePayload(undefined, undefined, dueDateResolution.dueDateOverride);
+    const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
     payload.number = number;
 
     try {
@@ -1804,7 +1811,11 @@ export function InvoiceModal({
 
     if (mode === 'edit' && invoice?.id) {
       try {
-        const payload = buildInvoicePayload(undefined, nextPlan, nextDueDate || undefined);
+        const payload = buildInvoicePayload({
+          planOverride: nextPlan,
+          dueDateOverride: nextDueDate || undefined,
+          replaceInstallmentPlan: true,
+        });
         await apiService.updateInvoice(invoice.id, payload);
         await onRefreshRequested?.();
         setInstallmentModalOpen(false);
@@ -2052,7 +2063,9 @@ export function InvoiceModal({
       }
 
       if (action === 'copy') {
-        const payload = buildInvoicePayload();
+        const payload = buildInvoicePayload({
+          replaceInstallmentPlan: Boolean(installmentPlan ?? relatedInstallmentPlan),
+        });
         payload.number = `${form.number || 'Счёт'} (копия)`;
         await apiService.createInvoice(payload);
         await onRefreshRequested?.();
@@ -2062,7 +2075,7 @@ export function InvoiceModal({
 
       if ((action === 'paid' || action === 'cancel') && invoice?.id) {
         const nextStatus: PaymentStatus = action === 'paid' ? 'Completed' : 'Cancelled';
-        const payload = buildInvoicePayload(nextStatus);
+        const payload = buildInvoicePayload({ statusOverride: nextStatus });
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
         setDisplayPayments((prev) => prev.map((payment) => (

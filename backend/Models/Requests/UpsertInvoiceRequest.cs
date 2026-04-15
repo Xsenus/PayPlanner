@@ -74,6 +74,8 @@ public class UpsertInvoiceRequest
 
     public List<InvoiceLineItemRequest>? LineItems { get; set; }
 
+    public bool ReplaceInstallmentPlan { get; set; }
+
     public InvoiceInstallmentPlanRequest? InstallmentPlan { get; set; }
 }
 

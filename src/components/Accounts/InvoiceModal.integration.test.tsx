@@ -438,12 +438,68 @@ describe('InvoiceModal integration', () => {
     await waitFor(() => {
       expect(vi.mocked(apiService.updateInvoice)).toHaveBeenCalledWith(
         532,
-        expect.objectContaining({ dueDate: '2026-06-10' }),
+        expect.objectContaining({
+          dueDate: '2026-06-10',
+          replaceInstallmentPlan: true,
+          installmentPlan: expect.objectContaining({
+            items: expect.arrayContaining([
+              expect.objectContaining({ sequence: 1 }),
+              expect.objectContaining({ sequence: 2 }),
+            ]),
+          }),
+        }),
       );
     });
 
     const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
     expect(dateInputs[1]?.value).toBe('2026-06-10');
+  });
+
+  it('sends explicit installment removal when the plan is cleared from the editor', async () => {
+    const invoice = {
+      id: 533,
+      invoiceEntityId: 29,
+      number: '29',
+      date: '2026-05-10',
+      dueDate: '2026-06-10',
+      amount: 10000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Р В Р В°РЎРѓРЎРѓРЎР‚Р С•РЎвЂЎР С”Р В° Р С—Р С• РЎРѓРЎвЂЎР ВµРЎвЂљРЎС“', quantity: 1, unit: 'РЎв‚¬РЎвЂљ', price: 10000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const installmentButton = document.querySelector('label button[type="button"]') as HTMLButtonElement | null;
+    expect(installmentButton).toBeTruthy();
+    fireEvent.click(installmentButton!);
+    expect(await screen.findByTestId('installment-planner')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'apply-installment-plan' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiService.updateInvoice)).toHaveBeenCalledWith(
+        533,
+        expect.objectContaining({
+          replaceInstallmentPlan: true,
+          installmentPlan: null,
+        }),
+      );
+    });
   });
 
   it('filters services by selected category and applies the matching template', async () => {

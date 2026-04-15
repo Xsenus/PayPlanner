@@ -924,6 +924,7 @@ export interface InvoiceInput {
   paidDate?: string | null;
   lineItems?: InvoiceLineItem[];
   responsibleIds?: number[];
+  replaceInstallmentPlan?: boolean;
   installmentPlan?: InstallmentPlanInput | null;
 }
 

@@ -2072,6 +2072,11 @@ public class InvoicesController : ControllerBase
             .Where(item => item.Metadata is not null)
             .ToList();
 
+        if (!ShouldReplaceInstallmentPlan(request))
+        {
+            return null;
+        }
+
         if (request.InstallmentPlan is null || request.InstallmentPlan.Items.Count == 0)
         {
             foreach (var existing in existingInstallmentPayments)
@@ -2182,6 +2187,11 @@ public class InvoicesController : ControllerBase
         }
 
         return null;
+    }
+
+    private static bool ShouldReplaceInstallmentPlan(UpsertInvoiceRequest request)
+    {
+        return request.ReplaceInstallmentPlan || request.InstallmentPlan is not null;
     }
 
     private static DateTime ResolveInvoiceDueDate(UpsertInvoiceRequest request)
@@ -3176,9 +3186,10 @@ public class InvoicesController : ControllerBase
         foreach (var installment in installments)
         {
             var metadata = ExtractInstallmentPaymentMetadata(installment.SystemNotes);
-            var date = metadata?.Item.Date != default ? metadata.Item.Date : installment.Date;
-            var amount = metadata?.Item.Payment > 0m ? metadata.Item.Payment : installment.Amount;
-            var sequence = metadata?.Item.Sequence ?? 0;
+            var metadataItem = metadata?.Item;
+            var date = metadataItem is not null && metadataItem.Date != default ? metadataItem.Date : installment.Date;
+            var amount = metadataItem is not null && metadataItem.Payment > 0m ? metadataItem.Payment : installment.Amount;
+            var sequence = metadataItem?.Sequence ?? 0;
             items.Add(new InstallmentScheduleItem(sequence, date, amount, installment.Id));
         }
 
