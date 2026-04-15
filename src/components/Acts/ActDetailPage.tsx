@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
+import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
@@ -92,11 +93,12 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
       setLoading(true);
       setError(null);
       try {
-        const [target, clientsData, responsiblesData] = await Promise.all([
+        const [targetResponse, clientsData, responsiblesData] = await Promise.all([
           apiService.getAct(actId),
           apiService.getClients(),
           apiService.getActResponsibles(),
         ]);
+        const target = normalizeAct(targetResponse);
         if (cancelled) return;
         if (!target) {
           setError('Акт не найден');
@@ -106,8 +108,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
         }
         setAct(target);
         setForm(normalizeActToForm(target));
-        setClients(clientsData ?? []);
-        setResponsibles(responsiblesData ?? []);
+        setClients(normalizeClientArray(clientsData));
+        setResponsibles(normalizeActResponsibleArray(responsiblesData));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Не удалось загрузить данные');
@@ -194,7 +196,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
     setSaving(true);
     setError(null);
     try {
-      const updated = await apiService.updateAct(act.id, payload);
+      const updated = normalizeAct(await apiService.updateAct(act.id, payload));
+      if (!updated) {
+        throw new Error('Не удалось прочитать обновленный акт');
+      }
       setAct(updated);
       setForm(normalizeActToForm(updated));
       setEditMode(false);
@@ -228,14 +233,6 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
     }
   };
 
-  const lineItems = act.lineItems ?? [];
-  const creationModeLabel =
-    act.creationMode === 'Full'
-      ? 'Полностью по счету'
-      : act.creationMode === 'Partial'
-        ? 'Частично по счету'
-        : 'Ручной акт';
-
   if (loading || !form || !act) {
     return (
       <div className="p-8">
@@ -243,6 +240,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProp
       </div>
     );
   }
+
+  const lineItems = act.lineItems ?? [];
+  const creationModeLabel =
+    act.creationMode === 'Full'
+      ? 'Полностью по счету'
+      : act.creationMode === 'Partial'
+        ? 'Частично по счету'
+        : 'Ручной акт';
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">

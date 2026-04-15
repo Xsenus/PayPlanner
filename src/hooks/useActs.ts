@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Act, ActInput, ActStatus, ActsSummary } from '../types';
+import { normalizeActArray, normalizeActsSummary } from '../utils/acts';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type ActsSortKey =
@@ -99,11 +100,11 @@ export function useActs(filters: ActsFilters): UseActsResult {
           page: filters.page,
           pageSize: filters.pageSize,
         });
-        setActs(response.items ?? []);
+        setActs(normalizeActArray(response?.items));
         setPagination({
-          page: response.page ?? filters.page ?? 1,
-          pageSize: response.pageSize ?? filters.pageSize ?? 20,
-          total: response.total ?? 0,
+          page: Number(response?.page ?? filters.page ?? 1) || 1,
+          pageSize: Number(response?.pageSize ?? filters.pageSize ?? 20) || 20,
+          total: Number(response?.total ?? 0) || 0,
         });
         hasLoadedRef.current = true;
       } catch (err) {
@@ -139,7 +140,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           responsibleId: filters.responsibleId,
           search: filters.search,
         });
-        setSummary(response);
+        setSummary(normalizeActsSummary(response));
         hasSummaryLoadedRef.current = true;
       } catch {
         if (!hasSummaryLoadedRef.current) {
