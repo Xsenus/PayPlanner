@@ -780,6 +780,32 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('shows the calculated line item amount and keeps invoice total in sync', async () => {
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Количество'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '2500' } });
+    fireEvent.blur(screen.getByLabelText('Цена'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Сумма позиции').textContent).toBe('7 500.00');
+      expect(screen.getByText(/Итого:\s*7 500\.00/)).toBeTruthy();
+    });
+  });
+
   it('opens print window before requesting printable pdf document', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();

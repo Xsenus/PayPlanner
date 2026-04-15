@@ -133,6 +133,13 @@ function formatMoneyDisplayValue(value: string | number | null | undefined): str
   return formatMoneyValue(value);
 }
 
+function calculateLineItemAmountValue(
+  quantity: string | number | null | undefined,
+  price: string | number | null | undefined,
+): string {
+  return formatMoneyDisplayValue(parseMoneyInput(quantity) * parseMoneyInput(price));
+}
+
 function normalizeLookupName(value: string | null | undefined): string {
   return String(value ?? '').trim().toLocaleLowerCase('ru');
 }
@@ -2972,14 +2979,24 @@ export function InvoiceModal({
                             </button>
                           </header>
                           <div className="space-y-2">
+                            <div className="hidden items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_5rem_7rem_8rem_8rem_auto]">
+                              <span>Категория</span>
+                              <span>Наименование</span>
+                              <span className="text-center">Кол-во</span>
+                              <span>Ед.</span>
+                              <span className="text-right">Цена</span>
+                              <span className="text-right">Сумма</span>
+                              <span className="sr-only">Действия</span>
+                            </div>
                             {lineItems.map((item) => {
                               const datalistId = `invoice-line-item-names-${item.id}`;
                               const lineItemServices = item.serviceCategoryId
                                 ? servicesByCategoryId.get(item.serviceCategoryId) ?? []
                                 : sortedServices;
+                              const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price);
 
                               return (
-                                <div key={item.id} className="grid gap-2 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_4.5rem_7rem_8rem_auto]">
+                                <div key={item.id} className="grid gap-2 md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_5rem_7rem_8rem_8rem_auto]">
                                   <select
                                     value={item.serviceCategoryId}
                                     onChange={(event) => handleLineItemCategoryChange(item.id, event.target.value)}
@@ -3042,6 +3059,12 @@ export function InvoiceModal({
                                     aria-label="Цена"
                                     className="rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
                                   />
+                                  <output
+                                    aria-label="Сумма позиции"
+                                    className="inline-flex min-h-10 items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700"
+                                  >
+                                    {lineItemTotal}
+                                  </output>
                                   <button
                                     type="button"
                                     onClick={() => { void removeLineItem(item.id); }}

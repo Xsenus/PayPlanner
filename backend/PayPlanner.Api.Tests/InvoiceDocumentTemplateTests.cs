@@ -35,7 +35,25 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{buyer.foundationRowHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{invoice.qrCodeHtml}}", dto.DefaultTemplateHtml);
+        Assert.Contains("<th class=\"sum\">Сумма</th>", dto.DefaultTemplateHtml);
+        Assert.Contains("<td class=\"sum\">{{total}}</td>", dto.DefaultTemplateHtml);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", dto.DefaultTemplateHtml);
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersDefaultTemplate_WithLineItemTotalColumn()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("<th class=\"sum\">Сумма</th>", content.Content);
+        Assert.Matches(new Regex("<td class=\"sum\">\\s*[^<]+\\s*</td>", RegexOptions.Singleline), content.Content);
+        Assert.Matches(new Regex("на сумму\\s*[^<]+\\s*руб\\.", RegexOptions.Singleline), content.Content);
     }
 
     [Fact]

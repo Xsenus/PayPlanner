@@ -184,6 +184,11 @@ function validateTemplateHtml(
     warnings.push('В шаблоне не используется дата счета.');
   }
 
+  const lineItemsBlocks = Array.from(source.matchAll(/\{\{#lineItems\}\}([\s\S]*?)\{\{\/lineItems\}\}/g));
+  if (lineItemsBlocks.length > 0 && !lineItemsBlocks.some(([, block]) => /\{\{\s*total\s*\}\}/.test(block))) {
+    warnings.push('В блоке {{#lineItems}} не используется {{total}}. Если нужна колонка суммы по позиции, добавьте этот токен в строку таблицы.');
+  }
+
   const allowedTokens = new Set<string>((settings?.tokens ?? []).map((token) => token.key));
   allowedTokens.add('#lineItems');
   allowedTokens.add('/lineItems');
