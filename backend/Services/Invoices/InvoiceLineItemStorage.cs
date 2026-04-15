@@ -25,6 +25,7 @@ public static class InvoiceLineItemStorage
             {
                 SortOrder = index,
                 SourceKey = BuildSourceKey(null, index),
+                ServiceId = item.ServiceId is > 0 ? item.ServiceId : null,
                 Name = item.Name!.Trim(),
                 Quantity = Math.Max(item.Quantity, 0),
                 Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
@@ -66,6 +67,7 @@ public static class InvoiceLineItemStorage
                     SourceKey = string.IsNullOrWhiteSpace(item.SourceKey)
                         ? BuildSourceKey(item.Id, item.SortOrder ?? index)
                         : item.SourceKey,
+                    ServiceId = item.ServiceId is > 0 ? item.ServiceId : null,
                     Name = item.Name.Trim(),
                     Quantity = item.Quantity,
                     Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),

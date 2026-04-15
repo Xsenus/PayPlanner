@@ -312,6 +312,17 @@ namespace PayPlanner.Api.Services
                 }
 
                 await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_Payments_ServiceId\" ON \"Payments\" (\"ServiceId\");", cancellationToken);
+
+                if (await TableExistsAsync(connection, "InvoiceLineItems", cancellationToken)
+                    && !await ColumnExistsAsync(connection, "InvoiceLineItems", "ServiceId", cancellationToken))
+                {
+                    await ExecuteNonQueryAsync(connection, "ALTER TABLE \"InvoiceLineItems\" ADD COLUMN \"ServiceId\" INTEGER NULL;", cancellationToken);
+                }
+
+                if (await TableExistsAsync(connection, "InvoiceLineItems", cancellationToken))
+                {
+                    await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS \"IX_InvoiceLineItems_ServiceId\" ON \"InvoiceLineItems\" (\"ServiceId\");", cancellationToken);
+                }
             }
             finally
             {

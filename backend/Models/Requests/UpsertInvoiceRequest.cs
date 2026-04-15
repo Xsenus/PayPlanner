@@ -81,6 +81,8 @@ public class UpsertInvoiceRequest
 
 public class InvoiceLineItemRequest
 {
+    public int? ServiceId { get; set; }
+
     [MaxLength(2000)]
     public string? Name { get; set; }
 

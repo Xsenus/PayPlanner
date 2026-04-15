@@ -578,6 +578,7 @@ public class ActsController : ControllerBase
                 Id = item.Id,
                 SortOrder = item.SortOrder,
                 SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
+                ServiceId = item.ServiceId,
                 Name = item.Name,
                 Quantity = item.Quantity,
                 Unit = item.Unit,

@@ -1545,6 +1545,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<int?>("ServiceId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -1573,6 +1576,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("PaymentId")
                         .HasDatabaseName("IX_InvoiceLineItems_PaymentId");
+
+                    b.HasIndex("ServiceId")
+                        .HasDatabaseName("IX_InvoiceLineItems_ServiceId");
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_InvoiceLineItem_UpdatedAt_Audit");
@@ -3799,7 +3805,14 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PayPlanner.Api.Models.ServiceDictionaryItem", "Service")
+                        .WithMany("InvoiceLineItems")
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Payment");
+
+                    b.Navigation("Service");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
@@ -4118,6 +4131,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceDictionaryItem", b =>
                 {
+                    b.Navigation("InvoiceLineItems");
+
                     b.Navigation("Payments");
                 });
 

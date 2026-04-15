@@ -360,6 +360,8 @@ public class DictionariesAdminController : ControllerBase
         if (e is null) return NotFound();
         if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ServiceId == id))
             return InUseError(e.Name);
+        if (await _db.InvoiceLineItems.AsNoTracking().AnyAsync(item => item.ServiceId == id))
+            return InUseError(e.Name);
         _db.Services.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();

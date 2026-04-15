@@ -9,6 +9,9 @@ public class InvoiceLineItem
     public int PaymentId { get; set; }
     public Payment Payment { get; set; } = null!;
 
+    public int? ServiceId { get; set; }
+    public ServiceDictionaryItem? Service { get; set; }
+
     public int SortOrder { get; set; }
 
     [MaxLength(2000)]

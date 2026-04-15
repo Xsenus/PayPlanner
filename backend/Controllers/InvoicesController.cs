@@ -280,6 +280,12 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        var lineItemServiceValidationError = await ValidateInvoiceLineItemServicesAsync(request.LineItems, ct);
+        if (lineItemServiceValidationError is not null)
+        {
+            return lineItemServiceValidationError;
+        }
+
         var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
         var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwnerClientId, request, ct);
         if (clientCaseValidation.Error is not null)
@@ -423,6 +429,12 @@ public class InvoicesController : ControllerBase
             {
                 return BadRequest($"Unknown serviceId {request.ServiceId.Value}");
             }
+        }
+
+        var lineItemServiceValidationError = await ValidateInvoiceLineItemServicesAsync(request.LineItems, ct);
+        if (lineItemServiceValidationError is not null)
+        {
+            return lineItemServiceValidationError;
         }
 
         var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
@@ -1994,6 +2006,7 @@ public class InvoicesController : ControllerBase
                 Id = item.Id,
                 SortOrder = item.SortOrder,
                 SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
+                ServiceId = item.ServiceId,
                 Name = item.Name,
                 Quantity = item.Quantity,
                 Unit = item.Unit,
@@ -2028,6 +2041,7 @@ public class InvoicesController : ControllerBase
                     Id = item.Id,
                     SortOrder = item.SortOrder,
                     SourceKey = InvoiceLineItemStorage.BuildSourceKey(item.Id, item.SortOrder),
+                    ServiceId = item.ServiceId,
                     Name = item.Name,
                     Quantity = item.Quantity,
                     Unit = item.Unit,
@@ -2635,6 +2649,36 @@ public class InvoicesController : ControllerBase
         return result;
     }
 
+    private async Task<BadRequestObjectResult?> ValidateInvoiceLineItemServicesAsync(IEnumerable<InvoiceLineItemRequest>? lineItems, CancellationToken ct)
+    {
+        if (lineItems is null)
+        {
+            return null;
+        }
+
+        var requestedServiceIds = lineItems
+            .Where(item => item?.ServiceId is > 0)
+            .Select(item => item!.ServiceId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (requestedServiceIds.Count == 0)
+        {
+            return null;
+        }
+
+        var existingServiceIds = await _db.Services
+            .AsNoTracking()
+            .Where(service => requestedServiceIds.Contains(service.Id))
+            .Select(service => service.Id)
+            .ToListAsync(ct);
+
+        var unknownServiceId = requestedServiceIds.Except(existingServiceIds).OrderBy(id => id).FirstOrDefault();
+        return unknownServiceId > 0
+            ? BadRequest($"Unknown invoice line item serviceId {unknownServiceId}")
+            : null;
+    }
+
     private async Task SyncInvoiceClientCasesAsync(Payment payment, IReadOnlyCollection<int> clientCaseIds, CancellationToken ct)
     {
         var collection = _db.Entry(payment).Collection(x => x.InvoiceClientCases);
@@ -2693,6 +2737,7 @@ public class InvoicesController : ControllerBase
             payment.InvoiceLineItems.Add(new InvoiceLineItem
             {
                 PaymentId = payment.Id,
+                ServiceId = item.ServiceId,
                 SortOrder = index,
                 Name = item.Name,
                 Quantity = item.Quantity,

@@ -18,5 +18,6 @@ namespace PayPlanner.Api.Models
         public ServiceCategoryDictionaryItem? Category { get; set; }
 
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
+        public ICollection<InvoiceLineItem> InvoiceLineItems { get; set; } = new List<InvoiceLineItem>();
     }
 }

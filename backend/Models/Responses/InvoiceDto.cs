@@ -92,6 +92,7 @@ public class InvoiceLineItemDto
     public int? Id { get; set; }
     public int? SortOrder { get; set; }
     public string SourceKey { get; set; } = string.Empty;
+    public int? ServiceId { get; set; }
     public string Name { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = "шт";

@@ -399,8 +399,13 @@ public class PaymentContext : DbContext
                 .WithMany(e => e.InvoiceLineItems)
                 .HasForeignKey(e => e.PaymentId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Service)
+                .WithMany(e => e.InvoiceLineItems)
+                .HasForeignKey(e => e.ServiceId)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_InvoiceLineItems_PaymentId");
             entity.HasIndex(e => new { e.PaymentId, e.SortOrder }).HasDatabaseName("IX_InvoiceLineItems_PaymentId_SortOrder");
+            entity.HasIndex(e => e.ServiceId).HasDatabaseName("IX_InvoiceLineItems_ServiceId");
         });
 
         // ------------------ LegalEntity ------------------

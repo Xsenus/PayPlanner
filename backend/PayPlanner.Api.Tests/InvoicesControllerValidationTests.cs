@@ -118,6 +118,65 @@ public class InvoicesControllerValidationTests
     }
 
     [Fact]
+    public async Task Create_PersistsInvoiceLineItemServiceId()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+        var serviceId = await CreateServiceAsync(db, "Составление иска");
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("31A", clientId, new DateTime(2026, 4, 10));
+        request.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                ServiceId = serviceId,
+                Name = "Составление иска по делу №42",
+                Quantity = 1,
+                Unit = "усл. ед.",
+                Price = 22_500m,
+            },
+        ];
+        request.Amount = 22_500m;
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+        var lineItem = Assert.Single(dto.LineItems);
+        Assert.Equal(serviceId, lineItem.ServiceId);
+
+        var storedServiceId = await db.InvoiceLineItems.AsNoTracking().Select(x => x.ServiceId).SingleAsync();
+        Assert.Equal(serviceId, storedServiceId);
+    }
+
+    [Fact]
+    public async Task Create_RejectsUnknownInvoiceLineItemServiceId()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("31B", clientId, new DateTime(2026, 4, 10));
+        request.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                ServiceId = 9999,
+                Name = "Нестандартная услуга",
+                Quantity = 1,
+                Unit = "шт",
+                Price = 1_000m,
+            },
+        ];
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Equal("Unknown invoice line item serviceId 9999", badRequest.Value);
+    }
+
+    [Fact]
     public async Task Create_AlignsDueDateWithLastInstallmentPaymentDate()
     {
         await using var db = await CreateContextAsync();
@@ -321,6 +380,23 @@ public class InvoicesControllerValidationTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client.Id;
+    }
+
+    private static async Task<int> CreateServiceAsync(PaymentContext db, string name)
+    {
+        var service = new ServiceDictionaryItem
+        {
+            Name = name,
+            Description = string.Empty,
+            Unit = "усл. ед.",
+            DefaultPrice = 0m,
+            ColorHex = "#111827",
+            IsActive = true,
+        };
+
+        db.Services.Add(service);
+        await db.SaveChangesAsync();
+        return service.Id;
     }
 
     private static async Task CreateOrphanInvoiceAsync(PaymentContext db, string number, DateTime date)
