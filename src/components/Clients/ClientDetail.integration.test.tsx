@@ -169,7 +169,7 @@ function getRowContainerByValue(value: string): HTMLElement {
 
 function getPowerOfAttorneyCard(text: string): HTMLElement {
   const element = screen.getByText(text);
-  const container = element.parentElement?.parentElement?.parentElement;
+  const container = element.closest('[data-poa-card="true"]');
   expect(container).toBeTruthy();
   return container as HTMLElement;
 }
@@ -449,8 +449,9 @@ describe('ClientDetail integration', () => {
     expect(await screen.findByText('Кем выдана: Старый нотариус')).toBeTruthy();
 
     expect(within(getPowerOfAttorneyCard('Кем выдана: Старый нотариус')).getByRole('button', { name: 'Удалить доверенность' })).toBeTruthy();
+    expect(within(getPowerOfAttorneyCard('Кем выдана: Старый нотариус')).queryByText(/^Изменить$/)).toBeNull();
 
-    await user.click(within(getPowerOfAttorneyCard('Кем выдана: Старый нотариус')).getByRole('button', { name: 'Изменить' }));
+    await user.click(within(getPowerOfAttorneyCard('Кем выдана: Старый нотариус')).getByRole('button', { name: 'Изменить доверенность' }));
 
     const promptForm = (await screen.findByText('Редактирование доверенности')).closest('form');
     expect(promptForm).toBeTruthy();

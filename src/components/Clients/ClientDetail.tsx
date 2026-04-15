@@ -611,6 +611,8 @@ const ADDRESS_TYPE_OPTIONS: AddressTypeOption[] = [
 const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
 const PROFILE_DELETE_ICON_BUTTON_CLASS =
   'inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60';
+const PROFILE_SECONDARY_ICON_BUTTON_CLASS =
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60';
 
 const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; label: string }> = [
   { value: 'never_married', label: 'Никогда не состоял(а) в браке' },
@@ -3590,23 +3592,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <div className="space-y-2">
                   {clientFormState.education.map((item, index) => (
                     <div key={`education-${index}`} className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => { void removeEducation(index); }}
-                          disabled={!clientPermissions.canEdit}
-                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                          title="Удалить образование"
-                          aria-label="Удалить образование"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-4">
-                        <input value={item.institution} onChange={(e) => updateEducation(index, 'institution', e.target.value)} placeholder="Учебное заведение" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={item.specialty} onChange={(e) => updateEducation(index, 'specialty', e.target.value)} placeholder="Специальность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={item.diplomaNumber} onChange={(e) => updateEducation(index, 'diplomaNumber', e.target.value)} placeholder="№ диплома" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" list="okso-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <div className="grid items-start gap-2 md:grid-cols-12">
+                        <input value={item.institution} onChange={(e) => updateEducation(index, 'institution', e.target.value)} placeholder="Учебное заведение" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <input value={item.specialty} onChange={(e) => updateEducation(index, 'specialty', e.target.value)} placeholder="Специальность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        <input value={item.diplomaNumber} onChange={(e) => updateEducation(index, 'diplomaNumber', e.target.value)} placeholder="№ диплома" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                        <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" list="okso-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                        <div className="flex items-center justify-end md:col-span-1">
+                          <button
+                            type="button"
+                            onClick={() => { void removeEducation(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить образование"
+                            aria-label="Удалить образование"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3624,21 +3626,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <div className="space-y-2">
                   {clientFormState.professions.map((item, index) => (
                     <div key={`profession-${index}`} className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => { void removeProfession(index); }}
-                          disabled={!clientPermissions.canEdit}
-                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                          title="Удалить профессию"
-                          aria-label="Удалить профессию"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        <input value={item.profession} onChange={(e) => updateProfession(index, 'profession', e.target.value)} placeholder="Профессия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                        <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" list="okpdtr-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      <div className="grid items-start gap-2 md:grid-cols-12">
+                        <input value={item.profession} onChange={(e) => updateProfession(index, 'profession', e.target.value)} placeholder="Профессия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-7" />
+                        <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" list="okpdtr-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <div className="flex items-center justify-end md:col-span-1">
+                          <button
+                            type="button"
+                            onClick={() => { void removeProfession(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить профессию"
+                            aria-label="Удалить профессию"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3653,23 +3655,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <div className="space-y-2">
                   {clientFormState.workplaces.map((item, index) => (
                     <div key={`workplace-${index}`} className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => { void removeWorkplace(index); }}
-                          disabled={!clientPermissions.canEdit}
-                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                          title="Удалить место работы"
-                          aria-label="Удалить место работы"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-12">
+                      <div className="grid items-start gap-2 md:grid-cols-12">
                         <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
-                        <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
                         <div className="md:col-span-2"><input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
                         <div className="md:col-span-2"><input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                        <div className="flex items-center justify-end md:col-span-1">
+                          <button
+                            type="button"
+                            onClick={() => { void removeWorkplace(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить место работы"
+                            aria-label="Удалить место работы"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3696,23 +3698,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <div className="space-y-2">
                   {clientFormState.relatives.map((item, index) => (
                     <div key={`relative-${index}`} className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => { void removeRelative(index); }}
-                          disabled={!clientPermissions.canEdit}
-                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                          title="Удалить родственника"
-                          aria-label="Удалить родственника"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-12">
+                      <div className="grid items-start gap-2 md:grid-cols-12">
                         <input value={item.relation} onChange={(e) => updateRelative(index, 'relation', e.target.value)} placeholder="Степень родства" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
                         <input value={item.fullName} onChange={(e) => updateRelative(index, 'fullName', e.target.value)} placeholder="ФИО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
                         <input value={item.birthYear} onChange={(e) => updateRelative(index, 'birthYear', e.target.value)} placeholder="Год рождения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
-                        <input value={item.phone} onChange={(e) => updateRelative(index, 'phone', e.target.value)} placeholder="Номер телефона" disabled={!clientPermissions.canEdit} inputMode="tel" className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <input value={item.phone} onChange={(e) => updateRelative(index, 'phone', e.target.value)} placeholder="Номер телефона" disabled={!clientPermissions.canEdit} inputMode="tel" className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        <div className="flex items-center justify-end md:col-span-1">
+                          <button
+                            type="button"
+                            onClick={() => { void removeRelative(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить родственника"
+                            aria-label="Удалить родственника"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3730,23 +3732,29 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                     <div className="space-y-2">
                       {clientFormState.birthCertificateEntries.map((doc, index) => (
-                        <div key={`birth-certificate-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
-                          <input value={doc.series} onChange={(e) => updateBirthCertificateEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.number} onChange={(e) => updateBirthCertificateEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input type="date" value={doc.issueDate} onChange={(e) => updateBirthCertificateEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                          <input value={doc.actRecordNumber} onChange={(e) => updateBirthCertificateEntry(index, 'actRecordNumber', e.target.value)} placeholder="№ актовой записи" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.childFullName} onChange={(e) => updateBirthCertificateEntry(index, 'childFullName', e.target.value)} placeholder="ФИО ребенка" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <button
-                            type="button"
-                            onClick={() => { void removeBirthCertificateEntry(index); }}
-                            disabled={!clientPermissions.canEdit}
-                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                            title="Удалить свидетельство о рождении"
-                            aria-label="Удалить свидетельство о рождении"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                          <input value={doc.issuedBy} onChange={(e) => updateBirthCertificateEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдано" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        <div key={`birth-certificate-${index}`} className="rounded-lg border border-gray-200 p-3">
+                          <div className="grid items-start gap-2 md:grid-cols-12">
+                            <input value={doc.series} onChange={(e) => updateBirthCertificateEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                            <input value={doc.number} onChange={(e) => updateBirthCertificateEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                            <div className="md:col-span-5">
+                              <input type="date" value={doc.issueDate} onChange={(e) => updateBirthCertificateEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                            </div>
+                            <div className="flex items-center justify-end md:col-span-1">
+                              <button
+                                type="button"
+                                onClick={() => { void removeBirthCertificateEntry(index); }}
+                                disabled={!clientPermissions.canEdit}
+                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                title="Удалить свидетельство о рождении"
+                                aria-label="Удалить свидетельство о рождении"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <input value={doc.actRecordNumber} onChange={(e) => updateBirthCertificateEntry(index, 'actRecordNumber', e.target.value)} placeholder="№ актовой записи" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                            <input value={doc.childFullName} onChange={(e) => updateBirthCertificateEntry(index, 'childFullName', e.target.value)} placeholder="ФИО ребенка" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-8" />
+                            <input value={doc.issuedBy} onChange={(e) => updateBirthCertificateEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдано" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3763,26 +3771,32 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </div>
                     <div className="space-y-2">
                       {clientFormState.militaryIdEntries.map((doc, index) => (
-                        <div key={`military-id-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 md:grid-cols-3">
-                          <input value={doc.series} onChange={(e) => updateMilitaryIdEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.number} onChange={(e) => updateMilitaryIdEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input type="date" value={doc.issueDate} onChange={(e) => updateMilitaryIdEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
-                          <input value={doc.rank} onChange={(e) => updateMilitaryIdEntry(index, 'rank', e.target.value)} placeholder="Воинское звание" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.category} onChange={(e) => updateMilitaryIdEntry(index, 'category', e.target.value)} placeholder="Категория запаса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.fitnessCategory} onChange={(e) => updateMilitaryIdEntry(index, 'fitnessCategory', e.target.value)} placeholder="Категория годности" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <input value={doc.vusCode} onChange={(e) => updateMilitaryIdEntry(index, 'vusCode', e.target.value)} placeholder="Код ВУС" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <button
-                            type="button"
-                            onClick={() => { void removeMilitaryIdEntry(index); }}
-                            disabled={!clientPermissions.canEdit}
-                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                            title="Удалить военный билет"
-                            aria-label="Удалить военный билет"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                          <input value={doc.issuedBy} onChange={(e) => updateMilitaryIdEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
-                          <input value={doc.militaryCommissariat} onChange={(e) => updateMilitaryIdEntry(index, 'militaryCommissariat', e.target.value)} placeholder="Военный комиссариат" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                        <div key={`military-id-${index}`} className="rounded-lg border border-gray-200 p-3">
+                          <div className="grid items-start gap-2 md:grid-cols-12">
+                            <input value={doc.series} onChange={(e) => updateMilitaryIdEntry(index, 'series', e.target.value)} placeholder="Серия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                            <input value={doc.number} onChange={(e) => updateMilitaryIdEntry(index, 'number', e.target.value)} placeholder="Номер" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
+                            <div className="md:col-span-5">
+                              <input type="date" value={doc.issueDate} onChange={(e) => updateMilitaryIdEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
+                            </div>
+                            <div className="flex items-center justify-end md:col-span-1">
+                              <button
+                                type="button"
+                                onClick={() => { void removeMilitaryIdEntry(index); }}
+                                disabled={!clientPermissions.canEdit}
+                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                title="Удалить военный билет"
+                                aria-label="Удалить военный билет"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <input value={doc.rank} onChange={(e) => updateMilitaryIdEntry(index, 'rank', e.target.value)} placeholder="Воинское звание" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                            <input value={doc.category} onChange={(e) => updateMilitaryIdEntry(index, 'category', e.target.value)} placeholder="Категория запаса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                            <input value={doc.fitnessCategory} onChange={(e) => updateMilitaryIdEntry(index, 'fitnessCategory', e.target.value)} placeholder="Категория годности" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                            <input value={doc.vusCode} onChange={(e) => updateMilitaryIdEntry(index, 'vusCode', e.target.value)} placeholder="Код ВУС" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12" />
+                            <input value={doc.issuedBy} onChange={(e) => updateMilitaryIdEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12" />
+                            <input value={doc.militaryCommissariat} onChange={(e) => updateMilitaryIdEntry(index, 'militaryCommissariat', e.target.value)} placeholder="Военный комиссариат" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3807,11 +3821,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   {powersOfAttorney.length === 0 ? (
                     <p className="text-sm text-gray-500">Доверенности не найдены.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {powersOfAttorney.map((poa) => (
-                        <div key={poa.id} className="rounded border border-gray-200 px-3 py-3 text-sm">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                            <div className="space-y-1">
+                        <div key={poa.id} data-poa-card="true" className="rounded border border-gray-200 px-3 py-3 text-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
                               <div className="font-medium text-slate-800">
                                 №{poa.number}
                               </div>
@@ -3820,8 +3834,17 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                               </div>
                               {poa.issuer ? <div className="text-slate-500">Кем выдана: {poa.issuer}</div> : null}
                             </div>
-                            <div className="flex items-center gap-3">
-                              <button type="button" onClick={() => openEditPoaPrompt(poa)} disabled={!clientPermissions.canEdit} className="text-sm text-slate-600">Изменить</button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEditPoaPrompt(poa)}
+                                disabled={!clientPermissions.canEdit}
+                                className={PROFILE_SECONDARY_ICON_BUTTON_CLASS}
+                                title="Изменить доверенность"
+                                aria-label="Изменить доверенность"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => void deletePowerOfAttorney(poa)}
