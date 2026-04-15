@@ -385,6 +385,8 @@ describe('ClientDetail integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Паспорта' }));
     expect(await screen.findByRole('button', { name: 'Удалить паспорт' })).toBeTruthy();
+    expect(screen.queryByText('Действует с')).toBeNull();
+    expect(screen.queryByText('Действует по')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Адреса' }));
     expect((await screen.findAllByRole('button', { name: 'Удалить адрес' })).length).toBeGreaterThan(0);
@@ -497,5 +499,53 @@ describe('ClientDetail integration', () => {
     await waitFor(() => {
       expect(screen.queryByText('Кем выдана: Новый нотариус')).toBeNull();
     });
+  });
+
+  it('clears hidden passport validity dates before saving the client card', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(apiService.getClient).mockResolvedValue(
+      createClient({
+        passportEntries: [
+          {
+            series: '36 19',
+            number: '664580',
+            issuedBy: 'ОУФМС России по Самарской области',
+            issueDate: '2019-06-15',
+            departmentCode: '630-001',
+            birthPlacePassport: 'г. Самара',
+            birthPlaceFias: 'Самарская обл, г Самара',
+            validFrom: '2019-06-15',
+            validTo: '2045-06-15',
+          },
+        ],
+      }),
+    );
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByDisplayValue('Иванов');
+    await user.click(screen.getByRole('button', { name: 'Паспорта' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => {
+      expect(apiService.updateClient).toHaveBeenCalled();
+    });
+
+    const [, payload] = vi.mocked(apiService.updateClient).mock.calls.at(-1) ?? [];
+    const notes = (payload as { notes?: string | null }).notes ?? '';
+    const serializedProfile = notes.startsWith(CLIENT_PROFILE_NOTES_PREFIX)
+      ? notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)
+      : '';
+    const parsedProfile = JSON.parse(serializedProfile) as {
+      passportEntries: Array<{ validFrom: string; validTo: string }>;
+    };
+
+    expect(parsedProfile.passportEntries[0]).toEqual(
+      expect.objectContaining({
+        validFrom: '',
+        validTo: '',
+      }),
+    );
   });
 });

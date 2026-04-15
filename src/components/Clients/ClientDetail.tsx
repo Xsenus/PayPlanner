@@ -99,7 +99,12 @@ import {
   type AddressTypeOption,
   type ClientAddressEntryFormValue,
 } from './ClientAddressEntriesForm';
+import {
+  ClientPassportEntriesForm,
+  type ClientPassportEntryFormValue,
+} from './ClientPassportEntriesForm';
 import { stripAddressEntryValidityList } from './addressEntryPersistence';
+import { stripPassportEntryValidityList } from './passportEntryPersistence';
 import { chooseBestDisplayAddress } from './addressEntryUtils';
 
 interface ClientDetailProps {
@@ -456,17 +461,7 @@ interface ClientMilitaryIdItem {
   militaryCommissariat: string;
 }
 
-interface ClientPassportItem {
-  series: string;
-  number: string;
-  issuedBy: string;
-  issueDate: string;
-  departmentCode: string;
-  birthPlacePassport: string;
-  birthPlaceFias: string;
-  validFrom: string;
-  validTo: string;
-}
+type ClientPassportItem = ClientPassportEntryFormValue;
 
 interface ClientAddressItem extends ClientAddressEntryFormValue {
   sourceQuery: string;
@@ -890,7 +885,7 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     militaryIds: normalizeList(profile.militaryIds),
     birthCertificateEntries: profile.birthCertificateEntries,
     militaryIdEntries: profile.militaryIdEntries,
-    passportEntries: profile.passportEntries,
+    passportEntries: stripPassportEntryValidityList(profile.passportEntries),
     addressEntries: stripAddressEntryValidityList(profile.addressEntries),
     comment: profile.comment.trim(),
     legacyNotes: profile.legacyNotes.trim(),
@@ -3501,37 +3496,14 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'passports' && (
-                <div className="md:col-span-2 space-y-4">
-                  {clientFormState.passportEntries.map((passport, index) => (
-                    <div key={`passport-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-slate-800">Паспорт #{index + 1}</h3>
-                        <button
-                          type="button"
-                          onClick={() => { void removePassportEntry(index); }}
-                          disabled={!clientPermissions.canEdit}
-                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                          title="Удалить паспорт"
-                          aria-label="Удалить паспорт"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Серия</span><input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Номер</span><input value={passport.number} onChange={(e) => updatePassportEntry(index, 'number', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Дата выдачи</span><input type="date" value={passport.issueDate} onChange={(e) => updatePassportEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Код подразделения</span><input value={passport.departmentCode} onChange={(e) => updatePassportEntry(index, 'departmentCode', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует с</span><input type="date" value={passport.validFrom} onChange={(e) => updatePassportEntry(index, 'validFrom', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
-                        <label className="text-sm text-slate-700"><span className="mb-1 block">Действует по</span><input type="date" value={passport.validTo} onChange={(e) => updatePassportEntry(index, 'validTo', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></label>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Кем выдан</span><input value={passport.issuedBy} onChange={(e) => updatePassportEntry(index, 'issuedBy', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (как в паспорте)</span><input value={passport.birthPlacePassport} onChange={(e) => updatePassportEntry(index, 'birthPlacePassport', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                        <label className="text-sm text-slate-700 xl:col-span-2"><span className="mb-1 block">Место рождения (ФИАС)</span><input value={passport.birthPlaceFias} onChange={(e) => updatePassportEntry(index, 'birthPlaceFias', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" onClick={addPassportEntry} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить паспорт</button>
-                </div>
+                <ClientPassportEntriesForm
+                  entries={clientFormState.passportEntries}
+                  canEdit={clientPermissions.canEdit}
+                  dateInputClassName={DATE_INPUT_CLASS}
+                  onUpdateEntry={updatePassportEntry}
+                  onRemoveEntry={removePassportEntry}
+                  onAddEntry={addPassportEntry}
+                />
               )}
 
               {clientFormState.kind === 'individual' && activeProfileGroup === 'addresses' && (
