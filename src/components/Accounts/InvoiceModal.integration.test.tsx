@@ -7,6 +7,8 @@ import { apiService } from '../../services/api';
 
 const {
   confirmMock,
+  installmentPlannerPlanRef,
+  installmentPlannerPropsSpy,
   invoiceUnitsMock,
   serviceCategoriesMock,
   servicesMock,
@@ -14,6 +16,8 @@ const {
   toastSuccessMock,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
+  installmentPlannerPlanRef: { current: null as any },
+  installmentPlannerPropsSpy: vi.fn(),
   invoiceUnitsMock: [] as any[],
   serviceCategoriesMock: [] as any[],
   servicesMock: [] as any[],
@@ -76,7 +80,16 @@ vi.mock('../ui/LookupSelect', () => ({
 }));
 
 vi.mock('./InstallmentPlanner', () => ({
-  InstallmentPlanner: () => null,
+  InstallmentPlanner: (props: any) => {
+    installmentPlannerPropsSpy(props);
+    return (
+      <div data-testid="installment-planner">
+        <button type="button" onClick={() => props.onApplyPlan(installmentPlannerPlanRef.current)}>
+          apply-installment-plan
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../ui/ObjectAuditModal', () => ({
@@ -94,6 +107,9 @@ vi.mock('../../utils/invoiceEditorBridge', () => ({
 describe('InvoiceModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
+    confirmMock.mockResolvedValue(true);
+    installmentPlannerPlanRef.current = null;
+    installmentPlannerPropsSpy.mockReset();
     invoiceUnitsMock.splice(0, invoiceUnitsMock.length);
     serviceCategoriesMock.splice(0, serviceCategoriesMock.length);
     servicesMock.splice(0, servicesMock.length);
@@ -121,6 +137,7 @@ describe('InvoiceModal integration', () => {
       configurable: true,
       value: vi.fn(),
     });
+    vi.mocked(apiService.updateInvoice).mockClear();
   });
 
   it('renders related payments even when the current invoice record is the only operation available', async () => {
@@ -291,6 +308,142 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText(/Настроено платежей:\s*2,/)).toBeTruthy();
     expect(screen.getByText('Рассрочка 1/2')).toBeTruthy();
     expect(screen.getByText('Рассрочка 2/2')).toBeTruthy();
+  });
+
+  it('prompts to align due date with the last installment payment before saving the invoice', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 531,
+      invoiceEntityId: 27,
+      number: '27',
+      date: '2026-05-10',
+      dueDate: '2026-05-10',
+      amount: 10000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ', quantity: 1, unit: 'С€С‚', price: 10000 }],
+    } as unknown as Invoice;
+
+    const firstInstallment = {
+      id: 611,
+      invoiceId: 27,
+      amount: 5600,
+      date: '2026-05-10',
+      plannedDate: '2026-05-10',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–27 В· РїР»Р°С‚РµР¶ 1/2',
+      account: '27',
+      accountDate: '2026-05-10',
+      systemNotes:
+        '[pp:installment-payment] {"sequence":1,"total":10000,"downPayment":0,"annualRate":0,"months":2,"startDate":"2026-05-10","roundingMode":"none","roundingStep":null,"toPay":11200,"overpay":1200,"loanAmount":10000,"baseMonthlyPayment":5600,"roundedMonthlyPayment":5600,"item":{"sequence":1,"date":"2026-05-10","principal":5000,"interest":600,"payment":5600,"balance":5000}}',
+    } as unknown as Payment;
+
+    const secondInstallment = {
+      id: 612,
+      invoiceId: 27,
+      amount: 5600,
+      date: '2026-06-10',
+      plannedDate: '2026-06-10',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ в„–27 В· РїР»Р°С‚РµР¶ 2/2',
+      account: '27',
+      accountDate: '2026-05-10',
+      systemNotes:
+        '[pp:installment-payment] {"sequence":2,"total":10000,"downPayment":0,"annualRate":0,"months":2,"startDate":"2026-05-10","roundingMode":"none","roundingStep":null,"toPay":11200,"overpay":1200,"loanAmount":10000,"baseMonthlyPayment":5600,"roundedMonthlyPayment":5600,"item":{"sequence":2,"date":"2026-06-10","principal":5000,"interest":600,"payment":5600,"balance":0}}',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[firstInstallment, secondInstallment]}
+      />,
+    );
+
+    const saveButton = document.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+    expect(saveButton).toBeTruthy();
+    fireEvent.click(saveButton!);
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalled();
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dueDate: '2026-06-10' }));
+    });
+  });
+
+  it('aligns due date with the last installment payment when the plan is applied from the editor', async () => {
+    installmentPlannerPlanRef.current = {
+      total: 10000,
+      downPayment: 0,
+      annualRate: 0,
+      months: 2,
+      startDate: '2026-05-10',
+      roundingMode: 'none',
+      roundingStep: null,
+      toPay: 11200,
+      overpay: 1200,
+      loanAmount: 10000,
+      baseMonthlyPayment: 5600,
+      roundedMonthlyPayment: 5600,
+      items: [
+        { sequence: 1, date: '2026-05-10', principal: 5000, interest: 600, payment: 5600, balance: 5000 },
+        { sequence: 2, date: '2026-06-10', principal: 5000, interest: 600, payment: 5600, balance: 0 },
+      ],
+    };
+
+    const invoice = {
+      id: 532,
+      invoiceEntityId: 28,
+      number: '28',
+      date: '2026-05-10',
+      dueDate: '2026-05-10',
+      amount: 10000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Р Р°СЃСЃСЂРѕС‡РєР° РїРѕ СЃС‡РµС‚Сѓ', quantity: 1, unit: 'С€С‚', price: 10000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const installmentButton = document.querySelector('label button[type="button"]') as HTMLButtonElement | null;
+    expect(installmentButton).toBeTruthy();
+    fireEvent.click(installmentButton!);
+    expect(await screen.findByTestId('installment-planner')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'apply-installment-plan' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiService.updateInvoice)).toHaveBeenCalledWith(
+        532,
+        expect.objectContaining({ dueDate: '2026-06-10' }),
+      );
+    });
+
+    const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
+    expect(dateInputs[1]?.value).toBe('2026-06-10');
   });
 
   it('filters services by selected category and applies the matching template', async () => {

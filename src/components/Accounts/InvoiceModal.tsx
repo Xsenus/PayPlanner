@@ -350,6 +350,17 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+function getInstallmentPlanLastDate(plan: InstallmentPlanInput | null | undefined): string {
+  if (!plan?.items?.length) return '';
+
+  return plan.items.reduce<string>((latest, item) => {
+    const normalized = toDateInputValue(item.date);
+    if (!normalized) return latest;
+    if (!latest || normalized > latest) return normalized;
+    return latest;
+  }, '');
+}
+
 type StatusTimelineEntry = {
   key: string;
   title: string;
@@ -1609,11 +1620,16 @@ export function InvoiceModal({
   }, [form.amount, installmentPlan]);
 
 
-  const buildInvoicePayload = useCallback((statusOverride?: PaymentStatus, planOverride?: InstallmentPlanInput | null): InvoiceInput => {
+  const buildInvoicePayload = useCallback((
+    statusOverride?: PaymentStatus,
+    planOverride?: InstallmentPlanInput | null,
+    dueDateOverride?: string | null,
+  ): InvoiceInput => {
     const safeAmount = parseMoneyInput(form.amount);
     const clientCaseIds = selectedClientCaseIds.filter((id) => Number.isFinite(id) && id > 0);
     const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
     const effectiveInstallmentPlan = planOverride === undefined ? installmentPlan : planOverride;
+    const effectiveDueDate = dueDateOverride === undefined ? form.dueDate : (dueDateOverride ?? '');
     const shouldIncludeInstallmentPlan =
       mode === 'create'
         ? Boolean(effectiveInstallmentPlan)
@@ -1622,7 +1638,7 @@ export function InvoiceModal({
     return {
       number: form.number.trim() || String(invoice?.number ?? ''),
       date: fromInputToApiDate(form.date) ?? form.date,
-      dueDate: form.dueDate ? fromInputToApiDate(form.dueDate) ?? form.dueDate : undefined,
+      dueDate: effectiveDueDate ? fromInputToApiDate(effectiveDueDate) ?? effectiveDueDate : undefined,
       amount: safeAmount,
       type: form.type,
       status: statusOverride ?? form.status,
@@ -1652,6 +1668,40 @@ export function InvoiceModal({
         : undefined,
     };
   }, [form, installmentPlan, installmentPlanTouched, invoice?.number, lineItems, mode, relatedInstallmentPlan, selectedActs, selectedClientCaseIds]);
+
+  const resolveInstallmentDueDateForSave = useCallback(async (
+    planOverride?: InstallmentPlanInput | null,
+  ): Promise<{ cancelled: boolean; dueDateOverride?: string }> => {
+    const effectivePlan = planOverride === undefined ? installmentPlan : planOverride;
+    const expectedDueDate = getInstallmentPlanLastDate(effectivePlan);
+
+    if (!expectedDueDate) {
+      return { cancelled: false };
+    }
+
+    const currentDueDate = toDateInputValue(form.dueDate);
+    if (currentDueDate === expectedDueDate) {
+      return { cancelled: false, dueDateOverride: expectedDueDate };
+    }
+
+    const currentDueDateLabel = formatDate(currentDueDate) || 'не указан';
+    const expectedDueDateLabel = formatDate(expectedDueDate);
+    const accepted = await confirm({
+      title: 'Срок оплаты по рассрочке',
+      description:
+        `Срок оплаты счета (${currentDueDateLabel}) не совпадает с последней датой платежа по рассрочке (${expectedDueDateLabel}). `
+        + `Установить срок оплаты ${expectedDueDateLabel} и продолжить сохранение?`,
+      confirmLabel: 'Установить и сохранить',
+      cancelLabel: 'Отмена',
+    });
+
+    if (!accepted) {
+      return { cancelled: true };
+    }
+
+    setForm((prev) => (prev.dueDate === expectedDueDate ? prev : { ...prev, dueDate: expectedDueDate }));
+    return { cancelled: false, dueDateOverride: expectedDueDate };
+  }, [confirm, form.dueDate, installmentPlan]);
 
   const buildInvoiceEditorDraft = useCallback((): InvoiceEditorDraftState => ({
     invoiceId: invoice?.id ?? null,
@@ -1714,7 +1764,12 @@ export function InvoiceModal({
       return;
     }
 
-    const payload = buildInvoicePayload();
+    const dueDateResolution = await resolveInstallmentDueDateForSave();
+    if (dueDateResolution.cancelled) {
+      return;
+    }
+
+    const payload = buildInvoicePayload(undefined, undefined, dueDateResolution.dueDateOverride);
     payload.number = number;
 
     try {
@@ -1738,14 +1793,18 @@ export function InvoiceModal({
 
   const handleApplyInstallmentPlan = async (plan: InstallmentPlanInput | null) => {
     const nextPlan = cloneInstallmentPlan(plan);
+    const nextDueDate = getInstallmentPlanLastDate(nextPlan);
 
     setInstallmentPlan(nextPlan);
     setInstallmentPlanTouched(true);
     setLocalError(null);
+    if (nextDueDate) {
+      setForm((prev) => (prev.dueDate === nextDueDate ? prev : { ...prev, dueDate: nextDueDate }));
+    }
 
     if (mode === 'edit' && invoice?.id) {
       try {
-        const payload = buildInvoicePayload(undefined, nextPlan);
+        const payload = buildInvoicePayload(undefined, nextPlan, nextDueDate || undefined);
         await apiService.updateInvoice(invoice.id, payload);
         await onRefreshRequested?.();
         setInstallmentModalOpen(false);

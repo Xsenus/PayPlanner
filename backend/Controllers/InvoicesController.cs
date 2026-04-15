@@ -300,13 +300,15 @@ public class InvoicesController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
+        var resolvedDueDate = ResolveInvoiceDueDate(request);
+
         var payment = new Payment
         {
             Account = number,
             DocumentKind = DocumentKind.Invoice,
             AccountDate = request.Date.Date,
             Invoice = invoice,
-            Date = (request.DueDate ?? request.Date).Date,
+            Date = resolvedDueDate,
             Amount = request.Amount,
             Status = request.Status,
             Type = request.Type,
@@ -454,7 +456,7 @@ public class InvoicesController : ControllerBase
         payment.Invoice.Date = request.Date.Date;
         payment.Invoice.UpdatedAt = now;
         payment.InvoiceId = payment.Invoice.Id == 0 ? null : payment.Invoice.Id;
-        payment.Date = (request.DueDate ?? request.Date).Date;
+        payment.Date = ResolveInvoiceDueDate(request);
         payment.Amount = request.Amount;
         payment.Status = request.Status;
         payment.Type = request.Type;
@@ -2180,6 +2182,21 @@ public class InvoicesController : ControllerBase
         }
 
         return null;
+    }
+
+    private static DateTime ResolveInvoiceDueDate(UpsertInvoiceRequest request)
+    {
+        var installmentDueDate = request.InstallmentPlan?.Items?
+            .Where(item => item is not null)
+            .Select(item => (DateTime?)item.Date.Date)
+            .Max();
+
+        if (installmentDueDate.HasValue && installmentDueDate.Value != default)
+        {
+            return installmentDueDate.Value;
+        }
+
+        return (request.DueDate ?? request.Date).Date;
     }
 
     private void ApplyInstallmentPayment(

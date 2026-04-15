@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -116,6 +117,59 @@ public class InvoicesControllerValidationTests
         Assert.Equal(LongInvoiceLineItemName, storedName);
     }
 
+    [Fact]
+    public async Task Create_AlignsDueDateWithLastInstallmentPaymentDate()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚");
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("32", clientId, new DateTime(2026, 4, 10));
+        request.DueDate = new DateTime(2026, 4, 12);
+        request.InstallmentPlan = CreateInstallmentPlanRequest(
+            new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+        Assert.Equal(new DateTime(2026, 6, 10), dto.DueDate);
+
+        var storedInvoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == dto.Id);
+        Assert.Equal(new DateTime(2026, 6, 10), storedInvoicePayment.Date);
+    }
+
+    [Fact]
+    public async Task Update_AlignsDueDateWithLastInstallmentPaymentDate()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚");
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var createRequest = CreateRequest("33", clientId, new DateTime(2026, 4, 10));
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateRequest = CreateRequest("33", clientId, new DateTime(2026, 4, 10));
+        updateRequest.DueDate = new DateTime(2026, 4, 12);
+        updateRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(new DateTime(2026, 6, 10), dto.DueDate);
+
+        var storedInvoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(new DateTime(2026, 6, 10), storedInvoicePayment.Date);
+    }
+
     private static UpsertInvoiceRequest CreateRequest(string number, int clientId, DateTime date)
     {
         return new UpsertInvoiceRequest
@@ -127,6 +181,42 @@ public class InvoicesControllerValidationTests
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
             ClientId = clientId,
+        };
+    }
+
+    private static InvoiceInstallmentPlanRequest CreateInstallmentPlanRequest(DateTime startDate, params DateTime[] dates)
+    {
+        var paymentAmount = dates.Length > 0 ? decimal.Round(11_000m / dates.Length, 2) : 11_000m;
+
+        return new InvoiceInstallmentPlanRequest
+        {
+            Total = 11_000m,
+            DownPayment = 0m,
+            AnnualRate = 0m,
+            Months = Math.Max(1, dates.Length),
+            StartDate = startDate,
+            RoundingMode = InstallmentRoundingMode.None,
+            ToPay = 11_000m,
+            Overpay = 0m,
+            LoanAmount = 11_000m,
+            BaseMonthlyPayment = paymentAmount,
+            RoundedMonthlyPayment = paymentAmount,
+            Items = dates.Select((itemDate, index) =>
+            {
+                var isLast = index == dates.Length - 1;
+                var payment = isLast ? 11_000m - paymentAmount * (dates.Length - 1) : paymentAmount;
+                var balance = isLast ? 0m : Math.Max(0m, 11_000m - paymentAmount * (index + 1));
+
+                return new InvoiceInstallmentPlanItemRequest
+                {
+                    Sequence = index + 1,
+                    Date = itemDate,
+                    Principal = payment,
+                    Interest = 0m,
+                    Payment = payment,
+                    Balance = balance,
+                };
+            }).ToList(),
         };
     }
 
