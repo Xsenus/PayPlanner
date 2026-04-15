@@ -90,6 +90,11 @@ import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import { getContractEffectiveAmount } from '../../utils/contracts';
 import {
+  createEmptyClientRelative as createEmptyRelative,
+  normalizeClientRelative,
+  type ClientRelativeItem,
+} from './clientRelativeUtils';
+import {
   ClientAddressEntriesForm,
   type AddressTypeOption,
   type ClientAddressEntryFormValue,
@@ -429,12 +434,6 @@ interface ClientWorkplaceItem {
   endDate: string;
 }
 
-interface ClientRelativeItem {
-  relation: string;
-  fullName: string;
-  birthYear: string;
-}
-
 interface ClientBirthCertificateItem {
   series: string;
   number: string;
@@ -530,7 +529,6 @@ const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 const createEmptyEducation = (): ClientEducationItem => ({ institution: '', specialty: '', diplomaNumber: '', oksoCode: '' });
 const createEmptyProfession = (): ClientProfessionItem => ({ profession: '', okpdtrCode: '' });
 const createEmptyWorkplace = (): ClientWorkplaceItem => ({ organizationName: '', position: '', startDate: '', endDate: '' });
-const createEmptyRelative = (): ClientRelativeItem => ({ relation: '', fullName: '', birthYear: '' });
 const createEmptyBirthCertificateEntry = (): ClientBirthCertificateItem => ({ series: '', number: '', issueDate: '', issuedBy: '', actRecordNumber: '', childFullName: '' });
 const createEmptyMilitaryIdEntry = (): ClientMilitaryIdItem => ({ series: '', number: '', issueDate: '', issuedBy: '', category: '', rank: '', vusCode: '', fitnessCategory: '', militaryCommissariat: '' });
 const createEmptyPassportEntry = (): ClientPassportItem => ({
@@ -787,7 +785,7 @@ const parseClientExtendedProfile = (client: Client): ClientExtendedProfile => {
       education: (parsed.education ?? defaultProfile.education).map((item) => ({ ...createEmptyEducation(), ...item })),
       professions: (parsed.professions ?? defaultProfile.professions).map((item) => ({ ...createEmptyProfession(), ...item })),
       workplaces: (parsed.workplaces ?? defaultProfile.workplaces).map((item) => ({ ...createEmptyWorkplace(), ...item })),
-      relatives: (parsed.relatives ?? defaultProfile.relatives).map((item) => ({ ...createEmptyRelative(), ...item })),
+      relatives: (parsed.relatives ?? defaultProfile.relatives).map((item) => normalizeClientRelative(item)),
       phones: normalizeList(parsed.phones ?? defaultProfile.phones),
       emails: normalizeList(parsed.emails ?? defaultProfile.emails),
       addresses: normalizeList(parsed.addresses ?? defaultProfile.addresses),
@@ -3398,10 +3396,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Близкие родственники</label>
                 <div className="space-y-2">
                   {clientFormState.relatives.map((item, index) => (
-                    <div key={`relative-${index}`} className="grid gap-2 md:grid-cols-3">
-                      <input value={item.relation} onChange={(e) => updateRelative(index, 'relation', e.target.value)} placeholder="Степень родства" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.fullName} onChange={(e) => updateRelative(index, 'fullName', e.target.value)} placeholder="ФИО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.birthYear} onChange={(e) => updateRelative(index, 'birthYear', e.target.value)} placeholder="Год рождения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                    <div key={`relative-${index}`} className="grid gap-2 md:grid-cols-12">
+                      <input value={item.relation} onChange={(e) => updateRelative(index, 'relation', e.target.value)} placeholder="Степень родства" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                      <input value={item.fullName} onChange={(e) => updateRelative(index, 'fullName', e.target.value)} placeholder="ФИО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      <input value={item.birthYear} onChange={(e) => updateRelative(index, 'birthYear', e.target.value)} placeholder="Год рождения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                      <input value={item.phone} onChange={(e) => updateRelative(index, 'phone', e.target.value)} placeholder="Номер телефона" disabled={!clientPermissions.canEdit} inputMode="tel" className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, relatives: [...prev.relatives, createEmptyRelative()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить родственника</button>
