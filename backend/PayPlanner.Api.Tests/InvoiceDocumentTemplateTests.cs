@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -131,6 +132,8 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("Адрес: Самара, ул. Тестовая, д. 1", content.Content);
         Assert.Contains("Паспорт 1234 567890", content.Content);
+        Assert.Contains("ИНН: 123456789012", content.Content);
+        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
         Assert.Contains("Тел.: +7 999 123-45-67", content.Content);
         Assert.Contains("Email: client@example.com", content.Content);
         Assert.Contains("Договор: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
@@ -226,6 +229,66 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_UsesBuyerProfilePassportFallback_WhenNormalizedPassportMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db, createNormalizedPassport: false);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("Паспорт 1234 567890", content.Content);
+        Assert.Contains("код подразделения 123-456", content.Content);
+        Assert.Contains("ИНН: 123456789012", content.Content);
+        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersCorrAndSettlementAccount_InExpectedBankGridRows()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+
+        var company = new LegalEntity
+        {
+            ShortName = "ООО Тест",
+            FullName = "Общество с ограниченной ответственностью Тест",
+            Inn = "7700000000",
+            Address = "Москва, тестовый адрес",
+            BankAccountsJson =
+                "[" +
+                "{\"bank\":\"Банк 1\",\"bik\":\"111111111\",\"accountNumber\":\"40802810000000000001\",\"accountType\":\"Дополнительный\"}," +
+                "{\"bank\":\"Банк 2\",\"bik\":\"222222222\",\"accountNumber\":\"40802810000000000002\",\"accountType\":\"Основной\",\"corrAccountNumber\":\"30101810000000000002\"}" +
+                "]",
+        };
+
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = $"[{company.Id}]",
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = company.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Matches(new Regex("rowspan=\"2\" class=\"v-al-t bor0-t\" style=\"width: 35%;\">30101810000000000002</td>", RegexOptions.Singleline), content.Content);
+        Assert.Matches(new Regex("rowspan=\"4\" class=\"v-al-t\" style=\"width: 35%;\">40802810000000000002</td>", RegexOptions.Singleline), content.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_UsesStoredPrintMode_WhenOverrideNotProvided()
     {
         await using var db = await CreateContextAsync();
@@ -284,7 +347,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("%PDF-mail%"u8.ToArray(), emailService.AttachmentBytes);
     }
 
-    private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db)
+    private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db, bool createNormalizedPassport = true)
     {
         var client = new Client
         {
@@ -293,6 +356,7 @@ public class InvoiceDocumentTemplateTests
             Email = "client@example.com",
             Phone = "+7 999 123-45-67",
             Company = "ООО Тестовый заказчик",
+            Notes = """__PP_CLIENT_PROFILE_V2__:{"inn":"123456789012","snils":"123-456-789 00","passportSeries":"1234","passportNumber":"567890","passportIssuedBy":"ОВД Тестового района","passportIssueDate":"2020-01-12T00:00:00","passportDepartmentCode":"123-456","passportEntries":[{"series":"1234","number":"567890","issuedBy":"ОВД Тестового района","issueDate":"2020-01-12T00:00:00","departmentCode":"123-456"}]}""",
         };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
@@ -305,15 +369,19 @@ public class InvoiceDocumentTemplateTests
             IsPrimary = true,
         });
 
-        db.ClientPassports.Add(new ClientPassport
+        if (createNormalizedPassport)
         {
-            ClientId = client.Id,
-            Series = "1234",
-            Number = "567890",
-            IssuedBy = "ОВД Тестового района",
-            IssuedAt = new DateTime(2020, 1, 12),
-            IsPrimary = true,
-        });
+            db.ClientPassports.Add(new ClientPassport
+            {
+                ClientId = client.Id,
+                Series = "1234",
+                Number = "567890",
+                IssuedBy = "ОВД Тестового района",
+                IssuedAt = new DateTime(2020, 1, 12),
+                DepartmentCode = "123-456",
+                IsPrimary = true,
+            });
+        }
 
         var invoice = new Invoice
         {

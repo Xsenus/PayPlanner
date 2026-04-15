@@ -12,8 +12,10 @@ namespace PayPlanner.Api.Services.Invoices;
 public static class InvoiceDocumentTemplateEngine
 {
     public const string DefaultTemplateKey = "invoice-standard";
+    private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+    private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Regex LoopRegex = new("""\{\{#lineItems\}\}(.*?)\{\{\/lineItems\}\}""", RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex TokenRegex = new("""\{\{\s*([a-zA-Z0-9\._]+)\s*\}\}""", RegexOptions.Compiled);
 
@@ -165,6 +167,8 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "buyer.name", Category = "Покупатель", Description = "ФИО или название покупателя", IsRepeating = false },
             new() { Key = "buyer.address", Category = "Покупатель", Description = "Адрес покупателя", IsRepeating = false },
             new() { Key = "buyer.passport", Category = "Покупатель", Description = "Паспортные данные покупателя", IsRepeating = false },
+            new() { Key = "buyer.inn", Category = "Покупатель", Description = "ИНН покупателя", IsRepeating = false },
+            new() { Key = "buyer.snils", Category = "Покупатель", Description = "СНИЛС покупателя", IsRepeating = false },
             new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
             new() { Key = "buyer.email", Category = "Покупатель", Description = "Email покупателя", IsRepeating = false },
             new() { Key = "buyer.contract", Category = "Покупатель", Description = "Связанный договор покупателя", IsRepeating = false },
@@ -269,6 +273,8 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),
+                ["buyer.inn"] = Encode(buyer.Inn),
+                ["buyer.snils"] = Encode(buyer.Snils),
                 ["buyer.phone"] = Encode(buyer.Phone),
                 ["buyer.email"] = Encode(buyer.Email),
                 ["buyer.contract"] = Encode(buyer.Contract),
@@ -359,6 +365,7 @@ public static class InvoiceDocumentTemplateEngine
     {
         var isExpense = payment.Type == PaymentType.Expense;
         var directClient = isExpense ? payment.ExpenseClient : payment.Client;
+        var buyerProfile = ParseBuyerProfile(directClient?.Notes);
         var primaryPassport = directClient?.Passports
             .OrderByDescending(passport => passport.IsPrimary)
             .ThenByDescending(passport => passport.UpdatedAt ?? passport.CreatedAt)
@@ -371,6 +378,13 @@ public static class InvoiceDocumentTemplateEngine
         var company = directClient?.Company ?? string.Empty;
         var address = ResolveBuyerAddress(directClient);
         var passport = BuildPassport(primaryPassport);
+        if (string.IsNullOrWhiteSpace(passport))
+        {
+            passport = BuildPassport(ResolvePrimaryPassport(buyerProfile));
+        }
+
+        var inn = buyerProfile?.Inn?.Trim() ?? string.Empty;
+        var snils = buyerProfile?.Snils?.Trim() ?? string.Empty;
         var phone = directClient?.Phone ?? string.Empty;
         var email = directClient?.Email ?? string.Empty;
         var contract = BuildBuyerContract(payment.Contract);
@@ -390,6 +404,16 @@ public static class InvoiceDocumentTemplateEngine
         if (!string.IsNullOrWhiteSpace(passport))
         {
             requisitesLines.Add(passport);
+        }
+
+        if (!string.IsNullOrWhiteSpace(inn))
+        {
+            requisitesLines.Add($"ИНН: {inn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(snils))
+        {
+            requisitesLines.Add($"СНИЛС: {snils}");
         }
 
         if (!string.IsNullOrWhiteSpace(phone))
@@ -417,6 +441,8 @@ public static class InvoiceDocumentTemplateEngine
             Name = name,
             Address = address,
             Passport = passport,
+            Inn = inn,
+            Snils = snils,
             Phone = phone,
             Email = email,
             Contract = contract,
@@ -508,28 +534,123 @@ public static class InvoiceDocumentTemplateEngine
             return string.Empty;
         }
 
+        return BuildPassportValue(
+            passport.Series,
+            passport.Number,
+            passport.IssuedAt,
+            passport.IssuedBy,
+            passport.DepartmentCode);
+    }
+
+    private static string BuildPassport(ClientPassportProfileInfo? passport)
+    {
+        if (passport is null)
+        {
+            return string.Empty;
+        }
+
+        return BuildPassportValue(
+            passport.Series,
+            passport.Number,
+            passport.IssueDate,
+            passport.IssuedBy,
+            passport.DepartmentCode);
+    }
+
+    private static string BuildPassportValue(
+        string? series,
+        string? number,
+        DateTime? issueDate,
+        string? issuedBy,
+        string? departmentCode)
+    {
         var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(passport.Series) || !string.IsNullOrWhiteSpace(passport.Number))
+        if (!string.IsNullOrWhiteSpace(series) || !string.IsNullOrWhiteSpace(number))
         {
-            parts.Add($"Паспорт {string.Join(" ", new[] { passport.Series, passport.Number }.Where(static x => !string.IsNullOrWhiteSpace(x)))}".Trim());
+            parts.Add($"Паспорт {string.Join(" ", new[] { series, number }.Where(static x => !string.IsNullOrWhiteSpace(x)))}".Trim());
         }
 
-        if (passport.IssuedAt.HasValue)
+        if (issueDate.HasValue)
         {
-            parts.Add($"выдан {passport.IssuedAt.Value:dd.MM.yyyy}");
+            parts.Add($"выдан {issueDate.Value:dd.MM.yyyy}");
         }
 
-        if (!string.IsNullOrWhiteSpace(passport.IssuedBy))
+        if (!string.IsNullOrWhiteSpace(issuedBy))
         {
-            parts.Add(passport.IssuedBy);
+            parts.Add(issuedBy);
         }
 
-        if (!string.IsNullOrWhiteSpace(passport.DepartmentCode))
+        if (!string.IsNullOrWhiteSpace(departmentCode))
         {
-            parts.Add($"код подразделения {passport.DepartmentCode}");
+            parts.Add($"код подразделения {departmentCode}");
         }
 
         return string.Join(", ", parts);
+    }
+
+    private static BuyerProfileInfo? ParseBuyerProfile(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return null;
+        }
+
+        var raw = notes.Trim();
+        if (!raw.StartsWith(ClientProfileNotesPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var payload = raw[ClientProfileNotesPrefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<BuyerProfileInfo>(payload, ClientProfileJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ClientPassportProfileInfo? ResolvePrimaryPassport(BuyerProfileInfo? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        if (profile.PassportEntries is { Count: > 0 })
+        {
+            return profile.PassportEntries.FirstOrDefault(passport =>
+                !string.IsNullOrWhiteSpace(passport.Series)
+                || !string.IsNullOrWhiteSpace(passport.Number)
+                || !string.IsNullOrWhiteSpace(passport.IssuedBy)
+                || passport.IssueDate.HasValue
+                || !string.IsNullOrWhiteSpace(passport.DepartmentCode));
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.PassportSeries)
+            && string.IsNullOrWhiteSpace(profile.PassportNumber)
+            && string.IsNullOrWhiteSpace(profile.PassportIssuedBy)
+            && !profile.PassportIssueDate.HasValue
+            && string.IsNullOrWhiteSpace(profile.PassportDepartmentCode))
+        {
+            return null;
+        }
+
+        return new ClientPassportProfileInfo
+        {
+            Series = profile.PassportSeries,
+            Number = profile.PassportNumber,
+            IssuedBy = profile.PassportIssuedBy,
+            IssueDate = profile.PassportIssueDate,
+            DepartmentCode = profile.PassportDepartmentCode,
+        };
     }
 
     private static List<BankAccountInfo> ParseBankAccounts(string? json)
@@ -853,12 +974,35 @@ public static class InvoiceDocumentTemplateEngine
         public string Name { get; init; } = string.Empty;
         public string Address { get; init; } = string.Empty;
         public string Passport { get; init; } = string.Empty;
+        public string Inn { get; init; } = string.Empty;
+        public string Snils { get; init; } = string.Empty;
         public string Phone { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
         public string Contract { get; init; } = string.Empty;
         public string Case { get; init; } = string.Empty;
         public string Requisites { get; init; } = string.Empty;
         public string RequisitesHtml { get; init; } = string.Empty;
+    }
+
+    private sealed class BuyerProfileInfo
+    {
+        public string? Inn { get; init; }
+        public string? Snils { get; init; }
+        public string? PassportSeries { get; init; }
+        public string? PassportNumber { get; init; }
+        public string? PassportIssuedBy { get; init; }
+        public DateTime? PassportIssueDate { get; init; }
+        public string? PassportDepartmentCode { get; init; }
+        public List<ClientPassportProfileInfo>? PassportEntries { get; init; }
+    }
+
+    private sealed class ClientPassportProfileInfo
+    {
+        public string? Series { get; init; }
+        public string? Number { get; init; }
+        public string? IssuedBy { get; init; }
+        public DateTime? IssueDate { get; init; }
+        public string? DepartmentCode { get; init; }
     }
 
     private sealed class BankAccountInfo
