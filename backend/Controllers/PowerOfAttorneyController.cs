@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -27,7 +28,7 @@ public class PowerOfAttorneyController : ControllerBase
             .ToListAsync(ct));
 
     [HttpPost]
-    public async Task<IActionResult> Create(int clientId, [FromBody] PowerOfAttorney model, CancellationToken ct)
+    public async Task<IActionResult> Create(int clientId, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
     {
         var clientExists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
         if (!clientExists) return NotFound();
@@ -36,7 +37,7 @@ public class PowerOfAttorneyController : ControllerBase
         {
             ClientId = clientId,
             Number = (model.Number ?? string.Empty).Trim(),
-            IssuedAt = model.IssuedAt,
+            IssuedAt = model.IssuedAt.GetValueOrDefault(),
             ValidUntil = model.ValidUntil,
             Issuer = Normalize(model.Issuer),
             Notes = Normalize(model.Notes),
@@ -49,13 +50,13 @@ public class PowerOfAttorneyController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int clientId, int id, [FromBody] PowerOfAttorney model, CancellationToken ct)
+    public async Task<IActionResult> Update(int clientId, int id, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
     {
         var entity = await _db.PowersOfAttorney.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Id == id, ct);
         if (entity is null) return NotFound();
 
         entity.Number = (model.Number ?? string.Empty).Trim();
-        entity.IssuedAt = model.IssuedAt;
+        entity.IssuedAt = model.IssuedAt.GetValueOrDefault();
         entity.ValidUntil = model.ValidUntil;
         entity.Issuer = Normalize(model.Issuer);
         entity.Notes = Normalize(model.Notes);
