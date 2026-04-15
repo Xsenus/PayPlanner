@@ -358,7 +358,7 @@ public class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var entity = new LegalEntity
         {
-            ShortName = "Р—Р°РјРµРЅР° Р°РґСЂРµСЃРѕРІ",
+            ShortName = "Замена адресов",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -370,9 +370,9 @@ public class LegalEntitiesControllerTests
         {
             LegalEntityId = entity.Id,
             Type = AddressType.Legal,
-            Value = "РЎС‚Р°СЂС‹Р№ Р°РґСЂРµСЃ",
-            CityWithType = "Рі РЎР°РјР°СЂР°",
-            StreetWithType = "СѓР» РЎС‚Р°СЂР°СЏ",
+            Value = "Старый адрес",
+            CityWithType = "г Самара",
+            StreetWithType = "ул Старая",
             House = "1",
             IsPrimary = true,
         });
@@ -385,11 +385,11 @@ public class LegalEntitiesControllerTests
             new LegalEntityAddressRequest
             {
                 Type = 3,
-                Value = "РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
-                UnrestrictedValue = "446200, РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
+                Value = "Самарская обл., г. Новокуйбышевск, ул. Миронова, д. 9",
+                UnrestrictedValue = "446200, Самарская обл., г. Новокуйбышевск, ул. Миронова, д. 9",
                 PostalCode = "446200",
-                CityWithType = "Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє",
-                StreetWithType = "СѓР» РњРёСЂРѕРЅРѕРІР°",
+                CityWithType = "г Новокуйбышевск",
+                StreetWithType = "ул Миронова",
                 House = "9",
                 IsPrimary = true,
             },
@@ -409,10 +409,10 @@ public class LegalEntitiesControllerTests
 
         Assert.Single(storedAddresses);
         Assert.Equal("446200", storedAddresses[0].PostalCode);
-        Assert.Equal("Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє", storedAddresses[0].CityWithType);
+        Assert.Equal("г Новокуйбышевск", storedAddresses[0].CityWithType);
         Assert.Null(storedAddresses[0].ClientId);
         Assert.Equal(entity.Id, storedAddresses[0].LegalEntityId);
-        Assert.DoesNotContain(storedAddresses, item => item.Value == "РЎС‚Р°СЂС‹Р№ Р°РґСЂРµСЃ");
+        Assert.DoesNotContain(storedAddresses, item => item.Value == "Старый адрес");
     }
 
     [Fact]
@@ -459,7 +459,7 @@ public class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var entity = new LegalEntity
         {
-            ShortName = "РџСЂРѕС‡РёС‚Р°С‚СЊ Р°РґСЂРµСЃР°",
+            ShortName = "Прочитать адреса",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -471,10 +471,10 @@ public class LegalEntitiesControllerTests
         {
             LegalEntityId = entity.Id,
             Type = AddressType.Legal,
-            Value = "РЎР°РјР°СЂСЃРєР°СЏ РѕР±Р»., Рі. РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє, СѓР». РњРёСЂРѕРЅРѕРІР°, Рґ. 9",
+            Value = "Самарская обл., г. Новокуйбышевск, ул. Миронова, д. 9",
             PostalCode = "446200",
-            CityWithType = "Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє",
-            StreetWithType = "СѓР» РњРёСЂРѕРЅРѕРІР°",
+            CityWithType = "г Новокуйбышевск",
+            StreetWithType = "ул Миронова",
             House = "9",
             IsPrimary = true,
         });
@@ -488,8 +488,8 @@ public class LegalEntitiesControllerTests
 
         var address = Assert.Single(dto.Addresses);
         Assert.Equal("446200", address.PostalCode);
-        Assert.Equal("Рі РќРѕРІРѕРєСѓР№Р±С‹С€РµРІСЃРє", address.CityWithType);
-        Assert.Equal("СѓР» РњРёСЂРѕРЅРѕРІР°", address.StreetWithType);
+        Assert.Equal("г Новокуйбышевск", address.CityWithType);
+        Assert.Equal("ул Миронова", address.StreetWithType);
     }
 
     [Fact]
@@ -539,7 +539,7 @@ public class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var entity = new LegalEntity
         {
-            ShortName = "РџРµСЂРµРіСЂСѓР¶РµРЅРЅРѕРµ СЋСЂР»РёС†Рѕ",
+            ShortName = "Перегруженное юрлицо",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };

@@ -196,7 +196,7 @@ public class InvoiceDocumentTemplateTests
                     new InvoiceDocumentTemplateRequest
                     {
                         Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
-                        Name = "РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ СЃС‡РµС‚",
+                        Name = "Стандартный счет",
                         Html = BuildLegacyBrokenManagedDefaultTemplateHtml(),
                     },
                 ],
@@ -230,7 +230,7 @@ public class InvoiceDocumentTemplateTests
                     new InvoiceDocumentTemplateRequest
                     {
                         Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
-                        Name = "РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ СЃС‡РµС‚",
+                        Name = "Стандартный счет",
                         Html = "<html><body>custom-standard-{{invoice.number}}</body></html>",
                     },
                 ],

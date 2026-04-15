@@ -78,19 +78,6 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ error: toastErrorMock, success: toastSuccessMock }),
 }));
 
-function getButtonByTextVariants(...variants: RegExp[]): HTMLButtonElement {
-  const button = screen.getAllByRole('button').find((candidate) => {
-    const textContent = candidate.textContent ?? '';
-    return variants.some((variant) => variant.test(textContent));
-  });
-
-  if (!button) {
-    throw new Error(`Button not found for variants: ${variants.map((variant) => variant.source).join(', ')}`);
-  }
-
-  return button as HTMLButtonElement;
-}
-
 vi.mock('../../services/api', () => ({
   apiService: {
     downloadInvoiceDocument: vi
@@ -808,8 +795,8 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(getButtonByTextVariants(/Скачать/i, /РЎРєР°С‡Р°С‚СЊ/i));
-    fireEvent.click(getButtonByTextVariants(/PDF без подписи и печати/i, /PDF Р±РµР· РїРѕРґРїРёСЃРё Рё РїРµС‡Р°С‚Рё/i));
+    fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
+    fireEvent.click(screen.getByRole('button', { name: /PDF без подписи и печати/i }));
 
     await waitFor(() => {
       expect(downloadMock).toHaveBeenCalledWith(551, 'pdf', { includeSignatureAndSeal: false });
@@ -875,7 +862,7 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(getButtonByTextVariants(/Печать/i, /РџРµС‡Р°С‚СЊ/i));
+    fireEvent.click(screen.getByRole('button', { name: /Печать/i }));
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {

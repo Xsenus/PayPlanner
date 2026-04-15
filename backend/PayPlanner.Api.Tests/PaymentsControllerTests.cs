@@ -316,8 +316,8 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
 
-        var standalonePayment = CreatePayment(new DateTime(2026, 4, 20), 4_500m, "РћР±С‹С‡РЅС‹Р№ РїР»Р°С‚РµР¶");
-        var unrelatedPayment = CreatePayment(new DateTime(2026, 4, 21), 7_500m, "РџРѕСЃР»РµРґСѓСЋС‰РёР№ РїР»Р°С‚РµР¶");
+        var standalonePayment = CreatePayment(new DateTime(2026, 4, 20), 4_500m, "Обычный платеж");
+        var unrelatedPayment = CreatePayment(new DateTime(2026, 4, 21), 7_500m, "Последующий платеж");
 
         db.Payments.AddRange(standalonePayment, unrelatedPayment);
         await db.SaveChangesAsync();
@@ -416,21 +416,21 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var invoiceDate = new DateTime(2026, 4, 8);
-        var parentPayment = CreatePayment(invoiceDate, 18_000m, "РЎС‡РµС‚ в„–30");
+        var parentPayment = CreatePayment(invoiceDate, 18_000m, "Счет №30");
         parentPayment.DocumentKind = DocumentKind.Invoice;
         parentPayment.InvoiceId = invoice.Id;
         parentPayment.Account = invoice.Number;
         parentPayment.AccountDate = invoice.Date;
 
-        var installmentOne = CreatePayment(invoiceDate, 6_000m, "Р Р°СЃСЃСЂРѕС‡РєР° 1/3");
+        var installmentOne = CreatePayment(invoiceDate, 6_000m, "Рассрочка 1/3");
         installmentOne.InvoiceId = invoice.Id;
-        installmentOne.SystemNotes = $"{InstallmentPaymentMarker}\nРџР»Р°С‚С‘Р¶ 1/3";
+        installmentOne.SystemNotes = $"{InstallmentPaymentMarker}\nПлатёж 1/3";
 
-        var installmentTwo = CreatePayment(invoiceDate.AddMonths(1), 6_000m, "Р Р°СЃСЃСЂРѕС‡РєР° 2/3");
+        var installmentTwo = CreatePayment(invoiceDate.AddMonths(1), 6_000m, "Рассрочка 2/3");
         installmentTwo.InvoiceId = invoice.Id;
-        installmentTwo.SystemNotes = $"{InstallmentPaymentMarker}\nРџР»Р°С‚С‘Р¶ 2/3";
+        installmentTwo.SystemNotes = $"{InstallmentPaymentMarker}\nПлатёж 2/3";
 
-        var unrelatedPayment = CreatePayment(invoiceDate, 2_000m, "РћР±С‹С‡РЅС‹Р№ РїР»Р°С‚РµР¶");
+        var unrelatedPayment = CreatePayment(invoiceDate, 2_000m, "Обычный платеж");
 
         db.Payments.AddRange(parentPayment, installmentOne, installmentTwo, unrelatedPayment);
         await db.SaveChangesAsync();

@@ -121,7 +121,7 @@ public class InvoicesControllerValidationTests
     public async Task Create_AlignsDueDateWithLastInstallmentPaymentDate()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚");
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
 
         var controller = CreateController(db, isAdmin: true, userId: null);
         var request = CreateRequest("32", clientId, new DateTime(2026, 4, 10));
@@ -145,7 +145,7 @@ public class InvoicesControllerValidationTests
     public async Task Update_AlignsDueDateWithLastInstallmentPaymentDate()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚");
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
         var controller = CreateController(db, isAdmin: true, userId: null);
 
         var createRequest = CreateRequest("33", clientId, new DateTime(2026, 4, 10));
@@ -174,7 +174,7 @@ public class InvoicesControllerValidationTests
     public async Task Update_PreservesExistingInstallmentSchedule_WhenInstallmentPlanIsOmitted()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ");
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
         var controller = CreateController(db, isAdmin: true, userId: null);
 
         var createRequest = CreateRequest("34", clientId, new DateTime(2026, 4, 10));
@@ -216,7 +216,7 @@ public class InvoicesControllerValidationTests
     public async Task Update_RemovesExistingInstallmentSchedule_WhenReplaceInstallmentPlanRequestedWithNullPlan()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "Р СћР ВµРЎРѓРЎвЂљР С•Р Р†РЎвЂ№Р в„– Р С”Р В»Р С‘Р ВµР Р…РЎвЂљ");
+        var clientId = await CreateClientAsync(db, "Тестовый клиент");
         var controller = CreateController(db, isAdmin: true, userId: null);
 
         var createRequest = CreateRequest("35", clientId, new DateTime(2026, 4, 10));
