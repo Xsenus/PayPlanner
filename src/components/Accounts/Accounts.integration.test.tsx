@@ -245,7 +245,13 @@ vi.mock('../../utils/invoiceEditorBridge', () => ({
 }));
 
 vi.mock('./InvoiceModal', () => ({
-  InvoiceModal: (props: { open: boolean; relatedPayments?: Payment[]; paymentsLoading?: boolean }) => {
+  InvoiceModal: (props: {
+    open: boolean;
+    relatedPayments?: Payment[];
+    paymentsLoading?: boolean;
+    onBack?: () => void;
+    onClose?: () => void;
+  }) => {
     invoiceModalPropsSpy(props);
     if (!props.open) {
       return null;
@@ -254,6 +260,8 @@ vi.mock('./InvoiceModal', () => ({
     return (
       <div data-testid="invoice-modal">
         <div>{`payments-loading:${String(props.paymentsLoading)}`}</div>
+        <button type="button" onClick={props.onBack}>invoice-back</button>
+        <button type="button" onClick={props.onClose}>invoice-close</button>
         {(props.relatedPayments ?? []).map((payment) => (
           <div key={payment.id}>{payment.description}</div>
         ))}
@@ -391,6 +399,46 @@ describe('Accounts integration', () => {
     expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
     expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('Legacy sibling payment for invoice 24')).toBeTruthy();
+  });
+
+  it('restores client context when leaving the routed invoice page via the back action', async () => {
+    const onRouteInvoiceChange = vi.fn();
+    const onRouteInvoicePageBack = vi.fn();
+
+    render(
+      <Accounts
+        routeInvoiceId={528}
+        onRouteInvoiceChange={onRouteInvoiceChange}
+        onRouteInvoicePageBack={onRouteInvoicePageBack}
+      />,
+    );
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'invoice-back' }));
+
+    await waitFor(() => expect(onRouteInvoicePageBack).toHaveBeenCalledTimes(1));
+    expect(onRouteInvoiceChange).toHaveBeenCalledWith(null);
+  });
+
+  it('does not restore client context when the routed invoice page is simply closed', async () => {
+    const onRouteInvoiceChange = vi.fn();
+    const onRouteInvoicePageBack = vi.fn();
+
+    render(
+      <Accounts
+        routeInvoiceId={528}
+        onRouteInvoiceChange={onRouteInvoiceChange}
+        onRouteInvoicePageBack={onRouteInvoicePageBack}
+      />,
+    );
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'invoice-close' }));
+
+    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(null));
+    expect(onRouteInvoicePageBack).not.toHaveBeenCalled();
   });
 
   it('passes the canonical linked invoice context into the payment modal opened from the accounts registry', async () => {

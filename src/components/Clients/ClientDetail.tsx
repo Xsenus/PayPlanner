@@ -25,7 +25,7 @@ import {
   Calculator,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
@@ -101,6 +101,8 @@ interface ClientDetailProps {
   onBack: () => void;
   onClientUpdated?: (client: Client) => void;
   initialCaseId?: number | 'all';
+  initialSection?: ClientDetailSection;
+  onOpenInvoicePage?: (invoiceId: number) => void;
 }
 
 type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
@@ -855,7 +857,7 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     legacyNotes: profile.legacyNotes.trim(),
   });
 
-export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId }: ClientDetailProps) {
+export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId, initialSection, onOpenInvoicePage }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const { confirm } = useDialog();
@@ -1401,6 +1403,26 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
     setInvoiceModalOpen(true);
   };
 
+  const handleInvoicePageLinkClick = useCallback((event: MouseEvent<HTMLAnchorElement>, invoiceId: number) => {
+    if (!onOpenInvoicePage) {
+      return;
+    }
+
+    if (
+      event.button !== 0
+      || event.defaultPrevented
+      || event.metaKey
+      || event.ctrlKey
+      || event.shiftKey
+      || event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    onOpenInvoicePage(invoiceId);
+  }, [onOpenInvoicePage]);
+
   const closeInvoiceModal = () => {
     setInvoiceModalOpen(false);
     setSelectedInvoice(null);
@@ -1662,6 +1684,16 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId 
   );
 
   const [activeSection, setActiveSection] = useState<ClientDetailSection>(() => {
+    if (initialSection && initialSection !== 'settlement') {
+      try {
+        if (sectionPermissions(initialSection).canView) {
+          return initialSection;
+        }
+      } catch {
+        // ignore invalid initial section and use the first available one
+      }
+    }
+
     const firstAllowed = SECTION_ORDER.find((section) => {
       if (section === 'settlement') return false;
       try {
@@ -4325,7 +4357,18 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
                                       return (
                                         <>
-                                          <div className="font-medium text-gray-900">№{invoice.number}</div>
+                                          {accountPermissions.canView ? (
+                                            <a
+                                              href={`/invoices/${invoice.id}`}
+                                              onClick={(event) => handleInvoicePageLinkClick(event, invoice.id)}
+                                              className="font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
+                                              title={`Открыть счет №${invoice.number}`}
+                                            >
+                                              №{invoice.number}
+                                            </a>
+                                          ) : (
+                                            <div className="font-medium text-gray-900">№{invoice.number}</div>
+                                          )}
                                           {caseLabels.map((label) => (
                                             <div key={label} className="text-xs text-gray-500">{label}</div>
                                           ))}

@@ -64,6 +64,7 @@ interface AccountsProps {
   lockType?: boolean;
   routeInvoiceId?: number | null;
   onRouteInvoiceChange?: (invoiceId: number | null) => void;
+  onRouteInvoicePageBack?: () => void;
   onOpenClient?: (clientId: number) => void;
 }
 
@@ -249,6 +250,7 @@ export function Accounts({
   lockType = false,
   routeInvoiceId,
   onRouteInvoiceChange,
+  onRouteInvoicePageBack,
   onOpenClient,
 }: AccountsProps) {
   const { user } = useAuth();
@@ -626,13 +628,16 @@ export function Accounts({
     setModalError(null);
   };
 
-  const closeEditPage = () => {
+  const closeEditPage = (options?: { restoreClientContext?: boolean }) => {
     clearInvoiceEditorDraft();
     setPageEditingInvoiceId(null);
     setPageEditingInvoice(null);
     setPageInvoiceLoading(false);
     setResumeInvoiceDraft(null);
     setModalError(null);
+    if (options?.restoreClientContext) {
+      onRouteInvoicePageBack?.();
+    }
     onRouteInvoiceChange?.(null);
   };
 
@@ -1540,8 +1545,8 @@ export function Accounts({
           presentation="page"
           invoice={currentPageInvoice}
           resumeDraft={resumeInvoiceDraft}
-          onClose={closeEditPage}
-          onBack={closeEditPage}
+          onClose={() => closeEditPage()}
+          onBack={() => closeEditPage({ restoreClientContext: true })}
           onOpenClient={openClientFromEditor}
           onSubmit={submitInvoice}
           submitting={submitting}

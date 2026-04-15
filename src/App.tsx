@@ -212,9 +212,11 @@ function AppContent() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
+  const [initialClientSection, setInitialClientSection] = useState<'accounts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
   const [selectedActId, setSelectedActId] = useState<number | null>(null);
+  const [invoicePageReturnClientId, setInvoicePageReturnClientId] = useState<number | null>(null);
   const [clientReturnTab, setClientReturnTab] = useState<{
     tab: Tab;
     contractId?: number | null;
@@ -326,6 +328,8 @@ function AppContent() {
         return;
       }
 
+      setInitialClientSection(undefined);
+      setInvoicePageReturnClientId(null);
       setClientReturnTab(options?.returnTo ?? { tab: 'clients' });
       setSelectedClientId(clientId);
       setInitialCaseId(typeof caseId === 'number' ? caseId : 'all');
@@ -346,6 +350,23 @@ function AppContent() {
     },
     [logActivity, permissions.clients.canView],
   );
+
+  const handleRouteInvoiceChange = useCallback((invoiceId: number | null) => {
+    setSelectedInvoiceId(invoiceId);
+    if (invoiceId === null) {
+      setInvoicePageReturnClientId(null);
+    }
+  }, []);
+
+  const handleBackToClientFromInvoicePage = useCallback(() => {
+    if (!invoicePageReturnClientId) {
+      return;
+    }
+
+    setInitialClientSection('accounts');
+    setSelectedClientId(invoicePageReturnClientId);
+    setActiveTab('clientDetail');
+  }, [invoicePageReturnClientId]);
 
   const handleOpenProfile = useCallback(() => {
     setActiveTab('profile');
@@ -591,6 +612,13 @@ function AppContent() {
           <ClientDetail
             clientId={selectedClientId}
             initialCaseId={initialCaseId}
+            initialSection={initialClientSection}
+            onOpenInvoicePage={(invoiceId) => {
+              setInvoicePageReturnClientId(selectedClientId);
+              setInitialClientSection('accounts');
+              setSelectedInvoiceId(invoiceId);
+              setActiveTab('accounts');
+            }}
             onBack={() => {
               const target = clientReturnTab?.tab ?? 'clients';
               if (target === 'contractDetail' && clientReturnTab?.contractId) {
@@ -601,6 +629,7 @@ function AppContent() {
               }
               setActiveTab(target);
               setSelectedClientId(null);
+              setInitialClientSection(undefined);
               setClientReturnTab(null);
               void logActivity({
                 category: 'clients',
@@ -618,7 +647,8 @@ function AppContent() {
           ? (
               <Accounts
                 routeInvoiceId={selectedInvoiceId}
-                onRouteInvoiceChange={setSelectedInvoiceId}
+                onRouteInvoiceChange={handleRouteInvoiceChange}
+                onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })}
               />
             )
@@ -629,7 +659,8 @@ function AppContent() {
           ? (
               <Accounts
                 routeInvoiceId={selectedInvoiceId}
-                onRouteInvoiceChange={setSelectedInvoiceId}
+                onRouteInvoiceChange={handleRouteInvoiceChange}
+                onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 defaultType="Income"
                 lockType
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })}
@@ -642,7 +673,8 @@ function AppContent() {
           ? (
               <Accounts
                 routeInvoiceId={selectedInvoiceId}
-                onRouteInvoiceChange={setSelectedInvoiceId}
+                onRouteInvoiceChange={handleRouteInvoiceChange}
+                onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 defaultType="Expense"
                 lockType
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })}
