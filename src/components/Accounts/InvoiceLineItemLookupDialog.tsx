@@ -125,6 +125,7 @@ export function InvoiceLineItemLookupDialog({
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={searchPlaceholder}
               autoFocus
+              data-testid="invoice-line-item-lookup-query-input"
               className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-10 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
             />
           </div>
@@ -160,6 +161,7 @@ export function InvoiceLineItemLookupDialog({
               <button
                 type="button"
                 onClick={onSelectCustomQuery}
+                data-testid="invoice-line-item-lookup-custom-action"
                 className="flex w-full items-center justify-between gap-4 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-left transition hover:bg-blue-50"
               >
                 <div className="min-w-0">
@@ -187,6 +189,7 @@ export function InvoiceLineItemLookupDialog({
                     key={option.value}
                     type="button"
                     onClick={() => onSelect(option.value)}
+                    data-testid={`invoice-line-item-lookup-option-${option.value}`}
                     className={`flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left transition ${
                       isSelected
                         ? 'border-blue-200 bg-blue-50/80'

@@ -891,6 +891,7 @@ export interface InvoiceLineItem {
   id?: number | null;
   sortOrder?: number | null;
   sourceKey?: string | null;
+  serviceId?: number | null;
   name: string;
   quantity: number;
   unit: string;

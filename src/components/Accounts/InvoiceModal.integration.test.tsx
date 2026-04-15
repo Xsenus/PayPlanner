@@ -763,6 +763,59 @@ describe('InvoiceModal integration', () => {
       expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Нестандартная услуга');
     });
   });
+  it('lets the user reopen a selected service and append custom text without losing the template fields', async () => {
+    const serviceName = 'Claim drafting';
+    const customServiceName = 'Claim drafting for case 42';
+
+    invoiceUnitsMock.push({ name: 'pcs' }, { name: 'svc' }, { name: 'hour' });
+    serviceCategoriesMock.push(
+      { id: 1, name: 'Litigation', description: '', colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
+    );
+    servicesMock.push(
+      { id: 1, name: serviceName, description: '', unit: 'svc', defaultPrice: 15000, categoryId: 1, colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
+    );
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click((await screen.findAllByTestId('invoice-line-item-service-trigger'))[0]);
+    fireEvent.click(screen.getByTestId('invoice-line-item-lookup-option-1'));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('invoice-line-item-service-trigger')[0].textContent).toContain(serviceName);
+      expect((screen.getAllByTestId('invoice-line-item-unit-input')[0] as HTMLInputElement).value).toBe('svc');
+      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000.00');
+    });
+
+    fireEvent.click(screen.getAllByTestId('invoice-line-item-service-trigger')[0]);
+
+    const nameSearchInput = screen.getByTestId('invoice-line-item-lookup-query-input') as HTMLInputElement;
+    expect(nameSearchInput.value).toBe(serviceName);
+
+    fireEvent.change(nameSearchInput, {
+      target: { value: customServiceName },
+    });
+    fireEvent.click(screen.getByTestId('invoice-line-item-lookup-custom-action'));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('invoice-line-item-service-trigger')[0].textContent).toContain(customServiceName);
+      expect((screen.getAllByTestId('invoice-line-item-unit-input')[0] as HTMLInputElement).value).toBe('svc');
+      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000.00');
+    });
+  });
+
   it('downloads document variant without signature and seal on demand', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();

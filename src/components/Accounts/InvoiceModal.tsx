@@ -63,6 +63,7 @@ type LineItem = {
   unit: string;
   price: string;
   serviceCategoryId: string;
+  serviceId: string;
 };
 
 type DraftActForm = {
@@ -163,6 +164,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       unit: item.unit ?? 'шт',
       price: formatMoneyValue(item.price),
       serviceCategoryId: '',
+      serviceId: item.serviceId ? String(item.serviceId) : '',
     }));
   }
 
@@ -174,6 +176,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       unit: 'шт',
       price: formatMoneyValue(fallbackAmount ?? 0),
       serviceCategoryId: '',
+      serviceId: '',
     },
   ];
 }
@@ -804,6 +807,11 @@ export function InvoiceModal({
     });
   }, [activeLineItemLookup, serviceCategoryById, servicesByCategoryId, sortedServices]);
 
+  const getServiceTemplateById = useCallback((serviceId: string | null | undefined) => {
+    if (!serviceId) return null;
+    return sortedServices.find((item) => String(item.id) === serviceId) ?? null;
+  }, [sortedServices]);
+
   const findServiceTemplate = useCallback((name: string, serviceCategoryId?: string) => {
     const normalizedName = normalizeLookupName(name);
     if (!normalizedName) return null;
@@ -819,6 +827,34 @@ export function InvoiceModal({
     return exactMatches[0] ?? null;
   }, [sortedServices]);
 
+  const resolveLineItemTemplate = useCallback((
+    item: Pick<LineItem, 'name' | 'serviceCategoryId' | 'serviceId'>,
+    nameOverride?: string,
+    serviceCategoryIdOverride?: string,
+  ) => {
+    const effectiveName = nameOverride ?? item.name;
+    const effectiveCategoryId = serviceCategoryIdOverride ?? item.serviceCategoryId;
+    const selectedTemplate = getServiceTemplateById(item.serviceId);
+    const selectedTemplateMatchesCategory = !effectiveCategoryId
+      || String(selectedTemplate?.categoryId ?? '') === effectiveCategoryId;
+
+    if (
+      selectedTemplate
+      && selectedTemplateMatchesCategory
+      && normalizeLookupName(effectiveName)
+      && normalizeLookupName(effectiveName) === normalizeLookupName(selectedTemplate.name)
+    ) {
+      return selectedTemplate;
+    }
+
+    const exactMatch = findServiceTemplate(effectiveName, effectiveCategoryId);
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    return selectedTemplate && selectedTemplateMatchesCategory ? selectedTemplate : null;
+  }, [findServiceTemplate, getServiceTemplateById]);
+
   const handleLineItemPriceChange = (id: string, rawValue: string) => {
     updateLineItem(id, { price: formatMoneyInputValue(rawValue) });
   };
@@ -828,30 +864,13 @@ export function InvoiceModal({
     updateLineItem(id, { price: formatted || formatMoneyDisplayValue(0) });
   };
 
-  const applyLineItemTemplate = (id: string, name: string) => {
-    const currentLineItem = lineItems.find((item) => item.id === id);
-    const template = findServiceTemplate(name, currentLineItem?.serviceCategoryId);
-    if (!template) return;
-
-    const patch: Partial<LineItem> = {
-      serviceCategoryId: template.categoryId ? String(template.categoryId) : '',
-    };
-
-    if (template.unit?.trim()) {
-      patch.unit = template.unit.trim();
-    }
-
-    if (template.defaultPrice !== undefined && template.defaultPrice !== null) {
-      patch.price = formatMoneyDisplayValue(template.defaultPrice);
-    }
-
-    updateLineItem(id, patch);
-  };
-
   const handleLineItemCategoryChange = (id: string, serviceCategoryId: string) => {
     const currentLineItem = lineItems.find((item) => item.id === id);
-    const template = currentLineItem ? findServiceTemplate(currentLineItem.name, serviceCategoryId) : null;
-    const patch: Partial<LineItem> = { serviceCategoryId };
+    const template = currentLineItem ? resolveLineItemTemplate(currentLineItem, currentLineItem.name, serviceCategoryId) : null;
+    const patch: Partial<LineItem> = {
+      serviceCategoryId,
+      serviceId: template ? String(template.id) : '',
+    };
 
     if (template?.unit?.trim()) {
       patch.unit = template.unit.trim();
@@ -865,7 +884,8 @@ export function InvoiceModal({
   };
 
   const openLineItemLookup = (lookup: Exclude<LineItemLookupState, null>) => {
-    setLineItemLookupQuery('');
+    const currentLineItem = lineItems.find((item) => item.id === lookup.lineItemId);
+    setLineItemLookupQuery(lookup.kind === 'service' ? currentLineItem?.name ?? '' : '');
     setLineItemLookupState(lookup);
   };
 
@@ -888,6 +908,7 @@ export function InvoiceModal({
     const patch: Partial<LineItem> = {
       name: selectedService.name,
       serviceCategoryId: selectedService.categoryId ? String(selectedService.categoryId) : '',
+      serviceId: String(selectedService.id),
     };
 
     if (selectedService.unit?.trim()) {
@@ -909,8 +930,30 @@ export function InvoiceModal({
       return;
     }
 
-    updateLineItem(currentLineItemId, { name: trimmedQuery });
-    applyLineItemTemplate(currentLineItemId, trimmedQuery);
+    const currentLineItem = lineItems.find((item) => item.id === currentLineItemId);
+    if (!currentLineItem) {
+      return;
+    }
+
+    const template = resolveLineItemTemplate(currentLineItem, trimmedQuery);
+    const patch: Partial<LineItem> = {
+      name: trimmedQuery,
+      serviceId: template ? String(template.id) : '',
+    };
+
+    if (template?.categoryId) {
+      patch.serviceCategoryId = String(template.categoryId);
+    }
+
+    if (template?.unit?.trim()) {
+      patch.unit = template.unit.trim();
+    }
+
+    if (template?.defaultPrice !== undefined && template?.defaultPrice !== null) {
+      patch.price = formatMoneyDisplayValue(template.defaultPrice);
+    }
+
+    updateLineItem(currentLineItemId, patch);
     closeLineItemLookup();
   };
 
@@ -920,7 +963,7 @@ export function InvoiceModal({
       return;
     }
 
-    updateLineItem(currentLineItemId, { name: '' });
+    updateLineItem(currentLineItemId, { name: '', serviceId: '' });
     closeLineItemLookup();
   };
 
@@ -1437,15 +1480,20 @@ export function InvoiceModal({
     setLineItems((prev) => {
       let changed = false;
       const next = prev.map((item) => {
-        if (item.serviceCategoryId) return item;
-        const template = findServiceTemplate(item.name);
-        if (!template?.categoryId) return item;
+        const template = resolveLineItemTemplate(item);
+        const nextCategoryId = item.serviceCategoryId || (template?.categoryId ? String(template.categoryId) : '');
+        const nextServiceId = item.serviceId || (template ? String(template.id) : '');
+        if (item.serviceCategoryId === nextCategoryId && item.serviceId === nextServiceId) return item;
         changed = true;
-        return { ...item, serviceCategoryId: String(template.categoryId) };
+        return {
+          ...item,
+          serviceCategoryId: nextCategoryId,
+          serviceId: nextServiceId,
+        };
       });
       return changed ? next : prev;
     });
-  }, [findServiceTemplate, sortedServices.length]);
+  }, [resolveLineItemTemplate, sortedServices.length]);
 
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
@@ -1465,6 +1513,7 @@ export function InvoiceModal({
         unit: unitOptions[0] || 'шт',
         price: formatMoneyDisplayValue(0),
         serviceCategoryId: '',
+        serviceId: '',
       },
     ]);
   };
@@ -1813,6 +1862,7 @@ export function InvoiceModal({
       responsibleIds: form.responsibleIds.slice(0, 1).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
       lineItems: lineItems
         .map((item) => ({
+          serviceId: item.serviceId ? Number(item.serviceId) : undefined,
           name: item.name.trim(),
           quantity: parseMoneyInput(item.quantity),
           unit: item.unit.trim() || 'шт',
@@ -2699,7 +2749,7 @@ export function InvoiceModal({
     ? serviceCategoryById.get(Number(activeLineItemLookup.serviceCategoryId)) ?? 'Все категории'
     : 'Все категории';
   const activeLineItemSelectedServiceId = activeLineItemLookup
-    ? String(findServiceTemplate(activeLineItemLookup.name, activeLineItemLookup.serviceCategoryId)?.id ?? '')
+    ? String(resolveLineItemTemplate(activeLineItemLookup)?.id ?? '')
     : '';
   const canApplyCustomServiceName = lineItemLookupState?.kind === 'service'
     && Boolean(lineItemLookupQueryTrimmed)
@@ -3154,6 +3204,7 @@ export function InvoiceModal({
                                       <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Наименование</span>
                                       <button
                                         type="button"
+                                        data-testid="invoice-line-item-service-trigger"
                                         onClick={() => openLineItemLookup({ kind: 'service', lineItemId: item.id })}
                                         aria-label="Наименование услуги"
                                         title={item.name || 'Выберите или введите наименование'}
@@ -3183,6 +3234,7 @@ export function InvoiceModal({
                                       <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Ед.</span>
                                       <input
                                         type="text"
+                                        data-testid="invoice-line-item-unit-input"
                                         list="invoice-line-item-units"
                                         value={item.unit}
                                         onChange={(event) => updateLineItem(item.id, { unit: event.target.value })}
@@ -3196,6 +3248,7 @@ export function InvoiceModal({
                                       <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Цена</span>
                                       <input
                                         type="text"
+                                        data-testid="invoice-line-item-price-input"
                                         inputMode="decimal"
                                         value={item.price}
                                         onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)}
