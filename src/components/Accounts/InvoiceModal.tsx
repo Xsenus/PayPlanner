@@ -342,6 +342,17 @@ function contractLabel(contract: Contract | null): string {
   return contract.title?.trim() ? `${contract.number} — ${contract.title}` : contract.number;
 }
 
+function sortContractsByRecency(source: Contract[]): Contract[] {
+  return [...source].sort((left, right) => {
+    const leftDate = Date.parse(left.date ?? '');
+    const rightDate = Date.parse(right.date ?? '');
+    if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) {
+      return rightDate - leftDate;
+    }
+    return right.id - left.id;
+  });
+}
+
 function formatDate(value?: string | null): string {
   if (!value) return '';
   const normalized = toDateInputValue(value);
@@ -655,6 +666,7 @@ export function InvoiceModal({
   const [contractOptions, setContractOptions] = useState<Contract[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
+  const [contractsLoadedClientId, setContractsLoadedClientId] = useState('');
   const [createContractOpen, setCreateContractOpen] = useState(false);
   const [createContractSubmitting, setCreateContractSubmitting] = useState(false);
   const [createContractError, setCreateContractError] = useState<string | null>(null);
@@ -680,6 +692,7 @@ export function InvoiceModal({
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
   const lastAutoContractClientIdRef = useRef<string>('');
+  const contractOptionsRevisionRef = useRef(0);
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
 
   const calculateLineItemsTotal = useCallback(
@@ -1003,6 +1016,7 @@ export function InvoiceModal({
       if (!open || !form.clientId) {
         setContractOptions([]);
         setContractsError(null);
+        setContractsLoadedClientId('');
         return;
       }
 
@@ -1010,11 +1024,15 @@ export function InvoiceModal({
       if (!Number.isFinite(clientId) || clientId <= 0) {
         setContractOptions([]);
         setContractsError(null);
+        setContractsLoadedClientId('');
         return;
       }
 
+      const requestRevision = contractOptionsRevisionRef.current;
+      const requestClientId = String(clientId);
       setContractsLoading(true);
       setContractsError(null);
+      setContractsLoadedClientId('');
       try {
         const response = await apiService.getContracts({
           clientId,
@@ -1023,12 +1041,14 @@ export function InvoiceModal({
           sortBy: 'createdAt',
           sortDir: 'desc',
         });
-        if (!cancelled) {
-          setContractOptions(response.items ?? []);
+        if (!cancelled && requestRevision === contractOptionsRevisionRef.current) {
+          setContractOptions(sortContractsByRecency(response.items ?? []));
+          setContractsLoadedClientId(requestClientId);
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && requestRevision === contractOptionsRevisionRef.current) {
           setContractOptions([]);
+          setContractsLoadedClientId(requestClientId);
           setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры');
         }
       } finally {
@@ -1065,27 +1085,27 @@ export function InvoiceModal({
   }, [contractOptions, form.clientId, form.contractId, mode, open]);
 
   useEffect(() => {
-    if (!form.contractId) return;
+    if (!open || !form.contractId) return;
+    if (!form.clientId) {
+      setForm((prev) => ({ ...prev, contractId: '' }));
+      return;
+    }
+    if (contractsLoading || contractsLoadedClientId !== form.clientId) return;
     if (contractOptions.some((contract) => String(contract.id) === form.contractId)) return;
     setForm((prev) => ({ ...prev, contractId: '' }));
-  }, [contractOptions, form.contractId]);
+  }, [contractOptions, contractsLoadedClientId, contractsLoading, form.clientId, form.contractId, open]);
 
   const handleCreateContractFromInvoice = useCallback(async (payload: ContractInput) => {
     setCreateContractSubmitting(true);
     setCreateContractError(null);
     try {
       const created = await apiService.createContract(payload);
+      contractOptionsRevisionRef.current += 1;
       setContractOptions((prev) => {
         const next = [created, ...prev.filter((contract) => contract.id !== created.id)];
-        return next.sort((left, right) => {
-          const leftDate = Date.parse(left.date ?? '');
-          const rightDate = Date.parse(right.date ?? '');
-          if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) {
-            return rightDate - leftDate;
-          }
-          return right.id - left.id;
-        });
+        return sortContractsByRecency(next);
       });
+      setContractsLoadedClientId(form.clientId);
       setForm((prev) => ({ ...prev, contractId: String(created.id) }));
       lastAutoContractClientIdRef.current = form.clientId;
       setCreateContractOpen(false);

@@ -2,13 +2,33 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
-import type { Invoice, Payment } from '../../types';
+import type {
+  Client,
+  Contract,
+  ContractInput,
+  InstallmentPlanInput,
+  Invoice,
+  Payment,
+  ServiceCategoryDictionaryItem,
+  ServiceDictionaryItem,
+} from '../../types';
+import type { BaseDictItem } from '../../types/dictionaries';
 import { apiService } from '../../services/api';
+
+type ContractModalMockProps = {
+  open: boolean;
+  onSubmit: (payload: ContractInput) => void | Promise<void>;
+};
+
+type InstallmentPlannerMockProps = {
+  onApplyPlan: (plan: InstallmentPlanInput | null) => void;
+};
 
 const {
   confirmMock,
   installmentPlannerPlanRef,
   installmentPlannerPropsSpy,
+  contractModalSubmitPayloadRef,
   invoiceUnitsMock,
   serviceCategoriesMock,
   servicesMock,
@@ -16,11 +36,24 @@ const {
   toastSuccessMock,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
-  installmentPlannerPlanRef: { current: null as any },
+  installmentPlannerPlanRef: { current: null as InstallmentPlanInput | null },
   installmentPlannerPropsSpy: vi.fn(),
-  invoiceUnitsMock: [] as any[],
-  serviceCategoriesMock: [] as any[],
-  servicesMock: [] as any[],
+  contractModalSubmitPayloadRef: {
+    current: {
+      number: 'CT-001',
+      date: '2026-04-15',
+      billingMode: 'Fixed',
+      isOpenEnded: false,
+      amount: 10_000,
+      clients: [{ clientId: 1 }],
+      actIds: [],
+      invoiceIds: [],
+      paymentIds: [],
+    } satisfies ContractInput,
+  },
+  invoiceUnitsMock: [] as BaseDictItem[],
+  serviceCategoriesMock: [] as ServiceCategoryDictionaryItem[],
+  servicesMock: [] as ServiceDictionaryItem[],
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
 }));
@@ -72,7 +105,16 @@ vi.mock('../Clients/CaseModal', () => ({
 }));
 
 vi.mock('../Contracts/ContractModal', () => ({
-  ContractModal: () => null,
+  ContractModal: (props: ContractModalMockProps) => {
+    if (!props.open) return null;
+    return (
+      <div data-testid="contract-modal">
+        <button type="button" onClick={() => props.onSubmit(contractModalSubmitPayloadRef.current)}>
+          submit-contract
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../ui/LookupSelect', () => ({
@@ -80,7 +122,7 @@ vi.mock('../ui/LookupSelect', () => ({
 }));
 
 vi.mock('./InstallmentPlanner', () => ({
-  InstallmentPlanner: (props: any) => {
+  InstallmentPlanner: (props: InstallmentPlannerMockProps) => {
     installmentPlannerPropsSpy(props);
     return (
       <div data-testid="installment-planner">
@@ -104,12 +146,54 @@ vi.mock('../../utils/invoiceEditorBridge', () => ({
   storeInvoiceEditorDraft: vi.fn(),
 }));
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
+function getContractSelect(): HTMLSelectElement {
+  const select = getAddContractButton().parentElement?.querySelector('select');
+  expect(select).toBeTruthy();
+  return select as HTMLSelectElement;
+}
+
+function getAddContractButton(): HTMLButtonElement {
+  return screen.getByRole('button', { name: 'Добавить договор' }) as HTMLButtonElement;
+}
+
+function createTestClient(id: number, name: string): Client {
+  return {
+    id,
+    name,
+    company: null,
+    isActive: true,
+    createdAt: '2026-04-15T00:00:00Z',
+  } as Client;
+}
+
 describe('InvoiceModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     installmentPlannerPlanRef.current = null;
     installmentPlannerPropsSpy.mockReset();
+    contractModalSubmitPayloadRef.current = {
+      number: 'CT-001',
+      date: '2026-04-15',
+      billingMode: 'Fixed',
+      isOpenEnded: false,
+      amount: 10_000,
+      clients: [{ clientId: 1 }],
+      actIds: [],
+      invoiceIds: [],
+      paymentIds: [],
+    };
     invoiceUnitsMock.splice(0, invoiceUnitsMock.length);
     serviceCategoriesMock.splice(0, serviceCategoriesMock.length);
     servicesMock.splice(0, servicesMock.length);
@@ -138,6 +222,110 @@ describe('InvoiceModal integration', () => {
       value: vi.fn(),
     });
     vi.mocked(apiService.updateInvoice).mockClear();
+  });
+
+  it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {
+    const deferredContracts = createDeferred<{ items: Array<{ id: number; number: string; title?: string; date: string }> }>();
+    vi.mocked(apiService.getContracts).mockImplementationOnce(async () => deferredContracts.promise);
+
+    const invoice = {
+      id: 700,
+      invoiceEntityId: 700,
+      number: '700',
+      date: '2026-04-15',
+      dueDate: '2026-04-20',
+      amount: 15000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      contractId: 77,
+      lineItems: [{ name: 'РЈСЃР»СѓРіР°', quantity: 1, unit: 'С€С‚', price: 15000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    deferredContracts.resolve({
+      items: [{ id: 77, number: 'CT-077', title: 'РћР±СЃР»СѓР¶РёРІР°РЅРёРµ', date: '2026-04-15' }],
+    });
+
+    await waitFor(() => {
+      expect(getContractSelect().value).toBe('77');
+    });
+  });
+
+  it('preserves a contract created from the invoice even when an older contracts request resolves afterwards', async () => {
+    const deferredContracts = createDeferred<{ items: Array<{ id: number; number: string; title?: string; date: string }> }>();
+    vi.mocked(apiService.getContracts).mockImplementationOnce(async () => deferredContracts.promise);
+    vi.mocked(apiService.createContract).mockResolvedValue({
+      id: 91,
+      number: 'CT-091',
+      title: 'РќРѕРІС‹Р№ РґРѕРіРѕРІРѕСЂ',
+      date: '2026-04-15',
+      billingMode: 'Fixed',
+      isOpenEnded: false,
+      amount: 10000,
+      createdAt: '2026-04-15T10:00:00Z',
+      invoiceAmountTotal: 0,
+      actAmountTotal: 0,
+      paymentAmountTotal: 0,
+      clients: [{ id: 1, name: 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚' }],
+      actIds: [],
+      invoiceIds: [],
+      paymentIds: [],
+    } as Contract);
+
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(getAddContractButton());
+    fireEvent.click(await screen.findByRole('button', { name: 'submit-contract' }));
+
+    await waitFor(() => {
+      expect(getContractSelect().value).toBe('91');
+    });
+
+    deferredContracts.resolve({ items: [] });
+
+    await waitFor(() => {
+      expect(getContractSelect().value).toBe('91');
+    });
+
+    fireEvent.change(screen.getByLabelText('Номер счёта'), { target: { value: 'INV-091' } });
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ contractId: 91 }));
+    });
   });
 
   it('renders related payments even when the current invoice record is the only operation available', async () => {
