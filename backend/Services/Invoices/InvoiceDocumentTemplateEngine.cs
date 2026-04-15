@@ -387,10 +387,27 @@ public static class InvoiceDocumentTemplateEngine
         var snils = buyerProfile?.Snils?.Trim() ?? string.Empty;
         var phone = directClient?.Phone ?? string.Empty;
         var email = directClient?.Email ?? string.Empty;
-        var contract = BuildBuyerContract(payment.Contract);
+        var contractValue = BuildBuyerContractValue(payment.Contract);
+        var contract = string.IsNullOrWhiteSpace(contractValue)
+            ? string.Empty
+            : $"Договор: {contractValue}";
+        var foundation = string.IsNullOrWhiteSpace(contractValue)
+            ? string.Empty
+            : $"Основание: {contractValue}";
         var clientCase = BuildBuyerCase(payment);
 
         var requisitesLines = new List<string> { name };
+
+        if (!string.IsNullOrWhiteSpace(inn))
+        {
+            requisitesLines.Add($"ИНН {inn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(snils))
+        {
+            requisitesLines.Add($"СНИЛС {snils}");
+        }
+
         if (!string.IsNullOrWhiteSpace(company) && !string.Equals(company, name, StringComparison.OrdinalIgnoreCase))
         {
             requisitesLines.Add(company);
@@ -406,16 +423,6 @@ public static class InvoiceDocumentTemplateEngine
             requisitesLines.Add(passport);
         }
 
-        if (!string.IsNullOrWhiteSpace(inn))
-        {
-            requisitesLines.Add($"ИНН: {inn}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(snils))
-        {
-            requisitesLines.Add($"СНИЛС: {snils}");
-        }
-
         if (!string.IsNullOrWhiteSpace(phone))
         {
             requisitesLines.Add($"Тел.: {phone}");
@@ -426,9 +433,9 @@ public static class InvoiceDocumentTemplateEngine
             requisitesLines.Add($"Email: {email}");
         }
 
-        if (!string.IsNullOrWhiteSpace(contract))
+        if (!string.IsNullOrWhiteSpace(foundation))
         {
-            requisitesLines.Add(contract);
+            requisitesLines.Add(foundation);
         }
 
         if (!string.IsNullOrWhiteSpace(clientCase))
@@ -468,7 +475,7 @@ public static class InvoiceDocumentTemplateEngine
         return FirstNotEmpty(normalizedAddress, client.Address);
     }
 
-    private static string BuildBuyerContract(Contract? contract)
+    private static string BuildBuyerContractValue(Contract? contract)
     {
         if (contract is null)
         {
@@ -493,7 +500,7 @@ public static class InvoiceDocumentTemplateEngine
 
         return parts.Count == 0
             ? string.Empty
-            : $"Договор: {string.Join(" ", parts)}";
+            : string.Join(" ", parts);
     }
 
     private static string BuildBuyerCase(Payment payment)
@@ -567,7 +574,21 @@ public static class InvoiceDocumentTemplateEngine
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(series) || !string.IsNullOrWhiteSpace(number))
         {
-            parts.Add($"Паспорт {string.Join(" ", new[] { series, number }.Where(static x => !string.IsNullOrWhiteSpace(x)))}".Trim());
+            var passportIdentityParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(series))
+            {
+                passportIdentityParts.Add($"серия {series.Trim()}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(number))
+            {
+                passportIdentityParts.Add($"номер {number.Trim()}");
+            }
+
+            if (passportIdentityParts.Count > 0)
+            {
+                parts.Add($"Паспорт: {string.Join(" ", passportIdentityParts)}");
+            }
         }
 
         if (issueDate.HasValue)

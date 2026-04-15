@@ -131,16 +131,23 @@ public class InvoiceDocumentTemplateTests
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
         Assert.Contains("Адрес: Самара, ул. Тестовая, д. 1", content.Content);
-        Assert.Contains("Паспорт 1234 567890", content.Content);
-        Assert.Contains("ИНН: 123456789012", content.Content);
-        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
+        Assert.Contains("Паспорт: серия 1234 номер 567890", content.Content);
+        Assert.Contains("ИНН 123456789012", content.Content);
+        Assert.Contains("СНИЛС 123-456-789 00", content.Content);
         Assert.Contains("Тел.: +7 999 123-45-67", content.Content);
         Assert.Contains("Email: client@example.com", content.Content);
-        Assert.Contains("Договор: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
+        Assert.Contains("Основание: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
         Assert.Contains("Дело: Дело о взыскании задолженности", content.Content);
         Assert.Contains("Комментарий для клиента:</strong> Тестовый счет", content.Content);
         Assert.Contains("Срок оплаты:</strong> 12.04.2026", content.Content);
         Assert.Contains("Счет не для бухгалтерии", content.Content);
+
+        var buyerNameIndex = content.Content.IndexOf("Тестовый клиент", StringComparison.Ordinal);
+        var innIndex = content.Content.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
+        var snilsIndex = content.Content.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
+        Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered document.");
+        Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
+        Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
     }
 
     [Fact]
@@ -239,10 +246,20 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("Паспорт 1234 567890", content.Content);
+        Assert.Contains("Паспорт: серия 1234 номер 567890", content.Content);
         Assert.Contains("код подразделения 123-456", content.Content);
-        Assert.Contains("ИНН: 123456789012", content.Content);
-        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
+        Assert.Contains("ИНН 123456789012", content.Content);
+        Assert.Contains("СНИЛС 123-456-789 00", content.Content);
+        Assert.DoesNotContain("ИНН: 123456789012", content.Content);
+        Assert.DoesNotContain("СНИЛС: 123-456-789 00", content.Content);
+        Assert.Contains("Основание: Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
+
+        var buyerNameIndex = content.Content.IndexOf("Тестовый клиент", StringComparison.Ordinal);
+        var innIndex = content.Content.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
+        var snilsIndex = content.Content.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
+        Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered document.");
+        Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
+        Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
     }
 
     [Fact]
