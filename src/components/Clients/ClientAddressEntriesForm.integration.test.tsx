@@ -112,4 +112,26 @@ describe('ClientAddressEntriesForm integration', () => {
     expect(screen.getByDisplayValue(updatedFullAddress)).toBeTruthy();
     expect(onScheduleSuggestions).toHaveBeenLastCalledWith(0, updatedFullAddress);
   });
+
+  it('renders address removal as an icon-only action with an accessible label', () => {
+    render(
+      <ClientAddressEntriesForm
+        entries={[baseEntry]}
+        canEdit
+        dateInputClassName="date-input"
+        addressTypeOptions={addressTypeOptions}
+        suggestionsByIndex={{}}
+        onUpdateEntry={vi.fn()}
+        onRemoveEntry={vi.fn()}
+        onAddEntry={vi.fn()}
+        onToggleAdditionalType={vi.fn()}
+        onScheduleSuggestions={vi.fn()}
+        onFindAddress={vi.fn()}
+        onApplySuggestion={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Удалить адрес' })).toBeTruthy();
+    expect(screen.queryByText(/^Удалить$/)).toBeNull();
+  });
 });

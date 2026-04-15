@@ -1,3 +1,4 @@
+import { Trash2 } from 'lucide-react';
 import type { DadataAddressSuggestion } from '../../types';
 
 export interface ClientAddressEntryFormValue {
@@ -34,13 +35,16 @@ interface ClientAddressEntriesFormProps {
   addressTypeOptions: AddressTypeOption[];
   suggestionsByIndex: Record<number, DadataAddressSuggestion[]>;
   onUpdateEntry: (index: number, key: keyof ClientAddressEntryFormValue, value: string) => void;
-  onRemoveEntry: (index: number) => void;
+  onRemoveEntry: (index: number) => void | Promise<void>;
   onAddEntry: () => void;
   onToggleAdditionalType: (index: number, type: string) => void;
   onScheduleSuggestions: (index: number, query: string) => void;
   onFindAddress: (index: number) => void;
   onApplySuggestion: (index: number, suggestion: DadataAddressSuggestion) => Promise<void>;
 }
+
+const ADDRESS_DELETE_ICON_BUTTON_CLASS =
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60';
 
 export function ClientAddressEntriesForm({
   entries,
@@ -71,11 +75,13 @@ export function ClientAddressEntriesForm({
             {showReadonlyControls ? (
               <button
                 type="button"
-                onClick={() => onRemoveEntry(index)}
+                onClick={() => { void onRemoveEntry(index); }}
                 disabled={!canEdit}
-                className="text-sm text-rose-600"
+                className={ADDRESS_DELETE_ICON_BUTTON_CLASS}
+                title="Удалить адрес"
+                aria-label="Удалить адрес"
               >
-                Удалить
+                <Trash2 className="h-4 w-4" />
               </button>
             ) : null}
           </div>

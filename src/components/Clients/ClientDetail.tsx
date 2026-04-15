@@ -524,6 +524,24 @@ interface ClientExtendedProfile {
   legacyNotes: string;
 }
 
+interface ClientPowerOfAttorneyDraft {
+  id: number | null;
+  number: string;
+  issuedAt: string;
+  validUntil: string;
+  issuer: string;
+  notes: string;
+  isActive: boolean;
+}
+
+interface ClientProfileDeleteActionOptions {
+  title: string;
+  description: string;
+  successMessage: string;
+  toastTitle: string;
+  onDelete: () => void;
+}
+
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
 const createEmptyEducation = (): ClientEducationItem => ({ institution: '', specialty: '', diplomaNumber: '', oksoCode: '' });
@@ -562,6 +580,24 @@ const createEmptyAddressEntry = (): ClientAddressItem => ({
   validFrom: '',
   validTo: '',
 });
+const createEmptyPoaDraft = (): ClientPowerOfAttorneyDraft => ({
+  id: null,
+  number: '',
+  issuedAt: formatLocalYMD(new Date()),
+  validUntil: '',
+  issuer: '',
+  notes: '',
+  isActive: true,
+});
+const createPoaDraftFromItem = (poa: PowerOfAttorney): ClientPowerOfAttorneyDraft => ({
+  id: poa.id,
+  number: poa.number,
+  issuedAt: poa.issuedAt,
+  validUntil: poa.validUntil ?? '',
+  issuer: poa.issuer ?? '',
+  notes: poa.notes ?? '',
+  isActive: poa.isActive,
+});
 
 const ADDRESS_TYPE_OPTIONS: AddressTypeOption[] = [
   { value: 'registration', label: 'Адрес регистрации' },
@@ -573,6 +609,8 @@ const ADDRESS_TYPE_OPTIONS: AddressTypeOption[] = [
 ] as const;
 
 const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
+const PROFILE_DELETE_ICON_BUTTON_CLASS =
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60';
 
 const MARITAL_STATUS_OPTIONS: Array<{ value: Exclude<ClientMaritalStatus, ''>; label: string }> = [
   { value: 'never_married', label: 'Никогда не состоял(а) в браке' },
@@ -948,7 +986,8 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
   const [poaPromptOpen, setPoaPromptOpen] = useState(false);
   const [poaPromptSubmitting, setPoaPromptSubmitting] = useState(false);
   const [poaPromptError, setPoaPromptError] = useState<string | null>(null);
-  const [poaDraft, setPoaDraft] = useState({ number: '', issuedAt: formatLocalYMD(new Date()) });
+  const [poaDraft, setPoaDraft] = useState<ClientPowerOfAttorneyDraft>(() => createEmptyPoaDraft());
+  const isEditingPoa = poaDraft.id !== null;
 
   const hasMeaningfulValue = (value: unknown): boolean => {
     if (value === null || value === undefined) return false;
@@ -1022,7 +1061,19 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
     if (poaPromptSubmitting && !force) return;
     setPoaPromptOpen(false);
     setPoaPromptError(null);
-    setPoaDraft({ number: '', issuedAt: formatLocalYMD(new Date()) });
+    setPoaDraft(createEmptyPoaDraft());
+  };
+
+  const openCreatePoaPrompt = () => {
+    setPoaPromptError(null);
+    setPoaDraft(createEmptyPoaDraft());
+    setPoaPromptOpen(true);
+  };
+
+  const openEditPoaPrompt = (poa: PowerOfAttorney) => {
+    setPoaPromptError(null);
+    setPoaDraft(createPoaDraftFromItem(poa));
+    setPoaPromptOpen(true);
   };
 
   const submitQuickPowerOfAttorney = async () => {
@@ -1036,16 +1087,63 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
 
     try {
       setPoaPromptSubmitting(true);
-      const created = await apiService.createClientPowerOfAttorney(clientId, { number, issuedAt, isActive: true });
-      setPowersOfAttorney((prev) => [created, ...prev]);
+      const payload = {
+        number,
+        issuedAt,
+        validUntil: poaDraft.validUntil.trim() || undefined,
+        issuer: poaDraft.issuer.trim() || undefined,
+        notes: poaDraft.notes.trim() || undefined,
+        isActive: poaDraft.isActive,
+      };
+
+      if (poaDraft.id === null) {
+        const created = await apiService.createClientPowerOfAttorney(clientId, payload);
+        setPowersOfAttorney((prev) => [created, ...prev]);
+        toast.success('Доверенность создана.', 'Доверенности');
+      } else {
+        const updated = await apiService.updateClientPowerOfAttorney(clientId, poaDraft.id, payload);
+        setPowersOfAttorney((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        toast.success('Доверенность обновлена.', 'Доверенности');
+      }
       closePoaPrompt(true);
-      toast.success('Доверенность создана.', 'Доверенности');
     } catch (error) {
-      const message = extractDisplayErrorMessage(error, 'Не удалось создать доверенность');
+      const message = extractDisplayErrorMessage(
+        error,
+        poaDraft.id === null ? 'Не удалось создать доверенность' : 'Не удалось обновить доверенность',
+      );
       setPoaPromptError(message);
       toast.error(message, 'Доверенности');
     } finally {
       setPoaPromptSubmitting(false);
+    }
+  };
+
+  const deletePowerOfAttorney = async (poa: PowerOfAttorney) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования клиента.');
+      return;
+    }
+
+    const ok = await confirm({
+      title: 'Удаление доверенности',
+      description: `Удалить доверенность №${poa.number}?`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!ok) return;
+
+    try {
+      await apiService.deleteClientPowerOfAttorney(clientId, poa.id);
+      setPowersOfAttorney((prev) => prev.filter((item) => item.id !== poa.id));
+      if (poaDraft.id === poa.id) {
+        closePoaPrompt(true);
+      }
+      toast.success('Доверенность удалена.', 'Доверенности');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось удалить доверенность');
+      toast.error(message, 'Доверенности');
     }
   };
 
@@ -1758,6 +1856,33 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
   const showPermissionWarning = useCallback((message: string) => {
     toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
   }, [toast]);
+
+  const confirmProfileDeleteAction = useCallback(async ({
+    title,
+    description,
+    successMessage,
+    toastTitle,
+    onDelete,
+  }: ClientProfileDeleteActionOptions) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning('Недостаточно прав для редактирования клиента.');
+      return false;
+    }
+
+    const ok = await confirm({
+      title,
+      description,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!ok) return false;
+
+    onDelete();
+    toast.success(successMessage, toastTitle);
+    return true;
+  }, [clientPermissions.canEdit, confirm, showPermissionWarning, toast]);
 
   useEffect(() => {
     let alive = true;
@@ -2553,13 +2678,25 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
     setClientFormState((prev) => ({ ...prev, [field]: [...prev[field], ''] }));
   };
 
-    const removeListFieldRow = (
+  const removeListFieldRow = async (
     field: 'phones' | 'emails' | 'addresses' | ClientDocumentKey,
     index: number,
   ) => {
-    setClientFormState((prev) => {
-      const nextValues = prev[field].filter((_, i) => i !== index);
-      return { ...prev, [field]: nextValues.length ? nextValues : [''] };
+    const value = clientFormState[field][index]?.trim() ?? '';
+    const isPhoneField = field === 'phones';
+    const fieldLabel = isPhoneField ? 'телефон' : 'email';
+
+    await confirmProfileDeleteAction({
+      title: isPhoneField ? 'Удаление телефона' : 'Удаление email',
+      description: value ? `Удалить ${fieldLabel} «${value}»?` : `Удалить ${fieldLabel}?`,
+      successMessage: isPhoneField ? 'Телефон удалён.' : 'Email удалён.',
+      toastTitle: 'Контакты',
+      onDelete: () => {
+        setClientFormState((prev) => {
+          const nextValues = prev[field].filter((_, i) => i !== index);
+          return { ...prev, [field]: nextValues.length ? nextValues : [''] };
+        });
+      },
     });
   };
 
@@ -2591,6 +2728,74 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     }));
   };
 
+  const removeEducation = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление образования',
+      description: `Удалить образование #${index + 1}?`,
+      successMessage: 'Образование удалено.',
+      toastTitle: 'Образование (ОКСО)',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          education: prev.education.filter((_, i) => i !== index).length > 0
+            ? prev.education.filter((_, i) => i !== index)
+            : [createEmptyEducation()],
+        }));
+      },
+    });
+  };
+
+  const removeProfession = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление профессии',
+      description: `Удалить профессию #${index + 1}?`,
+      successMessage: 'Профессия удалена.',
+      toastTitle: 'Профессии (ОКПДТР)',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          professions: prev.professions.filter((_, i) => i !== index).length > 0
+            ? prev.professions.filter((_, i) => i !== index)
+            : [createEmptyProfession()],
+        }));
+      },
+    });
+  };
+
+  const removeWorkplace = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление места работы',
+      description: `Удалить место работы #${index + 1}?`,
+      successMessage: 'Место работы удалено.',
+      toastTitle: 'Работа и должности',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          workplaces: prev.workplaces.filter((_, i) => i !== index).length > 0
+            ? prev.workplaces.filter((_, i) => i !== index)
+            : [createEmptyWorkplace()],
+        }));
+      },
+    });
+  };
+
+  const removeRelative = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление родственника',
+      description: `Удалить родственника #${index + 1}?`,
+      successMessage: 'Родственник удалён.',
+      toastTitle: 'Родственники',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          relatives: prev.relatives.filter((_, i) => i !== index).length > 0
+            ? prev.relatives.filter((_, i) => i !== index)
+            : [createEmptyRelative()],
+        }));
+      },
+    });
+  };
+
   const updatePassportEntry = (index: number, key: keyof ClientPassportItem, value: string) => {
     setClientFormState((prev) => ({
       ...prev,
@@ -2602,13 +2807,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     setClientFormState((prev) => ({ ...prev, passportEntries: [...prev.passportEntries, createEmptyPassportEntry()] }));
   };
 
-  const removePassportEntry = (index: number) => {
-    setClientFormState((prev) => ({
-      ...prev,
-      passportEntries: prev.passportEntries.filter((_, i) => i !== index).length > 0
-        ? prev.passportEntries.filter((_, i) => i !== index)
-        : [createEmptyPassportEntry()],
-    }));
+  const removePassportEntry = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление паспорта',
+      description: `Удалить паспорт #${index + 1}?`,
+      successMessage: 'Паспорт удалён.',
+      toastTitle: 'Паспорта',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          passportEntries: prev.passportEntries.filter((_, i) => i !== index).length > 0
+            ? prev.passportEntries.filter((_, i) => i !== index)
+            : [createEmptyPassportEntry()],
+        }));
+      },
+    });
   };
 
   const updateAddressEntry = (index: number, key: keyof ClientAddressItem, value: string) => {
@@ -2636,13 +2849,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     setClientFormState((prev) => ({ ...prev, addressEntries: [...prev.addressEntries, createEmptyAddressEntry()] }));
   };
 
-  const removeAddressEntry = (index: number) => {
-    setClientFormState((prev) => ({
-      ...prev,
-      addressEntries: prev.addressEntries.filter((_, i) => i !== index).length > 0
-        ? prev.addressEntries.filter((_, i) => i !== index)
-        : [createEmptyAddressEntry()],
-    }));
+  const removeAddressEntry = async (index: number) => {
+    const addressLabel = clientFormState.addressEntries[index]?.fullAddress?.trim() ?? '';
+
+    await confirmProfileDeleteAction({
+      title: 'Удаление адреса',
+      description: addressLabel ? `Удалить адрес «${addressLabel}»?` : `Удалить адрес #${index + 1}?`,
+      successMessage: 'Адрес удалён.',
+      toastTitle: 'Адреса',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          addressEntries: prev.addressEntries.filter((_, i) => i !== index).length > 0
+            ? prev.addressEntries.filter((_, i) => i !== index)
+            : [createEmptyAddressEntry()],
+        }));
+      },
+    });
   };
 
   const toggleAddressAdditionalType = (index: number, type: string) => {
@@ -2670,13 +2893,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     setClientFormState((prev) => ({ ...prev, birthCertificateEntries: [...prev.birthCertificateEntries, createEmptyBirthCertificateEntry()] }));
   };
 
-  const removeBirthCertificateEntry = (index: number) => {
-    setClientFormState((prev) => ({
-      ...prev,
-      birthCertificateEntries: prev.birthCertificateEntries.filter((_, i) => i !== index).length > 0
-        ? prev.birthCertificateEntries.filter((_, i) => i !== index)
-        : [createEmptyBirthCertificateEntry()],
-    }));
+  const removeBirthCertificateEntry = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление свидетельства о рождении',
+      description: `Удалить свидетельство о рождении #${index + 1}?`,
+      successMessage: 'Свидетельство о рождении удалено.',
+      toastTitle: 'Свидетельства о рождении',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          birthCertificateEntries: prev.birthCertificateEntries.filter((_, i) => i !== index).length > 0
+            ? prev.birthCertificateEntries.filter((_, i) => i !== index)
+            : [createEmptyBirthCertificateEntry()],
+        }));
+      },
+    });
   };
 
   const updateMilitaryIdEntry = (index: number, key: keyof ClientMilitaryIdItem, value: string) => {
@@ -2690,13 +2921,21 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
     setClientFormState((prev) => ({ ...prev, militaryIdEntries: [...prev.militaryIdEntries, createEmptyMilitaryIdEntry()] }));
   };
 
-  const removeMilitaryIdEntry = (index: number) => {
-    setClientFormState((prev) => ({
-      ...prev,
-      militaryIdEntries: prev.militaryIdEntries.filter((_, i) => i !== index).length > 0
-        ? prev.militaryIdEntries.filter((_, i) => i !== index)
-        : [createEmptyMilitaryIdEntry()],
-    }));
+  const removeMilitaryIdEntry = async (index: number) => {
+    await confirmProfileDeleteAction({
+      title: 'Удаление военного билета',
+      description: `Удалить военный билет #${index + 1}?`,
+      successMessage: 'Военный билет удалён.',
+      toastTitle: 'Военные билеты',
+      onDelete: () => {
+        setClientFormState((prev) => ({
+          ...prev,
+          militaryIdEntries: prev.militaryIdEntries.filter((_, i) => i !== index).length > 0
+            ? prev.militaryIdEntries.filter((_, i) => i !== index)
+            : [createEmptyMilitaryIdEntry()],
+        }));
+      },
+    });
   };
 
   const loadAddressSuggestions = async (index: number, query: string) => {
@@ -3264,7 +3503,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <div key={`passport-entry-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div className="mb-3 flex items-center justify-between">
                         <h3 className="text-sm font-semibold text-slate-800">Паспорт #{index + 1}</h3>
-                        <button type="button" onClick={() => removePassportEntry(index)} disabled={!clientPermissions.canEdit} className="text-sm text-rose-600">Удалить</button>
+                        <button
+                          type="button"
+                          onClick={() => { void removePassportEntry(index); }}
+                          disabled={!clientPermissions.canEdit}
+                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                          title="Удалить паспорт"
+                          aria-label="Удалить паспорт"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <label className="text-sm text-slate-700"><span className="mb-1 block">Серия</span><input value={passport.series} onChange={(e) => updatePassportEntry(index, 'series', e.target.value)} disabled={!clientPermissions.canEdit} className="w-full rounded-lg border border-gray-300 px-3 py-2" /></label>
@@ -3317,7 +3565,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                               disabled={!clientPermissions.canEdit}
                               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                             />
-                            <button type="button" onClick={() => removeListFieldRow(field, index)} disabled={!clientPermissions.canEdit} className="px-3 py-2 rounded-lg border border-gray-300 text-sm">Удалить</button>
+                            <button
+                              type="button"
+                              onClick={() => { void removeListFieldRow(field, index); }}
+                              disabled={!clientPermissions.canEdit}
+                              className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                              title={field === 'phones' ? 'Удалить телефон' : 'Удалить email'}
+                              aria-label={field === 'phones' ? 'Удалить телефон' : 'Удалить email'}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </div>
                         ))}
                         <button type="button" onClick={() => addListFieldRow(field)} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить</button>
@@ -3332,11 +3589,25 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Образование (ОКСО)</label>
                 <div className="space-y-2">
                   {clientFormState.education.map((item, index) => (
-                    <div key={`education-${index}`} className="grid gap-2 md:grid-cols-4">
-                      <input value={item.institution} onChange={(e) => updateEducation(index, 'institution', e.target.value)} placeholder="Учебное заведение" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.specialty} onChange={(e) => updateEducation(index, 'specialty', e.target.value)} placeholder="Специальность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.diplomaNumber} onChange={(e) => updateEducation(index, 'diplomaNumber', e.target.value)} placeholder="№ диплома" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" list="okso-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                    <div key={`education-${index}`} className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => { void removeEducation(index); }}
+                          disabled={!clientPermissions.canEdit}
+                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                          title="Удалить образование"
+                          aria-label="Удалить образование"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-4">
+                        <input value={item.institution} onChange={(e) => updateEducation(index, 'institution', e.target.value)} placeholder="Учебное заведение" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <input value={item.specialty} onChange={(e) => updateEducation(index, 'specialty', e.target.value)} placeholder="Специальность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <input value={item.diplomaNumber} onChange={(e) => updateEducation(index, 'diplomaNumber', e.target.value)} placeholder="№ диплома" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <input value={item.oksoCode} onChange={(e) => updateEducation(index, 'oksoCode', e.target.value)} placeholder="Код ОКСО" list="okso-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, education: [...prev.education, createEmptyEducation()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить образование</button>
@@ -3352,9 +3623,23 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Профессии (ОКПДТР)</label>
                 <div className="space-y-2">
                   {clientFormState.professions.map((item, index) => (
-                    <div key={`profession-${index}`} className="grid gap-2 md:grid-cols-2">
-                      <input value={item.profession} onChange={(e) => updateProfession(index, 'profession', e.target.value)} placeholder="Профессия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                      <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" list="okpdtr-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                    <div key={`profession-${index}`} className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => { void removeProfession(index); }}
+                          disabled={!clientPermissions.canEdit}
+                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                          title="Удалить профессию"
+                          aria-label="Удалить профессию"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <input value={item.profession} onChange={(e) => updateProfession(index, 'profession', e.target.value)} placeholder="Профессия" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                        <input value={item.okpdtrCode} onChange={(e) => updateProfession(index, 'okpdtrCode', e.target.value)} placeholder="Код ОКПДТР" list="okpdtr-codes" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, professions: [...prev.professions, createEmptyProfession()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить профессию</button>
@@ -3367,11 +3652,25 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Места работы и должности</label>
                 <div className="space-y-2">
                   {clientFormState.workplaces.map((item, index) => (
-                    <div key={`workplace-${index}`} className="grid gap-2 md:grid-cols-12">
-                      <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
-                      <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
-                      <div className="md:col-span-2"><input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
-                      <div className="md:col-span-2"><input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                    <div key={`workplace-${index}`} className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => { void removeWorkplace(index); }}
+                          disabled={!clientPermissions.canEdit}
+                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                          title="Удалить место работы"
+                          aria-label="Удалить место работы"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-12">
+                        <input value={item.organizationName} onChange={(e) => updateWorkplace(index, 'organizationName', e.target.value)} placeholder="Организация" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <input value={item.position} onChange={(e) => updateWorkplace(index, 'position', e.target.value)} placeholder="Должность" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <div className="md:col-span-2"><input type="date" value={item.startDate} onChange={(e) => updateWorkplace(index, 'startDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                        <div className="md:col-span-2"><input type="date" value={item.endDate} onChange={(e) => updateWorkplace(index, 'endDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} /></div>
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, workplaces: [...prev.workplaces, createEmptyWorkplace()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить место работы</button>
@@ -3396,11 +3695,25 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <label className="block text-sm font-medium text-gray-700 mb-2">Близкие родственники</label>
                 <div className="space-y-2">
                   {clientFormState.relatives.map((item, index) => (
-                    <div key={`relative-${index}`} className="grid gap-2 md:grid-cols-12">
-                      <input value={item.relation} onChange={(e) => updateRelative(index, 'relation', e.target.value)} placeholder="Степень родства" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
-                      <input value={item.fullName} onChange={(e) => updateRelative(index, 'fullName', e.target.value)} placeholder="ФИО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
-                      <input value={item.birthYear} onChange={(e) => updateRelative(index, 'birthYear', e.target.value)} placeholder="Год рождения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
-                      <input value={item.phone} onChange={(e) => updateRelative(index, 'phone', e.target.value)} placeholder="Номер телефона" disabled={!clientPermissions.canEdit} inputMode="tel" className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                    <div key={`relative-${index}`} className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => { void removeRelative(index); }}
+                          disabled={!clientPermissions.canEdit}
+                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                          title="Удалить родственника"
+                          aria-label="Удалить родственника"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-12">
+                        <input value={item.relation} onChange={(e) => updateRelative(index, 'relation', e.target.value)} placeholder="Степень родства" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                        <input value={item.fullName} onChange={(e) => updateRelative(index, 'fullName', e.target.value)} placeholder="ФИО" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                        <input value={item.birthYear} onChange={(e) => updateRelative(index, 'birthYear', e.target.value)} placeholder="Год рождения" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2" />
+                        <input value={item.phone} onChange={(e) => updateRelative(index, 'phone', e.target.value)} placeholder="Номер телефона" disabled={!clientPermissions.canEdit} inputMode="tel" className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4" />
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={() => setClientFormState((prev) => ({ ...prev, relatives: [...prev.relatives, createEmptyRelative()] }))} disabled={!clientPermissions.canEdit} className="text-sm text-emerald-600">+ Добавить родственника</button>
@@ -3423,7 +3736,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           <input type="date" value={doc.issueDate} onChange={(e) => updateBirthCertificateEntry(index, 'issueDate', e.target.value)} disabled={!clientPermissions.canEdit} className={DATE_INPUT_CLASS} />
                           <input value={doc.actRecordNumber} onChange={(e) => updateBirthCertificateEntry(index, 'actRecordNumber', e.target.value)} placeholder="№ актовой записи" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                           <input value={doc.childFullName} onChange={(e) => updateBirthCertificateEntry(index, 'childFullName', e.target.value)} placeholder="ФИО ребенка" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <button type="button" onClick={() => removeBirthCertificateEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <button
+                            type="button"
+                            onClick={() => { void removeBirthCertificateEntry(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить свидетельство о рождении"
+                            aria-label="Удалить свидетельство о рождении"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                           <input value={doc.issuedBy} onChange={(e) => updateBirthCertificateEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдано" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
                         </div>
                       ))}
@@ -3449,7 +3771,16 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                           <input value={doc.category} onChange={(e) => updateMilitaryIdEntry(index, 'category', e.target.value)} placeholder="Категория запаса" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                           <input value={doc.fitnessCategory} onChange={(e) => updateMilitaryIdEntry(index, 'fitnessCategory', e.target.value)} placeholder="Категория годности" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
                           <input value={doc.vusCode} onChange={(e) => updateMilitaryIdEntry(index, 'vusCode', e.target.value)} placeholder="Код ВУС" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg" />
-                          <button type="button" onClick={() => removeMilitaryIdEntry(index)} disabled={!clientPermissions.canEdit} className="text-left text-sm text-rose-600">Удалить</button>
+                          <button
+                            type="button"
+                            onClick={() => { void removeMilitaryIdEntry(index); }}
+                            disabled={!clientPermissions.canEdit}
+                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                            title="Удалить военный билет"
+                            aria-label="Удалить военный билет"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                           <input value={doc.issuedBy} onChange={(e) => updateMilitaryIdEntry(index, 'issuedBy', e.target.value)} placeholder="Кем выдан" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
                           <input value={doc.militaryCommissariat} onChange={(e) => updateMilitaryIdEntry(index, 'militaryCommissariat', e.target.value)} placeholder="Военный комиссариат" disabled={!clientPermissions.canEdit} className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3" />
                         </div>
@@ -3466,11 +3797,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   <button
                     type="button"
                     disabled={!clientPermissions.canEdit}
-                    onClick={() => {
-                      setPoaPromptError(null);
-                      setPoaDraft({ number: '', issuedAt: formatLocalYMD(new Date()) });
-                      setPoaPromptOpen(true);
-                    }}
+                    onClick={openCreatePoaPrompt}
                     className="text-sm text-emerald-600"
                   >
                     + Добавить доверенность
@@ -3482,8 +3809,31 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   ) : (
                     <div className="space-y-2">
                       {powersOfAttorney.map((poa) => (
-                        <div key={poa.id} className="rounded border border-gray-200 px-3 py-2 text-sm">
-                          №{poa.number} · {toRuDate(poa.issuedAt)} {poa.validUntil ? `— до ${toRuDate(poa.validUntil)}` : ""}
+                        <div key={poa.id} className="rounded border border-gray-200 px-3 py-3 text-sm">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div className="space-y-1">
+                              <div className="font-medium text-slate-800">
+                                №{poa.number}
+                              </div>
+                              <div className="text-slate-600">
+                                {toRuDate(poa.issuedAt)} {poa.validUntil ? `— до ${toRuDate(poa.validUntil)}` : ''}
+                              </div>
+                              {poa.issuer ? <div className="text-slate-500">Кем выдана: {poa.issuer}</div> : null}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button type="button" onClick={() => openEditPoaPrompt(poa)} disabled={!clientPermissions.canEdit} className="text-sm text-slate-600">Изменить</button>
+                              <button
+                                type="button"
+                                onClick={() => void deletePowerOfAttorney(poa)}
+                                disabled={!clientPermissions.canEdit}
+                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                title="Удалить доверенность"
+                                aria-label="Удалить доверенность"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -5220,8 +5570,8 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
         <FormPromptModal
           open={poaPromptOpen}
-          title="Новая доверенность"
-          description="Добавление доверенности без перехода в отдельную форму."
+          title={isEditingPoa ? 'Редактирование доверенности' : 'Новая доверенность'}
+          description={isEditingPoa ? 'Измените реквизиты доверенности прямо из карточки клиента.' : 'Добавление доверенности без перехода в отдельную форму.'}
           fields={[
             {
               key: 'number',
@@ -5250,10 +5600,34 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               type: 'date',
               required: true,
             },
+            {
+              key: 'validUntil',
+              label: 'Действует до',
+              value: poaDraft.validUntil,
+              onChange: (value) => {
+                setPoaDraft((prev) => ({ ...prev, validUntil: value }));
+                if (poaPromptError) {
+                  setPoaPromptError(null);
+                }
+              },
+              type: 'date',
+            },
+            {
+              key: 'issuer',
+              label: 'Кем выдана',
+              value: poaDraft.issuer,
+              onChange: (value) => {
+                setPoaDraft((prev) => ({ ...prev, issuer: value }));
+                if (poaPromptError) {
+                  setPoaPromptError(null);
+                }
+              },
+              placeholder: 'Организация или ФИО',
+            },
           ]}
           onCancel={closePoaPrompt}
           onConfirm={submitQuickPowerOfAttorney}
-          confirmLabel="Создать"
+          confirmLabel={isEditingPoa ? 'Сохранить' : 'Создать'}
           cancelLabel="Отмена"
           error={poaPromptError ?? undefined}
           loading={poaPromptSubmitting}
