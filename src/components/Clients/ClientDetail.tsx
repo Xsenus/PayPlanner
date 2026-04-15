@@ -99,6 +99,7 @@ import {
   type AddressTypeOption,
   type ClientAddressEntryFormValue,
 } from './ClientAddressEntriesForm';
+import { stripAddressEntryValidityList } from './addressEntryPersistence';
 import { chooseBestDisplayAddress } from './addressEntryUtils';
 
 interface ClientDetailProps {
@@ -890,7 +891,7 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     birthCertificateEntries: profile.birthCertificateEntries,
     militaryIdEntries: profile.militaryIdEntries,
     passportEntries: profile.passportEntries,
-    addressEntries: profile.addressEntries,
+    addressEntries: stripAddressEntryValidityList(profile.addressEntries),
     comment: profile.comment.trim(),
     legacyNotes: profile.legacyNotes.trim(),
   });
@@ -3537,7 +3538,6 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 <ClientAddressEntriesForm
                   entries={clientFormState.addressEntries}
                   canEdit={clientPermissions.canEdit}
-                  dateInputClassName={DATE_INPUT_CLASS}
                   addressTypeOptions={ADDRESS_TYPE_OPTIONS}
                   suggestionsByIndex={addressSuggestionsByIndex}
                   onUpdateEntry={updateAddressFormEntry}

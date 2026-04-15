@@ -1,5 +1,7 @@
 import { Trash2 } from 'lucide-react';
+
 import type { DadataAddressSuggestion } from '../../types';
+import { ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE } from '../../config/features';
 
 export interface ClientAddressEntryFormValue {
   type: string;
@@ -31,7 +33,8 @@ interface ClientAddressEntriesFormProps {
   entries: ClientAddressEntryFormValue[];
   canEdit: boolean;
   compactReadOnly?: boolean;
-  dateInputClassName: string;
+  showValidityFields?: boolean;
+  validityDateInputClassName?: string;
   addressTypeOptions: AddressTypeOption[];
   suggestionsByIndex: Record<number, DadataAddressSuggestion[]>;
   onUpdateEntry: (index: number, key: keyof ClientAddressEntryFormValue, value: string) => void;
@@ -45,12 +48,15 @@ interface ClientAddressEntriesFormProps {
 
 const ADDRESS_DELETE_ICON_BUTTON_CLASS =
   'inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60';
+const ADDRESS_ENTRY_VALIDITY_DATE_INPUT_CLASS =
+  'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
 
 export function ClientAddressEntriesForm({
   entries,
   canEdit,
   compactReadOnly = false,
-  dateInputClassName,
+  showValidityFields,
+  validityDateInputClassName = ADDRESS_ENTRY_VALIDITY_DATE_INPUT_CLASS,
   addressTypeOptions,
   suggestionsByIndex,
   onUpdateEntry,
@@ -62,6 +68,7 @@ export function ClientAddressEntriesForm({
   onApplySuggestion,
 }: ClientAddressEntriesFormProps) {
   const showReadonlyControls = !compactReadOnly;
+  const shouldShowValidityFields = showValidityFields ?? ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE;
 
   return (
     <div className="space-y-4 md:col-span-2">
@@ -75,7 +82,9 @@ export function ClientAddressEntriesForm({
             {showReadonlyControls ? (
               <button
                 type="button"
-                onClick={() => { void onRemoveEntry(index); }}
+                onClick={() => {
+                  void onRemoveEntry(index);
+                }}
                 disabled={!canEdit}
                 className={ADDRESS_DELETE_ICON_BUTTON_CLASS}
                 title="Удалить адрес"
@@ -103,27 +112,31 @@ export function ClientAddressEntriesForm({
               </select>
             </label>
 
-            <label className="text-sm text-slate-700">
-              <span className="mb-1 block">Действует с</span>
-              <input
-                type="date"
-                value={entry.validFrom}
-                onChange={(event) => onUpdateEntry(index, 'validFrom', event.target.value)}
-                disabled={!canEdit}
-                className={dateInputClassName}
-              />
-            </label>
+            {shouldShowValidityFields ? (
+              <>
+                <label className="text-sm text-slate-700">
+                  <span className="mb-1 block">Действует с</span>
+                  <input
+                    type="date"
+                    value={entry.validFrom}
+                    onChange={(event) => onUpdateEntry(index, 'validFrom', event.target.value)}
+                    disabled={!canEdit}
+                    className={validityDateInputClassName}
+                  />
+                </label>
 
-            <label className="text-sm text-slate-700">
-              <span className="mb-1 block">Действует по</span>
-              <input
-                type="date"
-                value={entry.validTo}
-                onChange={(event) => onUpdateEntry(index, 'validTo', event.target.value)}
-                disabled={!canEdit}
-                className={dateInputClassName}
-              />
-            </label>
+                <label className="text-sm text-slate-700">
+                  <span className="mb-1 block">Действует по</span>
+                  <input
+                    type="date"
+                    value={entry.validTo}
+                    onChange={(event) => onUpdateEntry(index, 'validTo', event.target.value)}
+                    disabled={!canEdit}
+                    className={validityDateInputClassName}
+                  />
+                </label>
+              </>
+            ) : null}
 
             <div className="xl:col-span-2">
               <span className="mb-1 block text-sm text-slate-700">Дополнительно относится к</span>
@@ -145,7 +158,11 @@ export function ClientAddressEntriesForm({
               </div>
             </div>
 
-            <label className={`text-sm text-slate-700 ${showReadonlyControls ? 'xl:col-span-3' : 'xl:col-span-4'}`}>
+            <label
+              className={`text-sm text-slate-700 ${
+                showReadonlyControls ? 'xl:col-span-3' : 'xl:col-span-4'
+              }`}
+            >
               <span className="mb-1 block">Полный адрес</span>
               <input
                 value={entry.fullAddress}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
 import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from './ClientAddressEntriesForm';
 import type { DadataAddressSuggestion } from '../../types';
 
@@ -49,7 +50,6 @@ describe('ClientAddressEntriesForm integration', () => {
       <ClientAddressEntriesForm
         entries={[baseEntry]}
         canEdit
-        dateInputClassName="date-input"
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{ 0: [fullSuggestion] }}
         onUpdateEntry={vi.fn()}
@@ -79,7 +79,6 @@ describe('ClientAddressEntriesForm integration', () => {
         <ClientAddressEntriesForm
           entries={entries}
           canEdit
-          dateInputClassName="date-input"
           addressTypeOptions={addressTypeOptions}
           suggestionsByIndex={{}}
           onUpdateEntry={(index, key, value) => {
@@ -118,7 +117,6 @@ describe('ClientAddressEntriesForm integration', () => {
       <ClientAddressEntriesForm
         entries={[baseEntry]}
         canEdit
-        dateInputClassName="date-input"
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{}}
         onUpdateEntry={vi.fn()}
@@ -133,5 +131,49 @@ describe('ClientAddressEntriesForm integration', () => {
 
     expect(screen.getByRole('button', { name: 'Удалить адрес' })).toBeTruthy();
     expect(screen.queryByText(/^Удалить$/)).toBeNull();
+  });
+
+  it('shows additional address types instead of validity dates', () => {
+    render(
+      <ClientAddressEntriesForm
+        entries={[baseEntry]}
+        canEdit
+        addressTypeOptions={addressTypeOptions}
+        suggestionsByIndex={{}}
+        onUpdateEntry={vi.fn()}
+        onRemoveEntry={vi.fn()}
+        onAddEntry={vi.fn()}
+        onToggleAdditionalType={vi.fn()}
+        onScheduleSuggestions={vi.fn()}
+        onFindAddress={vi.fn()}
+        onApplySuggestion={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Дополнительно относится к')).toBeTruthy();
+    expect(screen.queryByText('Действует с')).toBeNull();
+    expect(screen.queryByText('Действует по')).toBeNull();
+  });
+
+  it('can restore validity dates through the shared toggle without changing the form markup', () => {
+    render(
+      <ClientAddressEntriesForm
+        entries={[baseEntry]}
+        canEdit
+        showValidityFields
+        addressTypeOptions={addressTypeOptions}
+        suggestionsByIndex={{}}
+        onUpdateEntry={vi.fn()}
+        onRemoveEntry={vi.fn()}
+        onAddEntry={vi.fn()}
+        onToggleAdditionalType={vi.fn()}
+        onScheduleSuggestions={vi.fn()}
+        onFindAddress={vi.fn()}
+        onApplySuggestion={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Действует с')).toBeTruthy();
+    expect(screen.getByText('Действует по')).toBeTruthy();
   });
 });

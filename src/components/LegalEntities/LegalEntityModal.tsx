@@ -200,7 +200,6 @@ const ADDRESS_TYPE_OPTIONS = [
   { value: 'other', label: 'Иной адрес' },
 ] as const;
 
-const DATE_INPUT_CLASS = 'w-full rounded-lg border border-gray-300 px-3 py-2';
 const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 function LegalEntityImageField({
@@ -2104,7 +2103,6 @@ export function LegalEntityModal({
                   entries={addressEntries}
                   canEdit={!readOnly}
                   compactReadOnly={compactReadOnlyView}
-                  dateInputClassName={DATE_INPUT_CLASS}
                   addressTypeOptions={[...ADDRESS_TYPE_OPTIONS]}
                   suggestionsByIndex={addressSuggestionsByIndex}
                   onUpdateEntry={updateAddressFormEntry}
