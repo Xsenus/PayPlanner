@@ -67,18 +67,12 @@ public static class ActDocumentTemplateEngine
       print-color-adjust: exact !important;
     }
     .page-content {
-      width: 100%;
-      background: #ffffff;
-    }
-    .page-content-in {
-      overflow: hidden;
-      zoom: 1;
-    }
-    .p-center {
       width: 675px;
-      padding: 20px;
-      margin-left: auto;
-      margin-right: auto;
+      padding: 0 50px;
+      height: 100%;
+      box-sizing: content-box;
+      zoom: 1;
+      margin: 0 auto;
       background: #ffffff;
     }
     .document-template,
@@ -96,129 +90,163 @@ public static class ActDocumentTemplateEngine
     .document-template table {
       width: 100%;
       border-collapse: collapse;
-      border-spacing: 0;
     }
+    .text-r { text-align: right; }
     .text-c { text-align: center; }
+    .font-b { font-weight: 700; }
     .v-al-t { vertical-align: top; }
-    .doc-title {
-      margin: 12px 0;
-      font-size: 18px;
+    .v-al-b { vertical-align: bottom; }
+    .pad-t-5 { padding-top: 5px; }
+    .color-line { border-bottom: 1px solid #000000; }
+    .doc-main-title {
+      margin: 10px 0 12px;
+      text-align: center;
+      font-size: 16px !important;
       font-weight: 700;
-      line-height: 1.2;
+      line-height: 1.15;
     }
-    .party-table td {
-      padding: 0;
-      line-height: 1.25;
+    .counterparty-table td {
+      padding: 3px 4px;
       vertical-align: top;
+      font-size: 12px !important;
+      line-height: 1.25;
+    }
+    .counterparty-label {
+      width: 15%;
+      color: #000000;
+      white-space: nowrap;
     }
     .party-label {
-      width: 88px;
+      width: 15%;
+      color: #000000;
       padding-right: 8px !important;
       white-space: nowrap;
     }
-    .party-value {
-      font-weight: 700;
+    .counterparty-value {
+      font-weight: 600;
     }
-    tr.pad-t-10 > td { padding-top: 10px !important; }
-    tr.pad-b-10 > td { padding-bottom: 10px !important; }
-    .bor {
-      border: 1px solid #000000;
+    .party-value {
+      font-weight: 600;
     }
     .items-table {
-      margin-top: 2px;
-      border: 2px solid #000000;
+      margin: 8px 0 6px;
+      border: 1px solid #000000;
     }
     .items-table th,
     .items-table td {
+      border: 1px solid #000000;
       padding: 4px 6px;
-      line-height: 1.15;
       vertical-align: top;
+      line-height: 1.25;
     }
-    .heading th {
+    .items-table th {
       font-weight: 700;
       text-align: center;
     }
-    .item-index {
+    .items-table .item-index {
       width: 5%;
       text-align: center;
-      vertical-align: middle !important;
+      vertical-align: middle;
     }
-    .item-name {
-      width: 45%;
+    .items-table .item-name {
+      width: 55%;
       word-break: break-word;
     }
-    .item-qty {
-      width: 10%;
-      text-align: right;
-      vertical-align: middle !important;
+    .items-table .item-qty {
+      width: 7%;
+      text-align: center;
+      vertical-align: middle;
       white-space: nowrap;
     }
-    .item-unit {
-      width: 10%;
-      text-align: right;
-      vertical-align: middle !important;
+    .items-table .item-unit {
+      width: 8%;
+      text-align: center;
+      vertical-align: middle;
       white-space: nowrap;
     }
-    .item-price,
-    .item-sum {
-      width: 15%;
+    .items-table .item-price,
+    .items-table .item-sum {
+      width: 12.5%;
       text-align: right;
-      vertical-align: middle !important;
+      vertical-align: middle;
       white-space: nowrap;
+    }
+    .totals-table td {
+      padding: 0;
+      font-size: 12px !important;
+    }
+    .totals-label {
+      width: 84%;
+      text-align: right;
+      padding-right: 10px !important;
+      font-weight: 700;
+    }
+    .totals-value {
+      width: 16%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .summary-block {
+      margin-top: 10px;
+      line-height: 1.25;
     }
     .mar-t-5 { margin-top: 5px !important; }
     .mar-t-10 { margin-top: 10px !important; }
     .mar-t-15 { margin-top: 15px !important; }
-    .totals-table td {
-      padding: 0;
-      vertical-align: top;
-    }
-    .totals-label {
-      width: 85%;
-      text-align: right;
-      padding-right: 8px !important;
-      font-weight: 700;
-    }
-    .totals-value {
-      width: 15%;
-      text-align: right;
-      white-space: nowrap;
-    }
     .summary-words {
+      margin-top: 2px;
       font-weight: 700;
     }
-    .acceptance,
+    .acceptance {
+      margin-top: 12px;
+      line-height: 1.35;
+    }
     .comment {
-      line-height: 1.4;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+    .signature-table {
+      margin-top: 16px;
     }
     .signature-area {
-      min-height: 160px;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
+      min-height: 150px;
     }
     .signature-table td {
-      border: none;
+      border: 0;
     }
-    .signature-role {
+    .signature-caption-head {
       width: 49%;
-      font-size: 10pt;
+      padding-bottom: 6px;
+      font-size: 12px !important;
       font-weight: 700;
+      text-transform: uppercase;
     }
     .signature-gap {
       width: 2%;
     }
+    .signature-role {
+      width: 49%;
+      padding-bottom: 6px;
+      font-size: 12px !important;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .signature-party-name {
+      padding-bottom: 26px;
+      font-size: 12px !important;
+    }
     .signature-party {
-      padding-top: 5px;
-      font-size: 10pt;
+      padding-bottom: 26px;
+      font-size: 12px !important;
     }
     .signature-line-cell {
       position: relative;
-      height: 58px;
+      height: 54px;
       padding: 0 6px 4px 6px;
       border-bottom: 1px solid #000000;
       text-align: right;
       vertical-align: bottom;
-      font-size: 10pt;
+      overflow: visible;
     }
     .signature-line-text {
       position: relative;
@@ -232,41 +260,40 @@ public static class ActDocumentTemplateEngine
       left: 0;
       bottom: 8px;
       z-index: 3;
-      max-width: 150px;
-      max-height: 42px;
+      max-width: 145px;
+      max-height: 38px;
       object-fit: contain;
     }
     .seal {
       position: absolute;
-      left: 88px;
-      bottom: -22px;
+      left: 84px;
+      bottom: -20px;
       z-index: 2;
-      max-width: 118px;
-      max-height: 118px;
+      max-width: 112px;
+      max-height: 112px;
       object-fit: contain;
-      opacity: 0.95;
+      opacity: 0.92;
     }
   </style>
 </head>
 <body>
   <div class="page-content">
-    <div class="page-content-in p-center pad-pdf-p">
-      <div class="document-template act-template">
-        <div class="doc-title text-c">{{Encode(documentTitle)}}</div>
+    <div class="document-template act-template">
+      <div class="doc-main-title">{{Encode(documentTitle)}}</div>
 
-        <table class="party-table">
+        <table class="counterparty-table">
           <tbody>
-            <tr class="pad-t-10">
+            <tr>
               <td class="party-label v-al-t">Исполнитель:</td>
-              <td class="party-value"><b>{{seller.RequisitesHtml}}</b></td>
+              <td class="counterparty-value">{{seller.RequisitesHtml}}</td>
             </tr>
-            <tr class="pad-t-10">
+            <tr>
               <td class="party-label v-al-t">Заказчик:</td>
-              <td class="party-value"><b>{{buyer.RequisitesHtml}}</b></td>
+              <td class="counterparty-value pad-t-5">{{buyer.RequisitesHtml}}</td>
             </tr>
-            <tr class="pad-t-10 pad-b-10">
+            <tr>
               <td class="party-label v-al-t">Основание:</td>
-              <td class="party-value"><b>{{Encode(basis)}}</b></td>
+              <td class="counterparty-value pad-t-5">{{Encode(basis)}}</td>
             </tr>
           </tbody>
         </table>
@@ -300,7 +327,7 @@ public static class ActDocumentTemplateEngine
           </tbody>
         </table>
 
-        <div>
+        <div class="summary-block">
           <div class="mar-t-5">Всего оказано услуг {{effectiveLineItems.Count}}, на сумму {{FormatMoney(totalAmount)}} руб.</div>
           <div class="summary-words">{{Encode(totalWords)}}</div>
         </div>
@@ -309,7 +336,6 @@ public static class ActDocumentTemplateEngine
           Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объему, качеству и срокам оказания услуг не имеет.
         </div>
         {{commentHtml}}
-        <br />
 
         <div class="signature-area">
           <table class="signature-table">

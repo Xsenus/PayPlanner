@@ -47,6 +47,8 @@ public class ActsControllerTests
         var dto = Assert.IsType<ActDto>(created.Value);
         Assert.Equal(20_000m, dto.Amount);
         Assert.Equal(ActCreationMode.Full, dto.CreationMode);
+        Assert.Equal(invoicePayment.Id, dto.InvoiceId);
+        Assert.Equal("INV-100", dto.InvoiceNumber);
         Assert.Equal(2, dto.LineItems.Count);
         Assert.Collection(
             dto.LineItems.OrderBy(item => item.SourceSortOrder),
@@ -340,6 +342,8 @@ public class ActsControllerTests
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
         Assert.Contains("document-template act-template", normalizedHtml);
+        Assert.Contains("doc-main-title", normalizedHtml);
+        Assert.Contains("counterparty-table", normalizedHtml);
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
         Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
 import type {
+  Act,
   Client,
   Contract,
   ContractInput,
@@ -1184,6 +1185,77 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Открыть полный договор' }));
 
     expect(onOpenContract).toHaveBeenCalledWith(77);
+  });
+
+  it('creates a linked act from a saved invoice and reuses its line items', async () => {
+    const createActLabel = '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0430\u043a\u0442';
+    const actNumberLabel = '\u041d\u043e\u043c\u0435\u0440 \u0430\u043a\u0442\u0430';
+    const createActMock = vi.mocked(apiService.createAct);
+    createActMock.mockResolvedValue({
+      id: 901,
+      number: 'ACT-901',
+      title: null,
+      date: '2026-04-10',
+      amount: 18_000,
+      creationMode: 'Full',
+      invoiceNumber: '36',
+      invoiceId: 618,
+      status: 'Created',
+      clientId: 1,
+      clientName: 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚',
+      responsibleId: 9,
+      responsibleName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ',
+      lineItems: [],
+      createdAt: '2026-04-10T00:00:00Z',
+    } as Act);
+
+    const invoice = {
+      id: 618,
+      invoiceEntityId: 618,
+      number: '36',
+      date: '2026-04-10',
+      dueDate: '2026-04-20',
+      amount: 18000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      contractId: 77,
+      responsibles: [{ id: 9, fullName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ' }],
+      lineItems: [{ name: 'РЎРѕСЃС‚Р°РІР»РµРЅРёРµ РёСЃРєР°', quantity: 1, unit: 'СѓСЃР».РµРґ.', price: 18000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
+        responsibles={[{ id: 9, fullName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ' }]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: createActLabel }));
+    fireEvent.change(screen.getByLabelText(actNumberLabel), { target: { value: 'ACT-901' } });
+    fireEvent.click(screen.getAllByRole('button', { name: createActLabel }).at(-1)!);
+
+    await waitFor(() => {
+      expect(createActMock).toHaveBeenCalledWith(expect.objectContaining({
+        number: 'ACT-901',
+        amount: 0,
+        creationMode: 'Full',
+        invoiceId: 618,
+        invoiceNumber: '36',
+        clientId: 1,
+        contractId: 77,
+        responsibleId: 9,
+        status: 'Created',
+      }));
+    });
   });
 
   it('downloads document variant without signature and seal on demand', async () => {

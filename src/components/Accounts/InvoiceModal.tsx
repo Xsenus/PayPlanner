@@ -1857,14 +1857,20 @@ export function InvoiceModal({
     setCreatingAct(true);
     setCreateActError(null);
     try {
+      const linkedInvoiceId = typeof invoice?.id === 'number' && invoice.id > 0 ? invoice.id : undefined;
+      const shouldBuildFromInvoice = Boolean(linkedInvoiceId && (invoice?.lineItems?.length ?? 0) > 0);
       const created = await apiService.createAct({
         number: draftAct.number.trim(),
         title: draftAct.title.trim() || undefined,
         date: fromInputToApiDate(draftAct.date) ?? draftAct.date,
-        amount: actAmount,
+        amount: shouldBuildFromInvoice ? 0 : actAmount,
+        creationMode: shouldBuildFromInvoice ? 'Full' : 'Manual',
+        invoiceId: linkedInvoiceId,
         invoiceNumber: form.number.trim() || undefined,
         clientId: form.clientId ? Number(form.clientId) : undefined,
         contractId: form.contractId ? Number(form.contractId) : undefined,
+        responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : undefined,
+        counterpartyInn: invoice?.counterpartyInn?.trim() || undefined,
         status: 'Created',
         comment: draftAct.comment.trim() || undefined,
       });
