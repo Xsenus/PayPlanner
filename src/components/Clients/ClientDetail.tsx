@@ -891,7 +891,14 @@ const serializeClientExtendedProfile = (profile: ClientExtendedProfile): string 
     legacyNotes: profile.legacyNotes.trim(),
   });
 
-export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId, initialSection, onOpenInvoicePage }: ClientDetailProps) {
+export function ClientDetail({
+  clientId,
+  onBack,
+  onClientUpdated,
+  initialCaseId,
+  initialSection,
+  onOpenInvoicePage,
+}: ClientDetailProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const { confirm } = useDialog();
@@ -2364,10 +2371,6 @@ export function ClientDetail({ clientId, onBack, onClientUpdated, initialCaseId,
     setPayModalOpen(true);
   };
   const openEditPayment = (p: Payment) => {
-    if (isInvoiceManagedPayment(p)) {
-      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи');
-      return;
-    }
     if (!clientPermissions.canEdit) {
       showPermissionWarning(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
       return;
@@ -4520,7 +4523,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                             {(clientPermissions.canEdit || clientPermissions.canDelete) && (
                               <td className="px-4 py-4">
                                 <div className="flex items-center justify-end gap-2">
-                                  {clientPermissions.canEdit && !isInvoiceManagedPayment(payment) ? (
+                                  {clientPermissions.canEdit ? (
                                     <button
                                       type="button"
                                       className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"

@@ -254,10 +254,6 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleEditPayment = (payment: Payment) => {
-    if (isInvoiceManagedPayment(payment)) {
-      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи');
-      return;
-    }
     if (!calendarPermissions.canEdit) {
       showPermissionNotice(
         t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.',
@@ -716,7 +712,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canAdd={calendarPermissions.canCreate}
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
-              canEditPayment={(payment) => !isInvoiceManagedPayment(payment)}
+              canEditPayment={() => true}
               canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
               columns={visiblePaymentColumns}
               draggingColumn={draggingColumn}

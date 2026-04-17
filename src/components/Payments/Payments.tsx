@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ChevronDown, Lock, Plus, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, Loader2, Lock, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -21,6 +21,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -28,6 +29,8 @@ type StatusFilter = 'all' | PaymentStatus;
 
 interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
+  routePaymentId?: number | null;
+  onRoutePaymentChange?: (paymentId: number | null) => void;
   defaultType?: TypeFilter;
   lockType?: boolean;
   titleKey?: string;
@@ -40,6 +43,14 @@ type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+const PAYMENT_PREVIEW_STATUS_STYLES: Record<PaymentStatus, string> = {
+  Completed: 'bg-emerald-100 text-emerald-700',
+  Pending: 'bg-amber-100 text-amber-700',
+  Overdue: 'bg-violet-100 text-violet-700',
+  Processing: 'bg-sky-100 text-sky-700',
+  Cancelled: 'bg-slate-200 text-slate-700',
+};
 
 const PAYMENT_COLUMN_CONFIGS = [
   { key: 'date', defaultVisible: true, defaultWidth: 140 },
@@ -195,6 +206,8 @@ function formatCountLabel(template: string, count: number) {
 
 export function Payments({
   onOpenClient,
+  routePaymentId,
+  onRoutePaymentChange,
   defaultType,
   lockType = false,
   titleKey,
@@ -206,7 +219,7 @@ export function Payments({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
-  const { t } = useTranslation();
+  const { t, formatDate } = useTranslation();
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
 
@@ -229,11 +242,17 @@ export function Payments({
     defaultType === 'Expense' ? 'Expense' : 'Income',
   );
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [routePaymentPreviewOpen, setRoutePaymentPreviewOpen] = useState(false);
+  const [routePaymentPreviewId, setRoutePaymentPreviewId] = useState<number | null>(null);
+  const [routePaymentPreview, setRoutePaymentPreview] = useState<Payment | null>(null);
+  const [routePaymentPreviewLoading, setRoutePaymentPreviewLoading] = useState(false);
+  const [routePaymentPreviewError, setRoutePaymentPreviewError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
+  const routePaymentRequestRef = useRef(0);
   const [autoRetryScheduled, setAutoRetryScheduled] = useState(false);
   const autoRetryAttemptsRef = useRef(0);
   const autoRetryTimerRef = useRef<number | null>(null);
@@ -351,6 +370,61 @@ export function Payments({
     return undefined;
   }, [loading, payments.length]);
 
+  const resetRoutePaymentPreview = useCallback(() => {
+    routePaymentRequestRef.current += 1;
+    setRoutePaymentPreviewOpen(false);
+    setRoutePaymentPreviewId(null);
+    setRoutePaymentPreview(null);
+    setRoutePaymentPreviewLoading(false);
+    setRoutePaymentPreviewError(null);
+  }, []);
+
+  const closeRoutePaymentPreview = useCallback(() => {
+    resetRoutePaymentPreview();
+    onRoutePaymentChange?.(null);
+  }, [onRoutePaymentChange, resetRoutePaymentPreview]);
+
+  useEffect(() => {
+    if (!routePaymentId && routePaymentPreviewOpen) {
+      resetRoutePaymentPreview();
+    }
+  }, [resetRoutePaymentPreview, routePaymentId, routePaymentPreviewOpen]);
+
+  useEffect(() => {
+    if (!(routePaymentId && routePaymentId > 0)) {
+      return;
+    }
+
+    const requestId = routePaymentRequestRef.current + 1;
+    routePaymentRequestRef.current = requestId;
+    setRoutePaymentPreviewOpen(true);
+    setRoutePaymentPreviewId(routePaymentId);
+    setRoutePaymentPreview(null);
+    setRoutePaymentPreviewError(null);
+    setRoutePaymentPreviewLoading(true);
+
+    void (async () => {
+      try {
+        const payment = await apiService.getPayment(routePaymentId);
+        if (routePaymentRequestRef.current !== requestId) {
+          return;
+        }
+        setRoutePaymentPreview(payment);
+      } catch (error) {
+        if (routePaymentRequestRef.current !== requestId) {
+          return;
+        }
+        setRoutePaymentPreviewError(
+          extractDisplayErrorMessage(error, 'Не удалось загрузить платеж.'),
+        );
+      } finally {
+        if (routePaymentRequestRef.current === requestId) {
+          setRoutePaymentPreviewLoading(false);
+        }
+      }
+    })();
+  }, [routePaymentId]);
+
   const paymentColumns = useMemo(
     () => [
       { key: 'date' as const, label: t('date') ?? 'Дата' },
@@ -397,6 +471,11 @@ export function Payments({
       Cancelled: t('cancelledStatus') ?? 'Отменено',
     }),
     [t],
+  );
+
+  const selectedRoutePaymentInstallment = useMemo(
+    () => (routePaymentPreview ? parseInstallmentPaymentMetadata(routePaymentPreview.systemNotes) : null),
+    [routePaymentPreview],
   );
 
   const availableStatuses = useMemo(() => {
@@ -668,10 +747,6 @@ export function Payments({
 
   const handleEditPayment = useCallback(
     (payment: Payment) => {
-      if (isInvoiceManagedPayment(payment)) {
-        toast.error('Счет и график рассрочки редактируются через раздел "Счета".', t('payments') ?? 'Платежи');
-        return;
-      }
       if (!paymentsPermissions.canEdit) {
         showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
         return;
@@ -680,7 +755,7 @@ export function Payments({
       setModalType(payment.type);
       setIsModalOpen(true);
     },
-    [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
+    [paymentsPermissions.canEdit, showPermissionNotice, t],
   );
 
   const handleDeletePayment = useCallback(
@@ -1150,7 +1225,7 @@ export function Payments({
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
-                canEditPayment={(payment) => !isInvoiceManagedPayment(payment)}
+                canEditPayment={() => true}
                 canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
                 columns={visiblePaymentColumns}
                 draggingColumn={draggingColumn}
@@ -1188,6 +1263,158 @@ export function Payments({
           </div>
         ) : null}
       </div>
+
+      {routePaymentPreviewOpen ? (
+        <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-slate-900/60 p-4">
+          <div
+            data-testid="payments-route-payment-preview"
+            className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {`Платеж #${routePaymentPreview?.id ?? routePaymentPreviewId ?? '—'}`}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">Просмотр платежа из журнала.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeRoutePaymentPreview}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label={t('close') ?? 'Закрыть'}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              {routePaymentPreviewError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {routePaymentPreviewError}
+                </div>
+              ) : null}
+
+              {routePaymentPreviewLoading ? (
+                <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Обновляем данные платежа...
+                </div>
+              ) : null}
+
+              {routePaymentPreview ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Сумма</div>
+                      <div className="mt-2 text-xl font-semibold text-slate-900">
+                        {formatCurrencySmart(routePaymentPreview.amount ?? 0).full}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Статус</div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            PAYMENT_PREVIEW_STATUS_STYLES[routePaymentPreview.status] ?? PAYMENT_PREVIEW_STATUS_STYLES.Pending
+                          }`}
+                        >
+                          {statusLabels[routePaymentPreview.status] ?? routePaymentPreview.status}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {routePaymentPreview.type === 'Expense' ? 'Расходный платеж' : 'Доходный платеж'}
+                        </span>
+                        {selectedRoutePaymentInstallment ? (
+                          <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                            {`Рассрочка ${selectedRoutePaymentInstallment.sequence}/${Math.max(
+                              selectedRoutePaymentInstallment.months,
+                              selectedRoutePaymentInstallment.sequence,
+                            )}`}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 px-4 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Описание</div>
+                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                      {routePaymentPreview.description?.trim() || 'Без описания'}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Плановая дата</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {formatDate(routePaymentPreview.plannedDate || routePaymentPreview.date) || '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дата оплаты</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {(routePaymentPreview.paidDate || routePaymentPreview.lastPaymentDate)
+                          ? formatDate(routePaymentPreview.paidDate || routePaymentPreview.lastPaymentDate || '')
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Клиент</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {routePaymentPreview.client?.name || '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дело</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {routePaymentPreview.clientCase?.title || '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Категория</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {routePaymentPreview.dealType?.name
+                          || routePaymentPreview.incomeType?.name
+                          || routePaymentPreview.paymentSource?.name
+                          || '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Связанные документы</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {`Счет: ${
+                          routePaymentPreview.account?.trim()
+                          || (routePaymentPreview.invoiceId ? `ID ${routePaymentPreview.invoiceId}` : '—')
+                        }, договор: ${
+                          routePaymentPreview.contractId ? `ID ${routePaymentPreview.contractId}` : '—'
+                        }`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {routePaymentPreview.notes?.trim() ? (
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Комментарий</div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                        {routePaymentPreview.notes}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={closeRoutePaymentPreview}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PaymentModal
         isOpen={isModalOpen}
