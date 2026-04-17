@@ -66,6 +66,8 @@ interface AccountsProps {
   onRouteInvoiceChange?: (invoiceId: number | null) => void;
   onRouteInvoicePageBack?: () => void;
   onOpenClient?: (clientId: number) => void;
+  onOpenContract?: (contractId: number) => void;
+  onOpenPayment?: (payment: Payment) => void;
 }
 
 type FilterType = PaymentKind | 'All';
@@ -252,6 +254,8 @@ export function Accounts({
   onRouteInvoiceChange,
   onRouteInvoicePageBack,
   onOpenClient,
+  onOpenContract,
+  onOpenPayment,
 }: AccountsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
@@ -556,18 +560,27 @@ export function Accounts({
     if (!pageEditingInvoiceId) return;
 
     let active = true;
+    const requestedInvoiceId = pageEditingInvoiceId;
 
     const loadInvoice = async () => {
       try {
         setPageInvoiceLoading(true);
-        const invoice = await apiService.getInvoice(pageEditingInvoiceId);
+        const invoice = await apiService.getInvoice(requestedInvoiceId);
         if (!active) return;
         setPageEditingInvoice(invoice);
       } catch (err) {
         if (!active) return;
+        const persistedDraft = peekInvoiceEditorDraft();
+        if (persistedDraft?.mode === 'edit' && persistedDraft.invoiceId === requestedInvoiceId) {
+          clearInvoiceEditorDraft();
+        }
         toast.error(extractDisplayErrorMessage(err, 'Не удалось загрузить счет.'));
         setPageEditingInvoiceId(null);
         setPageEditingInvoice(null);
+        setResumeInvoiceDraft((prev) => (
+          prev?.mode === 'edit' && prev.invoiceId === requestedInvoiceId ? null : prev
+        ));
+        onRouteInvoiceChange?.(null);
       } finally {
         if (active) {
           setPageInvoiceLoading(false);
@@ -580,7 +593,7 @@ export function Accounts({
     return () => {
       active = false;
     };
-  }, [pageEditingInvoiceId, toast]);
+  }, [onRouteInvoiceChange, pageEditingInvoiceId, toast]);
 
   useEffect(() => {
     if (modalOpen || pageEditingInvoiceId) return;
@@ -1285,8 +1298,19 @@ export function Accounts({
     setPaymentModalOpen(true);
   };
 
+  const openRelatedPaymentModal = (payment: Payment, invoice?: Invoice | null) => {
+    setEditingPayment(payment);
+    setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
+    setPaymentModalType(payment.type ?? 'Income');
+    setPaymentModalOpen(true);
+  };
+
   const openPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
     if (isInvoiceManagedPayment(payment)) {
+      if (invoice?.id) {
+        openEditPage(invoice.id);
+        return;
+      }
       toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи счета');
       return;
     }
@@ -1548,6 +1572,8 @@ export function Accounts({
           onClose={() => closeEditPage()}
           onBack={() => closeEditPage({ restoreClientContext: true })}
           onOpenClient={openClientFromEditor}
+          onOpenContract={onOpenContract}
+          onOpenPayment={onOpenPayment}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}
@@ -1563,7 +1589,7 @@ export function Accounts({
           paymentsLoading={isLoading || isRefreshing}
           onRefreshRequested={refreshAccounts}
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
-          onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEdit ? (payment) => openRelatedPaymentModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
         />
         {paymentModalElement}
@@ -2144,10 +2170,10 @@ export function Accounts({
                                           {(canEdit || canDelete) && (
                                             <td className="px-4 py-2">
                                               <div className="flex items-center justify-end gap-2">
-                                                {canEdit && !isInvoiceManagedPayment(payment) && (
+                                                {canEdit && (
                                                   <button
                                                     type="button"
-                                                    onClick={() => openPaymentEditModal(payment, invoice)}
+                                                    onClick={() => openRelatedPaymentModal(payment, invoice)}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
                                                     title={t('edit') ?? 'Редактировать'}
                                                     aria-label={t('edit') ?? 'Редактировать'}

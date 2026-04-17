@@ -35,6 +35,7 @@ import { InvoiceLineItemLookupDialog } from './InvoiceLineItemLookupDialog';
 import { LookupSelect } from '../ui/LookupSelect';
 import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
+import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { filterRepresentativeInvoiceWhenInstallmentsExist, isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
@@ -192,6 +193,8 @@ interface InvoiceModalProps {
   onClose: () => void;
   onBack?: () => void;
   onOpenClient?: (clientId: number) => void;
+  onOpenContract?: (contractId: number) => void;
+  onOpenPayment?: (payment: Payment) => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
@@ -357,11 +360,6 @@ function clientCaseStatusLabel(statusRaw?: string | null): string {
   return status;
 }
 
-function contractLabel(contract: Contract | null): string {
-  if (!contract) return 'Без договора';
-  return contract.title?.trim() ? `${contract.number} — ${contract.title}` : contract.number;
-}
-
 function sortContractsByRecency(source: Contract[]): Contract[] {
   return [...source].sort((left, right) => {
     const leftDate = Date.parse(left.date ?? '');
@@ -379,6 +377,26 @@ function formatDate(value?: string | null): string {
   if (!normalized) return value;
   const [y, m, d] = normalized.split('-');
   return `${d}.${m}.${y}`;
+}
+
+function resolveRelatedPaymentDate(payment: Payment): string {
+  return payment.paidDate ?? payment.lastPaymentDate ?? payment.plannedDate ?? payment.date ?? '';
+}
+
+function formatContractSidebarLabel(contract: Contract | null): string {
+  if (!contract) return 'Без договора';
+  const number = contract.number?.trim() || `#${contract.id}`;
+  const dateLabel = formatDate(contract.date) || 'без даты';
+  return `Договор №${number} от ${dateLabel}`;
+}
+
+function formatRelatedPaymentLinkLabel(payment: Payment): string {
+  const dateLabel = formatDate(resolveRelatedPaymentDate(payment)) || 'без даты';
+  const sourceLabel = payment.paymentSource?.name?.trim();
+  const amountLabel = formatCurrencySmart(payment.amount ?? 0).short;
+  return sourceLabel
+    ? `от ${dateLabel} ${sourceLabel.toLowerCase()}: ${amountLabel}`
+    : `от ${dateLabel}: ${amountLabel}`;
 }
 
 function getInstallmentPlanLastDate(plan: InstallmentPlanInput | null | undefined): string {
@@ -631,6 +649,8 @@ export function InvoiceModal({
   onClose,
   onBack,
   onOpenClient,
+  onOpenContract,
+  onOpenPayment,
   onSubmit,
   submitting,
   errorMessage,
@@ -692,12 +712,24 @@ export function InvoiceModal({
   const [createContractOpen, setCreateContractOpen] = useState(false);
   const [createContractSubmitting, setCreateContractSubmitting] = useState(false);
   const [createContractError, setCreateContractError] = useState<string | null>(null);
+  const [contractPreviewOpen, setContractPreviewOpen] = useState(false);
+  const [contractPreviewSeed, setContractPreviewSeed] = useState<Contract | null>(null);
+  const [contractPreviewDetails, setContractPreviewDetails] = useState<Contract | null>(null);
+  const [contractPreviewLoading, setContractPreviewLoading] = useState(false);
+  const [contractPreviewError, setContractPreviewError] = useState<string | null>(null);
+  const [paymentPreviewOpen, setPaymentPreviewOpen] = useState(false);
+  const [paymentPreviewSeed, setPaymentPreviewSeed] = useState<Payment | null>(null);
+  const [paymentPreviewDetails, setPaymentPreviewDetails] = useState<Payment | null>(null);
+  const [paymentPreviewLoading, setPaymentPreviewLoading] = useState(false);
+  const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
   const [clientCasesLoading, setClientCasesLoading] = useState(false);
   const [clientCasesError, setClientCasesError] = useState<string | null>(null);
   const [actsLoading, setActsLoading] = useState(false);
   const [actsError, setActsError] = useState<string | null>(null);
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
   const [numberEditedManually, setNumberEditedManually] = useState(false);
+  const contractPreviewRequestRef = useRef(0);
+  const paymentPreviewRequestRef = useRef(0);
   const visibleRelatedPayments = useMemo(
     () => filterRepresentativeInvoiceWhenInstallmentsExist(relatedPayments),
     [relatedPayments],
@@ -1078,6 +1110,11 @@ export function InvoiceModal({
     () => contractOptions.find((contract) => String(contract.id) === form.contractId) ?? null,
     [contractOptions, form.contractId],
   );
+  const selectedContractPreview = contractPreviewDetails ?? contractPreviewSeed;
+  const selectedPaymentPreview = paymentPreviewDetails ?? paymentPreviewSeed;
+  const selectedPaymentPreviewInstallment = selectedPaymentPreview
+    ? parseInstallmentPaymentMetadata(selectedPaymentPreview.systemNotes)
+    : null;
   const defaultContractClients = useMemo<ContractClient[]>(
     () =>
       selectedClient
@@ -1463,6 +1500,92 @@ export function InvoiceModal({
       cancelled = true;
     };
   }, [open, mode, form.date, numberEditedManually]);
+
+  const closeContractPreview = useCallback(() => {
+    contractPreviewRequestRef.current += 1;
+    setContractPreviewOpen(false);
+    setContractPreviewSeed(null);
+    setContractPreviewDetails(null);
+    setContractPreviewLoading(false);
+    setContractPreviewError(null);
+  }, []);
+
+  const openContractPreview = useCallback(async (contractIdRaw: string | number | null | undefined, seed?: Contract | null) => {
+    const contractId = typeof contractIdRaw === 'number'
+      ? contractIdRaw
+      : Number.parseInt(String(contractIdRaw ?? ''), 10);
+
+    if (!Number.isFinite(contractId) || contractId <= 0) {
+      return;
+    }
+
+    setContractPreviewOpen(true);
+    setContractPreviewSeed(seed ?? null);
+    setContractPreviewDetails(null);
+    setContractPreviewError(null);
+
+    const requestId = contractPreviewRequestRef.current + 1;
+    contractPreviewRequestRef.current = requestId;
+    setContractPreviewLoading(true);
+
+    try {
+      const freshContract = await apiService.getContract(contractId);
+      if (contractPreviewRequestRef.current !== requestId) return;
+      setContractPreviewDetails(freshContract);
+    } catch (error) {
+      if (contractPreviewRequestRef.current !== requestId) return;
+      setContractPreviewError(extractDisplayErrorMessage(error, 'Не удалось загрузить договор.'));
+    } finally {
+      if (contractPreviewRequestRef.current === requestId) {
+        setContractPreviewLoading(false);
+      }
+    }
+  }, []);
+
+  const closePaymentPreview = useCallback(() => {
+    paymentPreviewRequestRef.current += 1;
+    setPaymentPreviewOpen(false);
+    setPaymentPreviewSeed(null);
+    setPaymentPreviewDetails(null);
+    setPaymentPreviewLoading(false);
+    setPaymentPreviewError(null);
+  }, []);
+
+  const openPaymentPreview = useCallback(async (payment: Payment) => {
+    setPaymentPreviewOpen(true);
+    setPaymentPreviewSeed(payment);
+    setPaymentPreviewDetails(null);
+    setPaymentPreviewError(null);
+
+    if (!(typeof payment.id === 'number' && payment.id > 0)) {
+      setPaymentPreviewLoading(false);
+      return;
+    }
+
+    const requestId = paymentPreviewRequestRef.current + 1;
+    paymentPreviewRequestRef.current = requestId;
+    setPaymentPreviewLoading(true);
+
+    try {
+      const freshPayment = await apiService.getPayment(payment.id);
+      if (paymentPreviewRequestRef.current !== requestId) return;
+      setPaymentPreviewDetails(freshPayment);
+    } catch (error) {
+      if (paymentPreviewRequestRef.current !== requestId) return;
+      setPaymentPreviewError(extractDisplayErrorMessage(error, 'Не удалось загрузить платеж.'));
+    } finally {
+      if (paymentPreviewRequestRef.current === requestId) {
+        setPaymentPreviewLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      closeContractPreview();
+      closePaymentPreview();
+    }
+  }, [closeContractPreview, closePaymentPreview, open]);
 
   useEffect(() => {
     const total = calculateLineItemsTotal(lineItems);
@@ -2884,6 +3007,105 @@ export function InvoiceModal({
                 <a href={invoiceLink} className="break-all text-blue-600 underline">{invoiceLink || '—'}</a>
               </div>
 
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <div className="mb-3 flex items-center gap-2 font-medium">
+                  <List className="h-4 w-4" />
+                  Договор и оплаты
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Договор</div>
+                    {form.contractId && contractsLoading && !selectedContract ? (
+                      <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Загружаем договор...
+                      </div>
+                    ) : (selectedContract || form.contractId) ? (
+                      <button
+                        type="button"
+                        onClick={() => { void openContractPreview(form.contractId, selectedContract); }}
+                        data-testid="invoice-related-contract-link"
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+                      >
+                        <div className="font-medium text-blue-700 underline decoration-blue-300 underline-offset-2">
+                          {formatContractSidebarLabel(selectedContract)}
+                        </div>
+                        {selectedContract?.title?.trim() ? (
+                          <div className="mt-1 text-xs text-slate-600">{selectedContract.title}</div>
+                        ) : (
+                          <div className="mt-1 text-xs text-slate-500">Открыть карточку договора</div>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
+                        Договор не выбран.
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Оплаты</div>
+                    {paymentsLoading ? (
+                      <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Загружаем оплаты...
+                      </div>
+                    ) : displayPayments.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
+                        Связанные оплаты пока не добавлены.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {displayPayments.map((payment) => {
+                          const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                          const installmentSequenceLabel = installmentMeta
+                            ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
+                            : null;
+
+                          return (
+                            <button
+                              key={payment.id}
+                              type="button"
+                              onClick={() => {
+                                if (onEditRelatedPayment) {
+                                  onEditRelatedPayment(payment);
+                                  return;
+                                }
+                                void openPaymentPreview(payment);
+                              }}
+                              title={`Открыть платеж #${payment.id}`}
+                              data-testid={`invoice-related-payment-link-${payment.id}`}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+                            >
+                              <div className="text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2">
+                                {formatRelatedPaymentLinkLabel(payment)}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-600">
+                                {payment.description?.trim() || 'Без описания'}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                    relatedPaymentStatusMeta[payment.status] ?? relatedPaymentStatusMeta.Pending
+                                  }`}
+                                >
+                                  {invoicePaymentStatusLabel[payment.status] ?? invoicePaymentStatusLabel.Pending}
+                                </span>
+                                {installmentMeta ? (
+                                  <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                                    Рассрочка {installmentSequenceLabel}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
                 <p>
                   <span className="text-slate-500">{counterpartyLabel}:</span>{' '}
@@ -2915,7 +3137,6 @@ export function InvoiceModal({
                     )}
                   </p>
                 )}
-                <p><span className="text-slate-500">Договор:</span> {contractLabel(selectedContract)}</p>
                 <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
                 <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
                 <p><span className="text-slate-500">{t('acts') ?? 'Акты'}:</span> {selectedActsSummary || '—'}</p>
@@ -3368,7 +3589,7 @@ export function InvoiceModal({
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
-                        {(onEditRelatedPayment || onDeleteRelatedPayment) && !isInvoiceManagedPayment(payment) && (
+                        {(onEditRelatedPayment || (onDeleteRelatedPayment && !isInvoiceManagedPayment(payment))) && (
                           <div className="flex items-center gap-2 self-end sm:self-start">
                             {onEditRelatedPayment && (
                               <button
@@ -3381,7 +3602,7 @@ export function InvoiceModal({
                                 <Pencil className="h-4 w-4" />
                               </button>
                             )}
-                            {onDeleteRelatedPayment && (
+                            {onDeleteRelatedPayment && !isInvoiceManagedPayment(payment) && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -3612,6 +3833,276 @@ export function InvoiceModal({
             </div>
           )}
       </form>
+      )}
+
+      {contractPreviewOpen && selectedContractPreview && (
+        <div className="fixed inset-0 z-[2240] flex items-center justify-center bg-slate-900/60 p-4">
+          <div data-testid="invoice-related-contract-preview" className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {formatContractSidebarLabel(selectedContractPreview)}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">Просмотр связанного договора по счету.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeContractPreview}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label={t('close') ?? 'Закрыть'}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              {contractPreviewError && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {contractPreviewError}
+                </div>
+              )}
+
+              {contractPreviewLoading && (
+                <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Обновляем данные договора...
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Тип расчетов</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {getContractBillingModeLabel(selectedContractPreview.billingMode)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Сумма договора</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {getContractEffectiveAmount(selectedContractPreview) !== null
+                      ? formatCurrencySmart(getContractEffectiveAmount(selectedContractPreview) ?? 0).full
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Название</div>
+                <div className="mt-2 text-sm leading-6 text-slate-700">
+                  {selectedContractPreview.title?.trim() || 'Без названия'}
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дата договора</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {formatDate(selectedContractPreview.date) || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Срок действия</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedContractPreview.isOpenEnded
+                      ? 'До исполнения обязательств'
+                      : (formatDate(selectedContractPreview.validUntil) || '—')}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Клиенты</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedContractPreview.clients?.length
+                      ? selectedContractPreview.clients.map((client) => client.name).join(', ')
+                      : (selectedClient?.name || '—')}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Связанные документы</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {`Счетов: ${selectedContractPreview.invoiceIds?.length ?? 0}, актов: ${selectedContractPreview.actIds?.length ?? 0}, платежей: ${selectedContractPreview.paymentIds?.length ?? 0}`}
+                  </div>
+                </div>
+              </div>
+
+              {selectedContractPreview.description?.trim() ? (
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Описание</div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {selectedContractPreview.description}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 px-5 py-4">
+              {onOpenContract && selectedContractPreview.id > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeContractPreview();
+                    onOpenContract(selectedContractPreview.id);
+                  }}
+                  className="mr-auto rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                >
+                  Открыть полный договор
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={closeContractPreview}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paymentPreviewOpen && selectedPaymentPreview && (
+        <div className="fixed inset-0 z-[2250] flex items-center justify-center bg-slate-900/60 p-4">
+          <div data-testid="invoice-related-payment-preview" className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Платеж #{selectedPaymentPreview.id}</h3>
+                <p className="mt-1 text-sm text-slate-500">Просмотр связанного платежа по счету.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closePaymentPreview}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label={t('close') ?? 'Закрыть'}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              {paymentPreviewError && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {paymentPreviewError}
+                </div>
+              )}
+
+              {paymentPreviewLoading && (
+                <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Обновляем данные платежа...
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Сумма</div>
+                  <div className="mt-2 text-xl font-semibold text-slate-900">
+                    {formatCurrencySmart(selectedPaymentPreview.amount ?? 0).full}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Статус</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        relatedPaymentStatusMeta[selectedPaymentPreview.status] ?? relatedPaymentStatusMeta.Pending
+                      }`}
+                    >
+                      {invoicePaymentStatusLabel[selectedPaymentPreview.status] ?? invoicePaymentStatusLabel.Pending}
+                    </span>
+                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                      {selectedPaymentPreview.type === 'Expense' ? 'Расходный платеж' : 'Доходный платеж'}
+                    </span>
+                    {selectedPaymentPreviewInstallment ? (
+                      <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                        Рассрочка {selectedPaymentPreviewInstallment.sequence}/{Math.max(selectedPaymentPreviewInstallment.months, selectedPaymentPreviewInstallment.sequence)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Описание</div>
+                <div className="mt-2 text-sm leading-6 text-slate-700">
+                  {selectedPaymentPreview.description?.trim() || 'Без описания'}
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Плановая дата</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {formatDate(selectedPaymentPreview.plannedDate || selectedPaymentPreview.date) || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дата оплаты</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {formatDate(selectedPaymentPreview.paidDate || selectedPaymentPreview.lastPaymentDate) || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Счет</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedPaymentPreview.account || form.number || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Клиент</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedPaymentPreview.client?.name
+                      || (selectedPaymentPreview.type === 'Expense' ? selectedExpenseClient?.name : selectedClient?.name)
+                      || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дело</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedPaymentPreview.clientCase?.title || selectedClientCasesSummary || '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Связь с договором</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">
+                    {selectedPaymentPreview.contractId
+                      ? `ID ${selectedPaymentPreview.contractId}`
+                      : (selectedContract ? formatContractSidebarLabel(selectedContract) : '—')}
+                  </div>
+                </div>
+              </div>
+
+              {selectedPaymentPreview.notes?.trim() ? (
+                <div className="rounded-xl border border-slate-200 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Комментарий</div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {selectedPaymentPreview.notes}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 px-5 py-4">
+              {onOpenPayment && selectedPaymentPreview.id > 0 && !isInvoiceManagedPayment(selectedPaymentPreview) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closePaymentPreview();
+                    onOpenPayment(selectedPaymentPreview);
+                  }}
+                  className="mr-auto rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                >
+                  Открыть полный платеж
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={closePaymentPreview}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <InvoiceLineItemLookupDialog

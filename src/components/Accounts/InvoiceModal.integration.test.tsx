@@ -86,10 +86,12 @@ vi.mock('../../services/api', () => ({
     getInvoiceRulesSettings: vi
       .fn()
       .mockResolvedValue({ maxClientCasesPerInvoice: 3, maxActsPerInvoice: 3 }),
+    getContract: vi.fn(),
     getContracts: vi.fn().mockResolvedValue({ items: [] }),
     getCases: vi.fn().mockResolvedValue([]),
     getActs: vi.fn().mockResolvedValue({ items: [] }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
+    getPayment: vi.fn(),
     createContract: vi.fn(),
     createCase: vi.fn(),
     createAct: vi.fn(),
@@ -221,6 +223,8 @@ describe('InvoiceModal integration', () => {
       configurable: true,
       value: vi.fn(),
     });
+    vi.mocked(apiService.getContract).mockReset();
+    vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.updateInvoice).mockClear();
   });
 
@@ -814,6 +818,372 @@ describe('InvoiceModal integration', () => {
       expect((screen.getAllByTestId('invoice-line-item-unit-input')[0] as HTMLInputElement).value).toBe('svc');
       expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000.00');
     });
+  });
+
+  it('opens a related payment preview from the page sidebar', async () => {
+    const invoice = {
+      id: 550,
+      invoiceEntityId: 550,
+      number: '550',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 18000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 880,
+      invoiceId: 550,
+      amount: 6000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Частичная оплата по счету №550',
+      account: '550',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      ...relatedPayment,
+      notes: 'Платеж поступил по банку',
+    } as Payment);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-880'));
+
+    expect(await screen.findByTestId('invoice-related-payment-preview')).toBeTruthy();
+    await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(880);
+    });
+    expect(screen.getByText('Платеж #880')).toBeTruthy();
+    expect(screen.getByText('Платеж поступил по банку')).toBeTruthy();
+  });
+
+  it('opens the existing payment modal callback from the page sidebar when edit mode is available', async () => {
+    const onEditRelatedPayment = vi.fn();
+    const invoice = {
+      id: 553,
+      invoiceEntityId: 553,
+      number: '553',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'шт', price: 21000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 883,
+      invoiceId: 553,
+      documentKind: 'Invoice',
+      amount: 7000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Open via existing modal callback',
+      account: '553',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onEditRelatedPayment={onEditRelatedPayment}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-883'));
+
+    expect(onEditRelatedPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 883,
+        invoiceId: 553,
+      }),
+    );
+    expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
+  });
+
+  it('opens the full payment callback from a standalone payment preview', async () => {
+    const onOpenPayment = vi.fn();
+    const invoice = {
+      id: 551,
+      invoiceEntityId: 551,
+      number: '551',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 21000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 881,
+      invoiceId: undefined,
+      amount: 7000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'РџРµСЂРІР°СЏ РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–551',
+      account: '551',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      ...relatedPayment,
+      notes: 'РџР»Р°С‚РµР¶ Р·Р°С‡С‚РµРЅ РєР°Рє РѕСЃРЅРѕРІРЅРѕР№',
+    } as Payment);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onOpenPayment={onOpenPayment}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-881'));
+    expect(await screen.findByTestId('invoice-related-payment-preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть полный платеж' }));
+
+    expect(onOpenPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 881,
+        notes: 'РџР»Р°С‚РµР¶ Р·Р°С‡С‚РµРЅ РєР°Рє РѕСЃРЅРѕРІРЅРѕР№',
+      }),
+    );
+  });
+
+  it('hides the full payment action for invoice-managed payment previews', async () => {
+    const invoice = {
+      id: 552,
+      invoiceEntityId: 552,
+      number: '552',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'шт', price: 21000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 882,
+      invoiceId: 552,
+      documentKind: 'Invoice',
+      amount: 7000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Test invoice-managed payment',
+      account: '552',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.getPayment).mockResolvedValue(relatedPayment);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onOpenPayment={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-882'));
+    expect(await screen.findByTestId('invoice-related-payment-preview')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Открыть полный платеж' })).toBeNull();
+  });
+
+  it('opens a related contract preview from the page sidebar', async () => {
+    const invoice = {
+      id: 560,
+      invoiceEntityId: 560,
+      number: '560',
+      date: '2026-04-12',
+      dueDate: '2026-05-12',
+      amount: 25000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      contractId: 77,
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 25000 }],
+    } as unknown as Invoice;
+
+    const contract = {
+      id: 77,
+      number: 'CT-077',
+      title: 'Абонентское обслуживание',
+      date: '2026-04-01',
+      billingMode: 'Fixed',
+      isOpenEnded: false,
+      amount: 25000,
+      validUntil: '2026-12-31',
+      invoiceAmountTotal: 25000,
+      actAmountTotal: 0,
+      paymentAmountTotal: 0,
+      clients: [{ id: 1, name: 'Тестовый клиент', company: null }],
+      invoiceIds: [560],
+      actIds: [],
+      paymentIds: [880],
+      createdAt: '2026-04-01T00:00:00Z',
+      description: 'Основной договор на обслуживание',
+    } as unknown as Contract;
+
+    vi.mocked(apiService.getContracts).mockResolvedValueOnce({ items: [contract] });
+    vi.mocked(apiService.getContract).mockResolvedValue(contract);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-contract-link'));
+
+    expect(await screen.findByTestId('invoice-related-contract-preview')).toBeTruthy();
+    await waitFor(() => {
+      expect(apiService.getContract).toHaveBeenCalledWith(77);
+    });
+    expect(screen.getByText('Основной договор на обслуживание')).toBeTruthy();
+    expect(screen.getAllByText(/CT-077/).length).toBeGreaterThan(0);
+  });
+
+  it('opens the full contract callback from the contract preview', async () => {
+    const onOpenContract = vi.fn();
+    const invoice = {
+      id: 561,
+      invoiceEntityId: 561,
+      number: '561',
+      date: '2026-04-12',
+      dueDate: '2026-05-12',
+      amount: 25000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      contractId: 77,
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 25000 }],
+    } as unknown as Invoice;
+
+    const contract = {
+      id: 77,
+      number: 'CT-077',
+      title: 'Абонентское обслуживание',
+      date: '2026-04-01',
+      billingMode: 'Fixed',
+      isOpenEnded: false,
+      amount: 25000,
+      validUntil: '2026-12-31',
+      invoiceAmountTotal: 25000,
+      actAmountTotal: 0,
+      paymentAmountTotal: 0,
+      clients: [{ id: 1, name: 'Тестовый клиент', company: null }],
+      invoiceIds: [561],
+      actIds: [],
+      paymentIds: [880],
+      createdAt: '2026-04-01T00:00:00Z',
+      description: 'Основной договор на обслуживание',
+    } as unknown as Contract;
+
+    vi.mocked(apiService.getContracts).mockResolvedValueOnce({ items: [contract] });
+    vi.mocked(apiService.getContract).mockResolvedValue(contract);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onOpenContract={onOpenContract}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-contract-link'));
+    expect(await screen.findByTestId('invoice-related-contract-preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть полный договор' }));
+
+    expect(onOpenContract).toHaveBeenCalledWith(77);
   });
 
   it('downloads document variant without signature and seal on demand', async () => {

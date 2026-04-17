@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
 import type { AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } from '../../types';
+import { clearInvoiceEditorDraft, peekInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 const {
   getActResponsiblesMock,
@@ -335,6 +336,9 @@ vi.mock('../ui/TableSelectCheckbox', () => ({
 }));
 
 describe('Accounts integration', () => {
+  const clearInvoiceEditorDraftMock = vi.mocked(clearInvoiceEditorDraft);
+  const peekInvoiceEditorDraftMock = vi.mocked(peekInvoiceEditorDraft);
+
   beforeEach(() => {
     getActResponsiblesMock.mockReset();
     getAccountsRegistryResultMock.mockReset();
@@ -343,6 +347,9 @@ describe('Accounts integration', () => {
     invoiceModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
+    clearInvoiceEditorDraftMock.mockReset();
+    peekInvoiceEditorDraftMock.mockReset();
+    window.localStorage.clear();
 
     getAccountsRegistryResultMock.mockReturnValue({
       items: [createAccountRow()],
@@ -356,6 +363,8 @@ describe('Accounts integration', () => {
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
     getActResponsiblesMock.mockResolvedValue([]);
+    clearInvoiceEditorDraftMock.mockImplementation(() => undefined);
+    peekInvoiceEditorDraftMock.mockReturnValue(null);
   });
 
   it('passes grouped invoice operations into the editor opened from the accounts registry', async () => {
@@ -439,6 +448,30 @@ describe('Accounts integration', () => {
 
     await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(null));
     expect(onRouteInvoicePageBack).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale persisted invoice draft after a not found response and returns to the registry', async () => {
+    const onRouteInvoiceChange = vi.fn();
+    let persistedDraft: { mode: 'edit'; invoiceId: number } | null = {
+      mode: 'edit',
+      invoiceId: 999,
+    };
+
+    peekInvoiceEditorDraftMock.mockImplementation(() => persistedDraft);
+    clearInvoiceEditorDraftMock.mockImplementation(() => {
+      persistedDraft = null;
+    });
+    getInvoiceMock.mockRejectedValue(new Error('Not Found'));
+
+    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(999));
+    await waitFor(() => expect(clearInvoiceEditorDraftMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(null));
+    expect(await screen.findByRole('button', { name: '24' })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(getInvoiceMock.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(persistedDraft).toBeNull();
   });
 
   it('passes the canonical linked invoice context into the payment modal opened from the accounts registry', async () => {
