@@ -2952,6 +2952,226 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("ServiceLanguages");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("CreatedRows")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ErrorRows")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RollbackRows")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RolledBackAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SkippedRows")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SummaryJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("TotalRows")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UpdatedRows")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_SpreadsheetImportBatches_CreatedAt");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_SpreadsheetImportBatches_Status");
+
+                    b.ToTable("SpreadsheetImportBatches");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatchFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BatchId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DetectedKind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<int>("RowCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SheetName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchId")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchFiles_BatchId");
+
+                    b.HasIndex("FileHash")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchFiles_FileHash");
+
+                    b.ToTable("SpreadsheetImportBatchFiles");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatchOperation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("BatchId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("EntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RollbackAction")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("RollbackMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("RolledBackAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("SectionKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceFileHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("SourceFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("SourceRowId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("SourceRowNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceTitle")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchId")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId");
+
+                    b.HasIndex("EntityId")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchOperations_EntityId");
+
+                    b.HasIndex("BatchId", "SectionKey")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId_SectionKey");
+
+                    b.HasIndex("BatchId", "SourceRowId")
+                        .HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId_SourceRowId");
+
+                    b.ToTable("SpreadsheetImportBatchOperations");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -3948,6 +4168,28 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Category");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatchFile", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.SpreadsheetImportBatch", "Batch")
+                        .WithMany("Files")
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatchOperation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.SpreadsheetImportBatch", "Batch")
+                        .WithMany("Operations")
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -4134,6 +4376,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("InvoiceLineItems");
 
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SpreadsheetImportBatch", b =>
+                {
+                    b.Navigation("Files");
+
+                    b.Navigation("Operations");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>

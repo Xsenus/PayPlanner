@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Models.Requests;
@@ -17,15 +17,18 @@ public class DatabaseAdminController : ControllerBase
     private readonly DatabaseProviderInfo _databaseProvider;
     private readonly DatabaseBackupService _databaseBackupService;
     private readonly IDatabaseImportService _databaseImportService;
+    private readonly ISpreadsheetImportService _spreadsheetImportService;
 
     public DatabaseAdminController(
         DatabaseProviderInfo databaseProvider,
         DatabaseBackupService databaseBackupService,
-        IDatabaseImportService databaseImportService)
+        IDatabaseImportService databaseImportService,
+        ISpreadsheetImportService spreadsheetImportService)
     {
         _databaseProvider = databaseProvider;
         _databaseBackupService = databaseBackupService;
         _databaseImportService = databaseImportService;
+        _spreadsheetImportService = spreadsheetImportService;
     }
 
     [HttpGet("status")]
@@ -178,6 +181,92 @@ public class DatabaseAdminController : ControllerBase
         }
     }
 
+    [HttpPost("import/spreadsheets/preview")]
+    [Consumes("multipart/form-data")]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxImportFileSizeBytes)]
+    [RequestSizeLimit(MaxImportFileSizeBytes)]
+    public async Task<ActionResult<SpreadsheetImportPreviewDto>> PreviewSpreadsheetImportAsync(
+        [FromForm] List<IFormFile>? files,
+        CancellationToken cancellationToken)
+    {
+        var uploadFiles = await ReadSpreadsheetFilesAsync(files, cancellationToken);
+        if (uploadFiles.Count == 0)
+        {
+            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel-файл для анализа." });
+        }
+
+        try
+        {
+            var result = await _spreadsheetImportService.PreviewAsync(uploadFiles, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("import/spreadsheets/apply")]
+    [Consumes("multipart/form-data")]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxImportFileSizeBytes)]
+    [RequestSizeLimit(MaxImportFileSizeBytes)]
+    public async Task<ActionResult<SpreadsheetImportBatchDetailDto>> ApplySpreadsheetImportAsync(
+        [FromForm] List<IFormFile>? files,
+        [FromForm] SpreadsheetImportApplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var uploadFiles = await ReadSpreadsheetFilesAsync(files, cancellationToken);
+        if (uploadFiles.Count == 0)
+        {
+            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel-файл для импорта." });
+        }
+
+        try
+        {
+            var result = await _spreadsheetImportService.ApplyAsync(uploadFiles, request, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("import/spreadsheets/batches")]
+    public async Task<ActionResult<IReadOnlyCollection<SpreadsheetImportBatchSummaryDto>>> GetSpreadsheetImportBatchesAsync(
+        CancellationToken cancellationToken)
+    {
+        var items = await _spreadsheetImportService.GetBatchesAsync(cancellationToken);
+        return Ok(items);
+    }
+
+    [HttpGet("import/spreadsheets/batches/{batchId:int}")]
+    public async Task<ActionResult<SpreadsheetImportBatchDetailDto>> GetSpreadsheetImportBatchAsync(
+        int batchId,
+        CancellationToken cancellationToken)
+    {
+        var batch = await _spreadsheetImportService.GetBatchAsync(batchId, cancellationToken);
+        return batch is null
+            ? NotFound(new { message = "Сессия импорта не найдена." })
+            : Ok(batch);
+    }
+
+    [HttpPost("import/spreadsheets/batches/{batchId:int}/rollback")]
+    public async Task<ActionResult<SpreadsheetImportBatchDetailDto>> RollbackSpreadsheetImportBatchAsync(
+        int batchId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var batch = await _spreadsheetImportService.RollbackAsync(batchId, cancellationToken);
+            return Ok(batch);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private static DatabaseBackupOverviewDto MapOverview(DatabaseBackupOverview overview)
     {
         return new DatabaseBackupOverviewDto
@@ -215,5 +304,26 @@ public class DatabaseAdminController : ControllerBase
             CreatedAt = file.CreatedAt,
             Trigger = file.Trigger,
         };
+    }
+
+    private static async Task<IReadOnlyCollection<SpreadsheetImportUploadFile>> ReadSpreadsheetFilesAsync(
+        IReadOnlyCollection<IFormFile>? files,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<SpreadsheetImportUploadFile>();
+        if (files is null)
+        {
+            return result;
+        }
+
+        foreach (var file in files.Where(item => item is not null && item.Length > 0))
+        {
+            await using var stream = file.OpenReadStream();
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory, cancellationToken);
+            result.Add(new SpreadsheetImportUploadFile(file.FileName, memory.ToArray()));
+        }
+
+        return result;
     }
 }

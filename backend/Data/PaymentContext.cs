@@ -1256,6 +1256,62 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Section, e.FieldKey }).IsUnique().HasDatabaseName("IX_FormFieldRequirements_Section_FieldKey");
         });
 
+        modelBuilder.Entity<SpreadsheetImportBatch>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.SummaryJson).HasColumnType("text");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_SpreadsheetImportBatches_CreatedAt");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_SpreadsheetImportBatches_Status");
+        });
+
+        modelBuilder.Entity<SpreadsheetImportBatchFile>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.FileHash).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.DetectedKind).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SheetName).HasMaxLength(128);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(e => e.Batch)
+                .WithMany(e => e.Files)
+                .HasForeignKey(e => e.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.BatchId).HasDatabaseName("IX_SpreadsheetImportBatchFiles_BatchId");
+            entity.HasIndex(e => e.FileHash).HasDatabaseName("IX_SpreadsheetImportBatchFiles_FileHash");
+        });
+
+        modelBuilder.Entity<SpreadsheetImportBatchOperation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SectionKey).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SourceFileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.SourceFileHash).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.SourceRowId).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.SourceKey).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SourceTitle).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Action).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.EntityType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Message).HasMaxLength(2000);
+            entity.Property(e => e.BeforeJson).HasColumnType("text");
+            entity.Property(e => e.AfterJson).HasColumnType("text");
+            entity.Property(e => e.MetadataJson).HasColumnType("text");
+            entity.Property(e => e.RollbackAction).HasMaxLength(64);
+            entity.Property(e => e.RollbackMessage).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(e => e.Batch)
+                .WithMany(e => e.Operations)
+                .HasForeignKey(e => e.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.BatchId).HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId");
+            entity.HasIndex(e => new { e.BatchId, e.SectionKey }).HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId_SectionKey");
+            entity.HasIndex(e => new { e.BatchId, e.SourceRowId }).HasDatabaseName("IX_SpreadsheetImportBatchOperations_BatchId_SourceRowId");
+            entity.HasIndex(e => e.EntityId).HasDatabaseName("IX_SpreadsheetImportBatchOperations_EntityId");
+        });
+
         if (UseObjectAuditModel)
         {
             ConfigureAudit<Act>(modelBuilder);
@@ -1840,6 +1896,9 @@ public class PaymentContext : DbContext
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<SystemSetting> SystemSettings { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
+    public DbSet<SpreadsheetImportBatch> SpreadsheetImportBatches { get; set; }
+    public DbSet<SpreadsheetImportBatchFile> SpreadsheetImportBatchFiles { get; set; }
+    public DbSet<SpreadsheetImportBatchOperation> SpreadsheetImportBatchOperations { get; set; }
     public DbSet<UserCompanyAccess> UserCompanyAccesses { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }

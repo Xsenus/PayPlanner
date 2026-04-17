@@ -91,6 +91,7 @@ builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<RoleManagementAccessService>();
 builder.Services.AddScoped<IUserActivityService, UserActivityService>();
 builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
+builder.Services.AddScoped<ISpreadsheetImportService, SpreadsheetImportService>();
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
