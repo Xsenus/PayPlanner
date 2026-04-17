@@ -12,6 +12,7 @@ import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
+import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
   ContractNumberingSettingsDto,
@@ -106,7 +107,7 @@ export function AppSettings() {
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
-    if (activeSection === 'db-import') return 'Импорт SQLite';
+    if (activeSection === 'db-import') return 'Импорт данных';
     if (activeSection === 'db-operations') return 'Операции по разделам БД';
     if (activeSection === 'form-requirements') return 'Правила заполнения форм';
     return 'Финансовые правила';
@@ -758,7 +759,7 @@ export function AppSettings() {
                         : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
                     }`}
                   >
-                    Импорт SQLite
+                    Импорт данных
                   </button>
                     </>
                   )}
@@ -1083,7 +1084,9 @@ export function AppSettings() {
 
             {activeSection === 'db-maintenance' && <DatabaseMaintenanceSettings />}
 
-            {activeSection === 'db-import' && (
+            {activeSection === 'db-import' && <SpreadsheetImportSettings />}
+
+            {false && activeSection === 'db-import' && (
               <div className="space-y-6">
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

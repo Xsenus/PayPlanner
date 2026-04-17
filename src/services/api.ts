@@ -151,6 +151,122 @@ export interface DatabaseImportResultDto {
   tables: DatabaseImportTableResultDto[];
 }
 
+export interface SpreadsheetImportPreviewCellDto {
+  key: string;
+  label: string;
+  value?: string | null;
+}
+
+export interface SpreadsheetImportPreviewChangeDto {
+  fieldKey: string;
+  fieldLabel: string;
+  kind: string;
+  currentValue?: string | null;
+  incomingValue?: string | null;
+}
+
+export interface SpreadsheetImportPreviewRowDto {
+  previewId: string;
+  sourceFileName: string;
+  sourceFileHash: string;
+  sourceRowNumber: number;
+  action: string;
+  isSelectable: boolean;
+  isDerived: boolean;
+  title: string;
+  subtitle?: string | null;
+  message?: string | null;
+  dependencyPreviewIds: string[];
+  dependencyTitles: string[];
+  issues: string[];
+  counterpartyImportMode?: string | null;
+  counterpartyImportModeHint?: string | null;
+  availableCounterpartyImportModes: string[];
+  changes: SpreadsheetImportPreviewChangeDto[];
+  cells: SpreadsheetImportPreviewCellDto[];
+}
+
+export interface SpreadsheetImportPreviewSectionDto {
+  key: string;
+  label: string;
+  totalRows: number;
+  createRows: number;
+  updateRows: number;
+  skipRows: number;
+  errorRows: number;
+  selectableRows: number;
+  rows: SpreadsheetImportPreviewRowDto[];
+}
+
+export interface SpreadsheetImportPreviewFileDto {
+  fileName: string;
+  fileHash: string;
+  detectedKind: string;
+  detectedLabel: string;
+  sheetName?: string | null;
+  rowCount: number;
+  message?: string | null;
+}
+
+export interface SpreadsheetImportPreviewDto {
+  startedAt: string;
+  totalSelectableRows: number;
+  files: SpreadsheetImportPreviewFileDto[];
+  sections: SpreadsheetImportPreviewSectionDto[];
+  messages: string[];
+}
+
+export interface SpreadsheetImportBatchFileDto {
+  fileName: string;
+  fileHash: string;
+  detectedKind: string;
+  sheetName?: string | null;
+  rowCount: number;
+  createdAt: string;
+}
+
+export interface SpreadsheetImportBatchOperationDto {
+  id: number;
+  sectionKey: string;
+  sourceFileName: string;
+  sourceFileHash: string;
+  sourceRowId: string;
+  sourceRowNumber: number;
+  sourceKey: string;
+  sourceTitle: string;
+  action: string;
+  entityType: string;
+  entityId?: number | null;
+  message?: string | null;
+  metadataJson?: string | null;
+  rollbackAction?: string | null;
+  rollbackMessage?: string | null;
+  createdAt: string;
+  rolledBackAt?: string | null;
+}
+
+export interface SpreadsheetImportBatchSummaryDto {
+  id: number;
+  title: string;
+  status: string;
+  totalRows: number;
+  createdRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  errorRows: number;
+  rollbackRows: number;
+  createdAt: string;
+  appliedAt?: string | null;
+  rolledBackAt?: string | null;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  files: SpreadsheetImportBatchFileDto[];
+}
+
+export interface SpreadsheetImportBatchDetailDto extends SpreadsheetImportBatchSummaryDto {
+  operations: SpreadsheetImportBatchOperationDto[];
+}
+
 export interface ObjectAuditEventDto {
   id: number;
   objectType: string;
@@ -832,6 +948,47 @@ export class ApiService {
     return this.request<DatabaseImportResultDto>('/database/import/sqlite', {
       method: 'POST',
       body: payload,
+    });
+  }
+
+  async previewSpreadsheetImport(files: File[]) {
+    const payload = new FormData();
+    files.forEach((file) => payload.append('files', file));
+    return this.request<SpreadsheetImportPreviewDto>('/database/import/spreadsheets/preview', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async applySpreadsheetImport(
+    files: File[],
+    selectedPreviewIds: string[],
+    counterpartyOptions: Array<{ previewId: string; importMode: string }> = [],
+  ) {
+    const payload = new FormData();
+    files.forEach((file) => payload.append('files', file));
+    selectedPreviewIds.forEach((previewId) => payload.append('SelectedPreviewIds', previewId));
+    counterpartyOptions.forEach((option, index) => {
+      payload.append(`CounterpartyOptions[${index}].PreviewId`, option.previewId);
+      payload.append(`CounterpartyOptions[${index}].ImportMode`, option.importMode);
+    });
+    return this.request<SpreadsheetImportBatchDetailDto>('/database/import/spreadsheets/apply', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getSpreadsheetImportBatches() {
+    return this.request<SpreadsheetImportBatchSummaryDto[]>('/database/import/spreadsheets/batches');
+  }
+
+  async getSpreadsheetImportBatch(batchId: number) {
+    return this.request<SpreadsheetImportBatchDetailDto>(`/database/import/spreadsheets/batches/${batchId}`);
+  }
+
+  async rollbackSpreadsheetImportBatch(batchId: number) {
+    return this.request<SpreadsheetImportBatchDetailDto>(`/database/import/spreadsheets/batches/${batchId}/rollback`, {
+      method: 'POST',
     });
   }
 
