@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using System.Text.Json;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -13,6 +14,8 @@ namespace PayPlanner.Api.Controllers;
 public class DatabaseAdminController : ControllerBase
 {
     private const long MaxImportFileSizeBytes = 1024L * 1024L * 1024L;
+    private const int MaxImportFormValueCount = 50000;
+    private static readonly JsonSerializerOptions SpreadsheetImportRequestJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly DatabaseProviderInfo _databaseProvider;
     private readonly DatabaseBackupService _databaseBackupService;
@@ -208,11 +211,12 @@ public class DatabaseAdminController : ControllerBase
 
     [HttpPost("import/spreadsheets/apply")]
     [Consumes("multipart/form-data")]
-    [RequestFormLimits(MultipartBodyLengthLimit = MaxImportFileSizeBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxImportFileSizeBytes, ValueCountLimit = MaxImportFormValueCount)]
     [RequestSizeLimit(MaxImportFileSizeBytes)]
     public async Task<ActionResult<SpreadsheetImportBatchDetailDto>> ApplySpreadsheetImportAsync(
         [FromForm] List<IFormFile>? files,
-        [FromForm] SpreadsheetImportApplyRequest request,
+        [FromForm] SpreadsheetImportApplyRequest? request,
+        [FromForm] string? requestJson,
         CancellationToken cancellationToken)
     {
         var uploadFiles = await ReadSpreadsheetFilesAsync(files, cancellationToken);
@@ -223,7 +227,11 @@ public class DatabaseAdminController : ControllerBase
 
         try
         {
-            var result = await _spreadsheetImportService.ApplyAsync(uploadFiles, request, cancellationToken);
+            var normalizedRequest = ParseSpreadsheetImportApplyRequest(requestJson) ?? request ?? new SpreadsheetImportApplyRequest();
+            normalizedRequest.SelectedPreviewIds ??= new List<string>();
+            normalizedRequest.CounterpartyOptions ??= new List<SpreadsheetImportCounterpartyOptionRequest>();
+
+            var result = await _spreadsheetImportService.ApplyAsync(uploadFiles, normalizedRequest, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)
@@ -238,6 +246,24 @@ public class DatabaseAdminController : ControllerBase
     {
         var items = await _spreadsheetImportService.GetBatchesAsync(cancellationToken);
         return Ok(items);
+    }
+
+    private static SpreadsheetImportApplyRequest? ParseSpreadsheetImportApplyRequest(string? requestJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<SpreadsheetImportApplyRequest>(requestJson, SpreadsheetImportRequestJsonOptions)
+                ?? new SpreadsheetImportApplyRequest();
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Не удалось разобрать параметры импорта. Обновите страницу и попробуйте снова.", ex);
+        }
     }
 
     [HttpGet("import/spreadsheets/batches/{batchId:int}")]

@@ -967,11 +967,13 @@ export class ApiService {
   ) {
     const payload = new FormData();
     files.forEach((file) => payload.append('files', file));
-    selectedPreviewIds.forEach((previewId) => payload.append('SelectedPreviewIds', previewId));
-    counterpartyOptions.forEach((option, index) => {
-      payload.append(`CounterpartyOptions[${index}].PreviewId`, option.previewId);
-      payload.append(`CounterpartyOptions[${index}].ImportMode`, option.importMode);
-    });
+    payload.append('requestJson', JSON.stringify({
+      SelectedPreviewIds: selectedPreviewIds,
+      CounterpartyOptions: counterpartyOptions.map((option) => ({
+        PreviewId: option.previewId,
+        ImportMode: option.importMode,
+      })),
+    }));
     return this.request<SpreadsheetImportBatchDetailDto>('/database/import/spreadsheets/apply', {
       method: 'POST',
       body: payload,
