@@ -13,6 +13,7 @@ public class ActDto
     public string CreationMode { get; set; } = ActCreationMode.Manual;
     public string? InvoiceNumber { get; set; }
     public int? InvoiceId { get; set; }
+    public PaymentType? Type { get; set; }
     public int? ContractId { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; }

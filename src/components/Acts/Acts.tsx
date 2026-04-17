@@ -9,7 +9,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
-import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
+import type { Act, ActInput, ActResponsible, ActStatus, Client, PaymentKind } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
@@ -81,12 +81,14 @@ type SortState = {
 };
 
 interface ActsProps {
+  defaultType?: PaymentKind;
+  lockType?: boolean;
   onOpenAct?: (actId: number) => void;
   onOpenClient?: (clientId: number) => void;
   onOpenInvoiceEditor?: (invoiceId: number) => void;
 }
 
-export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
+export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -103,12 +105,14 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
   const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
+  const [typeFilter, setTypeFilter] = useState<'All' | PaymentKind>(defaultType ?? 'All');
   const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const effectiveTypeFilter = lockType && defaultType ? defaultType : typeFilter;
 
   const tableColumnConfigs = useMemo(
     () => ACT_COLUMN_CONFIGS.filter((column) => (column.key === 'actions' ? canEdit || canDelete : true)),
@@ -154,6 +158,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     from: periodRange.from || undefined,
     to: periodRange.to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
+    type: effectiveTypeFilter === 'All' ? undefined : effectiveTypeFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
     sortDir: sortState.direction,
@@ -169,6 +174,12 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (lockType && defaultType) {
+      setTypeFilter(defaultType);
+    }
+  }, [defaultType, lockType]);
 
   const summaryBuckets = useMemo(
     () =>
@@ -196,6 +207,42 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+
+  const typeOptions: Array<'All' | PaymentKind> = ['All', 'Income', 'Expense'];
+  const typeFilterLabels: Record<'All' | PaymentKind, string> = {
+    All: t('invoiceTypeAllShort') ?? 'Все',
+    Income: t('invoiceTypeIncomeShort') ?? 'Доходные',
+    Expense: t('invoiceTypeExpenseShort') ?? 'Расходные',
+  };
+  const typeBadgeClasses: Record<PaymentKind, string> = {
+    Income: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+    Expense: 'border border-rose-200 bg-rose-50 text-rose-700',
+  };
+  const headingTitle =
+    effectiveTypeFilter === 'Income'
+      ? t('actsIncomeTitle') ?? 'Доходные акты'
+      : effectiveTypeFilter === 'Expense'
+        ? t('actsExpenseTitle') ?? 'Расходные акты'
+        : t('acts') ?? 'Акты';
+  const headingDescription =
+    effectiveTypeFilter === 'Income'
+      ? t('actsSectionDescriptionIncome') ?? 'Просматривайте акты по доходным счетам и контролируйте их статусы.'
+      : effectiveTypeFilter === 'Expense'
+        ? t('actsSectionDescriptionExpense') ?? 'Просматривайте акты по расходным счетам и контролируйте их статусы.'
+        : t('actSectionDescription') ?? 'Управляйте актами и отслеживайте их статусы.';
+
+  const resolvedHeadingTitle =
+    headingTitle === 'actsIncomeTitle'
+      ? 'Доходные акты'
+      : headingTitle === 'actsExpenseTitle'
+        ? 'Расходные акты'
+        : headingTitle;
+  const resolvedHeadingDescription =
+    headingDescription === 'actsSectionDescriptionIncome'
+      ? 'Просматривайте акты по доходным счетам и контролируйте их статусы.'
+      : headingDescription === 'actsSectionDescriptionExpense'
+        ? 'Просматривайте акты по расходным счетам и контролируйте их статусы.'
+        : headingDescription;
 
   const summaryCards = useMemo(
     () => [
@@ -260,7 +307,7 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, periodRange.from, periodRange.to, pageSize]);
+  }, [debouncedSearch, effectiveTypeFilter, statusFilter, periodRange.from, periodRange.to, pageSize]);
 
   useEffect(() => {
     setPage((prev) => Math.min(prev, totalPages));
@@ -321,6 +368,9 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
     setSubmitting(true);
     setModalError(null);
     try {
+      if (lockType && effectiveTypeFilter !== 'All' && !payload.invoiceId) {
+        throw new Error('Для доходного или расходного акта укажите связанный счет.');
+      }
       await createAct(payload);
       toast.success(selectedAct ? 'Акт обновлен.' : 'Акт создан.');
       setModalOpen(false);
@@ -337,7 +387,12 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
 
   const openInvoiceFromAct = useCallback(async (act: Act) => {
-    if (!act.invoiceNumber || !onOpenInvoiceEditor) return;
+    if (!onOpenInvoiceEditor) return;
+    if (act.invoiceId) {
+      onOpenInvoiceEditor(act.invoiceId);
+      return;
+    }
+    if (!act.invoiceNumber) return;
     try {
       const response = await apiService.getInvoices({ search: act.invoiceNumber, page: 1, pageSize: 100 });
       const normalized = act.invoiceNumber.trim().toLowerCase();
@@ -379,6 +434,9 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
 
   const handleResetFilters = () => {
     setPeriod(defaultPeriod);
+    if (!lockType) {
+      setTypeFilter('All');
+    }
     setStatusFilter('all');
     setSearch('');
     setSortState({ key: 'date', direction: 'desc' });
@@ -484,8 +542,8 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
                 <FileCheck2 className="h-6 w-6" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">{t('acts') ?? 'Акты'}</h1>
-                <p className="text-sm text-slate-500">{t('actSectionDescription') ?? 'Управляйте актами и отслеживайте их статусы.'}</p>
+                <h1 className="text-2xl font-bold text-slate-900">{resolvedHeadingTitle}</h1>
+                <p className="text-sm text-slate-500">{resolvedHeadingDescription}</p>
               </div>
             </div>
           </div>
@@ -534,6 +592,35 @@ export function Acts({ onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps
         </div>
 
         <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="min-w-[260px]">
+            {lockType && effectiveTypeFilter !== 'All' ? (
+              <span
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
+                  typeBadgeClasses[effectiveTypeFilter]
+                }`}
+              >
+                {typeFilterLabels[effectiveTypeFilter]}
+              </span>
+            ) : (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-1 py-1 shadow-sm">
+                {typeOptions.map((option) => {
+                  const isActive = option === effectiveTypeFilter;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setTypeFilter(option)}
+                      className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
+                        isActive ? 'bg-indigo-600 text-white shadow' : 'bg-transparent text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {typeFilterLabels[option]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="min-w-[260px] flex-1">
             <DatePeriodPicker
               value={period}

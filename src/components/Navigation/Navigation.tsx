@@ -221,11 +221,24 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
 
     if (permissions.acts.canView) {
+      const actChildren: SidebarChild[] = [
+        {
+          id: 'actsIncome' as Tab,
+          label: t('invoiceTypeIncomeShort') ?? 'Доходные',
+          icon: TrendingUp,
+        },
+        {
+          id: 'actsExpense' as Tab,
+          label: t('invoiceTypeExpenseShort') ?? 'Расходные',
+          icon: TrendingDown,
+        },
+      ];
       items.push({
         id: 'acts',
         tab: 'acts' as Tab,
         label: t('acts') ?? 'Акты',
         icon: FileCheck2,
+        children: actChildren,
       });
     }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Act, ActInput, ActStatus, ActsSummary } from '../types';
+import type { Act, ActInput, ActStatus, ActsSummary, PaymentKind } from '../types';
 import { normalizeActArray, normalizeActsSummary } from '../utils/acts';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
@@ -19,6 +19,7 @@ export interface ActsFilters {
   from?: string;
   to?: string;
   status?: ActStatus;
+  type?: PaymentKind;
   clientId?: number;
   responsibleId?: number;
   search?: string;
@@ -53,6 +54,7 @@ function makeSummaryKey(filters: ActsFilters): string {
     from: filters.from ?? null,
     to: filters.to ?? null,
     status: filters.status ?? null,
+    type: filters.type ?? null,
     clientId: filters.clientId ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
@@ -92,6 +94,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          type: filters.type,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -122,7 +125,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [filters.from, filters.to, filters.status, filters.clientId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   const fetchSummary = useCallback(
@@ -136,6 +139,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          type: filters.type,
           clientId: filters.clientId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -152,7 +156,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [filters.from, filters.to, filters.status, filters.clientId, filters.responsibleId, filters.search],
+    [filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.responsibleId, filters.search],
   );
 
   useEffect(() => {

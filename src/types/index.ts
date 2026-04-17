@@ -615,6 +615,7 @@ export interface Act {
   creationMode?: ActCreationMode;
   invoiceNumber?: string | null;
   invoiceId?: number | null;
+  type?: PaymentKind | null;
   contractId?: number | null;
   counterpartyInn?: string | null;
   status: ActStatus;

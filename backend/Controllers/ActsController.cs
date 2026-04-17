@@ -48,6 +48,7 @@ public class ActsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] ActStatus? status,
+        [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
         [FromQuery] string? clientIds,
         [FromQuery] int? responsibleId,
@@ -62,7 +63,7 @@ public class ActsController : ControllerBase
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
 
         var query = _db.Acts.AsNoTracking()
-            .ApplyActFilters(from, to, status, clientId, responsibleId, search)
+            .ApplyActFilters(from, to, status, type, clientId, responsibleId, search)
             .ApplyActSort(sortBy, sortDir);
 
         var clientIdList = ParseIntList(clientIds);
@@ -113,13 +114,14 @@ public class ActsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] ActStatus? status,
+        [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         CancellationToken ct = default)
     {
         var query = _db.Acts.AsNoTracking()
-            .ApplyActFilters(from, to, status, clientId, responsibleId, search);
+            .ApplyActFilters(from, to, status, type, clientId, responsibleId, search);
 
         var groups = await query
             .GroupBy(a => a.Status)
@@ -368,6 +370,7 @@ public class ActsController : ControllerBase
         CreationMode = act.CreationMode,
         InvoiceNumber = act.InvoiceNumber,
         InvoiceId = act.InvoiceId,
+        Type = act.Invoice != null ? act.Invoice.Type : null,
         ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
@@ -409,12 +412,23 @@ public class ActsController : ControllerBase
         return await _db.Acts
             .AsNoTracking()
             .Include(act => act.Client)
+                .ThenInclude(client => client!.Addresses)
+            .Include(act => act.Client)
+                .ThenInclude(client => client!.Passports)
             .Include(act => act.Responsible)
             .Include(act => act.LineItems)
             .Include(act => act.Invoice)
                 .ThenInclude(invoice => invoice!.Client)
+                    .ThenInclude(client => client!.Addresses)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.Client)
+                    .ThenInclude(client => client!.Passports)
             .Include(act => act.Invoice)
                 .ThenInclude(invoice => invoice!.ExpenseClient)
+                    .ThenInclude(client => client!.Addresses)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.ExpenseClient)
+                    .ThenInclude(client => client!.Passports)
             .FirstOrDefaultAsync(act => act.Id == id, ct);
     }
 
@@ -732,6 +746,7 @@ public class ActsController : ControllerBase
             CreationMode = act.CreationMode,
             InvoiceNumber = act.InvoiceNumber,
             InvoiceId = act.InvoiceId,
+            Type = act.Invoice?.Type,
             ContractId = act.Invoice?.ContractId,
             CounterpartyInn = act.CounterpartyInn,
             Status = act.Status,

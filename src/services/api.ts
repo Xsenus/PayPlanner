@@ -754,6 +754,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: ActStatus;
+    type?: PaymentKind;
     clientId?: number;
     clientIds?: string;
     responsibleId?: number;
@@ -775,6 +776,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: ActStatus;
+    type?: PaymentKind;
     clientId?: number;
     responsibleId?: number;
     search?: string;
@@ -2170,6 +2172,7 @@ import type {
   Contract,
   ContractInput,
   Payment,
+  PaymentKind,
   PaymentPayload,
   Invoice,
   InvoiceInput,

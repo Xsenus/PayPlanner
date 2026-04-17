@@ -14,6 +14,7 @@ namespace PayPlanner.Api.Extensions
             DateTime? from,
             DateTime? to,
             ActStatus? status,
+            PaymentType? type,
             int? clientId,
             int? responsibleId,
             string? search)
@@ -21,6 +22,7 @@ namespace PayPlanner.Api.Extensions
             if (from.HasValue) q = q.Where(a => a.Date >= from.Value);
             if (to.HasValue) q = q.Where(a => a.Date <= to.Value);
             if (status.HasValue) q = q.Where(a => a.Status == status.Value);
+            if (type.HasValue) q = q.Where(a => a.Invoice != null && a.Invoice.Type == type.Value);
             if (clientId.HasValue) q = q.Where(a => a.ClientId == clientId.Value);
             if (responsibleId.HasValue) q = q.Where(a => a.ResponsibleId == responsibleId.Value);
 
