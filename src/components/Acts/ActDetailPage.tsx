@@ -1,47 +1,44 @@
-import { ArrowLeft, Download, Loader2, Pencil, Printer, Save, Search, UserRound } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Check, ChevronDown, Download, FileText, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Act, ActInput, ActResponsible, ActStatus, Client } from '../../types';
+import type { Act, ActInput, ActResponsible, ActStatus, Client, PaymentKind } from '../../types';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
-import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { toDateInputValue } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { ActModal } from './ActModal';
 
 interface ActDetailPageProps {
   actId: number;
   onBack: () => void;
   onOpenClient?: (clientId: number) => void;
+  onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
 }
 
-type FormState = {
-  number: string;
-  title: string;
-  date: string;
-  amount: string;
-  invoiceNumber: string;
-  counterpartyInn: string;
-  status: ActStatus;
-  clientId: string;
-  responsibleId: string;
-  comment: string;
-};
+type DocumentFormat = 'word' | 'pdf';
+type PageAction = 'send' | 'transferred' | 'signed' | 'delete';
 
-const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  const normalized = toDateInputValue(value);
+  if (!normalized) return value;
+  const [y, m, d] = normalized.split('-');
+  return `${d}.${m}.${y}`;
+}
 
-function normalizeActToForm(act: Act): FormState {
-  return {
-    number: act.number ?? '',
-    title: act.title ?? '',
-    date: toDateInputValue(act.date) || toDateInputValue(new Date()),
-    amount: act.amount !== undefined && act.amount !== null ? String(act.amount) : '',
-    invoiceNumber: act.invoiceNumber ?? '',
-    counterpartyInn: act.counterpartyInn ?? '',
-    status: act.status,
-    clientId: act.clientId ? String(act.clientId) : '',
-    responsibleId: act.responsibleId ? String(act.responsibleId) : '',
-    comment: act.comment ?? '',
-  };
+function formatMoney(value?: number | null): string {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value ?? 0));
 }
 
 function downloadBlob(fileName: string, blob: Blob) {
@@ -74,454 +71,809 @@ function openBlobInWindow(blob: Blob, targetWindow: Window | null, options?: { a
   }
 }
 
-export function ActDetailPage({ actId, onBack, onOpenClient }: ActDetailPageProps) {
+function getDocumentActionErrorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+
+  const message = error.message.trim();
+  if (!message) {
+    return fallback;
+  }
+
+  const separatorIndex = message.lastIndexOf(' - ');
+  if (separatorIndex >= 0) {
+    const detail = message.slice(separatorIndex + 3).trim();
+    if (detail) {
+      return detail;
+    }
+  }
+
+  return message;
+}
+
+function buildActPayload(act: Act, overrides?: Partial<ActInput>): ActInput {
+  const base: ActInput = {
+    number: act.number ?? '',
+    title: act.title ?? null,
+    date: toDateInputValue(act.date) || '',
+    amount: Number(act.amount ?? 0),
+    creationMode: act.creationMode,
+    invoiceNumber: act.invoiceNumber ?? null,
+    invoiceId: act.invoiceId ?? null,
+    contractId: act.contractId ?? null,
+    counterpartyInn: act.counterpartyInn ?? null,
+    status: act.status,
+    clientId: act.clientId ?? null,
+    responsibleId: act.responsibleId ?? null,
+    comment: act.comment ?? null,
+    lineItems: (act.lineItems ?? [])
+      .filter((item) => Boolean(item?.sourceKey))
+      .map((item) => ({
+        sourceKey: item.sourceKey,
+        quantity: Number(item.quantity ?? 0),
+      })),
+  };
+
+  return {
+    ...base,
+    ...overrides,
+  };
+}
+
+export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: ActDetailPageProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const { confirm } = useDialog();
+  const toast = useToast();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canEdit = permissions.acts.canEdit;
+  const canDelete = permissions.acts.canDelete;
+
   const [act, setAct] = useState<Act | null>(null);
-  const [form, setForm] = useState<FormState | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [clientPickerOpen, setClientPickerOpen] = useState(false);
-  const [clientSearch, setClientSearch] = useState('');
+  const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
+  const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorSubmitting, setEditorSubmitting] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
+
+  const downloadMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const loadActBundle = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [targetResponse, clientsData, responsiblesData] = await Promise.all([
+        apiService.getAct(actId),
+        apiService.getClients(),
+        apiService.getActResponsibles(),
+      ]);
+
+      const target = normalizeAct(targetResponse);
+      if (!target) {
+        setAct(null);
+        setError('Акт не найден.');
+        return;
+      }
+
+      setAct(target);
+      setClients(normalizeClientArray(clientsData));
+      setResponsibles(normalizeActResponsibleArray(responsiblesData));
+    } catch (loadError) {
+      setAct(null);
+      setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить данные акта.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [actId]);
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
+    void loadActBundle();
+  }, [loadActBundle]);
+
+  useEffect(() => {
+    if (!act?.id) {
+      setDocumentPreviewHtml('');
+      setDocumentPreviewError(null);
+      setDocumentPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    const loadPreview = async () => {
+      setDocumentPreviewLoading(true);
+      setDocumentPreviewError(null);
       try {
-        const [targetResponse, clientsData, responsiblesData] = await Promise.all([
-          apiService.getAct(actId),
-          apiService.getClients(),
-          apiService.getActResponsibles(),
-        ]);
-        const target = normalizeAct(targetResponse);
-        if (cancelled) return;
-        if (!target) {
-          setError('Акт не найден');
-          setAct(null);
-          setForm(null);
-          return;
-        }
-        setAct(target);
-        setForm(normalizeActToForm(target));
-        setClients(normalizeClientArray(clientsData));
-        setResponsibles(normalizeActResponsibleArray(responsiblesData));
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Не удалось загрузить данные');
-        }
+        const blob = await apiService.downloadActDocument(act.id, 'html', {
+          includeSignatureAndSeal: false,
+        });
+        const html = await blob.text();
+        if (!active) return;
+        setDocumentPreviewHtml(html);
+      } catch (previewError) {
+        if (!active) return;
+        setDocumentPreviewHtml('');
+        setDocumentPreviewError(
+          extractDisplayErrorMessage(previewError, 'Не удалось загрузить печатную форму акта.'),
+        );
       } finally {
-        if (!cancelled) setLoading(false);
+        if (active) {
+          setDocumentPreviewLoading(false);
+        }
       }
     };
 
-    void load();
+    void loadPreview();
+
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [actId]);
+  }, [act?.id, act?.updatedAt, act?.auditUpdatedAt]);
+
+  useEffect(() => {
+    if (!downloadMenuOpen) return undefined;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!downloadMenuRef.current) return;
+      if (!downloadMenuRef.current.contains(event.target as Node)) {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [downloadMenuOpen]);
 
   const selectedClient = useMemo(
-    () => clients.find((client) => String(client.id) === String(form?.clientId ?? '')) ?? null,
-    [clients, form?.clientId],
+    () => clients.find((client) => client.id === act?.clientId) ?? null,
+    [act?.clientId, clients],
   );
 
-  const filteredClients = useMemo(() => {
-    const searchValue = clientSearch.trim().toLowerCase();
-    return clients.filter((client) => {
-      if (!searchValue) return true;
-      return `${client.name} ${client.company ?? ''}`.toLowerCase().includes(searchValue);
-    });
-  }, [clientSearch, clients]);
+  const selectedResponsibleLabel = useMemo(() => {
+    if (act?.responsibleName?.trim()) {
+      return act.responsibleName;
+    }
 
-  const statusOptions = useMemo(
-    () =>
-      STATUS_VALUES.map((status) => ({
-        value: status,
-        label:
-          status === 'Created'
-            ? t('actStatusCreated') ?? 'Создан'
-            : status === 'Transferred'
-              ? t('actStatusTransferred') ?? 'Передано'
-              : status === 'Signed'
-                ? t('actStatusSigned') ?? 'Подписано'
-                : t('actStatusTerminated') ?? 'Расторгнуто',
-      })),
-    [t],
-  );
+    if (!act?.responsibleId) {
+      return t('actResponsibleNotSelected') ?? 'Не указан';
+    }
 
-  const handleChange = (field: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const value = event.target.value;
-    setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
+    return responsibles.find((responsible) => responsible.id === act.responsibleId)?.fullName
+      ?? `#${act.responsibleId}`;
+  }, [act?.responsibleId, act?.responsibleName, responsibles, t]);
+
+  const statusMeta: Record<ActStatus, { label: string; className: string }> = {
+    Created: {
+      label: t('actStatusCreated') ?? 'Создан',
+      className: 'bg-slate-100 text-slate-700 border border-slate-200',
+    },
+    Transferred: {
+      label: t('actStatusTransferred') ?? 'Передано',
+      className: 'bg-amber-100 text-amber-800 border border-amber-200',
+    },
+    Signed: {
+      label: t('actStatusSigned') ?? 'Подписано',
+      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    },
+    Terminated: {
+      label: t('actStatusTerminated') ?? 'Расторгнуто',
+      className: 'bg-rose-100 text-rose-700 border border-rose-200',
+    },
   };
 
-  const handleSave = async () => {
-    if (!form || !act) return;
-
-    if (!form.number.trim()) {
-      setError('Номер акта обязателен');
-      return;
+  const typeMeta = useMemo(() => {
+    if (act?.type === 'Income') {
+      return {
+        label: t('invoiceTypeIncomeShort') ?? 'Доходный',
+        className: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+      };
     }
 
-    if (!form.date) {
-      setError('Дата акта обязательна');
-      return;
+    if (act?.type === 'Expense') {
+      return {
+        label: t('invoiceTypeExpenseShort') ?? 'Расходный',
+        className: 'border border-rose-200 bg-rose-50 text-rose-700',
+      };
     }
 
-    const parsedAmount = Number(String(form.amount).replace(/\s+/g, '').replace(',', '.'));
-    if (Number.isNaN(parsedAmount)) {
-      setError('Введите корректную сумму');
-      return;
-    }
-
-    const payload: ActInput = {
-      number: form.number.trim(),
-      title: form.title.trim() ? form.title.trim() : undefined,
-      date: fromInputToApiDate(form.date) ?? form.date,
-      amount: parsedAmount,
-      creationMode: act.creationMode ?? undefined,
-      invoiceId: act.invoiceId ?? undefined,
-      invoiceNumber: form.invoiceNumber.trim() ? form.invoiceNumber.trim() : undefined,
-      counterpartyInn: form.counterpartyInn.trim() ? form.counterpartyInn.trim() : undefined,
-      status: form.status,
-      clientId: form.clientId ? Number(form.clientId) : undefined,
-      responsibleId: form.responsibleId ? Number(form.responsibleId) : undefined,
-      comment: form.comment.trim() ? form.comment.trim() : undefined,
+    return {
+      label: 'Без типа',
+      className: 'border border-slate-200 bg-slate-50 text-slate-600',
     };
+  }, [act?.type, t]);
 
-    setSaving(true);
-    setError(null);
+  const creationModeLabel = useMemo(() => {
+    if (act?.creationMode === 'Full') return 'Полностью по счету';
+    if (act?.creationMode === 'Partial') return 'Частично по счету';
+    return 'Ручной акт';
+  }, [act?.creationMode]);
+
+  const lineItems = useMemo(() => (act?.lineItems ?? []).filter((item) => Boolean(item?.name || item?.sourceKey)), [act?.lineItems]);
+  const currentStatusMeta = act ? (statusMeta[act.status] ?? statusMeta.Created) : statusMeta.Created;
+  const printableAmount = formatMoney(act?.amount);
+  const actLink = useMemo(() => {
+    if (typeof window === 'undefined' || !act?.id) {
+      return '';
+    }
+
+    const url = new URL(window.location.href);
+    url.pathname = `/acts/${act.id}`;
+    return `${url.origin}${url.pathname}${url.search}${url.hash}`;
+  }, [act?.id]);
+
+  const handlePrintDocument = async () => {
+    if (!act?.id) return;
+
+    let previewWindow: Window | null | undefined;
+    try {
+      previewWindow = window.open('', '_blank', 'width=1180,height=900');
+      const blob = await apiService.downloadActDocument(act.id, 'pdf', {
+        includeSignatureAndSeal: false,
+      });
+      openBlobInWindow(blob, previewWindow, { autoPrint: true });
+    } catch (printError) {
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
+      setError(getDocumentActionErrorMessage(printError, 'Не удалось открыть печатную форму акта.'));
+    }
+  };
+
+  const handleDownloadDocument = async (
+    format: DocumentFormat,
+    includeSignatureAndSeal: boolean,
+  ) => {
+    if (!act?.id) return;
+
+    try {
+      const blob = await apiService.downloadActDocument(act.id, format, {
+        includeSignatureAndSeal,
+      });
+      const extension = format === 'pdf' ? 'pdf' : 'doc';
+      downloadBlob(`act-${act.number || act.id}.${extension}`, blob);
+      setDownloadMenuOpen(false);
+    } catch (downloadError) {
+      setError(getDocumentActionErrorMessage(downloadError, 'Не удалось скачать документ акта.'));
+    }
+  };
+
+  const handleActSubmit = async (payload: ActInput) => {
+    if (!act) return;
+
+    setEditorSubmitting(true);
+    setEditorError(null);
     try {
       const updated = normalizeAct(await apiService.updateAct(act.id, payload));
       if (!updated) {
-        throw new Error('Не удалось прочитать обновленный акт');
+        throw new Error('Не удалось прочитать обновленный акт.');
       }
+
       setAct(updated);
-      setForm(normalizeActToForm(updated));
-      setEditMode(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось сохранить');
+      setEditorOpen(false);
+      toast.success('Изменения по акту сохранены.');
+    } catch (submitError) {
+      const message = extractDisplayErrorMessage(submitError, 'Не удалось сохранить акт.');
+      setEditorError(message);
+      throw submitError;
     } finally {
-      setSaving(false);
+      setEditorSubmitting(false);
     }
   };
 
-  const handlePrint = async () => {
+  const handleStatusAction = useCallback(async (
+    targetStatus: ActStatus,
+    actionKey: Extract<PageAction, 'transferred' | 'signed'>,
+    title: string,
+    description: string,
+    confirmLabel: string,
+    successMessage: string,
+  ) => {
     if (!act) return;
-    setError(null);
-    try {
-      const previewWindow = window.open('', '_blank', 'width=1180,height=900');
-      const blob = await apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true });
-      openBlobInWindow(blob, previewWindow, { autoPrint: true });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось открыть документ акта');
-    }
-  };
 
-  const handleDownloadPdf = async () => {
+    const accepted = await confirm({
+      title,
+      description,
+      confirmLabel,
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+    if (!accepted) return;
+
+    setPageActionLoading(actionKey);
+    try {
+      const updated = normalizeAct(await apiService.updateAct(act.id, buildActPayload(act, { status: targetStatus })));
+      if (!updated) {
+        throw new Error('Не удалось обновить статус акта.');
+      }
+
+      setAct(updated);
+      setError(null);
+      toast.success(successMessage);
+    } catch (statusError) {
+      setError(extractDisplayErrorMessage(statusError, 'Не удалось обновить статус акта.'));
+    } finally {
+      setPageActionLoading(null);
+    }
+  }, [act, confirm, toast]);
+
+  const handleDelete = useCallback(async () => {
     if (!act) return;
-    setError(null);
-    try {
-      const blob = await apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true });
-      downloadBlob(`act-${act.number || act.id}.pdf`, blob);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось скачать документ акта');
-    }
-  };
 
-  if (loading || !form || !act) {
+    const accepted = await confirm({
+      title: 'Удалить акт',
+      description: 'Удалить акт без возможности восстановления?',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
+    setPageActionLoading('delete');
+    try {
+      await apiService.deleteAct(act.id);
+      toast.success('Акт удален.');
+      onBack();
+    } catch (deleteError) {
+      setError(extractDisplayErrorMessage(deleteError, 'Не удалось удалить акт.'));
+    } finally {
+      setPageActionLoading(null);
+    }
+  }, [act, confirm, onBack, toast]);
+
+  const handleSend = useCallback(async () => {
+    if (!act) return;
+
+    const accepted = await confirm({
+      title: 'Отправить акт',
+      description: 'Открыть черновик письма со ссылкой на акт для отправки клиенту?',
+      confirmLabel: 'Открыть письмо',
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+    if (!accepted) return;
+
+    setPageActionLoading('send');
+    try {
+      const subject = encodeURIComponent(`Акт №${act.number || act.id} от ${formatDate(act.date)}`);
+      const body = encodeURIComponent(
+        `Добрый день!\n\nНаправляю акт №${act.number || act.id} от ${formatDate(act.date)}.\n${actLink}\n\nС уважением.`,
+      );
+
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && actLink) {
+        try {
+          await navigator.clipboard.writeText(actLink);
+        } catch {
+          // Clipboard is optional here.
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        window.location.href = `mailto:${selectedClient?.email ?? ''}?subject=${subject}&body=${body}`;
+      }
+
+      toast.success(
+        selectedClient?.email
+          ? `Открыт черновик письма для ${selectedClient.email}.`
+          : 'Открыт черновик письма со ссылкой на акт.',
+      );
+    } catch (sendError) {
+      setError(extractDisplayErrorMessage(sendError, 'Не удалось подготовить отправку акта.'));
+    } finally {
+      setPageActionLoading(null);
+    }
+  }, [act, actLink, confirm, selectedClient?.email, toast]);
+
+  const transferredDisabled = !canEdit || act?.status === 'Transferred' || act?.status === 'Signed' || act?.status === 'Terminated';
+  const signedDisabled = !canEdit || act?.status === 'Signed' || act?.status === 'Terminated';
+
+  if (loading) {
     return (
       <div className="p-8">
-        <Loader2 className="h-6 w-6 animate-spin" />
+        <div className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Загрузка акта...
+        </div>
       </div>
     );
   }
 
-  const lineItems = act.lineItems ?? [];
-  const creationModeLabel =
-    act.creationMode === 'Full'
-      ? 'Полностью по счету'
-      : act.creationMode === 'Partial'
-        ? 'Частично по счету'
-        : 'Ручной акт';
+  if (!act) {
+    return (
+      <div className="p-8">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
+          {error ?? 'Акт не найден.'}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
-      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 pt-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Назад
-          </button>
-
-          <div className="flex items-center gap-2">
+    <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
+      <div className="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => void handlePrint()}
+              onClick={onBack}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Назад
+            </button>
+
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">
+                Акт №{act.number || '—'} от {formatDate(act.date)}
+              </h2>
+              <p className="text-sm text-slate-500">
+                Просмотр акта с действиями и документом для печати/отправки
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>
+              {currentStatusMeta.label}
+            </span>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorError(null);
+                  setEditorOpen(true);
+                }}
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+                aria-label="Редактировать акт"
+                title="Редактировать акт"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="space-y-4 bg-slate-100 px-4 py-4">
+          {error ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="rounded-xl border border-slate-300 bg-white p-3">
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Печатный шаблон акта</h3>
+                </div>
+                {documentPreviewLoading ? (
+                  <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Загружаем шаблон...
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                {documentPreviewError ? (
+                  <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-rose-600">
+                    {documentPreviewError}
+                  </div>
+                ) : documentPreviewHtml ? (
+                  <iframe
+                    title={`Печатный шаблон акта ${act.number || ''}`.trim()}
+                    srcDoc={documentPreviewHtml}
+                    sandbox="allow-same-origin"
+                    className="h-[72rem] w-full bg-white"
+                  />
+                ) : (
+                  <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-slate-500">
+                    Подготовка печатного шаблона...
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside className="space-y-3">
+              <div className="rounded-lg border border-slate-300 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xl font-semibold">{printableAmount}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>
+                      {currentStatusMeta.label}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <div className="mb-2 flex items-center gap-2 font-medium">
+                  <Link2 className="h-4 w-4" />
+                  Ссылка на акт
+                </div>
+                {actLink ? (
+                  <a href={actLink} className="break-all text-blue-600 underline">
+                    {actLink}
+                  </a>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <div className="mb-3 flex items-center gap-2 font-medium">
+                  <List className="h-4 w-4" />
+                  Документ и основание
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Счет</div>
+                    {act.invoiceId && act.invoiceNumber && onOpenInvoice ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenInvoice(act.invoiceId as number, act.type ?? undefined)}
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+                      >
+                        <div className="font-medium text-blue-700 underline decoration-blue-300 underline-offset-2">
+                          Счет №{act.invoiceNumber}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">Открыть связанный счет</div>
+                      </button>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
+                        Связанный счет не указан.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-6">
+                    <p><span className="text-slate-500">Тип:</span> {typeMeta.label}</p>
+                    <p><span className="text-slate-500">Режим:</span> {creationModeLabel}</p>
+                    <p><span className="text-slate-500">Дата акта:</span> {formatDate(act.date)}</p>
+                    <p><span className="text-slate-500">ИНН:</span> {act.counterpartyInn || '—'}</p>
+                    <p><span className="text-slate-500">Ответственный:</span> {selectedResponsibleLabel}</p>
+                    <p><span className="text-slate-500">Комментарий:</span> {act.comment?.trim() || '—'}</p>
+                    <p><span className="text-slate-500">Позиции:</span> {lineItems.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
+                <div className="mb-3 flex items-center gap-2 font-medium">
+                  <UserRound className="h-4 w-4" />
+                  Контрагент
+                </div>
+                <p>
+                  <span className="text-slate-500">Клиент:</span>{' '}
+                  {selectedClient && onOpenClient ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClient(selectedClient.id)}
+                      className="text-blue-600 underline hover:text-blue-700"
+                    >
+                      {selectedClient.name}
+                    </button>
+                  ) : (
+                    selectedClient?.name || act.clientName || '—'
+                  )}
+                </p>
+                {selectedClient?.clientStatus ? (
+                  <div className="mt-2">
+                    <ClientStatusBadge status={selectedClient.clientStatus} />
+                  </div>
+                ) : null}
+                <p className="mt-2"><span className="text-slate-500">Телефон:</span> {selectedClient?.phone || '—'}</p>
+                <p><span className="text-slate-500">Email:</span> {selectedClient?.email || '—'}</p>
+                <p><span className="text-slate-500">Адрес:</span> {selectedClient?.address || '—'}</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
+                <div className="mb-3 flex items-center gap-2 font-medium">
+                  <FileText className="h-4 w-4" />
+                  Позиции акта
+                </div>
+                {lineItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
+                    У акта пока нет отдельных строк.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {lineItems.map((item, index) => (
+                      <div
+                        key={item.id ?? item.sourceKey ?? index}
+                        className="rounded-lg border border-slate-200 px-3 py-2"
+                      >
+                        <div className="text-sm font-medium text-slate-900">
+                          {index + 1}. {item.name || 'Без названия'}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {Number(item.quantity ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {item.unit || 'ед.'}
+                          {' • '}
+                          {formatMoney(item.price ?? 0)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <ObjectAuditLauncher
+                objectType="act"
+                objectId={act.id}
+                createdAt={act.createdAt}
+                createdByUserName={act.auditCreatedByUserName}
+                updatedAt={act.auditUpdatedAt}
+                updatedByUserName={act.auditUpdatedByUserName}
+                isDeleted={act.auditIsDeleted}
+                deletedAt={act.auditDeletedAt}
+                deletedByUserName={act.auditDeletedByUserName}
+                triggerTitle="Аудит акта"
+                triggerDescription="Паспорт акта и история изменений открываются в отдельном окне."
+                title="История акта"
+                className="rounded-lg border-slate-300 bg-white"
+                buttonClassName="bg-slate-50"
+              />
+            </aside>
+          </div>
+
+          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5'}`}>
+            <button
+              type="button"
+              onClick={() => void handleSend()}
+              disabled={pageActionLoading === 'send'}
+              className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pageActionLoading === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Отправить
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handlePrintDocument()}
+              className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
             >
               <Printer className="h-4 w-4" />
               Печать
             </button>
 
-            <button
-              type="button"
-              onClick={() => void handleDownloadPdf()}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              <Download className="h-4 w-4" />
-              Скачать PDF
-            </button>
-
-            {!editMode ? (
+            <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
-                onClick={() => setEditMode(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                onClick={() => setDownloadMenuOpen((prev) => !prev)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
               >
-                <Pencil className="h-4 w-4" />
-                {t('edit') ?? 'Редактировать'}
+                <Download className="h-4 w-4" />
+                Скачать
+                <ChevronDown className="h-4 w-4" />
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setForm(act ? normalizeActToForm(act) : form);
-                  setEditMode(false);
-                  setError(null);
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              >
-                Отмена
-              </button>
-            )}
-
-            <button
-              type="button"
-              disabled={!editMode || saving}
-              onClick={() => void handleSave()}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Сохранить
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-5">
-            <h1 className="text-2xl font-bold text-slate-900">Редактировать акт</h1>
-            <p className="text-sm text-slate-500">Создайте или обновите данные по акту</p>
-          </div>
-
-          {error ? (
-            <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-          ) : null}
-
-          <div className="mb-4">
-            <ObjectAuditLauncher
-              objectType="act"
-              objectId={act.id}
-              createdAt={act.createdAt}
-              createdByUserName={act.auditCreatedByUserName}
-              updatedAt={act.auditUpdatedAt}
-              updatedByUserName={act.auditUpdatedByUserName}
-              isDeleted={act.auditIsDeleted}
-              deletedAt={act.auditDeletedAt}
-              deletedByUserName={act.auditDeletedByUserName}
-              triggerTitle="Аудит акта"
-              triggerDescription="Паспорт акта и история изменений открываются в отдельном окне."
-              title="История акта"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Номер акта</span>
-              <input type="text" value={form.number} onChange={handleChange('number')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Дата</span>
-              <input type="date" value={form.date} onChange={handleChange('date')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Сумма</span>
-              <input type="number" step="0.01" value={form.amount} onChange={handleChange('amount')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Счёт</span>
-              <input type="text" value={form.invoiceNumber} onChange={handleChange('invoiceNumber')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="font-medium text-slate-700">Название</span>
-              <input type="text" value={form.title} onChange={handleChange('title')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-
-            <div className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Контрагент</span>
-              <div className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700">
-                {selectedClient?.name ?? 'Клиент не выбран'}
-              </div>
-              {selectedClient?.clientStatus ? (
-                <div className="mt-1">
-                  <ClientStatusBadge status={selectedClient.clientStatus} />
-                </div>
-              ) : null}
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={!editMode}
-                  onClick={() => setClientPickerOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Search className="h-4 w-4" />
-                  Выбрать из справочника
-                </button>
-                {selectedClient?.id ? (
+              {downloadMenuOpen ? (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                   <button
                     type="button"
-                    onClick={() => onOpenClient?.(selectedClient.id)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm text-indigo-700 hover:bg-indigo-100"
+                    onClick={() => void handleDownloadDocument('pdf', false)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
-                    <UserRound className="h-4 w-4" />
-                    Открыть карточку
+                    <span>PDF без подписи и печати</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
                   </button>
-                ) : null}
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('pdf', true)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>PDF с подписью и печатью</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
+                  </button>
+                  <div className="my-1 border-t border-slate-100" />
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', false)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Word без подписи и печати</span>
+                    <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', true)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Word с подписью и печатью</span>
+                    <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                </div>
+              ) : null}
             </div>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">ИНН контрагента</span>
-              <input type="text" value={form.counterpartyInn} onChange={handleChange('counterpartyInn')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Статус</span>
-              <select value={form.status} onChange={handleChange('status')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50">
-                {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Ответственный</span>
-              <select value={form.responsibleId} onChange={handleChange('responsibleId')} disabled={!editMode} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50">
-                <option value="">Выберите ответственного</option>
-                {responsibles.map((responsible) => (
-                  <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="font-medium text-slate-700">Комментарий</span>
-              <textarea value={form.comment} onChange={handleChange('comment')} disabled={!editMode} className="min-h-[96px] rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-            </label>
-          </div>
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Позиции акта</h2>
-                <p className="text-sm text-slate-500">Режим: {creationModeLabel}</p>
-              </div>
-              <div className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 shadow-sm">
-                Сумма акта: {Number(act.amount ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => void handleStatusAction(
+                'Transferred',
+                'transferred',
+                'Передать акт',
+                'Подтвердите перевод акта в статус «Передано».',
+                'Передан',
+                'Статус акта обновлен: Передано.',
+              )}
+              disabled={transferredDisabled || pageActionLoading === 'transferred'}
+              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                act.status === 'Transferred'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {pageActionLoading === 'transferred' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Передан
+            </button>
 
-            {lineItems.length > 0 ? (
-              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">№</th>
-                      <th className="px-4 py-3">Услуга</th>
-                      <th className="px-4 py-3 text-right">Кол-во</th>
-                      <th className="px-4 py-3 text-center">Ед.</th>
-                      <th className="px-4 py-3 text-right">Цена</th>
-                      <th className="px-4 py-3 text-right">Сумма</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {lineItems.map((item, index) => (
-                      <tr key={item.id ?? item.sourceKey ?? index}>
-                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
-                        <td className="px-4 py-3 text-slate-900">{item.name}</td>
-                        <td className="px-4 py-3 text-right text-slate-700">{Number(item.quantity ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}</td>
-                        <td className="px-4 py-3 text-center text-slate-700">{item.unit}</td>
-                        <td className="px-4 py-3 text-right text-slate-700">{Number(item.price ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-900">{Number((item.quantity ?? 0) * (item.price ?? 0)).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-500">
-                У этого акта пока нет отдельных строк. Для старых актов документ будет построен по общей сумме.
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => void handleStatusAction(
+                'Signed',
+                'signed',
+                'Подписать акт',
+                'Подтвердите перевод акта в статус «Подписано».',
+                'Подписан',
+                'Статус акта обновлен: Подписано.',
+              )}
+              disabled={signedDisabled || pageActionLoading === 'signed'}
+              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                act.status === 'Signed'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {pageActionLoading === 'signed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Подписан
+            </button>
+
+            {canDelete ? (
+              <button
+                type="button"
+                onClick={() => void handleDelete()}
+                disabled={pageActionLoading === 'delete'}
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pageActionLoading === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Удалить
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
 
-      {clientPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => setClientPickerOpen(false)}>
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-900">Выберите контрагента</h3>
-            <div className="mt-3">
-              <input
-                type="text"
-                value={clientSearch}
-                onChange={(event) => setClientSearch(event.target.value)}
-                placeholder="Поиск по имени или компании"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="mt-3 max-h-[360px] overflow-auto rounded-lg border border-slate-200">
-              {filteredClients.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">Клиенты не найдены</div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {filteredClients.map((client) => (
-                    <button
-                      key={client.id}
-                      type="button"
-                      className="flex w-full items-start justify-between px-4 py-3 text-left hover:bg-slate-50"
-                      onClick={() => {
-                        setForm((prev) => (prev ? { ...prev, clientId: String(client.id) } : prev));
-                        setClientPickerOpen(false);
-                        setClientSearch('');
-                      }}
-                    >
-                      <div>
-                        <div className="font-medium text-slate-900">{client.name}</div>
-                        {client.company ? <div className="text-xs text-slate-500">{client.company}</div> : null}
-                      </div>
-                      {client.clientStatus?.name ? <div className="text-xs text-slate-500">{client.clientStatus.name}</div> : null}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setClientPickerOpen(false)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ActModal
+        open={editorOpen}
+        mode="edit"
+        act={act}
+        onClose={() => {
+          if (editorSubmitting) return;
+          setEditorError(null);
+          setEditorOpen(false);
+        }}
+        onSubmit={handleActSubmit}
+        submitting={editorSubmitting}
+        errorMessage={editorError}
+        clients={clients}
+        responsibles={responsibles}
+        lookupsLoading={loading}
+      />
     </div>
   );
 }

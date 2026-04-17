@@ -1,59 +1,41 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.Acts;
 
 public static class ActDocumentTemplateEngine
 {
+    private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+
     public static string RenderHtml(
         Act act,
         IReadOnlyCollection<ActLineItem> lineItems,
         LegalEntity? mainCompany,
         bool includeSignatureAndSeal)
     {
-        var sellerName = Encode(mainCompany?.FullName ?? mainCompany?.ShortName ?? "—");
-        var sellerInn = Encode(mainCompany?.Inn);
-        var sellerAddress = Encode(mainCompany?.Address);
-        var sellerDirector = Encode(mainCompany?.Director ?? mainCompany?.ShortName ?? string.Empty);
-
-        var buyerName = Encode(
-            act.Client?.Name
-            ?? act.Invoice?.Client?.Name
-            ?? act.Invoice?.ExpenseClient?.Name
-            ?? act.Invoice?.CounterpartyName
-            ?? "—");
-        var buyerCompany = Encode(
-            act.Client?.Company
-            ?? act.Invoice?.Client?.Company
-            ?? act.Invoice?.ExpenseClient?.Company);
-        var buyerAddress = Encode(
-            act.Client?.Address
-            ?? act.Invoice?.Client?.Address
-            ?? act.Invoice?.ExpenseClient?.Address);
-        var buyerPhone = Encode(
-            act.Client?.Phone
-            ?? act.Invoice?.Client?.Phone
-            ?? act.Invoice?.ExpenseClient?.Phone);
-        var buyerEmail = Encode(
-            act.Client?.Email
-            ?? act.Invoice?.Client?.Email
-            ?? act.Invoice?.ExpenseClient?.Email);
-
+        var seller = BuildSeller(mainCompany);
+        var buyer = BuildBuyer(act);
         var effectiveLineItems = BuildEffectiveLineItems(act, lineItems);
+        var basis = BuildBasis(act);
+        var totalAmount = effectiveLineItems.Sum(item => item.Total);
+        var totalWords = SpellMoney(totalAmount);
+        var documentTitle = $"Акт № {act.Number} от {FormatLongDate(act.Date)}";
+
         var rows = new StringBuilder();
-        var index = 1;
-        foreach (var item in effectiveLineItems)
+        for (var index = 0; index < effectiveLineItems.Count; index++)
         {
+            var item = effectiveLineItems[index];
             rows.AppendLine("<tr>");
-            rows.AppendLine($"<td class=\"c\">{index}</td>");
-            rows.AppendLine($"<td>{Encode(item.Name)}</td>");
-            rows.AppendLine($"<td class=\"r\">{item.Quantity:0.####}</td>");
-            rows.AppendLine($"<td class=\"c\">{Encode(item.Unit)}</td>");
-            rows.AppendLine($"<td class=\"r\">{item.Price:N2}</td>");
-            rows.AppendLine($"<td class=\"r\">{item.Total:N2}</td>");
+            rows.AppendLine($"<td class=\"bor item-index\">{index + 1}</td>");
+            rows.AppendLine($"<td class=\"bor item-name\">{Encode(item.Name)}</td>");
+            rows.AppendLine($"<td class=\"bor item-qty\">{FormatQuantity(item.Quantity)}</td>");
+            rows.AppendLine($"<td class=\"bor item-unit\">{Encode(item.Unit)}</td>");
+            rows.AppendLine($"<td class=\"bor item-price\">{FormatMoney(item.Price)}</td>");
+            rows.AppendLine($"<td class=\"bor item-sum\">{FormatMoney(item.Total)}</td>");
             rows.AppendLine("</tr>");
-            index++;
         }
 
         var signatureHtml = includeSignatureAndSeal
@@ -64,112 +46,307 @@ public static class ActDocumentTemplateEngine
             : string.Empty;
         var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
             ? string.Empty
-            : $"<div class=\"comment\"><strong>Комментарий:</strong> {Encode(act.Comment)}</div>";
+            : $"<div class=\"mar-t-10 comment\"><b>Комментарий:</b> {Encode(act.Comment)}</div>";
 
         return $$"""
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Акт №{{Encode(act.Number)}} от {{act.Date:dd.MM.yyyy}}</title>
+  <title>{{Encode(documentTitle)}}</title>
   <style>
-    @page { size: A4; margin: 14mm 12mm 16mm; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #111; margin: 0; }
-    .doc { width: 100%; }
-    .top { margin-bottom: 18px; }
-    .title { text-align: center; font-size: 24px; font-weight: 700; margin: 18px 0 14px; }
-    .meta, .parties, .items, .totals, .signatures { width: 100%; border-collapse: collapse; }
-    .meta td, .parties td { vertical-align: top; padding: 4px 0; }
-    .parties .label { width: 120px; color: #555; font-weight: 700; }
-    .items { margin-top: 16px; }
-    .items th, .items td { border: 1px solid #111; padding: 6px 8px; vertical-align: top; }
-    .items th { text-align: center; font-weight: 700; }
-    .totals { margin-top: 10px; }
-    .totals td { padding: 2px 0; }
-    .r { text-align: right; }
-    .c { text-align: center; }
-    .comment { margin-top: 12px; }
-    .signatures { margin-top: 30px; table-layout: fixed; }
-    .signatures td { vertical-align: bottom; }
-    .line { border-top: 1px solid #111; height: 34px; }
-    .signature, .seal { display: block; margin: 0 auto; }
-    .signature { max-height: 48px; max-width: 140px; }
-    .seal { max-height: 120px; max-width: 120px; }
-    .caption { font-size: 12px; text-align: center; padding-top: 4px; }
-    .summary { margin-top: 14px; font-weight: 700; }
+    @page { size: A4; margin: 45px 0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #000000;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: 12px;
+      line-height: 1.25;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .page-content {
+      width: 100%;
+      background: #ffffff;
+    }
+    .page-content-in {
+      overflow: hidden;
+      zoom: 1;
+    }
+    .p-center {
+      width: 675px;
+      padding: 20px;
+      margin-left: auto;
+      margin-right: auto;
+      background: #ffffff;
+    }
+    .document-template,
+    .document-template div,
+    .document-template span,
+    .document-template table,
+    .document-template tbody,
+    .document-template thead,
+    .document-template tfoot,
+    .document-template tr,
+    .document-template th,
+    .document-template td {
+      font-size: 12px;
+    }
+    .document-template table {
+      width: 100%;
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+    .text-c { text-align: center; }
+    .v-al-t { vertical-align: top; }
+    .doc-title {
+      margin: 12px 0;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .party-table td {
+      padding: 0;
+      line-height: 1.25;
+      vertical-align: top;
+    }
+    .party-label {
+      width: 88px;
+      padding-right: 8px !important;
+      white-space: nowrap;
+    }
+    .party-value {
+      font-weight: 700;
+    }
+    tr.pad-t-10 > td { padding-top: 10px !important; }
+    tr.pad-b-10 > td { padding-bottom: 10px !important; }
+    .bor {
+      border: 1px solid #000000;
+    }
+    .items-table {
+      margin-top: 2px;
+      border: 2px solid #000000;
+    }
+    .items-table th,
+    .items-table td {
+      padding: 4px 6px;
+      line-height: 1.15;
+      vertical-align: top;
+    }
+    .heading th {
+      font-weight: 700;
+      text-align: center;
+    }
+    .item-index {
+      width: 5%;
+      text-align: center;
+      vertical-align: middle !important;
+    }
+    .item-name {
+      width: 45%;
+      word-break: break-word;
+    }
+    .item-qty {
+      width: 10%;
+      text-align: right;
+      vertical-align: middle !important;
+      white-space: nowrap;
+    }
+    .item-unit {
+      width: 10%;
+      text-align: right;
+      vertical-align: middle !important;
+      white-space: nowrap;
+    }
+    .item-price,
+    .item-sum {
+      width: 15%;
+      text-align: right;
+      vertical-align: middle !important;
+      white-space: nowrap;
+    }
+    .mar-t-5 { margin-top: 5px !important; }
+    .mar-t-10 { margin-top: 10px !important; }
+    .mar-t-15 { margin-top: 15px !important; }
+    .totals-table td {
+      padding: 0;
+      vertical-align: top;
+    }
+    .totals-label {
+      width: 85%;
+      text-align: right;
+      padding-right: 8px !important;
+      font-weight: 700;
+    }
+    .totals-value {
+      width: 15%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .summary-words {
+      font-weight: 700;
+    }
+    .acceptance,
+    .comment {
+      line-height: 1.4;
+    }
+    .signature-area {
+      min-height: 160px;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .signature-table td {
+      border: none;
+    }
+    .signature-role {
+      width: 49%;
+      font-size: 10pt;
+      font-weight: 700;
+    }
+    .signature-gap {
+      width: 2%;
+    }
+    .signature-party {
+      padding-top: 5px;
+      font-size: 10pt;
+    }
+    .signature-line-cell {
+      position: relative;
+      height: 58px;
+      padding: 0 6px 4px 6px;
+      border-bottom: 1px solid #000000;
+      text-align: right;
+      vertical-align: bottom;
+      font-size: 10pt;
+    }
+    .signature-line-text {
+      position: relative;
+      z-index: 3;
+      display: inline-block;
+      background: #ffffff;
+      padding-left: 6px;
+    }
+    .signature {
+      position: absolute;
+      left: 0;
+      bottom: 8px;
+      z-index: 3;
+      max-width: 150px;
+      max-height: 42px;
+      object-fit: contain;
+    }
+    .seal {
+      position: absolute;
+      left: 88px;
+      bottom: -22px;
+      z-index: 2;
+      max-width: 118px;
+      max-height: 118px;
+      object-fit: contain;
+      opacity: 0.95;
+    }
   </style>
 </head>
 <body>
-  <div class="doc">
-    <div class="top">
-      <table class="meta">
-        <tr>
-          <td><strong>{{sellerName}}</strong></td>
-          <td class="r">Основание: счет №{{Encode(act.InvoiceNumber ?? act.Invoice?.Account ?? "—")}}</td>
-        </tr>
-        <tr>
-          <td>ИНН {{sellerInn}}{{(string.IsNullOrWhiteSpace(mainCompany?.Address) ? string.Empty : $", {sellerAddress}")}}</td>
-          <td class="r">Дата: {{act.Date:dd.MM.yyyy}}</td>
-        </tr>
-      </table>
-      <div class="title">АКТ №{{Encode(act.Number)}} от {{act.Date:dd.MM.yyyy}}</div>
+  <div class="page-content">
+    <div class="page-content-in p-center pad-pdf-p">
+      <div class="document-template act-template">
+        <div class="doc-title text-c">{{Encode(documentTitle)}}</div>
+
+        <table class="party-table">
+          <tbody>
+            <tr class="pad-t-10">
+              <td class="party-label v-al-t">Исполнитель:</td>
+              <td class="party-value"><b>{{seller.RequisitesHtml}}</b></td>
+            </tr>
+            <tr class="pad-t-10">
+              <td class="party-label v-al-t">Заказчик:</td>
+              <td class="party-value"><b>{{buyer.RequisitesHtml}}</b></td>
+            </tr>
+            <tr class="pad-t-10 pad-b-10">
+              <td class="party-label v-al-t">Основание:</td>
+              <td class="party-value"><b>{{Encode(basis)}}</b></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table class="items-table">
+          <thead>
+            <tr class="heading">
+              <th class="bor item-index">№</th>
+              <th class="bor item-name">Наименование работ, услуг</th>
+              <th class="bor item-qty">Кол-во</th>
+              <th class="bor item-unit">Ед</th>
+              <th class="bor item-price">Цена</th>
+              <th class="bor item-sum">Сумма</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{rows}}
+          </tbody>
+        </table>
+
+        <table class="totals-table mar-t-5">
+          <tbody>
+            <tr>
+              <td class="totals-label">Итого:</td>
+              <td class="totals-value">{{FormatMoney(totalAmount)}}</td>
+            </tr>
+            <tr>
+              <td class="totals-label">Без налога (НДС):</td>
+              <td class="totals-value">-</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div>
+          <div class="mar-t-5">Всего оказано услуг {{effectiveLineItems.Count}}, на сумму {{FormatMoney(totalAmount)}} руб.</div>
+          <div class="summary-words">{{Encode(totalWords)}}</div>
+        </div>
+
+        <div class="mar-t-15 acceptance">
+          Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объему, качеству и срокам оказания услуг не имеет.
+        </div>
+        {{commentHtml}}
+        <br />
+
+        <div class="signature-area">
+          <table class="signature-table">
+            <tbody>
+              <tr>
+                <td class="signature-role">ИСПОЛНИТЕЛЬ</td>
+                <td class="signature-gap"></td>
+                <td class="signature-role">ЗАКАЗЧИК</td>
+              </tr>
+              <tr>
+                <td class="signature-party">{{Encode(seller.SignaturePartyName)}}</td>
+                <td class="signature-gap"></td>
+                <td class="signature-party">{{Encode(buyer.SignaturePartyName)}}</td>
+              </tr>
+              <tr>
+                <td class="signature-line-cell">
+                  {{signatureHtml}}
+                  {{sealHtml}}
+                  <span class="signature-line-text">/ {{Encode(seller.SignatoryShortName)}} /</span>
+                </td>
+                <td class="signature-gap"></td>
+                <td class="signature-line-cell">
+                  <span class="signature-line-text">/ {{Encode(buyer.SignatoryShortName)}} /</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-
-    <table class="parties">
-      <tr>
-        <td class="label">Исполнитель:</td>
-        <td>{{sellerName}}</td>
-      </tr>
-      <tr>
-        <td class="label">Заказчик:</td>
-        <td>
-          <div>{{buyerName}}{{(string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(buyerCompany)) ? string.Empty : $" — {buyerCompany}")}}</div>
-          <div>{{buyerAddress}}</div>
-          <div>{{(string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(buyerPhone)) ? string.Empty : $"Тел.: {buyerPhone}")}}{{(string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(buyerEmail)) ? string.Empty : $" {buyerEmail}")}}</div>
-        </td>
-      </tr>
-    </table>
-
-    <table class="items">
-      <thead>
-        <tr>
-          <th style="width: 6%">№</th>
-          <th>Услуги</th>
-          <th style="width: 10%">Кол-во</th>
-          <th style="width: 10%">Ед.</th>
-          <th style="width: 14%">Цена</th>
-          <th style="width: 16%">Сумма</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{rows}}
-      </tbody>
-    </table>
-
-    <div class="summary">Итого: {{act.Amount:N2}} руб.</div>
-    {{commentHtml}}
-
-    <table class="signatures">
-      <tr>
-        <td style="width: 26%;"><strong>Исполнитель</strong></td>
-        <td style="width: 28%;" class="line c">{{signatureHtml}}</td>
-        <td style="width: 10%;" class="c">{{sealHtml}}</td>
-        <td style="width: 36%;" class="line c">{{sellerDirector}}</td>
-      </tr>
-      <tr>
-        <td></td>
-        <td class="caption">подпись</td>
-        <td></td>
-        <td class="caption">расшифровка подписи</td>
-      </tr>
-    </table>
   </div>
 </body>
 </html>
 """;
     }
 
-    private static IReadOnlyCollection<RenderedActLineItem> BuildEffectiveLineItems(
+    private static List<RenderedActLineItem> BuildEffectiveLineItems(
         Act act,
         IReadOnlyCollection<ActLineItem> lineItems)
     {
@@ -183,13 +360,283 @@ public static class ActDocumentTemplateEngine
         }
 
         var title = string.IsNullOrWhiteSpace(act.Title)
-            ? $"Услуги по акту №{act.Number}"
+            ? $"Услуги по акту № {act.Number}"
             : act.Title.Trim();
 
         return
         [
-            new RenderedActLineItem(title, 1m, "усл.ед.", act.Amount)
+            new RenderedActLineItem(title, 1m, "усл.", act.Amount),
         ];
+    }
+
+    private static SellerInfo BuildSeller(LegalEntity? mainCompany)
+    {
+        var bankAccount = ParseBankAccounts(mainCompany?.BankAccountsJson)
+            .OrderByDescending(account => string.Equals(account.AccountType?.Trim(), "Основной", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(account => string.IsNullOrWhiteSpace(account.AccountNumber) ? 1 : 0)
+            .FirstOrDefault(account => !string.IsNullOrWhiteSpace(account.AccountNumber))
+            ?? new BankAccountInfo();
+
+        var fullName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Организация");
+        var signaturePartyName = FirstNotEmpty(mainCompany?.ShortName, mainCompany?.FullName, "Организация");
+        var signatoryShortName = BuildPersonShortName(
+            ParsePerson(mainCompany?.DocumentDirectorJson),
+            mainCompany?.Director ?? mainCompany?.ShortName);
+
+        var requisites = new List<string> { fullName };
+
+        if (!string.IsNullOrWhiteSpace(mainCompany?.Inn))
+        {
+            requisites.Add($"ИНН {mainCompany.Inn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mainCompany?.Kpp))
+        {
+            requisites.Add($"КПП {mainCompany.Kpp}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mainCompany?.Address))
+        {
+            requisites.Add(mainCompany.Address);
+        }
+
+        var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);
+        if (!string.IsNullOrWhiteSpace(accountNumber))
+        {
+            requisites.Add($"р/с {accountNumber}");
+        }
+
+        var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
+        if (!string.IsNullOrWhiteSpace(bankName))
+        {
+            requisites.Add($"в банке {bankName}");
+        }
+
+        var bik = FirstNotEmpty(bankAccount.Bik, mainCompany?.TreasuryBankBik);
+        if (!string.IsNullOrWhiteSpace(bik))
+        {
+            requisites.Add($"БИК {bik}");
+        }
+
+        var corrAccountNumber = FirstNotEmpty(bankAccount.CorrAccountNumber, mainCompany?.TreasuryCorrAccountNumber);
+        if (!string.IsNullOrWhiteSpace(corrAccountNumber))
+        {
+            requisites.Add($"к/с {corrAccountNumber}");
+        }
+
+        var requisitesText = string.Join(", ", requisites.Where(static value => !string.IsNullOrWhiteSpace(value)));
+        return new SellerInfo(Encode(requisitesText), signaturePartyName, signatoryShortName);
+    }
+
+    private static BuyerInfo BuildBuyer(Act act)
+    {
+        var buyerClient = act.Client
+            ?? act.Invoice?.Client
+            ?? act.Invoice?.ExpenseClient;
+
+        var displayName = FirstNotEmpty(
+            buyerClient?.Name,
+            act.Client?.Name,
+            act.Invoice?.CounterpartyName,
+            "Заказчик");
+
+        var requisites = new List<string> { displayName };
+
+        if (!string.IsNullOrWhiteSpace(buyerClient?.Company)
+            && !string.Equals(buyerClient.Company, displayName, StringComparison.OrdinalIgnoreCase))
+        {
+            requisites.Add(buyerClient.Company);
+        }
+
+        var address = ResolveAddress(buyerClient);
+        if (!string.IsNullOrWhiteSpace(address))
+        {
+            requisites.Add(address);
+        }
+
+        var passport = BuildPassport(buyerClient);
+        if (!string.IsNullOrWhiteSpace(passport))
+        {
+            requisites.Add(passport);
+        }
+
+        var requisitesText = string.Join(", ", requisites.Where(static value => !string.IsNullOrWhiteSpace(value)));
+        return new BuyerInfo(Encode(requisitesText), displayName, BuildShortName(displayName));
+    }
+
+    private static string BuildBasis(Act act)
+    {
+        var invoiceNumber = FirstNotEmpty(act.InvoiceNumber, act.Invoice?.Account);
+        if (string.IsNullOrWhiteSpace(invoiceNumber))
+        {
+            return "—";
+        }
+
+        var invoiceDate = act.Invoice is { Date: var date } && date != default
+            ? date.ToString("dd.MM.yyyy", RuCulture)
+            : null;
+
+        return string.IsNullOrWhiteSpace(invoiceDate)
+            ? $"Счет № {invoiceNumber}"
+            : $"Счет-договор № {invoiceNumber} от {invoiceDate}";
+    }
+
+    private static string ResolveAddress(Client? client)
+    {
+        if (client is null)
+        {
+            return string.Empty;
+        }
+
+        var normalizedAddress = client.Addresses
+            .OrderByDescending(address => address.IsPrimary)
+            .Select(address => FirstNotEmpty(address.UnrestrictedValue, address.Value))
+            .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
+
+        return FirstNotEmpty(normalizedAddress, client.Address);
+    }
+
+    private static string BuildPassport(Client? client)
+    {
+        var passport = client?.Passports
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault(item =>
+                !string.IsNullOrWhiteSpace(item.Series)
+                || !string.IsNullOrWhiteSpace(item.Number)
+                || !string.IsNullOrWhiteSpace(item.IssuedBy));
+
+        if (passport is null)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>();
+
+        var series = passport.Series?.Trim();
+        var number = passport.Number?.Trim();
+        if (!string.IsNullOrWhiteSpace(series) || !string.IsNullOrWhiteSpace(number))
+        {
+            var passportTitle = new StringBuilder("Паспорт");
+            if (!string.IsNullOrWhiteSpace(series))
+            {
+                passportTitle.Append(" серия ");
+                passportTitle.Append(series);
+            }
+
+            if (!string.IsNullOrWhiteSpace(number))
+            {
+                passportTitle.Append(" № ");
+                passportTitle.Append(number);
+            }
+
+            parts.Add(passportTitle.ToString());
+        }
+        else
+        {
+            parts.Add("Паспорт");
+        }
+
+        if (!string.IsNullOrWhiteSpace(passport.IssuedBy))
+        {
+            parts.Add(passport.IssuedBy.Trim());
+        }
+
+        if (passport.IssuedAt.HasValue)
+        {
+            parts.Add($"от {passport.IssuedAt.Value:dd.MM.yyyy}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(passport.DepartmentCode))
+        {
+            parts.Add($"код подразделения {passport.DepartmentCode.Trim()}");
+        }
+
+        return string.Join(", ", parts.Where(static value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static List<BankAccountInfo> ParseBankAccounts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<BankAccountInfo>>(
+                       json,
+                       new JsonSerializerOptions
+                       {
+                           PropertyNameCaseInsensitive = true,
+                       })
+                   ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static PersonInfo? ParsePerson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<PersonInfo>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string BuildPersonShortName(PersonInfo? person, string? fallback)
+    {
+        if (person is not null)
+        {
+            var parts = new[]
+            {
+                person.LastName?.Trim(),
+                string.IsNullOrWhiteSpace(person.FirstName) ? null : $"{char.ToUpperInvariant(person.FirstName.Trim()[0])}.",
+                person.NoMiddleName || string.IsNullOrWhiteSpace(person.MiddleName)
+                    ? null
+                    : $"{char.ToUpperInvariant(person.MiddleName.Trim()[0])}.",
+            };
+
+            var value = string.Join(" ", parts.Where(static item => !string.IsNullOrWhiteSpace(item))).Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return BuildShortName(fallback);
+    }
+
+    private static string BuildShortName(string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return string.Empty;
+        }
+
+        var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length <= 1)
+        {
+            return fullName.Trim();
+        }
+
+        var initials = parts
+            .Skip(1)
+            .Take(2)
+            .Select(part => $"{char.ToUpperInvariant(part[0])}.")
+            .ToArray();
+
+        return $"{parts[0]} {string.Join(" ", initials)}".Trim();
     }
 
     private static string BuildImageHtml(string? dataUrl, string alt, string cssClass)
@@ -199,8 +646,122 @@ public static class ActDocumentTemplateEngine
             return string.Empty;
         }
 
-        return $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{WebUtility.HtmlEncode(alt)}\" class=\"{cssClass}\" />";
+        return $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" />";
     }
+
+    private static string FormatMoney(decimal value)
+        => value.ToString("N2", RuCulture);
+
+    private static string FormatQuantity(decimal value)
+        => value.ToString("0.####", RuCulture);
+
+    private static string FormatLongDate(DateTime value)
+        => value.ToString("d MMMM yyyy 'г.'", RuCulture);
+
+    private static string SpellMoney(decimal value)
+    {
+        var rubles = (long)Math.Floor(value);
+        var kopecks = (int)Math.Round((value - rubles) * 100m, MidpointRounding.AwayFromZero);
+        if (kopecks == 100)
+        {
+            rubles += 1;
+            kopecks = 0;
+        }
+
+        var rublesWords = NumberToWords(rubles, GrammaticalGender.Masculine);
+        return $"{Capitalize(rublesWords)} {ChoosePlural(rubles, "рубль", "рубля", "рублей")} {kopecks:00} {ChoosePlural(kopecks, "копейка", "копейки", "копеек")}";
+    }
+
+    private static string NumberToWords(long value, GrammaticalGender gender)
+    {
+        if (value == 0)
+        {
+            return "ноль";
+        }
+
+        var groups = new[]
+        {
+            new GroupForms("", "", "", GrammaticalGender.Masculine),
+            new GroupForms("тысяча", "тысячи", "тысяч", GrammaticalGender.Feminine),
+            new GroupForms("миллион", "миллиона", "миллионов", GrammaticalGender.Masculine),
+            new GroupForms("миллиард", "миллиарда", "миллиардов", GrammaticalGender.Masculine),
+        };
+
+        var parts = new List<string>();
+        var groupIndex = 0;
+        while (value > 0 && groupIndex < groups.Length)
+        {
+            var triad = (int)(value % 1000);
+            if (triad > 0)
+            {
+                var group = groups[groupIndex];
+                var triadParts = new List<string>();
+                if (triad / 100 > 0)
+                {
+                    triadParts.Add(Hundreds[triad / 100]);
+                }
+
+                var tensUnits = triad % 100;
+                if (tensUnits is >= 10 and <= 19)
+                {
+                    triadParts.Add(Teens[tensUnits - 10]);
+                }
+                else
+                {
+                    if (tensUnits / 10 > 0)
+                    {
+                        triadParts.Add(Tens[tensUnits / 10]);
+                    }
+
+                    var unit = tensUnits % 10;
+                    if (unit > 0)
+                    {
+                        triadParts.Add((groupIndex == 0 ? gender : group.Gender) switch
+                        {
+                            GrammaticalGender.Feminine => UnitsFeminine[unit],
+                            _ => UnitsMasculine[unit],
+                        });
+                    }
+                }
+
+                if (groupIndex > 0)
+                {
+                    triadParts.Add(ChoosePlural(triad, group.One, group.Two, group.Five));
+                }
+
+                parts.Insert(0, string.Join(" ", triadParts.Where(static part => !string.IsNullOrWhiteSpace(part))));
+            }
+
+            value /= 1000;
+            groupIndex++;
+        }
+
+        return string.Join(" ", parts.Where(static part => !string.IsNullOrWhiteSpace(part))).Trim();
+    }
+
+    private static string ChoosePlural(long value, string one, string two, string five)
+    {
+        var mod100 = value % 100;
+        if (mod100 is >= 11 and <= 14)
+        {
+            return five;
+        }
+
+        return (value % 10) switch
+        {
+            1 => one,
+            2 or 3 or 4 => two,
+            _ => five,
+        };
+    }
+
+    private static string Capitalize(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : char.ToUpper(value[0], RuCulture) + value[1..];
+
+    private static string FirstNotEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
@@ -209,4 +770,115 @@ public static class ActDocumentTemplateEngine
     {
         public decimal Total => Quantity * Price;
     }
+
+    private sealed record SellerInfo(
+        string RequisitesHtml,
+        string SignaturePartyName,
+        string SignatoryShortName);
+
+    private sealed record BuyerInfo(
+        string RequisitesHtml,
+        string SignaturePartyName,
+        string SignatoryShortName);
+
+    private sealed class BankAccountInfo
+    {
+        public int? BankId { get; set; }
+        public string? Bank { get; set; }
+        public string? Name { get; set; }
+        public string? Bik { get; set; }
+        public string? Currency { get; set; }
+        public string? AccountNumber { get; set; }
+        public string? AccountType { get; set; }
+        public string? CorrAccountNumber { get; set; }
+        public string? City { get; set; }
+        public bool? IsForeignBank { get; set; }
+    }
+
+    private sealed class PersonInfo
+    {
+        public string? Position { get; set; }
+        public string? LastName { get; set; }
+        public string? FirstName { get; set; }
+        public string? MiddleName { get; set; }
+        public bool NoMiddleName { get; set; }
+    }
+
+    private sealed record GroupForms(string One, string Two, string Five, GrammaticalGender Gender);
+
+    private enum GrammaticalGender
+    {
+        Masculine,
+        Feminine,
+    }
+
+    private static readonly string[] Hundreds =
+    [
+        "",
+        "сто",
+        "двести",
+        "триста",
+        "четыреста",
+        "пятьсот",
+        "шестьсот",
+        "семьсот",
+        "восемьсот",
+        "девятьсот",
+    ];
+
+    private static readonly string[] Tens =
+    [
+        "",
+        "",
+        "двадцать",
+        "тридцать",
+        "сорок",
+        "пятьдесят",
+        "шестьдесят",
+        "семьдесят",
+        "восемьдесят",
+        "девяносто",
+    ];
+
+    private static readonly string[] Teens =
+    [
+        "десять",
+        "одиннадцать",
+        "двенадцать",
+        "тринадцать",
+        "четырнадцать",
+        "пятнадцать",
+        "шестнадцать",
+        "семнадцать",
+        "восемнадцать",
+        "девятнадцать",
+    ];
+
+    private static readonly string[] UnitsMasculine =
+    [
+        "",
+        "один",
+        "два",
+        "три",
+        "четыре",
+        "пять",
+        "шесть",
+        "семь",
+        "восемь",
+        "девять",
+    ];
+
+    private static readonly string[] UnitsFeminine =
+    [
+        "",
+        "одна",
+        "две",
+        "три",
+        "четыре",
+        "пять",
+        "шесть",
+        "семь",
+        "восемь",
+        "девять",
+    ];
 }

@@ -7,6 +7,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Acts;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -272,6 +273,162 @@ public class ActsControllerTests
         Assert.Contains("Выезд в суд", content.Content);
     }
 
+    [Fact]
+    public void ActDocumentTemplateEngine_RendersReferenceLikeTemplate()
+    {
+        var client = new Client
+        {
+            Name = "Хрустеев Сергей Петрович",
+            Address = "Самарская область, г. Новокуйбышевск, ул. Суворова, д. 21А, кв. 11",
+            Passports =
+            [
+                new ClientPassport
+                {
+                    Series = "36 07",
+                    Number = "763332",
+                },
+            ],
+        };
+
+        var act = new Act
+        {
+            Number = "1199",
+            Date = new DateTime(2025, 12, 25),
+            Amount = 20_000m,
+            Client = client,
+            InvoiceNumber = "182",
+            Invoice = new Payment
+            {
+                Account = "182",
+                Date = new DateTime(2025, 12, 24),
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "АДМ/ Ознакомление с материалами дела (за 1 том)",
+                    Quantity = 1m,
+                    Unit = "усл.ед.",
+                    Price = 10_000m,
+                    SortOrder = 0,
+                },
+                new ActLineItem
+                {
+                    Name = "ПР/ Юридические услуги / анализ дела",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 10_000m,
+                    SortOrder = 1,
+                },
+            ],
+            new LegalEntity
+            {
+                ShortName = "ИП Кожеваткин Андрей Владимирович",
+                FullName = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+                Inn = "633009620345",
+                Address = "446200, Самарская обл, г Новокуйбышевск, ул. Миронова д. 9",
+                TreasuryAccountNumber = "40802810414500006073",
+                TreasuryBankName = "ООО \"Банк Точка\"",
+                TreasuryBankBik = "044525104",
+                TreasuryCorrAccountNumber = "30101810745374525104",
+            },
+            includeSignatureAndSeal: false);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+
+        Assert.Contains("document-template act-template", normalizedHtml);
+        Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
+        Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
+        Assert.Contains("к/с 30101810745374525104", normalizedHtml);
+        Assert.Contains("Паспорт серия 36 07 № 763332", normalizedHtml);
+        Assert.Contains("Всего оказано услуг 2", normalizedHtml);
+        Assert.Contains("20 000,00", normalizedHtml);
+        Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
+    }
+
+    [Fact]
+    public async Task Get_FiltersActsByInvoiceType()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var incomeInvoicePayment = await CreateInvoiceAsync(
+            db,
+            "INV-105-IN",
+            new DateTime(2026, 4, 15),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Доходная услуга", Quantity = 1m, Unit = "усл.ед.", Price = 11_000m, SortOrder = 0 },
+            ],
+            PaymentType.Income);
+        var expenseInvoicePayment = await CreateInvoiceAsync(
+            db,
+            "INV-105-EX",
+            new DateTime(2026, 4, 15),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Расходная услуга", Quantity = 1m, Unit = "усл.ед.", Price = 9_000m, SortOrder = 0 },
+            ],
+            PaymentType.Expense);
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var incomeCreate = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-105-IN",
+                Date = new DateTime(2026, 4, 16),
+                Amount = 0m,
+                InvoiceId = incomeInvoicePayment.Id,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+                CreationMode = ActCreationMode.Full,
+            },
+            CancellationToken.None);
+        Assert.IsType<CreatedResult>(incomeCreate.Result);
+
+        var expenseCreate = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-105-EX",
+                Date = new DateTime(2026, 4, 16),
+                Amount = 0m,
+                InvoiceId = expenseInvoicePayment.Id,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+                CreationMode = ActCreationMode.Full,
+            },
+            CancellationToken.None);
+        Assert.IsType<CreatedResult>(expenseCreate.Result);
+
+        var action = await controller.Get(
+            null,
+            null,
+            null,
+            PaymentType.Income,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1,
+            20,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var items = Assert.IsAssignableFrom<IEnumerable<ActDto>>(ok.Value?.GetType().GetProperty("items")?.GetValue(ok.Value));
+        var total = Assert.IsType<int>(ok.Value?.GetType().GetProperty("total")?.GetValue(ok.Value));
+        var materialized = items.ToList();
+
+        var onlyAct = Assert.Single(materialized);
+        Assert.Equal(1, total);
+        Assert.Equal("ACT-105-IN", onlyAct.Number);
+        Assert.Equal(PaymentType.Income, onlyAct.Type);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -305,7 +462,8 @@ public class ActsControllerTests
         string invoiceNumber,
         DateTime date,
         int clientId,
-        IEnumerable<InvoiceLineItem> lineItems)
+        IEnumerable<InvoiceLineItem> lineItems,
+        PaymentType type = PaymentType.Income)
     {
         var invoice = new Invoice
         {
@@ -331,7 +489,7 @@ public class ActsControllerTests
             Notes = string.Empty,
             Status = PaymentStatus.Pending,
             SystemNotes = string.Empty,
-            Type = PaymentType.Income,
+            Type = type,
         };
 
         db.Payments.Add(payment);
