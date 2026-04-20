@@ -57,6 +57,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] PaymentStatus? status,
         [FromQuery] int? clientId,
         [FromQuery] string? clientIds,
+        [FromQuery] int? contractId,
         [FromQuery] int? caseId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
@@ -76,7 +77,7 @@ public class InvoicesController : ControllerBase
         }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type, ParseIntList(clientIds));
+        query = ApplyFilters(query, from, to, status, clientId, contractId, caseId, effectiveResponsibleId, search, type, ParseIntList(clientIds));
         query = ApplySort(query, sortBy, sortDir);
 
         var total = await query.CountAsync(ct);
@@ -113,7 +114,7 @@ public class InvoicesController : ControllerBase
         }
 
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, caseId, effectiveResponsibleId, search, type);
+        query = ApplyFilters(query, from, to, status, clientId, null, caseId, effectiveResponsibleId, search, type);
 
         var today = DateTime.UtcNow.Date;
 
@@ -1403,12 +1404,13 @@ public class InvoicesController : ControllerBase
                 && payment.Account != ""));
     }
 
-    private static IQueryable<InvoiceQueryItem> ApplyFilters(
+    private IQueryable<InvoiceQueryItem> ApplyFilters(
         IQueryable<InvoiceQueryItem> query,
         DateTime? from,
         DateTime? to,
         PaymentStatus? status,
         int? clientId,
+        int? contractId,
         int? caseId,
         int? responsibleId,
         string? search,
@@ -1446,6 +1448,13 @@ public class InvoicesController : ControllerBase
             query = query.Where(x =>
                 (x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value))
                 || (x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value)));
+        }
+
+        if (contractId.HasValue)
+        {
+            query = query.Where(x =>
+                x.Payment.ContractId == contractId.Value
+                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == x.Payment.Id));
         }
 
         if (caseId.HasValue)

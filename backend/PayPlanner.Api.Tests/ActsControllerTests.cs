@@ -419,6 +419,7 @@ public class ActsControllerTests
             null,
             null,
             null,
+            null,
             1,
             20,
             CancellationToken.None);
@@ -621,6 +622,7 @@ public class ActsControllerTests
             null,
             null,
             null,
+            null,
             $"0, bad, {secondClient.Id}",
             null,
             null,
@@ -644,6 +646,76 @@ public class ActsControllerTests
         Assert.Equal(1, pageSize);
         Assert.Equal("ACT-302", firstItem.Number);
         Assert.Equal(secondClient.Id, firstItem.ClientId);
+    }
+
+    [Fact]
+    public async Task Get_FiltersByContractId_UsingManualAndInvoiceLinks()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var contract = await CreateContractAsync(db, "ACT-CTR-1");
+
+        var canonicalInvoice = await CreateInvoiceAsync(
+            db,
+            "INV-ACT-CAN",
+            new DateTime(2026, 4, 25),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Услуга", Quantity = 1m, Unit = "усл.", Price = 5_000m, SortOrder = 0 },
+            ]);
+        canonicalInvoice.ContractId = contract.Id;
+
+        var legacyInvoice = await CreateInvoiceAsync(
+            db,
+            "INV-ACT-LEG",
+            new DateTime(2026, 4, 26),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Услуга", Quantity = 1m, Unit = "усл.", Price = 6_000m, SortOrder = 0 },
+            ]);
+
+        var manualAct = await CreateManualActAsync(db, client.Id, "ACT-CMAN", 2_000m, ActStatus.Created);
+        await CreateManualActAsync(db, client.Id, "ACT-CAN", 5_000m, ActStatus.Created, canonicalInvoice.Id);
+        await CreateManualActAsync(db, client.Id, "ACT-LEG", 6_000m, ActStatus.Created, legacyInvoice.Id);
+        await CreateManualActAsync(db, client.Id, "ACT-OUT", 7_000m, ActStatus.Created);
+
+        db.ContractActs.Add(new ContractAct
+        {
+            ContractId = contract.Id,
+            ActId = manualAct.Id,
+        });
+        db.ContractInvoices.Add(new ContractInvoice
+        {
+            ContractId = contract.Id,
+            InvoiceId = legacyInvoice.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Get(
+            null,
+            null,
+            null,
+            null,
+            null,
+            contract.Id,
+            null,
+            null,
+            null,
+            "number",
+            "asc",
+            1,
+            20,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var response = ok.Value;
+        Assert.NotNull(response);
+        var items = Assert.IsAssignableFrom<IEnumerable<ActDto>>(response.GetType().GetProperty("items")?.GetValue(response)).ToList();
+
+        Assert.Equal(new[] { "ACT-CAN", "ACT-CMAN", "ACT-LEG" }, items.Select(item => item.Number).ToArray());
+        Assert.DoesNotContain(items, item => item.Number == "ACT-OUT");
     }
 
     [Fact]
@@ -1402,12 +1474,28 @@ public class ActsControllerTests
         return payment;
     }
 
+    private static async Task<Contract> CreateContractAsync(PaymentContext db, string number)
+    {
+        var contract = new Contract
+        {
+            Number = number,
+            Date = new DateTime(2026, 4, 1),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        return contract;
+    }
+
     private static async Task<Act> CreateManualActAsync(
         PaymentContext db,
         int? clientId,
         string number,
         decimal amount,
-        ActStatus status)
+        ActStatus status,
+        int? invoiceId = null)
     {
         var act = new Act
         {
@@ -1417,6 +1505,7 @@ public class ActsControllerTests
             CreationMode = ActCreationMode.Manual,
             Status = status,
             ClientId = clientId,
+            InvoiceId = invoiceId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };

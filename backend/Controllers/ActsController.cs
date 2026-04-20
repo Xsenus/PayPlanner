@@ -50,6 +50,7 @@ public class ActsController : ControllerBase
         [FromQuery] ActStatus? status,
         [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
+        [FromQuery] int? contractId,
         [FromQuery] string? clientIds,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
@@ -70,6 +71,15 @@ public class ActsController : ControllerBase
         if (clientIdList.Count > 0)
         {
             query = query.Where(act => act.ClientId.HasValue && clientIdList.Contains(act.ClientId.Value));
+        }
+
+        if (contractId.HasValue)
+        {
+            query = query.Where(act =>
+                _db.ContractActs.Any(link => link.ContractId == contractId.Value && link.ActId == act.Id)
+                || (act.InvoiceId.HasValue && (
+                    _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == act.InvoiceId.Value)
+                    || _db.Payments.Any(payment => payment.Id == act.InvoiceId.Value && payment.ContractId == contractId.Value))));
         }
 
         var total = await query.CountAsync(ct);

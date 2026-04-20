@@ -756,6 +756,7 @@ export class ApiService {
     status?: ActStatus;
     type?: PaymentKind;
     clientId?: number;
+    contractId?: number;
     clientIds?: string;
     responsibleId?: number;
     search?: string;
@@ -1128,6 +1129,7 @@ export class ApiService {
     status?: PaymentStatus;
     clientId?: number;
     clientIds?: string;
+    contractId?: number;
     caseId?: number;
     responsibleId?: number;
     search?: string;
@@ -1420,7 +1422,9 @@ export class ApiService {
     to?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     clientIds?: string;
+    excludeInvoiceDocuments?: boolean;
     categoryTokens?: string;
     type?: PaymentKind;
     status?: PaymentStatus;

@@ -27,6 +27,7 @@ public class InvoicesControllerListTests
             status: null,
             clientId: null,
             clientIds: null,
+            contractId: null,
             caseId: null,
             responsibleId: null,
             search: null,
@@ -59,6 +60,7 @@ public class InvoicesControllerListTests
             status: null,
             clientId: null,
             clientIds: null,
+            contractId: null,
             caseId: null,
             responsibleId: null,
             search: null,
@@ -75,6 +77,50 @@ public class InvoicesControllerListTests
 
         Assert.Equal(legacyRepresentativeId, invoice.Id);
         Assert.Equal("LEG-7", invoice.Number);
+    }
+
+    [Fact]
+    public async Task Get_FiltersByContractId_UsingCanonicalAndLegacyLinks()
+    {
+        await using var db = await CreateContextAsync();
+        var contract = await CreateContractAsync(db, "CTR-LIST-1");
+
+        var canonicalInvoice = await CreateInvoiceDocumentAsync(db, "INV-CAN-1", new DateTime(2026, 4, 8), 15_000m);
+        canonicalInvoice.ContractId = contract.Id;
+
+        var legacyInvoice = await CreateInvoiceDocumentAsync(db, "INV-LEG-1", new DateTime(2026, 4, 9), 16_000m);
+        var outsideInvoice = await CreateInvoiceDocumentAsync(db, "INV-OUT-1", new DateTime(2026, 4, 10), 17_000m);
+
+        db.ContractInvoices.Add(new ContractInvoice
+        {
+            ContractId = contract.Id,
+            InvoiceId = legacyInvoice.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: contract.Id,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var items = ExtractInvoiceItems(ok);
+
+        Assert.Equal(new[] { "INV-CAN-1", "INV-LEG-1" }, items.Select(item => item.Number).ToArray());
+        Assert.DoesNotContain(items, item => item.Id == outsideInvoice.Id);
     }
 
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
@@ -149,6 +195,21 @@ public class InvoicesControllerListTests
         return (invoicePayment.Id, invoice.Id);
     }
 
+    private static async Task<Contract> CreateContractAsync(PaymentContext db, string number)
+    {
+        var contract = new Contract
+        {
+            Number = number,
+            Date = new DateTime(2026, 4, 1),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        return contract;
+    }
+
     private static async Task<int> CreateLegacyInvoiceAggregateWithoutInvoiceDocumentAsync(PaymentContext db)
     {
         var invoice = new Invoice
@@ -174,6 +235,28 @@ public class InvoicesControllerListTests
         await db.SaveChangesAsync();
 
         return firstPayment.Id;
+    }
+
+    private static async Task<Payment> CreateInvoiceDocumentAsync(PaymentContext db, string number, DateTime date, decimal amount)
+    {
+        var invoice = new Invoice
+        {
+            Number = number,
+            Date = date,
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(date, amount, $"Счет {number}");
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date;
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        return payment;
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)

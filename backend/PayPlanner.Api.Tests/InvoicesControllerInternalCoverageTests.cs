@@ -214,9 +214,9 @@ public class InvoicesControllerInternalCoverageTests
     }
 
     [Fact]
-    public void ApplyFilters_FiltersByDateRangeAndClient_InMemory()
+    public async Task ApplyFilters_FiltersByDateRangeAndClient_InMemory()
     {
-        var filtered = ExtractSortedAccounts(InvokeApplyFilters(
+        var filtered = ExtractSortedAccounts(await InvokeApplyFiltersAsync(
             CreatePrivateQuery(new[]
             {
                 CreateQueryItem(new Payment
@@ -256,6 +256,7 @@ public class InvoicesControllerInternalCoverageTests
             new DateTime(2026, 5, 31),
             null,
             1,
+            null,
             null,
             null,
             null,
@@ -2189,21 +2190,24 @@ public class InvoicesControllerInternalCoverageTests
         return method!.Invoke(null, [query, sortBy, sortDir])!;
     }
 
-    private static object InvokeApplyFilters(
+    private static async Task<object> InvokeApplyFiltersAsync(
         object query,
         DateTime? from,
         DateTime? to,
         PaymentStatus? status,
         int? clientId,
+        int? contractId,
         int? caseId,
         int? responsibleId,
         string? search,
         PaymentType? type,
         IReadOnlySet<int>? clientIds)
     {
-        var method = typeof(InvoicesController).GetMethod("ApplyFilters", BindingFlags.NonPublic | BindingFlags.Static);
+        var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var method = typeof(InvoicesController).GetMethod("ApplyFilters", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(method);
-        return method!.Invoke(null, [query, from, to, status, clientId, caseId, responsibleId, search, type, clientIds])!;
+        return method!.Invoke(controller, [query, from, to, status, clientId, contractId, caseId, responsibleId, search, type, clientIds])!;
     }
 
     private static string[] ExtractSortedAccounts(object query)
