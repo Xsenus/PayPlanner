@@ -50,6 +50,20 @@ describe('ClientPassportEntriesForm integration', () => {
     expect(screen.getByText('Дата выдачи')).toBeTruthy();
   });
 
+  it('does not render the birth place FIAS field', () => {
+    render(
+      <ClientPassportEntriesForm
+        entries={[baseEntry]}
+        canEdit
+        onUpdateEntry={vi.fn()}
+        onRemoveEntry={vi.fn()}
+        onAddEntry={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Место рождения (ФИАС)')).toBeNull();
+  });
+
   it('can restore validity dates through the shared toggle', () => {
     render(
       <ClientPassportEntriesForm

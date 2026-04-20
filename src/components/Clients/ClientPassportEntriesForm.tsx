@@ -151,15 +151,6 @@ export function ClientPassportEntriesForm({
               />
             </label>
 
-            <label className="text-sm text-slate-700 xl:col-span-2">
-              <span className="mb-1 block">Место рождения (ФИАС)</span>
-              <input
-                value={passport.birthPlaceFias}
-                onChange={(event) => onUpdateEntry(index, 'birthPlaceFias', event.target.value)}
-                disabled={!canEdit}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
           </div>
         </div>
       ))}
