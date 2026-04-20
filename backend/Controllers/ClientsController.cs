@@ -385,7 +385,10 @@ public class ClientsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients-modal", model);
+        var requirementsModel = BuildClientRequirementsModel(model);
+        var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync("clients-modal", ct);
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients-modal", requirementsModel, ct);
+        missingCreate = NormalizeQuickClientModalMissingFields(requiredQuickFields, requirementsModel, missingCreate);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
         var access = await GetCurrentAccessAsync(ct);
@@ -907,6 +910,34 @@ public class ClientsController : ControllerBase
         {
             _db.ClientPassports.RemoveRange(passports);
         }
+    }
+
+    private static List<string> NormalizeQuickClientModalMissingFields(
+        IEnumerable<string> requiredFields,
+        ClientRequirementsModel model,
+        IEnumerable<string> missingFields)
+    {
+        var requiredSet = new HashSet<string>(requiredFields, StringComparer.OrdinalIgnoreCase);
+        var normalized = new HashSet<string>(
+            missingFields.Where(field =>
+                !string.Equals(field, "Email", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(field, "Name", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(field, "Notes", StringComparison.OrdinalIgnoreCase)),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (requiredSet.Contains("Name"))
+        {
+            if (string.IsNullOrWhiteSpace(model.LastName)) normalized.Add("LastName");
+            if (string.IsNullOrWhiteSpace(model.FirstName)) normalized.Add("FirstName");
+            if (string.IsNullOrWhiteSpace(model.MiddleName)) normalized.Add("MiddleName");
+        }
+
+        if (requiredSet.Contains("Notes") && string.IsNullOrWhiteSpace(model.Comment))
+        {
+            normalized.Add("Comment");
+        }
+
+        return normalized.ToList();
     }
 
     private static ClientRequirementsModel BuildClientRequirementsModel(Client model)

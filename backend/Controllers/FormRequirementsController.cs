@@ -25,10 +25,14 @@ public class FormRequirementsController : ControllerBase
             "Клиенты (модалка создания)",
             new List<FieldDef>
             {
-                new("Name", "Имя"),
-                new("Email", "Email"),
+                new("LastName", "Фамилия"),
+                new("FirstName", "Имя"),
+                new("MiddleName", "Отчество"),
+                new("Comment", "Комментарий"),
+                new("Name", "ФИО", "Совместимость"),
+                new("Email", "Email", "Совместимость"),
                 new("Phone", "Телефон"),
-                new("Notes", "Комментарий"),
+                new("Notes", "Комментарий (legacy)", "Совместимость"),
             }),
         new(
             "clients",

@@ -405,6 +405,67 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task Create_QuickModalValidation_UsesStructuredFields_AndIgnoresEmailRequirement()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(
+            db,
+            userId,
+            new StaticFormRequirementsService(
+                ("clients-modal", "Name"),
+                ("clients-modal", "Notes"),
+                ("clients-modal", "Phone"),
+                ("clients-modal", "Email")));
+
+        var missingStructuredFieldModel = new Client
+        {
+            Name = "РРІР°РЅРѕРІ РРІР°РЅ",
+            Phone = "+7 (999) 000-00-00",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                lastName = "РРІР°РЅРѕРІ",
+                firstName = "РРІР°РЅ",
+                middleName = "",
+                comment = "",
+            }),
+            IsActive = true,
+        };
+
+        var badRequestAction = await controller.Create(missingStructuredFieldModel, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(badRequestAction);
+        var missingFields = Assert.IsAssignableFrom<IEnumerable<string>>(badRequest.Value?.GetType().GetProperty("missingFields")?.GetValue(badRequest.Value));
+        Assert.Contains("MiddleName", missingFields);
+        Assert.Contains("Comment", missingFields);
+        Assert.DoesNotContain("Name", missingFields);
+        Assert.DoesNotContain("Notes", missingFields);
+        Assert.DoesNotContain("Email", missingFields);
+
+        var validModel = new Client
+        {
+            Name = "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡",
+            Phone = "+7 (999) 000-00-00",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                lastName = "РРІР°РЅРѕРІ",
+                firstName = "РРІР°РЅ",
+                middleName = "РРІР°РЅРѕРІРёС‡",
+                comment = "РџРµСЂРµР·РІРѕРЅРёС‚СЊ РїРѕСЃР»Рµ РѕР±РµРґР°",
+            }),
+            IsActive = true,
+        };
+
+        var createAction = await controller.Create(validModel, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createAction);
+        var dto = Assert.IsType<Client>(created.Value);
+        Assert.Equal("РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡", dto.Name);
+        Assert.Equal("+7 (999) 000-00-00", dto.Phone);
+        Assert.Equal(string.Empty, dto.Email);
+    }
+
+    [Fact]
     public async Task Delete_RejectsClient_WhenPaymentUsageExists()
     {
         await using var db = await CreateContextAsync();
@@ -592,7 +653,10 @@ public class ClientsControllerTests
         return status.Id;
     }
 
-    private static ClientsController CreateController(PaymentContext db, int userId)
+    private static ClientsController CreateController(
+        PaymentContext db,
+        int userId,
+        IFormRequirementsService? formRequirementsService = null)
     {
         var claims = new[]
         {
@@ -600,7 +664,10 @@ public class ClientsControllerTests
             new Claim(ClaimTypes.Name, "Тестовый пользователь"),
         };
 
-        var controller = new ClientsController(db, new NoopEnrichmentService(), new NoopFormRequirementsService())
+        var controller = new ClientsController(
+            db,
+            new NoopEnrichmentService(),
+            formRequirementsService ?? new NoopFormRequirementsService())
         {
             ControllerContext = new ControllerContext
             {
@@ -632,6 +699,59 @@ public class ClientsControllerTests
     {
         public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default) => Task.FromResult(new List<string>());
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default) => Task.FromResult(new List<string>());
+    }
+
+    private sealed class StaticFormRequirementsService : IFormRequirementsService
+    {
+        private readonly Dictionary<string, List<string>> _requiredBySection;
+
+        public StaticFormRequirementsService(params (string Section, string FieldKey)[] requiredFields)
+        {
+            _requiredBySection = requiredFields
+                .GroupBy(item => item.Section, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(item => item.FieldKey).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+
+        public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default)
+            => Task.FromResult(_requiredBySection.TryGetValue(section, out var fields) ? fields.ToList() : new List<string>());
+
+        public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
+        {
+            var requiredFields = _requiredBySection.TryGetValue(section, out var fields)
+                ? fields
+                : new List<string>();
+
+            var properties = model.GetType()
+                .GetProperties()
+                .ToDictionary(property => property.Name, StringComparer.OrdinalIgnoreCase);
+
+            var missing = new List<string>();
+            foreach (var field in requiredFields)
+            {
+                if (!properties.TryGetValue(field, out var property))
+                {
+                    missing.Add(field);
+                    continue;
+                }
+
+                var value = property.GetValue(model);
+                if (value is null)
+                {
+                    missing.Add(field);
+                    continue;
+                }
+
+                if (value is string text && string.IsNullOrWhiteSpace(text))
+                {
+                    missing.Add(field);
+                }
+            }
+
+            return Task.FromResult(missing);
+        }
     }
 
     private sealed class NoopEnrichmentService : ILegalEntityEnrichmentService
