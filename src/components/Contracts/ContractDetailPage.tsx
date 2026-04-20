@@ -28,6 +28,7 @@ type ClientTableColumnKey = 'name' | 'company' | 'comment';
 type InvoiceTableColumnKey = 'number' | 'client' | 'date' | 'amount' | 'status';
 type ActTableColumnKey = 'number' | 'client' | 'date' | 'amount' | 'status';
 type PaymentTableColumnKey = 'id' | 'date' | 'client' | 'description' | 'amount';
+type RelatedDocumentsScope = 'contract' | 'clients';
 
 type TabListState<T> = {
   items: T[];
@@ -265,9 +266,11 @@ export function ContractDetailPage({
 
   const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceState, setInvoiceState] = useState<TabListState<Invoice>>(() => createTabListState());
+  const [invoiceScope, setInvoiceScope] = useState<RelatedDocumentsScope>('contract');
 
   const [actPage, setActPage] = useState(1);
   const [actState, setActState] = useState<TabListState<Act>>(() => createTabListState());
+  const [actScope, setActScope] = useState<RelatedDocumentsScope>('contract');
 
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentState, setPaymentState] = useState<TabListState<Payment>>(() => createTabListState());
@@ -315,7 +318,7 @@ export function ContractDetailPage({
     setInvoicePage(1);
     setActPage(1);
     setPaymentPage(1);
-  }, [contractClientIdsQuery]);
+  }, [contract?.id, contractClientIdsQuery]);
 
   useEffect(() => {
     setSettingsOpen(false);
@@ -326,8 +329,16 @@ export function ContractDetailPage({
   }, [invoicePageSize]);
 
   useEffect(() => {
+    setInvoicePage(1);
+  }, [invoiceScope]);
+
+  useEffect(() => {
     setActPage(1);
   }, [actPageSize]);
+
+  useEffect(() => {
+    setActPage(1);
+  }, [actScope]);
 
   useEffect(() => {
     setPaymentPage(1);
@@ -336,7 +347,7 @@ export function ContractDetailPage({
   useEffect(() => {
     if (activeTab !== 'invoices') return;
 
-    if (!contractClientIdsQuery) {
+    if (invoiceScope === 'contract' ? !contract?.id : !contractClientIdsQuery) {
       setInvoiceState(createTabListState());
       return;
     }
@@ -347,7 +358,9 @@ export function ContractDetailPage({
       setInvoiceState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         const response = await apiService.getInvoices({
-          clientIds: contractClientIdsQuery,
+          ...(invoiceScope === 'contract'
+            ? { contractId: contract.id }
+            : { clientIds: contractClientIdsQuery }),
           page: invoicePage,
           pageSize: invoicePageSize,
           sortBy: 'date',
@@ -378,12 +391,12 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, contractClientIdsQuery, invoicePage, invoicePageSize]);
+  }, [activeTab, contract?.id, contractClientIdsQuery, invoicePage, invoicePageSize, invoiceScope]);
 
   useEffect(() => {
     if (activeTab !== 'acts') return;
 
-    if (!contractClientIdsQuery) {
+    if (actScope === 'contract' ? !contract?.id : !contractClientIdsQuery) {
       setActState(createTabListState());
       return;
     }
@@ -394,7 +407,9 @@ export function ContractDetailPage({
       setActState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         const response = await apiService.getActs({
-          clientIds: contractClientIdsQuery,
+          ...(actScope === 'contract'
+            ? { contractId: contract.id }
+            : { clientIds: contractClientIdsQuery }),
           page: actPage,
           pageSize: actPageSize,
           sortBy: 'date',
@@ -425,12 +440,12 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, contractClientIdsQuery, actPage, actPageSize]);
+  }, [activeTab, actPage, actPageSize, actScope, contract?.id, contractClientIdsQuery]);
 
   useEffect(() => {
     if (activeTab !== 'money') return;
 
-    if (!contractClientIdsQuery) {
+    if (!contract?.id) {
       setPaymentState(createTabListState());
       return;
     }
@@ -441,7 +456,8 @@ export function ContractDetailPage({
       setPaymentState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         const response = await apiService.getPaymentsV2({
-          clientIds: contractClientIdsQuery,
+          contractId: contract.id,
+          excludeInvoiceDocuments: true,
           page: paymentPage,
           pageSize: paymentPageSize,
           sortBy: 'date',
@@ -472,7 +488,7 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, contractClientIdsQuery, paymentPage, paymentPageSize]);
+  }, [activeTab, contract?.id, paymentPage, paymentPageSize]);
 
   const selectedClientIds = useMemo(
     () => new Set((contract?.clients ?? []).map((item) => item.id)),
@@ -866,22 +882,24 @@ export function ContractDetailPage({
           <div className="mt-1 text-xs text-slate-500">{getContractBillingModeLabel(contract.billingMode)}</div>
         </div>
         <div className="rounded border bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма счетов</div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Сумма счетов в договоре</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.invoiceAmountTotal)}</div>
         </div>
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма актов</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.actAmountTotal)}</div>
+          <div className="mt-1 text-xs text-slate-500">Ручные акты и акты по счетам договора</div>
         </div>
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма платежей</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(contract.paymentAmountTotal)}</div>
+          <div className="mt-1 text-xs text-slate-500">По платежам, связанным с договором</div>
         </div>
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Исполнение</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{executionMetrics.label}</div>
           <div className="mt-1 text-xs text-slate-500">
-            {executionMetrics.percent !== null ? `${executionMetrics.percent}%` : 'Сумма считается по счетам'}
+            {executionMetrics.percent !== null ? `${executionMetrics.percent}%` : 'Сумма считается по счетам в договоре'}
             {executionMetrics.delta !== null ? ` · Остаток ${formatAmount(executionMetrics.delta)}` : ''}
           </div>
         </div>
@@ -1057,7 +1075,36 @@ export function ContractDetailPage({
       {activeTab === 'invoices' && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <h3 className="font-semibold">Счета договора</h3>
+            <div>
+              <h3 className="font-semibold">
+                {invoiceScope === 'contract' ? 'Счета в договоре' : 'Счета клиентов договора'}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {invoiceScope === 'contract'
+                  ? 'Сейчас показаны только счета, связанные с договором.'
+                  : 'Сейчас показаны все счета клиентов договора. В верхнюю сумму входят только счета, связанные с договором.'}
+              </p>
+              <div className="mt-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceScope('contract')}
+                  className={`rounded-md px-3 py-1.5 ${
+                    invoiceScope === 'contract' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Только в договоре
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceScope('clients')}
+                  className={`rounded-md px-3 py-1.5 ${
+                    invoiceScope === 'clients' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Все счета клиентов
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => setSettingsOpen((prev) => !prev)}
@@ -1227,7 +1274,36 @@ export function ContractDetailPage({
       {activeTab === 'acts' && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <h3 className="font-semibold">Акты договора</h3>
+            <div>
+              <h3 className="font-semibold">
+                {actScope === 'contract' ? 'Акты в договоре' : 'Акты клиентов договора'}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {actScope === 'contract'
+                  ? 'Сейчас показаны акты, попавшие в договор напрямую или через счета договора.'
+                  : 'Сейчас показаны все акты клиентов договора. Если акт связан со счетом договора, он считается включенным автоматически.'}
+              </p>
+              <div className="mt-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setActScope('contract')}
+                  className={`rounded-md px-3 py-1.5 ${
+                    actScope === 'contract' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Только в договоре
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActScope('clients')}
+                  className={`rounded-md px-3 py-1.5 ${
+                    actScope === 'clients' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Все акты клиентов
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => setSettingsOpen((prev) => !prev)}
@@ -1369,12 +1445,19 @@ export function ContractDetailPage({
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right">
-                        <input
-                          type="checkbox"
-                          disabled={!editMode}
-                          checked={(contract.actIds ?? []).includes(item.id)}
-                          onChange={() => toggleId('actIds', item.id)}
-                        />
+                        {(() => {
+                          const linkedViaInvoice =
+                            typeof item.invoiceId === 'number' && (contract.invoiceIds ?? []).includes(item.invoiceId);
+                          const checked = linkedViaInvoice || (contract.actIds ?? []).includes(item.id);
+                          return (
+                            <input
+                              type="checkbox"
+                              disabled={!editMode || linkedViaInvoice}
+                              checked={checked}
+                              onChange={() => toggleId('actIds', item.id)}
+                            />
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -1406,6 +1489,9 @@ export function ContractDetailPage({
               <Settings2 className="h-4 w-4" />
               {settingsOpen ? 'Скрыть настройки' : 'Настроить таблицу'}
             </button>
+          </div>
+          <div className="border-b border-slate-100 px-4 py-2 text-sm text-slate-500">
+            Здесь показаны только платежи, связанные с договором. Счета-документы остаются в отдельной вкладке счетов.
           </div>
           {settingsOpen ? (
             <div className="border-b border-slate-100 p-4">
