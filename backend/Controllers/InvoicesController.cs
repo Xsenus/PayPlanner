@@ -985,6 +985,7 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(new[] { payment });
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(new[] { payment }, ct);
+        await DetachActsFromDeletedInvoicePaymentsAsync(paymentsToDelete, ct);
 
         _db.Payments.RemoveRange(paymentsToDelete);
 
@@ -1040,6 +1041,7 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(payments);
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(payments, ct);
+        await DetachActsFromDeletedInvoicePaymentsAsync(paymentsToDelete, ct);
 
         _db.Payments.RemoveRange(paymentsToDelete);
 
@@ -1086,6 +1088,37 @@ public class InvoicesController : ControllerBase
         }
 
         return paymentsById.Values.ToList();
+    }
+
+    private async Task DetachActsFromDeletedInvoicePaymentsAsync(IEnumerable<Payment> payments, CancellationToken ct)
+    {
+        var representativePaymentIds = payments
+            .Where(IsInvoiceDocumentPayment)
+            .Select(payment => payment.Id)
+            .Distinct()
+            .ToList();
+
+        if (representativePaymentIds.Count == 0)
+        {
+            return;
+        }
+
+        var linkedActs = await _db.Acts
+            .Where(act => act.InvoiceId.HasValue && representativePaymentIds.Contains(act.InvoiceId.Value))
+            .ToListAsync(ct);
+
+        if (linkedActs.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var act in linkedActs)
+        {
+            act.InvoiceId = null;
+            act.InvoiceNumber = null;
+            act.UpdatedAt = now;
+        }
     }
 
     private static bool IsInvoiceDocumentPayment(Payment payment)
@@ -1138,7 +1171,18 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
-        foreach (var payment in payments)
+        var aggregatePaymentIds = (await ExpandInvoiceAggregatePaymentsAsync(payments, ct))
+            .Select(payment => payment.Id)
+            .Distinct()
+            .ToList();
+
+        var aggregatePayments = await _db.Payments
+            .Include(payment => payment.Invoice)
+            .Include(payment => payment.Responsibles)
+            .Where(payment => aggregatePaymentIds.Contains(payment.Id))
+            .ToListAsync(ct);
+
+        foreach (var payment in aggregatePayments)
         {
             var forRemoval = payment.Responsibles.ToList();
             foreach (var row in forRemoval)
