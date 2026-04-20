@@ -29,7 +29,7 @@ public class FormRequirementsController : ControllerBase
                 new("FirstName", "Имя"),
                 new("MiddleName", "Отчество"),
                 new("Comment", "Комментарий"),
-                new("Name", "ФИО", "Совместимость"),
+                new("Name", "Имя (legacy)", "Совместимость"),
                 new("Email", "Email", "Совместимость"),
                 new("Phone", "Телефон"),
                 new("Notes", "Комментарий (legacy)", "Совместимость"),

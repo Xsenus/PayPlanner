@@ -927,9 +927,7 @@ public class ClientsController : ControllerBase
 
         if (requiredSet.Contains("Name"))
         {
-            if (string.IsNullOrWhiteSpace(model.LastName)) normalized.Add("LastName");
             if (string.IsNullOrWhiteSpace(model.FirstName)) normalized.Add("FirstName");
-            if (string.IsNullOrWhiteSpace(model.MiddleName)) normalized.Add("MiddleName");
         }
 
         if (requiredSet.Contains("Notes") && string.IsNullOrWhiteSpace(model.Comment))

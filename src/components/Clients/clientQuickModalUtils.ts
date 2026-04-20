@@ -134,8 +134,9 @@ export const isQuickClientModalFieldRequired = (
 
   switch (field) {
     case 'LastName':
-    case 'FirstName':
     case 'MiddleName':
+      return isRequired(field);
+    case 'FirstName':
       return isRequired(field) || legacyNameRequired;
     case 'Comment':
       return isRequired('Comment') || legacyCommentRequired;

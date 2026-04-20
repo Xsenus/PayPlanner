@@ -74,13 +74,13 @@ describe('clientQuickModalUtils', () => {
     });
   });
 
-  it('treats legacy Name and Notes requirements as quick modal fio and comment requirements', () => {
+  it('treats legacy Name requirement as first-name-only and keeps notes compatibility', () => {
     const requiredKeys = new Set(['Name', 'Notes', 'Phone']);
     const isRequired = (key: string) => requiredKeys.has(key);
 
-    expect(isQuickClientModalFieldRequired('LastName', isRequired)).toBe(true);
+    expect(isQuickClientModalFieldRequired('LastName', isRequired)).toBe(false);
     expect(isQuickClientModalFieldRequired('FirstName', isRequired)).toBe(true);
-    expect(isQuickClientModalFieldRequired('MiddleName', isRequired)).toBe(true);
+    expect(isQuickClientModalFieldRequired('MiddleName', isRequired)).toBe(false);
     expect(isQuickClientModalFieldRequired('Phone', isRequired)).toBe(true);
     expect(isQuickClientModalFieldRequired('Comment', isRequired)).toBe(true);
   });

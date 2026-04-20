@@ -436,11 +436,13 @@ public class ClientsControllerTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(badRequestAction);
         var missingFields = Assert.IsAssignableFrom<IEnumerable<string>>(badRequest.Value?.GetType().GetProperty("missingFields")?.GetValue(badRequest.Value));
-        Assert.Contains("MiddleName", missingFields);
         Assert.Contains("Comment", missingFields);
         Assert.DoesNotContain("Name", missingFields);
         Assert.DoesNotContain("Notes", missingFields);
         Assert.DoesNotContain("Email", missingFields);
+        Assert.DoesNotContain("FirstName", missingFields);
+        Assert.DoesNotContain("LastName", missingFields);
+        Assert.DoesNotContain("MiddleName", missingFields);
 
         var validModel = new Client
         {
@@ -463,6 +465,39 @@ public class ClientsControllerTests
         Assert.Equal("РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡", dto.Name);
         Assert.Equal("+7 (999) 000-00-00", dto.Phone);
         Assert.Equal(string.Empty, dto.Email);
+    }
+
+    [Fact]
+    public async Task Create_QuickModalValidation_LegacyNameRequirement_MapsToFirstNameOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(
+            db,
+            userId,
+            new StaticFormRequirementsService(("clients-modal", "Name")));
+
+        var missingFirstNameModel = new Client
+        {
+            Name = "Client",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                lastName = "Ivanov",
+                firstName = "",
+                middleName = "",
+                comment = "callback",
+            }),
+            IsActive = true,
+        };
+
+        var badRequestAction = await controller.Create(missingFirstNameModel, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(badRequestAction);
+        var missingFields = Assert.IsAssignableFrom<IEnumerable<string>>(badRequest.Value?.GetType().GetProperty("missingFields")?.GetValue(badRequest.Value));
+        Assert.Contains("FirstName", missingFields);
+        Assert.DoesNotContain("LastName", missingFields);
+        Assert.DoesNotContain("MiddleName", missingFields);
+        Assert.DoesNotContain("Name", missingFields);
     }
 
     [Fact]
