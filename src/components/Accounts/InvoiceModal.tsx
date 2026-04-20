@@ -213,6 +213,7 @@ interface InvoiceModalProps {
   onAddRelatedPayment?: () => void;
   onEditRelatedPayment?: (payment: Payment) => void;
   onDeleteRelatedPayment?: (payment: Payment) => Promise<void> | void;
+  onClientCaseCreated?: (clientCase: ClientCase) => void;
 }
 
 function normalizeInvoiceToForm(
@@ -287,7 +288,10 @@ function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[
     return [
       {
         id: invoice.clientCaseId,
-        clientId: invoice.clientId ?? 0,
+        clientId:
+          invoice.type === 'Expense'
+            ? (invoice.expenseClientId ?? invoice.clientId ?? 0)
+            : (invoice.clientId ?? 0),
         title: invoice.clientCaseTitle ?? '',
         status: '',
         createdAt: invoice.createdAt,
@@ -669,6 +673,7 @@ export function InvoiceModal({
   onAddRelatedPayment,
   onEditRelatedPayment,
   onDeleteRelatedPayment,
+  onClientCaseCreated,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -1070,6 +1075,12 @@ export function InvoiceModal({
     };
   }, [downloadMenuOpen]);
 
+  const resolveCaseOwnerClientId = useCallback(
+    (type: PaymentKind, clientId: string, expenseClientId: string): string =>
+      type === 'Expense' ? expenseClientId : clientId,
+    [],
+  );
+
   const isIncome = form.type === 'Income';
   const isPageMode = presentation === 'page';
   const selectedClient = useMemo(
@@ -1080,9 +1091,11 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.expenseClientId) ?? null,
     [clients, form.expenseClientId],
   );
-  const caseOwnerClientId = form.clientId || (!isIncome ? form.expenseClientId : '');
-  const selectedCaseOwnerClient = selectedClient ?? (!isIncome ? selectedExpenseClient : null);
-  const selectedResponsibleSourceClient = selectedCaseOwnerClient ?? selectedClient;
+  const caseOwnerClientId = resolveCaseOwnerClientId(form.type, form.clientId, form.expenseClientId);
+  const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
+  const selectedResponsibleSourceClient = isIncome
+    ? selectedClient
+    : (selectedExpenseClient ?? selectedClient);
   const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
   const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
   const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
@@ -1734,7 +1747,8 @@ export function InvoiceModal({
 
   const handleTypeSelect = (nextType: PaymentKind) => {
     if (isTypeLocked) return;
-    if (nextType !== form.type) {
+    const nextCaseOwnerClientId = resolveCaseOwnerClientId(nextType, form.clientId, form.expenseClientId);
+    if (nextType !== form.type && nextCaseOwnerClientId !== caseOwnerClientId) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
       setCaseDropdownOpen(false);
@@ -1755,11 +1769,12 @@ export function InvoiceModal({
   const handleClientPick = (client: Client) => {
     const nextClientId = String(client.id);
     const clientChanged = form.clientId !== nextClientId;
+    const nextCaseOwnerClientId = resolveCaseOwnerClientId(form.type, nextClientId, form.expenseClientId);
     if (clientChanged) {
       lastAutoContractClientIdRef.current = '';
       setSelectedActs([]);
       setActOptions([]);
-      if (form.type === 'Income') {
+      if (nextCaseOwnerClientId !== caseOwnerClientId) {
         setSelectedClientCaseIds([]);
         setClientCaseOptions([]);
       }
@@ -1775,7 +1790,8 @@ export function InvoiceModal({
   };
 
   const handleExpenseClientChange = (nextClientId: string) => {
-    if (form.expenseClientId !== nextClientId) {
+    const nextCaseOwnerClientId = resolveCaseOwnerClientId(form.type, form.clientId, nextClientId);
+    if (form.expenseClientId !== nextClientId && nextCaseOwnerClientId !== caseOwnerClientId) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
       setCaseDropdownOpen(false);
@@ -1829,6 +1845,7 @@ export function InvoiceModal({
       const next = [created, ...prev.filter((item) => item.id !== created.id)];
       return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
     });
+    onClientCaseCreated?.(created);
     setSelectedClientCaseIds((prev) => {
       if (prev.includes(created.id)) return prev;
       if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
@@ -2483,12 +2500,12 @@ export function InvoiceModal({
   const canShowRelatedPaymentActions = mode === 'edit' && !!onAddRelatedPayment;
   const createCaseStub = useMemo<ClientCase>(() => ({
     id: 0,
-    clientId: form.clientId ? Number(form.clientId) : 0,
+    clientId: caseOwnerClientId ? Number(caseOwnerClientId) : 0,
     title: '',
     description: '',
     status: 'Open',
     createdAt: new Date().toISOString(),
-  }), [form.clientId]);
+  }), [caseOwnerClientId]);
   const statusHistorySection = (
     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="space-y-3">

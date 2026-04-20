@@ -2701,6 +2701,18 @@ export function ClientDetail({
     });
   };
 
+  const handleInvoiceCaseCreated = useCallback((created: ClientCase) => {
+    if (created.clientId !== clientId) {
+      return;
+    }
+
+    setCasesLocal((prev) => {
+      const source = prev ?? serverCases;
+      return [created, ...source.filter((item) => item.id !== created.id)];
+    });
+    bumpStats();
+  }, [clientId, serverCases]);
+
 const updateEducation = (index: number, key: keyof ClientEducationItem, value: string) => {
     setClientFormState((prev) => ({
       ...prev,
@@ -5456,6 +5468,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           relatedPayments={invoiceModalRelatedPayments}
           paymentsLoading={invoiceModalPaymentsLoading}
           onRefreshRequested={refreshInvoiceModalData}
+          onClientCaseCreated={handleInvoiceCaseCreated}
         />
 
         <ActModal

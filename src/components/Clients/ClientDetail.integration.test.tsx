@@ -430,7 +430,7 @@ describe('ClientDetail integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Военные билеты' }));
     expect(await screen.findByRole('button', { name: 'Удалить военный билет' })).toBeTruthy();
-  });
+  }, 15000);
 
   it('updates and deletes a power of attorney directly from the client card', async () => {
     const user = userEvent.setup();

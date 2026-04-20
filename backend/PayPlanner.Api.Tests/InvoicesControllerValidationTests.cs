@@ -200,7 +200,7 @@ public class InvoicesControllerValidationTests
     }
 
     [Fact]
-    public async Task Create_ExpenseInvoice_AcceptsClientCaseLinkedToSelectedClient()
+    public async Task Create_ExpenseInvoice_AcceptsClientCaseLinkedToSelectedExpenseClient()
     {
         await using var db = await CreateContextAsync();
         var clientId = await CreateClientAsync(db, "Клиент");
@@ -208,9 +208,9 @@ public class InvoicesControllerValidationTests
         var clientCaseId = await CreateClientCaseAsync(db, clientId, "Дело клиента");
 
         var controller = CreateController(db, isAdmin: true, userId: null);
-        var request = CreateRequest("31C", clientId, new DateTime(2026, 4, 10));
+        var request = CreateRequest("31C", expenseClientId, new DateTime(2026, 4, 10));
         request.Type = PaymentType.Expense;
-        request.ExpenseClientId = expenseClientId;
+        request.ExpenseClientId = clientId;
         request.ClientCaseIds = [clientCaseId];
 
         var action = await controller.Create(request, CancellationToken.None);

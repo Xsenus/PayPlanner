@@ -211,6 +211,50 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var supplierId = await CreateClientAsync(db, "Supplier");
+        var expenseClientId = await CreateClientAsync(db, "Expense Client");
+        var expenseCaseId = await CreateClientCaseAsync(db, expenseClientId, "Expense Case");
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-EXP-1", supplierId, new DateTime(2026, 4, 18), 7_500m);
+        request.Type = PaymentType.Expense;
+        request.ExpenseClientId = expenseClientId;
+        request.ClientCaseIds = [expenseCaseId];
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+        Assert.Equal(PaymentType.Expense, dto.Type);
+        Assert.Equal(supplierId, dto.ClientId);
+        Assert.Equal(expenseClientId, dto.ExpenseClientId);
+        Assert.Equal(new[] { expenseCaseId }, dto.ClientCaseIds);
+
+        db.ChangeTracker.Clear();
+
+        var storedParent = await db.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == dto.Id);
+        Assert.Equal(supplierId, storedParent.ClientId);
+        Assert.Equal(expenseClientId, storedParent.ExpenseClientId);
+        Assert.Equal(expenseCaseId, storedParent.ClientCaseId);
+
+        var storedCaseIds = await db.Set<InvoiceClientCase>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == dto.Id)
+            .Select(item => item.ClientCaseId)
+            .OrderBy(id => id)
+            .ToListAsync();
+        Assert.Equal(new[] { expenseCaseId }, storedCaseIds);
+    }
+
+    [Fact]
     public async Task Update_ReplacesInvoiceGraph_AndResyncsInstallmentsAndRelations()
     {
         await using var db = await CreateContextAsync();
@@ -424,6 +468,50 @@ public class InvoicesControllerCrudTests
             .Distinct()
             .ToListAsync();
         Assert.Equal(new[] { responsibleId2 }, updatedInstallmentResponsibleIds);
+    }
+
+    [Fact]
+    public async Task Update_ClearsClientCaseLinks_WhenCasesRemoved()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Eta");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Case To Remove");
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var createRequest = CreateRequest("INV-CLR-1", clientId, new DateTime(2026, 4, 10), 9_000m);
+        createRequest.ClientCaseIds = [caseId];
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateRequest = CreateRequest("INV-CLR-2", clientId, new DateTime(2026, 4, 11), 9_000m);
+        updateRequest.ClientCaseId = null;
+        updateRequest.ClientCaseIds = [];
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Empty(updatedDto.ClientCaseIds);
+        Assert.Null(updatedDto.ClientCaseId);
+
+        db.ChangeTracker.Clear();
+
+        var updatedParent = await db.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Null(updatedParent.ClientCaseId);
+
+        var updatedCaseIds = await db.Set<InvoiceClientCase>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == createdDto.Id)
+            .Select(item => item.ClientCaseId)
+            .ToListAsync();
+        Assert.Empty(updatedCaseIds);
     }
 
     [Fact]

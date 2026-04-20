@@ -1290,13 +1290,14 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('creates and loads client cases for the selected client even on expense invoices', async () => {
+  it('creates and loads client cases for the expense client on expense invoices', async () => {
     const getCasesMock = vi.mocked(apiService.getCases);
     const createCaseMock = vi.mocked(apiService.createCase);
+    const onClientCaseCreated = vi.fn();
     getCasesMock.mockResolvedValue([]);
     createCaseMock.mockResolvedValue({
       id: 441,
-      clientId: 1,
+      clientId: 2,
       title: 'Case from invoice',
       description: 'Created from invoice',
       status: 'Open',
@@ -1329,11 +1330,12 @@ describe('InvoiceModal integration', () => {
         responsibles={[]}
         lookupsLoading={false}
         relatedPayments={[]}
+        onClientCaseCreated={onClientCaseCreated}
       />,
     );
 
     await waitFor(() => {
-      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
+      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 2 });
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
@@ -1341,13 +1343,72 @@ describe('InvoiceModal integration', () => {
 
     await waitFor(() => {
       expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
-        clientId: 1,
+        clientId: 2,
         title: 'Case from invoice',
         status: 'Open',
       }));
     });
 
+    expect(onClientCaseCreated).toHaveBeenCalledWith(expect.objectContaining({
+      id: 441,
+      clientId: 2,
+      title: 'Case from invoice',
+    }));
     expect(await screen.findByText('Case from invoice')).toBeTruthy();
+  });
+
+  it('submits an empty client case list after unlinking the selected case from the invoice', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 821,
+      invoiceEntityId: 821,
+      number: '821',
+      date: '2026-04-15',
+      dueDate: '2026-04-20',
+      amount: 5000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      clientCaseId: 441,
+      clientCaseIds: [441],
+      clientCases: [
+        {
+          id: 441,
+          clientId: 1,
+          title: 'Case Alpha',
+          status: 'Open',
+          createdAt: '2026-04-14T10:00:00Z',
+        },
+      ],
+      lineItems: [{ name: 'Income service', quantity: 1, unit: 'pcs', price: 5000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Client owner')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Очистить' })[0]);
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: null,
+        clientCaseIds: [],
+      }));
+    });
   });
 
   it('downloads document variant without signature and seal on demand', async () => {
