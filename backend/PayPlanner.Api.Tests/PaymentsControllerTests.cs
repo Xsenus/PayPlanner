@@ -287,7 +287,9 @@ public class PaymentsControllerTests
             to: new DateTime(2026, 5, 31),
             clientId: client.Id,
             caseId: null,
+            contractId: null,
             excludeInstallmentParents: true,
+            excludeInvoiceDocuments: false,
             clientIds: null,
             categoryTokens: null,
             type: null,
@@ -309,6 +311,78 @@ public class PaymentsControllerTests
         Assert.DoesNotContain(response.Items, payment => payment.Id == parentPayment.Id);
         Assert.Equal(40_000m, response.Summary.Income);
         Assert.Equal(2, response.Summary.IncomeCount);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_FiltersByContractId_UsingCanonicalAndLegacyLinks_AndExcludesInvoiceDocuments()
+    {
+        await using var db = await CreateContextAsync();
+
+        var contract = await CreateContractAsync(db, "CTR-PAY-V2-1");
+        var invoice = new Invoice
+        {
+            Number = "INV-PAY-V2-1",
+            Date = new DateTime(2026, 4, 9),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var canonicalPayment = CreatePayment(new DateTime(2026, 4, 10), 5_000m, "Канонический платеж");
+        canonicalPayment.ContractId = contract.Id;
+
+        var legacyPayment = CreatePayment(new DateTime(2026, 4, 11), 6_000m, "Legacy платеж");
+
+        var invoiceDocument = CreatePayment(new DateTime(2026, 4, 12), 7_000m, "Счет-документ");
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+        invoiceDocument.ContractId = contract.Id;
+
+        var unrelatedPayment = CreatePayment(new DateTime(2026, 4, 13), 8_000m, "Посторонний платеж");
+
+        db.Payments.AddRange(canonicalPayment, legacyPayment, invoiceDocument, unrelatedPayment);
+        await db.SaveChangesAsync();
+
+        db.ContractPayments.Add(new ContractPayment
+        {
+            ContractId = contract.Id,
+            PaymentId = legacyPayment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+
+        var actionResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: null,
+            caseId: null,
+            contractId: contract.Id,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: true,
+            clientIds: null,
+            categoryTokens: null,
+            type: null,
+            status: null,
+            minAmount: null,
+            maxAmount: null,
+            search: null,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+
+        Assert.Equal(2, response.Total);
+        Assert.Equal(new[] { canonicalPayment.Id, legacyPayment.Id }, response.Items.Select(item => item.Id).OrderBy(id => id).ToArray());
+        Assert.Equal(11_000m, response.Summary.Income);
+        Assert.DoesNotContain(response.Items, item => item.Id == invoiceDocument.Id);
+        Assert.DoesNotContain(response.Items, item => item.Id == unrelatedPayment.Id);
     }
 
     [Fact]
@@ -580,6 +654,78 @@ public class PaymentsControllerTests
         Assert.Equal(invoice.Number, stored.Account);
         Assert.Equal("LEGACY-401", stored.LegacyAccountNumber);
         Assert.Equal(3, stored.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task Update_PersistsContractId_ForStandalonePayment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var contract = await CreateContractAsync(db, "CTR-PAY-UPD-1");
+        var payment = CreatePayment(new DateTime(2026, 4, 6), 3_500m, "Платеж для договора");
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var updateModel = new Payment
+        {
+            Amount = payment.Amount,
+            CounterpartyName = payment.CounterpartyName,
+            Date = payment.Date,
+            PlannedDate = payment.PlannedDate,
+            Description = payment.Description,
+            DocumentKind = DocumentKind.Payment,
+            Notes = payment.Notes,
+            Status = payment.Status,
+            SystemNotes = payment.SystemNotes,
+            Type = payment.Type,
+            ContractId = contract.Id,
+        };
+
+        var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(contract.Id, updated.ContractId);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(contract.Id, stored.ContractId);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_Update_PersistsContractId_ForStandalonePayment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var contract = await CreateContractAsync(db, "CTR-PAY-UPD-2");
+        var payment = CreatePayment(new DateTime(2026, 4, 7), 4_200m, "V2 платеж для договора");
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+        var updateModel = new Payment
+        {
+            Amount = payment.Amount,
+            CounterpartyName = payment.CounterpartyName,
+            Date = payment.Date,
+            PlannedDate = payment.PlannedDate,
+            Description = payment.Description,
+            DocumentKind = DocumentKind.Payment,
+            Notes = payment.Notes,
+            Status = payment.Status,
+            SystemNotes = payment.SystemNotes,
+            Type = payment.Type,
+            ContractId = contract.Id,
+        };
+
+        var actionResult = await controller.Update(payment.Id, updateModel);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(contract.Id, updated.ContractId);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(contract.Id, stored.ContractId);
     }
 
     [Fact]
@@ -1036,6 +1182,21 @@ public class PaymentsControllerTests
             parentPayment.Id,
             new[] { installmentOne.Id, installmentTwo.Id },
             unrelatedPayment.Id);
+    }
+
+    private static async Task<Contract> CreateContractAsync(PaymentContext db, string number)
+    {
+        var contract = new Contract
+        {
+            Number = number,
+            Date = new DateTime(2026, 4, 1),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        return contract;
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)

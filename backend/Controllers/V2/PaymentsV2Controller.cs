@@ -25,7 +25,9 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
+        [FromQuery] int? contractId = null,
         [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] bool excludeInvoiceDocuments = false,
         [FromQuery] string? clientIds = null,
         [FromQuery] string? categoryTokens = null,
         [FromQuery] PaymentType? type = null,
@@ -46,6 +48,18 @@ public class PaymentsV2Controller : ControllerBase
             .WithPaymentIncludes()
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search);
+
+        if (contractId.HasValue)
+        {
+            query = query.Where(payment =>
+                payment.ContractId == contractId.Value
+                || _db.ContractPayments.Any(link => link.ContractId == contractId.Value && link.PaymentId == payment.Id));
+        }
+
+        if (excludeInvoiceDocuments)
+        {
+            query = query.Where(payment => payment.DocumentKind != DocumentKind.Invoice);
+        }
 
         var clientIdList = ParseIntList(clientIds);
         if (clientIdList.Count > 0)
@@ -201,6 +215,7 @@ public class PaymentsV2Controller : ControllerBase
         entity.Notes = model.Notes ?? string.Empty;
         entity.ClientId = model.ClientId;
         entity.ClientCaseId = model.ClientCaseId;
+        entity.ContractId = model.ContractId;
         entity.DealTypeId = model.DealTypeId;
         entity.IncomeTypeId = model.IncomeTypeId;
         entity.PaymentSourceId = model.PaymentSourceId;

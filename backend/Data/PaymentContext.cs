@@ -565,7 +565,7 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(e => e.Contract)
-                  .WithMany()
+                  .WithMany(c => c.Payments)
                   .HasForeignKey(e => e.ContractId)
                   .OnDelete(DeleteBehavior.SetNull);
 

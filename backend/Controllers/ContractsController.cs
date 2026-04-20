@@ -43,14 +43,19 @@ public class ContractsController : ControllerBase
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
         var query = ApplySort(ApplyFilters(BuildContractsQuery(), from, to, clientId, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var items = await query.Skip((page - 1) * pageSize).Take(pageSize).Select(MapToDtoExpression).ToListAsync(ct);
+        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, search), sortBy, sortDir)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+        var items = contracts.Select(MapToDto).ToList();
         return Ok(new { items, total, page, pageSize });
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ContractDto>> GetById(int id, CancellationToken ct)
     {
-        var dto = await BuildContractsQuery().Where(c => c.Id == id).Select(MapToDtoExpression).FirstOrDefaultAsync(ct);
+        var contract = await BuildContractDetailQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
+        var dto = contract is null ? null : MapToDto(contract);
         return dto is null ? NotFound() : Ok(dto);
     }
 
@@ -132,10 +137,12 @@ public class ContractsController : ControllerBase
         };
 
         ApplyLinks(contract, normalized.Clients, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
-        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
         _db.Contracts.Add(contract);
         await _db.SaveChangesAsync(ct);
-        var dto = await BuildContractsQuery().Where(c => c.Id == contract.Id).Select(MapToDtoExpression).FirstAsync(ct);
+        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
+        await _db.SaveChangesAsync(ct);
+        _db.ChangeTracker.Clear();
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
         return Created($"/api/contracts/{dto.Id}", dto);
     }
 
@@ -172,7 +179,8 @@ public class ContractsController : ControllerBase
         SyncLinks(contract.ContractPayments, normalized.PaymentIds, id, paymentId => new ContractPayment { ContractId = id, PaymentId = paymentId }, (l, v) => l.PaymentId == v);
         await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
         await _db.SaveChangesAsync(ct);
-        var dto = await BuildContractsQuery().Where(c => c.Id == contract.Id).Select(MapToDtoExpression).FirstAsync(ct);
+        _db.ChangeTracker.Clear();
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
         return Ok(dto);
     }
 
@@ -228,6 +236,103 @@ public class ContractsController : ControllerBase
         InvoiceIds = contract.ContractInvoices.Select(x => x.InvoiceId).ToList(),
         PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
     };
+
+    private IQueryable<Contract> BuildContractDetailQuery() => _db.Contracts
+        .AsSplitQuery()
+        .Include(c => c.ClientContracts).ThenInclude(link => link.Client)
+        .Include(c => c.ContractActs).ThenInclude(link => link.Act)
+        .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
+        .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
+        .Include(c => c.Payments).ThenInclude(payment => payment.Acts);
+
+    private ContractDto MapToDto(Contract contract)
+    {
+        var entry = _db.Entry(contract);
+        var legacyInvoiceIds = contract.ContractInvoices.Select(link => link.InvoiceId).ToHashSet();
+        var canonicalInvoicePayments = contract.Payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.InvoiceId.HasValue)
+            .ToList();
+        var invoiceIds = legacyInvoiceIds
+            .Concat(canonicalInvoicePayments.Select(payment => payment.Id))
+            .Distinct()
+            .ToList();
+
+        var legacyInvoiceAmount = contract.ContractInvoices.Sum(link => link.Invoice?.Amount ?? 0m);
+        var canonicalInvoiceAmount = canonicalInvoicePayments
+            .Where(payment => !legacyInvoiceIds.Contains(payment.Id))
+            .Sum(payment => payment.Amount);
+        var legacyActIds = contract.ContractActs.Select(link => link.ActId).ToHashSet();
+        var legacyActAmount = contract.ContractActs.Sum(link => link.Act?.Amount ?? 0m);
+        var invoiceLinkedActs = contract.ContractInvoices
+            .Where(link => link.Invoice != null)
+            .SelectMany(link => link.Invoice!.Acts)
+            .Concat(
+                contract.Payments
+                    .Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.InvoiceId.HasValue)
+                    .SelectMany(payment => payment.Acts))
+            .Where(act => !legacyActIds.Contains(act.Id))
+            .GroupBy(act => act.Id)
+            .Select(group => group.First())
+            .ToList();
+        var legacyPaymentLinks = contract.ContractPayments
+            .Where(link => link.Payment != null && link.Payment.DocumentKind != DocumentKind.Invoice)
+            .ToList();
+        var legacyPaymentIds = legacyPaymentLinks.Select(link => link.PaymentId).ToHashSet();
+        var canonicalPayments = contract.Payments
+            .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
+            .ToList();
+        var paymentIds = legacyPaymentIds
+            .Concat(canonicalPayments.Select(payment => payment.Id))
+            .Distinct()
+            .ToList();
+        var legacyPaymentAmount = legacyPaymentLinks.Sum(link => link.Payment?.Amount ?? 0m);
+        var canonicalPaymentAmount = canonicalPayments
+            .Where(payment => !legacyPaymentIds.Contains(payment.Id))
+            .Sum(payment => payment.Amount);
+
+        return new ContractDto
+        {
+            Id = contract.Id,
+            Number = contract.Number,
+            Title = contract.Title,
+            Description = contract.Description,
+            BillingMode = contract.BillingMode,
+            IsOpenEnded = contract.IsOpenEnded,
+            Amount = contract.Amount,
+            Date = contract.Date,
+            StartDate = contract.StartDate,
+            ValidUntil = contract.ValidUntil,
+            TerminationDate = contract.TerminationDate,
+            CreatedAt = contract.CreatedAt,
+            UpdatedAt = contract.UpdatedAt,
+            AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue,
+            AuditCreatedByUserName = entry.Property<string?>("CreatedByUserName").CurrentValue,
+            AuditUpdatedAt = entry.Property<DateTime?>("UpdatedAt").CurrentValue,
+            AuditUpdatedByUserId = entry.Property<int?>("UpdatedByUserId").CurrentValue,
+            AuditUpdatedByUserName = entry.Property<string?>("UpdatedByUserName").CurrentValue,
+            AuditIsDeleted = entry.Property<bool>("IsDeleted").CurrentValue,
+            AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue,
+            AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue,
+            AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue,
+            InvoiceAmountTotal = legacyInvoiceAmount + canonicalInvoiceAmount,
+            ActAmountTotal = legacyActAmount + invoiceLinkedActs.Sum(act => act.Amount),
+            PaymentAmountTotal = legacyPaymentAmount + canonicalPaymentAmount,
+            Clients = contract.ClientContracts
+                .Where(link => link.Client != null)
+                .Select(link => new ContractClientDto
+                {
+                    Id = link.ClientId,
+                    Name = link.Client!.Name,
+                    Company = link.Client!.Company,
+                    Comment = link.Comment,
+                })
+                .OrderBy(item => item.Name)
+                .ToList(),
+            ActIds = contract.ContractActs.Select(link => link.ActId).ToList(),
+            InvoiceIds = invoiceIds,
+            PaymentIds = paymentIds,
+        };
+    }
 
     private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)>
         ValidateAndNormalizePayload(UpsertContractRequest request, int? contractId, CancellationToken ct)
@@ -552,13 +657,24 @@ public class ContractsController : ControllerBase
 
     private async Task AssignCanonicalContractLinks(Contract contract, List<int> invoiceIds, List<int> paymentIds, CancellationToken ct)
     {
-        var targetIds = invoiceIds.Concat(paymentIds).Distinct().ToList();
-        if (targetIds.Count == 0) return;
+        var invoiceTargets = invoiceIds.Distinct().ToHashSet();
+        var invoiceCandidates = await _db.Payments
+            .Where(x => x.DocumentKind == DocumentKind.Invoice && (x.ContractId == contract.Id || invoiceTargets.Contains(x.Id)))
+            .ToListAsync(ct);
 
-        var payments = await _db.Payments.Where(x => targetIds.Contains(x.Id)).ToListAsync(ct);
-        foreach (var payment in payments)
+        foreach (var payment in invoiceCandidates)
         {
-            payment.ContractId = contract.Id;
+            payment.ContractId = invoiceTargets.Contains(payment.Id) ? contract.Id : null;
+        }
+
+        var paymentTargets = paymentIds.Distinct().ToHashSet();
+        var paymentCandidates = await _db.Payments
+            .Where(x => x.DocumentKind != DocumentKind.Invoice && (x.ContractId == contract.Id || paymentTargets.Contains(x.Id)))
+            .ToListAsync(ct);
+
+        foreach (var payment in paymentCandidates)
+        {
+            payment.ContractId = paymentTargets.Contains(payment.Id) ? contract.Id : null;
         }
     }
 

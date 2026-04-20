@@ -91,4 +91,9 @@ public class Contract
     /// Ручные привязки начислений к договору.
     /// </summary>
     public ICollection<ContractPayment> ContractPayments { get; set; } = new List<ContractPayment>();
+
+    /// <summary>
+    /// Канонически связанные с договором документы платежного реестра.
+    /// </summary>
+    public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 }

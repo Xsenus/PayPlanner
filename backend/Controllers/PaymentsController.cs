@@ -155,6 +155,7 @@ public class PaymentsController : ControllerBase
         e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
         e.ClientCaseId = model.ClientCaseId;
+        e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
         e.IncomeTypeId = model.IncomeTypeId;
         e.PaymentSourceId = model.PaymentSourceId;

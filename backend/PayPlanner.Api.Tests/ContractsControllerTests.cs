@@ -149,6 +149,420 @@ public class ContractsControllerTests
         Assert.Contains(nameof(request.Amount), details.Errors.Keys);
     }
 
+    [Fact]
+    public async Task Create_AssignsCanonicalContractId_ToSelectedInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-31", new DateTime(2026, 4, 14), 8_000m);
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var request = new UpsertContractRequest
+        {
+            Number = "CT-005",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 10_000m,
+            InvoiceIds = [invoicePayment.Id],
+            Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+        };
+
+        var actionResult = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(created.Value);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+        Assert.Equal(8_000m, dto.InvoiceAmountTotal);
+
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == invoicePayment.Id);
+        Assert.Equal(dto.Id, storedPayment.ContractId);
+    }
+
+    [Fact]
+    public async Task Create_AssignsCanonicalContractId_ToSelectedPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 15), 3_500m);
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var request = new UpsertContractRequest
+        {
+            Number = "CT-005A",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            PaymentIds = [payment.Id],
+            Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+        };
+
+        var actionResult = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(created.Value);
+        Assert.Equal([payment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
+        Assert.Equal(3_500m, dto.PaymentAmountTotal);
+
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(dto.Id, storedPayment.ContractId);
+    }
+
+    [Fact]
+    public async Task GetById_UsesCanonicalInvoiceContractLinks_ForTotalsAndIds()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32", new DateTime(2026, 4, 14), 12_500m);
+        invoicePayment.ContractId = contract.Id;
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(12_500m, dto.InvoiceAmountTotal);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
+    public async Task GetById_KeepsLegacyManualInvoiceLinks_VisibleBeforeResave()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006A",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32A", new DateTime(2026, 4, 14), 7_500m);
+        db.Add(new ContractInvoice
+        {
+            ContractId = contract.Id,
+            InvoiceId = invoicePayment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(7_500m, dto.InvoiceAmountTotal);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
+    public async Task GetById_UsesCanonicalPaymentContractLinks_ForTotalsAndIds_WithoutCountingInvoiceDocuments()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006B",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 16), 4_250m);
+        payment.ContractId = contract.Id;
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32B", new DateTime(2026, 4, 16), 9_500m);
+        invoicePayment.ContractId = contract.Id;
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(4_250m, dto.PaymentAmountTotal);
+        Assert.Equal([payment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
+        Assert.Equal(9_500m, dto.InvoiceAmountTotal);
+    }
+
+    [Fact]
+    public async Task GetById_UsesActsLinkedThroughCanonicalInvoices_ForActAmountTotal_WithoutCreatingManualActIds()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006D",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32C", new DateTime(2026, 4, 17), 10_000m);
+        invoicePayment.ContractId = contract.Id;
+
+        var act = await CreateActAsync(db, invoicePayment.Id, new DateTime(2026, 4, 18), 3_800m);
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(3_800m, dto.ActAmountTotal);
+        Assert.Empty(dto.ActIds);
+        Assert.Equal(10_000m, dto.InvoiceAmountTotal);
+    }
+
+    [Fact]
+    public async Task GetById_UsesActsLinkedThroughLegacyInvoices_ForActAmountTotal_WithoutCreatingManualActIds()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006E",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32D", new DateTime(2026, 4, 19), 11_000m);
+        db.ContractInvoices.Add(new ContractInvoice
+        {
+            ContractId = contract.Id,
+            InvoiceId = invoicePayment.Id,
+        });
+
+        var act = await CreateActAsync(db, invoicePayment.Id, new DateTime(2026, 4, 20), 4_600m);
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(4_600m, dto.ActAmountTotal);
+        Assert.Empty(dto.ActIds);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
+    public async Task GetById_KeepsLegacyManualPaymentLinks_VisibleBeforeResave()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006C",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 17), 6_100m);
+        db.ContractPayments.Add(new ContractPayment
+        {
+            ContractId = contract.Id,
+            PaymentId = payment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(6_100m, dto.PaymentAmountTotal);
+        Assert.Equal([payment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
+    public async Task Update_ClearsCanonicalContractId_WhenInvoiceIsRemovedFromContract()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-007",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-33", new DateTime(2026, 4, 14), 5_000m);
+        invoicePayment.ContractId = contract.Id;
+        db.Add(new ContractInvoice
+        {
+            ContractId = contract.Id,
+            InvoiceId = invoicePayment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var request = new UpsertContractRequest
+        {
+            Number = contract.Number,
+            Date = contract.Date,
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = contract.Amount,
+            Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            InvoiceIds = [],
+        };
+
+        var actionResult = await controller.Update(contract.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Empty(dto.InvoiceIds);
+        Assert.Equal(0m, dto.InvoiceAmountTotal);
+
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == invoicePayment.Id);
+        Assert.Null(storedPayment.ContractId);
+        Assert.False(await db.ContractInvoices.AsNoTracking().AnyAsync(item => item.ContractId == contract.Id && item.InvoiceId == invoicePayment.Id));
+    }
+
+    [Fact]
+    public async Task Update_ClearsCanonicalContractId_WhenPaymentIsRemovedFromContract()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-007A",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 18), 5_200m);
+        payment.ContractId = contract.Id;
+        db.ContractPayments.Add(new ContractPayment
+        {
+            ContractId = contract.Id,
+            PaymentId = payment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var request = new UpsertContractRequest
+        {
+            Number = contract.Number,
+            Date = contract.Date,
+            BillingMode = contract.BillingMode,
+            IsOpenEnded = contract.IsOpenEnded,
+            Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            PaymentIds = [],
+        };
+
+        var actionResult = await controller.Update(contract.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Empty(dto.PaymentIds);
+        Assert.Equal(0m, dto.PaymentAmountTotal);
+
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Null(storedPayment.ContractId);
+        Assert.False(await db.ContractPayments.AsNoTracking().AnyAsync(item => item.ContractId == contract.Id && item.PaymentId == payment.Id));
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -207,6 +621,46 @@ public class ContractsControllerTests
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
         return payment;
+    }
+
+    private static async Task<Payment> CreateStandalonePaymentAsync(PaymentContext db, DateTime date, decimal amount)
+    {
+        var payment = new Payment
+        {
+            Amount = amount,
+            CounterpartyName = "Тестовый клиент",
+            Date = date,
+            PlannedDate = date,
+            Description = $"Платеж {date:dd.MM.yyyy}",
+            DocumentKind = DocumentKind.Payment,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+        };
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        return payment;
+    }
+
+    private static async Task<Act> CreateActAsync(PaymentContext db, int? invoiceId, DateTime date, decimal amount)
+    {
+        var act = new Act
+        {
+            Number = $"ACT-{date:yyyyMMddHHmmss}",
+            Date = date,
+            Amount = amount,
+            CreationMode = ActCreationMode.Manual,
+            InvoiceId = invoiceId,
+            Status = ActStatus.Created,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        return act;
     }
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService
