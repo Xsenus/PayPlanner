@@ -302,10 +302,17 @@ public class ActsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var act = await _db.Acts.FindAsync(new object[] { id }, ct);
+        var act = await _db.Acts
+            .Include(item => item.LineItems)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (act is null)
         {
             return NotFound();
+        }
+
+        if (act.LineItems.Count > 0)
+        {
+            _db.RemoveRange(act.LineItems);
         }
 
         _db.Acts.Remove(act);
