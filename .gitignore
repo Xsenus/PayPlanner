@@ -21,6 +21,7 @@ package-lock.json
 coverage/
 .cypress/
 .playwright/
+.codex-build/
 
 # Editor / OS
 .DS_Store
