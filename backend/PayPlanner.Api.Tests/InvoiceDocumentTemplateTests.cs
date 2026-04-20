@@ -90,6 +90,45 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_UsesRequestedTemplateKey_WhenProvided()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var saveAction = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "template-a",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "template-a",
+                        Name = "Template A",
+                        Html = "<html><body>template-a-{{invoice.number}}</body></html>",
+                    },
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "template-b",
+                        Name = "Template B",
+                        Html = "<html><body>template-b-{{invoice.number}}</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(saveAction.Result);
+
+        var result = await controller.GetDocument(paymentId, "html", " template-b ", null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("template-b-25", content.Content);
+        Assert.DoesNotContain("template-a-25", content.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_ReturnsPdf_WhenPdfFormatRequested()
     {
         await using var db = await CreateContextAsync();
@@ -178,6 +217,24 @@ public class InvoiceDocumentTemplateTests
         Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
         Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
         Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersInstallmentSchedule_WhenInstallmentsExist()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        await CreateInstallmentScheduleFixtureAsync(db, paymentId);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("installment-schedule", content.Content);
+        Assert.Contains("installment-title", content.Content);
+        Assert.Matches(new Regex("15\\.06\\.2026\\s*-\\s*4[\\s\\u00A0]000", RegexOptions.Singleline), content.Content);
+        Assert.Matches(new Regex("15\\.07\\.2026\\s*-\\s*7[\\s\\u00A0]000", RegexOptions.Singleline), content.Content);
     }
 
     [Fact]
@@ -286,6 +343,63 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("data:image/png;base64,new-seal", content.Content);
         Assert.Contains("data:image/png;base64,new-signature", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_UsesMainCompanyIdsFallback_WhenDefaultIdIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+
+        var company = new LegalEntity
+        {
+            ShortName = "Fallback Company",
+            FullName = "Fallback Company Full Name",
+            Inn = "7700000001",
+            Address = "Fallback address",
+            SealDataUrl = "data:image/png;base64,fallback-seal",
+            DirectorSignatureDataUrl = "data:image/png;base64,fallback-signature",
+            DocumentDirectorJson = "{\"position\":\"Director\",\"lastName\":\"Fallback\",\"firstName\":\"Ivan\",\"middleName\":\"Petrovich\",\"noMiddleName\":false}",
+        };
+
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = $"[{company.Id}]",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var result = await controller.GetDocument(paymentId, "html", null, true, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("data:image/png;base64,fallback-seal", content.Content);
+        Assert.Contains("data:image/png;base64,fallback-signature", content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_IgnoresBrokenMainCompanyIdsJson_WhenNoFallbackExists()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = "{broken-json",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var result = await controller.GetDocument(paymentId, "html", null, true, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.DoesNotContain("fallback-seal", content.Content);
+        Assert.DoesNotContain("fallback-signature", content.Content);
     }
 
     [Fact]
@@ -465,6 +579,361 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("%PDF-mail%"u8.ToArray(), emailService.AttachmentBytes);
     }
 
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_ForbidsNonAdminUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: false);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Default",
+                        Html = "<html><body>template</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_ReturnsValidationProblem_WhenModelStateIsInvalid()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+        controller.ModelState.AddModelError("Templates", "Required");
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Default",
+                        Html = "<html><body>template</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var result = Assert.IsType<ObjectResult>(action.Result);
+        var details = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.Contains("Templates", details.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsDuplicateTemplateKeys()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "duplicate",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "duplicate",
+                        Name = "Template 1",
+                        Html = "<html><body>one</body></html>",
+                    },
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "duplicate",
+                        Name = "Template 2",
+                        Html = "<html><body>two</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsEmptyTemplateCollection()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "missing",
+                Templates = [],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsBlankTemplateKey()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = " ",
+                        Name = "Template without key",
+                        Html = "<html><body>content</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsBlankTemplateName()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = " ",
+                        Html = "<html><body>content</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsBlankTemplateHtml()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Standard",
+                        Html = " ",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task UpsertDocumentTemplateSettings_RejectsMissingOrUnknownActiveTemplateKey()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var missingActiveKey = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = " ",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Default",
+                        Html = "<html><body>content</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(missingActiveKey.Result);
+
+        var unknownActiveKey = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "other",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Default",
+                        Html = "<html><body>content</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(unknownActiveKey.Result);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsNotFound_WhenInvoiceDoesNotExist()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.GetDocument(999, "html", null, null, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsWordAttachment_ForUnknownFormat()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.GetDocument(paymentId, "xlsx", null, null, CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(action);
+        Assert.Equal("application/msword", file.ContentType);
+        Assert.Equal("invoice-25.doc", file.FileDownloadName);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsProblem_WhenPdfServiceIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.GetDocument(paymentId, "pdf", null, null, CancellationToken.None);
+
+        var problem = Assert.IsType<ObjectResult>(action);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_ReturnsValidationProblem_WhenModelStateIsInvalid()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+        controller.ModelState.AddModelError("Email", "Invalid");
+
+        var action = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest { Email = "broken" },
+            CancellationToken.None);
+
+        var result = Assert.IsType<ObjectResult>(action);
+        var details = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.Contains("Email", details.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_ReturnsNotFound_WhenInvoiceDoesNotExist()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.SendInvoiceEmail(
+            999,
+            new SendInvoiceEmailRequest { Email = "mail@example.com" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_RequiresRecipient_WhenRequestAndClientEmailAreEmpty()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var payment = await db.Payments.Include(item => item.Client).SingleAsync(item => item.Id == paymentId);
+        payment.Client!.Email = "   ";
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+        var action = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest(),
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Equal("Recipient email is required.", badRequest.Value);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_NormalizesHtmlFormatToWord_AndUsesCustomContent()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var emailService = new RecordingEmailService();
+        var controller = CreateController(db, isAdmin: true, emailService: emailService);
+
+        var action = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest
+            {
+                Email = "custom@example.com",
+                Subject = "Custom subject",
+                Message = "Custom body",
+                Format = "html",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.NotNull(ok.Value);
+        Assert.Equal("word", ok.Value!.GetType().GetProperty("format")!.GetValue(ok.Value));
+        Assert.Equal("custom@example.com", emailService.ToEmail);
+        Assert.Equal("Custom subject", emailService.Subject);
+        Assert.Equal("Custom body", emailService.Body);
+        Assert.Equal("invoice-25.doc", emailService.AttachmentFileName);
+        Assert.Equal("application/msword", emailService.AttachmentContentType);
+    }
+
+    [Fact]
+    public async Task SendInvoiceEmail_ReturnsProblem_WhenPdfServiceIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var action = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest
+            {
+                Email = "pdf@example.com",
+                Format = "pdf",
+            },
+            CancellationToken.None);
+
+        var problem = Assert.IsType<ObjectResult>(action);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
+    }
+
     private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db, bool createNormalizedPassport = true)
     {
         var client = new Client
@@ -564,6 +1033,50 @@ public class InvoiceDocumentTemplateTests
 
         await db.SaveChangesAsync();
         return payment.Id;
+    }
+
+    private static async Task CreateInstallmentScheduleFixtureAsync(PaymentContext db, int parentPaymentId)
+    {
+        var parentPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == parentPaymentId);
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Account = parentPayment.Account,
+                AccountDate = parentPayment.AccountDate,
+                InvoiceId = parentPayment.InvoiceId,
+                ClientId = parentPayment.ClientId,
+                ContractId = parentPayment.ContractId,
+                ClientCaseId = parentPayment.ClientCaseId,
+                DocumentKind = DocumentKind.Payment,
+                Date = new DateTime(2026, 6, 15),
+                PlannedDate = new DateTime(2026, 6, 15),
+                Amount = 4_000m,
+                Status = PaymentStatus.Pending,
+                Type = parentPayment.Type,
+                Description = "Installment 2/2",
+                SystemNotes =
+                    "[pp:installment-payment] {\"sequence\":2,\"total\":11000,\"downPayment\":0,\"annualRate\":0,\"months\":2,\"startDate\":\"2026-04-12T00:00:00\",\"roundingMode\":0,\"roundingStep\":0,\"toPay\":11000,\"overpay\":0,\"loanAmount\":11000,\"baseMonthlyPayment\":5500,\"roundedMonthlyPayment\":5500,\"item\":{\"sequence\":2,\"date\":\"2026-06-15T00:00:00\",\"principal\":4000,\"interest\":0,\"payment\":4000,\"balance\":0}}",
+            },
+            new Payment
+            {
+                Account = parentPayment.Account,
+                AccountDate = parentPayment.AccountDate,
+                InvoiceId = parentPayment.InvoiceId,
+                ClientId = parentPayment.ClientId,
+                ContractId = parentPayment.ContractId,
+                ClientCaseId = parentPayment.ClientCaseId,
+                DocumentKind = DocumentKind.Payment,
+                Date = new DateTime(2026, 7, 15),
+                PlannedDate = new DateTime(2026, 7, 15),
+                Amount = 7_000m,
+                Status = PaymentStatus.Pending,
+                Type = parentPayment.Type,
+                Description = "Installment fallback",
+                SystemNotes = "[pp:installment-payment] broken-json",
+            });
+
+        await db.SaveChangesAsync();
     }
 
     private static async Task CreateMainCompanyAsync(PaymentContext db)
@@ -864,6 +1377,9 @@ public class InvoiceDocumentTemplateTests
 
     private sealed class RecordingEmailService : IEmailService
     {
+        public string? ToEmail { get; private set; }
+        public string? Subject { get; private set; }
+        public string? Body { get; private set; }
         public string? AttachmentFileName { get; private set; }
         public byte[]? AttachmentBytes { get; private set; }
         public string? AttachmentContentType { get; private set; }
@@ -881,6 +1397,9 @@ public class InvoiceDocumentTemplateTests
             byte[] attachmentBytes,
             string attachmentContentType)
         {
+            ToEmail = toEmail;
+            Subject = subject;
+            Body = body;
             AttachmentFileName = attachmentFileName;
             AttachmentBytes = attachmentBytes;
             AttachmentContentType = attachmentContentType;
