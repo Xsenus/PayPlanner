@@ -275,6 +275,266 @@ public class ClientsControllerTests
         Assert.Equal(1, secondarySummary.ExpenseCount);
     }
 
+    [Fact]
+    public async Task Create_Update_Delete_RoundTripsStructuredProfile_AndCleansChildrenOnDelete()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var firstLegalEntityId = await CreateLegalEntityAsync(db, "РЋСЂР»РёС†Рѕ 1");
+        var secondLegalEntityId = await CreateLegalEntityAsync(db, "РЋСЂР»РёС†Рѕ 2");
+        var firstStatusId = await CreateClientStatusAsync(db, "РќРѕРІС‹Р№");
+        var secondStatusId = await CreateClientStatusAsync(db, "VIP");
+        var controller = CreateController(db, userId);
+
+        var createModel = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ CRUD",
+            Email = "client-crud@example.com",
+            Phone = "+7 (900) 000-00-00",
+            Company = "РћРћРћ РџРµСЂРІРѕРµ",
+            Address = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                addressEntries = new[]
+                {
+                    new
+                    {
+                        type = "registration",
+                        sourceQuery = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
+                        fullAddress = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
+                        postalCode = "630001",
+                        country = "Р РѕСЃСЃРёСЏ",
+                        region = "РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»",
+                        city = "Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє",
+                        street = "СѓР» РџРµСЂРІР°СЏ",
+                        house = "1",
+                        flat = "10",
+                    },
+                },
+                passportEntries = new[]
+                {
+                    new
+                    {
+                        series = "1234",
+                        number = "567890",
+                        issuedBy = "РћР’Р” 1",
+                        issueDate = new DateTime(2020, 1, 1),
+                    },
+                },
+            }),
+            IsActive = true,
+            LegalEntityId = firstLegalEntityId,
+            ResponsibleUserId = userId,
+            ClientStatusId = firstStatusId,
+        };
+
+        var createAction = await controller.Create(createModel, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createAction);
+        var dto = Assert.IsType<Client>(created.Value);
+        Assert.Equal(firstLegalEntityId, dto.LegalEntityId);
+        Assert.Equal(firstStatusId, dto.ClientStatusId);
+        Assert.Equal(userId, dto.ResponsibleUserId);
+        Assert.Single(dto.Addresses);
+        Assert.Equal("РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ", dto.Addresses.Single().UnrestrictedValue);
+        Assert.Equal("1234", (await db.ClientPassports.AsNoTracking().SingleAsync(item => item.ClientId == dto.Id)).Series);
+
+        var updateModel = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ CRUD Updated",
+            Email = "client-crud-updated@example.com",
+            Phone = "+7 (900) 111-11-11",
+            Company = "РћРћРћ Р’С‚РѕСЂРѕРµ",
+            Address = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                addressEntries = new[]
+                {
+                    new
+                    {
+                        type = "actual",
+                        sourceQuery = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
+                        fullAddress = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
+                        postalCode = "630002",
+                        country = "Р РѕСЃСЃРёСЏ",
+                        region = "РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»",
+                        city = "Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє",
+                        street = "СѓР» Р’С‚РѕСЂР°СЏ",
+                        house = "2",
+                        flat = "20",
+                    },
+                },
+                passportEntries = new[]
+                {
+                    new
+                    {
+                        series = "4321",
+                        number = "098765",
+                        issuedBy = "РћР’Р” 2",
+                        issueDate = new DateTime(2021, 2, 2),
+                    },
+                },
+            }),
+            IsActive = false,
+            LegalEntityId = secondLegalEntityId,
+            ResponsibleUserId = userId,
+            ClientStatusId = secondStatusId,
+        };
+
+        var updateAction = await controller.Update(dto.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction);
+        var updated = Assert.IsType<Client>(ok.Value);
+        Assert.Equal("РљР»РёРµРЅС‚ CRUD Updated", updated.Name);
+        Assert.Equal(secondLegalEntityId, updated.LegalEntityId);
+        Assert.Equal(secondStatusId, updated.ClientStatusId);
+        Assert.False(updated.IsActive);
+        Assert.Single(updated.Addresses);
+        Assert.Equal("Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ", updated.Addresses.Single().UnrestrictedValue);
+
+        var storedPassport = await db.ClientPassports.AsNoTracking().SingleAsync(item => item.ClientId == dto.Id);
+        Assert.Equal("4321", storedPassport.Series);
+        Assert.Equal("098765", storedPassport.Number);
+
+        var deleteAction = await controller.Delete(dto.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(deleteAction);
+        Assert.Null(await db.Clients.AsNoTracking().SingleOrDefaultAsync(item => item.Id == dto.Id));
+        Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.ClientId == dto.Id));
+        Assert.Equal(0, await db.ClientPassports.AsNoTracking().CountAsync(item => item.ClientId == dto.Id));
+    }
+
+    [Fact]
+    public async Task Delete_RejectsClient_WhenPaymentUsageExists()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var client = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ СЃ РїР»Р°С‚РµР¶РѕРј",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Amount = 7_500m,
+            PaidAmount = 0m,
+            CounterpartyName = "РљР»РёРµРЅС‚ СЃ РїР»Р°С‚РµР¶РѕРј",
+            Date = new DateTime(2026, 4, 12),
+            PlannedDate = new DateTime(2026, 4, 12),
+            Description = "РџР»Р°С‚РµР¶ РєР»РёРµРЅС‚Р°",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            ClientId = client.Id,
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        };
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var action = await controller.Delete(client.Id, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(action);
+        var usage = Assert.IsAssignableFrom<IEnumerable<string>>(conflict.Value?.GetType().GetProperty("usage")?.GetValue(conflict.Value));
+        Assert.Contains(usage, item => !string.IsNullOrWhiteSpace(item));
+        Assert.NotNull(await db.Clients.AsNoTracking().SingleOrDefaultAsync(item => item.Id == client.Id));
+    }
+
+    [Fact]
+    public async Task BulkDelete_RemovesSelectedUnusedClients_AndSoftDeletesProfiles()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var firstClient = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ 1",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+
+        var secondClient = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ 2",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+
+        db.Clients.AddRange(firstClient, secondClient);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.AddRange(
+            new AddressRecord { ClientId = firstClient.Id, Type = AddressType.Registration, Value = "РђРґСЂРµСЃ 1", IsPrimary = true },
+            new AddressRecord { ClientId = secondClient.Id, Type = AddressType.Registration, Value = "РђРґСЂРµСЃ 2", IsPrimary = true });
+        db.ClientPassports.AddRange(
+            new ClientPassport { ClientId = firstClient.Id, Series = "1111", Number = "111111", IsPrimary = true },
+            new ClientPassport { ClientId = secondClient.Id, Series = "2222", Number = "222222", IsPrimary = true });
+        await db.SaveChangesAsync();
+
+        var action = await controller.BulkDelete(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [firstClient.Id, secondClient.Id],
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.Equal(2, ok.Value?.GetType().GetProperty("deleted")?.GetValue(ok.Value));
+        Assert.Equal(0, await db.Clients.AsNoTracking().CountAsync(item => item.Id == firstClient.Id || item.Id == secondClient.Id));
+        Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.ClientId == firstClient.Id || item.ClientId == secondClient.Id));
+        Assert.Equal(0, await db.ClientPassports.AsNoTracking().CountAsync(item => item.ClientId == firstClient.Id || item.ClientId == secondClient.Id));
+    }
+
+    [Fact]
+    public async Task ChangeResponsible_UpdatesSelectedClients()
+    {
+        await using var db = await CreateContextAsync();
+        var adminUserId = await CreateUserAsync(db, roleName: "admin");
+        var nextUserId = await CreateUserAsync(db, roleName: "user");
+        var controller = CreateController(db, adminUserId);
+
+        var firstClient = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ A",
+            ResponsibleUserId = adminUserId,
+            IsActive = true,
+        };
+
+        var secondClient = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ B",
+            ResponsibleUserId = adminUserId,
+            IsActive = true,
+        };
+
+        db.Clients.AddRange(firstClient, secondClient);
+        await db.SaveChangesAsync();
+
+        var action = await controller.ChangeResponsible(new PayPlanner.Api.Models.Requests.BulkAssignResponsibleRequest
+        {
+            Ids = [firstClient.Id, secondClient.Id],
+            ResponsibleUserId = nextUserId,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.Equal(2, ok.Value?.GetType().GetProperty("updated")?.GetValue(ok.Value));
+
+        var responsibles = await db.Clients.AsNoTracking()
+            .Where(item => item.Id == firstClient.Id || item.Id == secondClient.Id)
+            .Select(item => item.ResponsibleUserId)
+            .Distinct()
+            .ToListAsync();
+
+        Assert.Equal([nextUserId], responsibles);
+    }
+
     private static async Task<int> CreateUserAsync(PaymentContext db, string roleName = "user")
     {
         var role = new Role
@@ -289,7 +549,7 @@ public class ClientsControllerTests
 
         var user = new User
         {
-            Email = "client-tests@example.com",
+            Email = $"client-tests-{Guid.NewGuid():N}@example.com",
             PasswordHash = "hash",
             FullName = "Тестовый пользователь",
             RoleId = role.Id,
@@ -302,6 +562,34 @@ public class ClientsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user.Id;
+    }
+
+    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    {
+        var entity = new LegalEntity
+        {
+            ShortName = shortName,
+            FullName = shortName,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+        return entity.Id;
+    }
+
+    private static async Task<int> CreateClientStatusAsync(PaymentContext db, string name)
+    {
+        var status = new ClientStatusEntity
+        {
+            Name = name,
+            ColorHex = "#2563EB",
+        };
+
+        db.ClientStatuses.Add(status);
+        await db.SaveChangesAsync();
+        return status.Id;
     }
 
     private static ClientsController CreateController(PaymentContext db, int userId)

@@ -440,8 +440,8 @@ public class ClientsController : ControllerBase
         await SyncClientAddressesAsync(entity, profilePayload);
         await SyncClientPassportAsync(entity, profilePayload);
         await _db.SaveChangesAsync(ct);
-        await LoadClientResponseDataAsync(entity, ct);
-        return Created($"/api/clients/{entity.Id}", entity);
+        var response = await LoadClientResponseAsync(entity.Id, ct);
+        return Created($"/api/clients/{entity.Id}", response);
     }
 
     [HttpPut("{id:int}")]
@@ -502,20 +502,26 @@ public class ClientsController : ControllerBase
         e.ResponsibleUserId = responsibleUserId;
         e.ClientStatusId = model.ClientStatusId;
         await _db.SaveChangesAsync(ct);
-        await LoadClientResponseDataAsync(e, ct);
-        return Ok(e);
+        var response = await LoadClientResponseAsync(e.Id, ct);
+        return Ok(response);
     }
 
 
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task LoadClientResponseDataAsync(Client client, CancellationToken ct)
+    private async Task<Client> LoadClientResponseAsync(int clientId, CancellationToken ct)
     {
-        await _db.Entry(client).Reference(c => c.LegalEntity).LoadAsync(ct);
-        await _db.Entry(client).Reference(c => c.ClientStatus).LoadAsync(ct);
-        await _db.Entry(client).Reference(c => c.ResponsibleUser).LoadAsync(ct);
-        await _db.Entry(client).Collection(c => c.Addresses).LoadAsync(ct);
+        var client = await _db.Clients
+            .AsNoTracking()
+            .Include(c => c.LegalEntity)
+            .Include(c => c.ClientStatus)
+            .Include(c => c.ResponsibleUser)
+            .Include(c => c.Addresses)
+            .Include(c => c.Passports)
+            .FirstAsync(c => c.Id == clientId, ct);
+
         client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+        return client;
     }
 
     private static string? ExtractProfilePayloadFromNotes(string? notes)
@@ -740,8 +746,9 @@ public class ClientsController : ControllerBase
             });
         }
 
+        await RemoveClientProfileArtifactsAsync(new[] { id }, ct);
         _db.Clients.Remove(e);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -799,6 +806,7 @@ public class ClientsController : ControllerBase
             });
         }
 
+        await RemoveClientProfileArtifactsAsync(ids, ct);
         _db.Clients.RemoveRange(clients);
         await _db.SaveChangesAsync(ct);
 
@@ -874,6 +882,31 @@ public class ClientsController : ControllerBase
             usage.Add("доверенности");
 
         return usage;
+    }
+
+    private async Task RemoveClientProfileArtifactsAsync(IEnumerable<int> clientIds, CancellationToken ct)
+    {
+        var normalizedIds = NormalizeIds(clientIds);
+        if (normalizedIds.Count == 0)
+        {
+            return;
+        }
+
+        var addresses = await _db.AddressRecords
+            .Where(item => item.ClientId.HasValue && normalizedIds.Contains(item.ClientId.Value))
+            .ToListAsync(ct);
+        if (addresses.Count > 0)
+        {
+            _db.AddressRecords.RemoveRange(addresses);
+        }
+
+        var passports = await _db.ClientPassports
+            .Where(item => normalizedIds.Contains(item.ClientId))
+            .ToListAsync(ct);
+        if (passports.Count > 0)
+        {
+            _db.ClientPassports.RemoveRange(passports);
+        }
     }
 
     private static ClientRequirementsModel BuildClientRequirementsModel(Client model)
