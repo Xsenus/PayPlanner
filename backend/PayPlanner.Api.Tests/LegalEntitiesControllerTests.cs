@@ -651,6 +651,103 @@ public class LegalEntitiesControllerTests
         Assert.Contains("Новокуйбышевск", entrepreneur.Address);
     }
 
+    [Fact]
+    public async Task Update_ReplacesClientLinks_AndClearsRemovedClients()
+    {
+        await using var db = await CreateContextAsync();
+        var firstClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 1");
+        var secondClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 2");
+        var thirdClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 3");
+
+        var controller = CreateController(db, userId: 56);
+        var createRequest = BuildRequest();
+        createRequest.ClientIds = [firstClientId, secondClientId];
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(created.Value);
+
+        var updateRequest = BuildRequest();
+        updateRequest.ClientIds = [thirdClientId];
+
+        var updateAction = await controller.Update(dto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updated = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+        Assert.Single(updated.Clients);
+        Assert.Equal(thirdClientId, updated.Clients[0].Id);
+
+        var clients = await db.Clients.AsNoTracking()
+            .Where(client => client.Id == firstClientId || client.Id == secondClientId || client.Id == thirdClientId)
+            .OrderBy(client => client.Id)
+            .ToListAsync();
+
+        Assert.Null(clients.Single(client => client.Id == firstClientId).LegalEntityId);
+        Assert.Null(clients.Single(client => client.Id == secondClientId).LegalEntityId);
+        Assert.Equal(dto.Id, clients.Single(client => client.Id == thirdClientId).LegalEntityId);
+    }
+
+    [Fact]
+    public async Task Delete_RejectsLegalEntity_WhenLinkedClientsExist()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ РґР»СЏ РєРѕРЅС„Р»РёРєС‚Р°");
+
+        var controller = CreateController(db, userId: 57);
+        var createRequest = BuildRequest();
+        createRequest.ClientIds = [clientId];
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(created.Value);
+
+        var deleteAction = await controller.Delete(dto.Id, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(deleteAction);
+        Assert.NotNull(conflict.Value);
+        Assert.NotNull(await db.LegalEntities.AsNoTracking().SingleOrDefaultAsync(item => item.Id == dto.Id));
+    }
+
+    [Fact]
+    public async Task Delete_RemovesUserCompanyAccesses_AndSoftDeletesAddresses()
+    {
+        await using var db = await CreateContextAsync();
+        var employeeUserId = await CreateUserAsync(db);
+
+        var entity = new LegalEntity
+        {
+            ShortName = "РЈРґР°Р»СЏРµРјРѕРµ СЋСЂР»РёС†Рѕ",
+            FullName = "РЈРґР°Р»СЏРµРјРѕРµ СЋСЂРёРґРёС‡РµСЃРєРѕРµ Р»РёС†Рѕ",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Add(new AddressRecord
+        {
+            LegalEntityId = entity.Id,
+            Type = AddressType.Legal,
+            Value = "РђРґСЂРµСЃ РґР»СЏ СѓРґР°Р»РµРЅРёСЏ",
+            IsPrimary = true,
+        });
+        db.UserCompanyAccesses.Add(new UserCompanyAccess
+        {
+            UserId = employeeUserId,
+            LegalEntityId = entity.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 58);
+        var deleteAction = await controller.Delete(entity.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(deleteAction);
+        Assert.Null(await db.LegalEntities.AsNoTracking().SingleOrDefaultAsync(item => item.Id == entity.Id));
+        Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.LegalEntityId == entity.Id));
+        Assert.Equal(0, await db.UserCompanyAccesses.AsNoTracking().CountAsync(item => item.LegalEntityId == entity.Id));
+    }
+
     private static LegalEntityRequest BuildRequest()
     {
         return new LegalEntityRequest
@@ -761,6 +858,33 @@ public class LegalEntitiesControllerTests
         db.LegalEntities.Add(entity);
         await db.SaveChangesAsync();
         return entity.Id;
+    }
+
+    private static async Task<int> CreateUserAsync(PaymentContext db)
+    {
+        var role = new Role
+        {
+            Name = $"user-{Guid.NewGuid():N}",
+            Description = "User",
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        var user = new User
+        {
+            Email = $"legal-entities-tests-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Employee",
+            RoleId = role.Id,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user.Id;
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

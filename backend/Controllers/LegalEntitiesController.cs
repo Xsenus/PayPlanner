@@ -132,10 +132,6 @@ public class LegalEntitiesController : ControllerBase
             .ToList();
         var normalizedIdSet = normalizedIds.ToHashSet();
 
-        var normalizedDefaultId = defaultCompanyId.HasValue && normalizedIds.Contains(defaultCompanyId.Value)
-            ? defaultCompanyId
-            : normalizedIds.FirstOrDefault();
-
         var settings = await _db.SystemSettings
             .Where(item =>
                 item.Key == LegacyMainCompanySettingKey
@@ -188,6 +184,10 @@ public class LegalEntitiesController : ControllerBase
             return;
         }
 
+        var normalizedDefaultId = defaultCompanyId.HasValue && normalizedIds.Contains(defaultCompanyId.Value)
+            ? defaultCompanyId.Value
+            : normalizedIds[0];
+
         var staleAccesses = await _db.UserCompanyAccesses
             .Where(item => !normalizedIdSet.Contains(item.LegalEntityId))
             .ToListAsync(ct);
@@ -197,17 +197,8 @@ public class LegalEntitiesController : ControllerBase
         }
 
         UpsertSetting(MainCompanyIdsSettingKey, JsonSerializer.Serialize(normalizedIds));
-
-        if (normalizedDefaultId.HasValue)
-        {
-            UpsertSetting(DefaultMainCompanyIdSettingKey, normalizedDefaultId.Value.ToString(CultureInfo.InvariantCulture));
-            UpsertSetting(LegacyMainCompanySettingKey, normalizedDefaultId.Value.ToString(CultureInfo.InvariantCulture));
-        }
-        else
-        {
-            RemoveSetting(DefaultMainCompanyIdSettingKey);
-            RemoveSetting(LegacyMainCompanySettingKey);
-        }
+        UpsertSetting(DefaultMainCompanyIdSettingKey, normalizedDefaultId.ToString(CultureInfo.InvariantCulture));
+        UpsertSetting(LegacyMainCompanySettingKey, normalizedDefaultId.ToString(CultureInfo.InvariantCulture));
 
         await _db.SaveChangesAsync(ct);
     }
@@ -977,9 +968,20 @@ public class LegalEntitiesController : ControllerBase
             return Conflict($"Нельзя удалить юридическое лицо, пока к нему привязаны клиенты ({linkedClientsCount}). Сначала отвяжите клиентов.");
         }
 
-        foreach (var client in entity.Clients)
+        var addresses = await _db.AddressRecords
+            .Where(item => item.LegalEntityId == entity.Id)
+            .ToListAsync(ct);
+        if (addresses.Count > 0)
         {
-            client.LegalEntityId = null;
+            _db.AddressRecords.RemoveRange(addresses);
+        }
+
+        var companyAccesses = await _db.UserCompanyAccesses
+            .Where(item => item.LegalEntityId == entity.Id)
+            .ToListAsync(ct);
+        if (companyAccesses.Count > 0)
+        {
+            _db.UserCompanyAccesses.RemoveRange(companyAccesses);
         }
 
         await RemoveCompanyFromMainCompanySettingsAsync(entity.Id, ct);
@@ -1541,18 +1543,6 @@ public class LegalEntitiesController : ControllerBase
         }
 
         var normalizedValue = NormalizeOptional(cleaned?.Result) ?? legacyAddress;
-        if (string.IsNullOrWhiteSpace(normalizedValue))
-        {
-            result.Failed++;
-            result.Details.Add(BuildMigrationDetail(ownerType, ownerId, ownerName, new LegalEntityAddressMigrationDetailDto
-            {
-                LegacyAddress = legacyAddress,
-                Action = "Failed",
-                Message = "Не удалось получить нормализованный адрес",
-                DadataMatched = cleaned is not null,
-            }));
-            return;
-        }
 
         var existingAddress = addresses
             .FirstOrDefault(a => a.Type == addressType && IsSameAddress(a, legacyAddress, normalizedValue));
