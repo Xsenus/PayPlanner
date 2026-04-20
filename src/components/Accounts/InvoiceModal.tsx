@@ -1080,8 +1080,8 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.expenseClientId) ?? null,
     [clients, form.expenseClientId],
   );
-  const caseOwnerClientId = isIncome ? form.clientId : form.expenseClientId;
-  const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
+  const caseOwnerClientId = form.clientId || (!isIncome ? form.expenseClientId : '');
+  const selectedCaseOwnerClient = selectedClient ?? (!isIncome ? selectedExpenseClient : null);
   const selectedResponsibleSourceClient = selectedCaseOwnerClient ?? selectedClient;
   const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
   const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';

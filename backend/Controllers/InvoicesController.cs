@@ -1703,7 +1703,9 @@ public class InvoicesController : ControllerBase
             : null;
 
     private static int ResolveInvoiceCaseOwnerClientId(UpsertInvoiceRequest request)
-        => ResolveInvoiceExpenseClientId(request) ?? request.ClientId;
+        => request.ClientId > 0
+            ? request.ClientId
+            : ResolveInvoiceExpenseClientId(request) ?? request.ClientId;
 
     private async Task<(ActionResult? Error, List<int> ClientCaseIds)> ValidateInvoiceClientCasesAsync(int clientId, UpsertInvoiceRequest request, CancellationToken ct)
     {

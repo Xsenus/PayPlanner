@@ -5,6 +5,7 @@ import { InvoiceModal } from './InvoiceModal';
 import type {
   Act,
   Client,
+  ClientCase,
   Contract,
   ContractInput,
   InstallmentPlanInput,
@@ -21,11 +22,17 @@ type ContractModalMockProps = {
   onSubmit: (payload: ContractInput) => void | Promise<void>;
 };
 
+type CaseModalMockProps = {
+  isOpen: boolean;
+  onSave: (payload: Partial<ClientCase>) => void | Promise<void>;
+};
+
 type InstallmentPlannerMockProps = {
   onApplyPlan: (plan: InstallmentPlanInput | null) => void;
 };
 
 const {
+  caseModalSubmitPayloadRef,
   confirmMock,
   installmentPlannerPlanRef,
   installmentPlannerPropsSpy,
@@ -36,6 +43,13 @@ const {
   toastErrorMock,
   toastSuccessMock,
 } = vi.hoisted(() => ({
+  caseModalSubmitPayloadRef: {
+    current: {
+      title: 'Case from invoice',
+      description: 'Created from invoice',
+      status: 'Open',
+    } as Partial<ClientCase>,
+  },
   confirmMock: vi.fn(),
   installmentPlannerPlanRef: { current: null as InstallmentPlanInput | null },
   installmentPlannerPropsSpy: vi.fn(),
@@ -104,7 +118,16 @@ vi.mock('../../services/api', () => ({
 }));
 
 vi.mock('../Clients/CaseModal', () => ({
-  CaseModal: () => null,
+  CaseModal: (props: CaseModalMockProps) => {
+    if (!props.isOpen) return null;
+    return (
+      <div data-testid="case-modal">
+        <button type="button" onClick={() => props.onSave(caseModalSubmitPayloadRef.current)}>
+          submit-case
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../Contracts/ContractModal', () => ({
@@ -182,6 +205,11 @@ function createTestClient(id: number, name: string): Client {
 
 describe('InvoiceModal integration', () => {
   beforeEach(() => {
+    caseModalSubmitPayloadRef.current = {
+      title: 'Case from invoice',
+      description: 'Created from invoice',
+      status: 'Open',
+    };
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     installmentPlannerPlanRef.current = null;
@@ -224,6 +252,10 @@ describe('InvoiceModal integration', () => {
       configurable: true,
       value: vi.fn(),
     });
+    vi.mocked(apiService.getCases).mockReset();
+    vi.mocked(apiService.getCases).mockResolvedValue([]);
+    vi.mocked(apiService.createCase).mockReset();
+    vi.mocked(apiService.createAct).mockReset();
     vi.mocked(apiService.getContract).mockReset();
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.updateInvoice).mockClear();
@@ -1256,6 +1288,66 @@ describe('InvoiceModal integration', () => {
         status: 'Created',
       }));
     });
+  });
+
+  it('creates and loads client cases for the selected client even on expense invoices', async () => {
+    const getCasesMock = vi.mocked(apiService.getCases);
+    const createCaseMock = vi.mocked(apiService.createCase);
+    getCasesMock.mockResolvedValue([]);
+    createCaseMock.mockResolvedValue({
+      id: 441,
+      clientId: 1,
+      title: 'Case from invoice',
+      description: 'Created from invoice',
+      status: 'Open',
+      createdAt: '2026-04-15T10:00:00Z',
+    } as ClientCase);
+
+    const invoice = {
+      id: 820,
+      invoiceEntityId: 820,
+      number: '820',
+      date: '2026-04-15',
+      dueDate: '2026-04-20',
+      amount: 5000,
+      type: 'Expense',
+      status: 'Pending',
+      clientId: 1,
+      expenseClientId: 2,
+      lineItems: [{ name: 'Expense service', quantity: 1, unit: 'pcs', price: 5000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Client owner'), createTestClient(2, 'Expense supplier')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
+
+    await waitFor(() => {
+      expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+        clientId: 1,
+        title: 'Case from invoice',
+        status: 'Open',
+      }));
+    });
+
+    expect(await screen.findByText('Case from invoice')).toBeTruthy();
   });
 
   it('downloads document variant without signature and seal on demand', async () => {
