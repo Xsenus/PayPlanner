@@ -215,24 +215,24 @@ public sealed partial class SpreadsheetImportService
         int? excludeClientId,
         CancellationToken cancellationToken)
     {
-        if (await db.Clients.IgnoreQueryFilters().AnyAsync(
+        if (await db.Clients.AnyAsync(
                 item => item.LegalEntityId == legalEntityId && (!excludeClientId.HasValue || item.Id != excludeClientId.Value),
                 cancellationToken))
         {
             return true;
         }
 
-        if (await db.ExternalContacts.IgnoreQueryFilters().AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
+        if (await db.ExternalContacts.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
         {
             return true;
         }
 
-        if (await db.AddressRecords.IgnoreQueryFilters().AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
+        if (await db.AddressRecords.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
         {
             return true;
         }
 
-        if (await db.UserCompanyAccesses.IgnoreQueryFilters().AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
+        if (await db.UserCompanyAccesses.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
         {
             return true;
         }

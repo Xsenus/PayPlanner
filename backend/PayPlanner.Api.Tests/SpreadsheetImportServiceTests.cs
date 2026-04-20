@@ -1,7 +1,9 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Security;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -187,6 +189,870 @@ public class SpreadsheetImportServiceTests
         }
     }
 
+    [Fact]
+    public async Task RollbackAsync_WhenCounterpartyOperationHasNoEntityId_ReturnsControlledError()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Client)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Error, operation.RollbackAction);
+        Assert.Contains("идентификатор контрагента", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenCreatedCounterpartyIsReferencedByCase_SkipsDeletion()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var clientId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Rollback counterparty client",
+                Email = "rollback-client@example.com",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            db.ClientCases.Add(new ClientCase
+            {
+                ClientId = client.Id,
+                Title = "Protected case",
+                Description = "Blocks rollback deletion",
+            });
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", client, null)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            clientId = client.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("используется связанными документами", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        await using var verificationDb = CreateContext(connection);
+        Assert.NotNull(await verificationDb.Clients.FindAsync(clientId));
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenCreatedCounterpartyLegalEntityIsUsedElsewhere_SkipsDeletion()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var clientId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var legalEntity = new LegalEntity
+            {
+                ShortName = "Shared Legal Entity",
+                FullName = "Shared Legal Entity LLC",
+                Inn = "1234567890",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.LegalEntities.Add(legalEntity);
+            await db.SaveChangesAsync();
+
+            var importedClient = new Client
+            {
+                Name = "Imported legal client",
+                LegalEntityId = legalEntity.Id,
+                LegalEntity = legalEntity,
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(importedClient);
+            await db.SaveChangesAsync();
+
+            db.Clients.Add(new Client
+            {
+                Name = "Existing linked client",
+                LegalEntityId = legalEntity.Id,
+                CreatedAt = DateTime.UtcNow,
+            });
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Client),
+                entityId: importedClient.Id,
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", importedClient, legalEntity),
+                metadataJson: JsonSerializer.Serialize(new
+                {
+                    LegalEntityCreated = true,
+                    LegalEntityId = legalEntity.Id,
+                })));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            clientId = importedClient.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("юридическое лицо уже используется", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        await using var verificationDb = CreateContext(connection);
+        Assert.NotNull(await verificationDb.Clients.FindAsync(clientId));
+        Assert.Equal(1, await verificationDb.LegalEntities.CountAsync());
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenCounterpartyEntityIsAlreadyMissing_SkipsGracefully()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Client),
+                entityId: 9_999));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("уже отсутствует", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenCounterpartyChangedAfterImport_SkipsRollback()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var clientId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Changed client",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                afterJson: "{}"));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            clientId = client.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("были изменены после импорта", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        await using var verificationDb = CreateContext(connection);
+        Assert.NotNull(await verificationDb.Clients.FindAsync(clientId));
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedCounterpartySnapshotIsMissing_ReturnsError()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Counterparty without snapshot",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", client, null)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Error, operation.RollbackAction);
+        Assert.Contains("исходный снимок контрагента", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedCounterpartyRestoresMissingLegalEntity()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var clientId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Client without legal entity",
+                Email = "without-legal@example.com",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var beforeClient = new Client
+            {
+                Id = client.Id,
+                Name = "Client with restored legal entity",
+                Email = "with-legal@example.com",
+                CreatedAt = client.CreatedAt,
+                IsActive = true,
+                LegalEntityId = 4242,
+            };
+            var beforeLegalEntity = new LegalEntity
+            {
+                Id = 4242,
+                ShortName = "Restored Legal Entity",
+                FullName = "Restored Legal Entity LLC",
+                Inn = "5555555555",
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                beforeJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", beforeClient, beforeLegalEntity),
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", client, null)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            clientId = client.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBack, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Restored, operation.RollbackAction);
+
+        await using var verificationDb = CreateContext(connection);
+        var restoredClient = await verificationDb.Clients.Include(item => item.LegalEntity).SingleAsync(item => item.Id == clientId);
+        Assert.Equal("Client with restored legal entity", restoredClient.Name);
+        Assert.Equal("with-legal@example.com", restoredClient.Email);
+        Assert.NotNull(restoredClient.LegalEntity);
+        Assert.Equal("Restored Legal Entity", restoredClient.LegalEntity!.ShortName);
+        Assert.Equal("5555555555", restoredClient.LegalEntity.Inn);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedCounterpartyCreatedLegalEntityIsUsedElsewhere_SkipsRestore()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var legalEntity = new LegalEntity
+            {
+                ShortName = "Shared updated legal entity",
+                Inn = "6666666666",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.LegalEntities.Add(legalEntity);
+            await db.SaveChangesAsync();
+
+            var client = new Client
+            {
+                Name = "Updated counterparty",
+                LegalEntityId = legalEntity.Id,
+                LegalEntity = legalEntity,
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            db.Clients.Add(new Client
+            {
+                Name = "Second linked client",
+                LegalEntityId = legalEntity.Id,
+                CreatedAt = DateTime.UtcNow,
+            });
+
+            var beforeClient = new Client
+            {
+                Id = client.Id,
+                Name = "Updated counterparty",
+                CreatedAt = client.CreatedAt,
+                IsActive = true,
+            };
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                beforeJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", beforeClient, null),
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", client, legalEntity),
+                metadataJson: JsonSerializer.Serialize(new
+                {
+                    LegalEntityCreated = true,
+                    LegalEntityId = legalEntity.Id,
+                })));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("юридическое лицо уже используется", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedCounterpartyRestoresClientState_AndRemovesCreatedLegalEntity()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var clientId = 0;
+        var legalEntityId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var legalEntity = new LegalEntity
+            {
+                ShortName = "Temporary Legal Entity",
+                FullName = "Temporary Legal Entity LLC",
+                Inn = "9876543210",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.LegalEntities.Add(legalEntity);
+            await db.SaveChangesAsync();
+
+            var client = new Client
+            {
+                Name = "Current client name",
+                Email = "current-client@example.com",
+                Company = "Current Company",
+                LegalEntityId = legalEntity.Id,
+                LegalEntity = legalEntity,
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var beforeClient = new Client
+            {
+                Id = client.Id,
+                Name = "Original client name",
+                Email = "original-client@example.com",
+                Company = "Original Company",
+                CreatedAt = client.CreatedAt,
+                IsActive = true,
+            };
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "counterparties",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Client),
+                entityId: client.Id,
+                beforeJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", beforeClient, null),
+                afterJson: CaptureSnapshotJson("CaptureCounterpartySnapshot", client, legalEntity),
+                metadataJson: JsonSerializer.Serialize(new
+                {
+                    LegalEntityCreated = true,
+                    LegalEntityId = legalEntity.Id,
+                })));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            clientId = client.Id;
+            legalEntityId = legalEntity.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBack, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Restored, operation.RollbackAction);
+        Assert.Contains("юридическое лицо удалено", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        await using var verificationDb = CreateContext(connection);
+        var restoredClient = await verificationDb.Clients.Include(item => item.LegalEntity).SingleAsync(item => item.Id == clientId);
+        Assert.Equal("Original client name", restoredClient.Name);
+        Assert.Equal("original-client@example.com", restoredClient.Email);
+        Assert.Equal("Original Company", restoredClient.Company);
+        Assert.Null(restoredClient.LegalEntityId);
+        Assert.Null(restoredClient.LegalEntity);
+        Assert.Null(await verificationDb.LegalEntities.FindAsync(legalEntityId));
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenInvoiceOperationHasNoEntityId_ReturnsControlledError()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "invoices",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Payment)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Error, operation.RollbackAction);
+        Assert.Contains("идентификатор сущности", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenInvoiceEntityIsAlreadyMissing_SkipsGracefully()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "invoices",
+                action: SpreadsheetImportOperationAction.Created,
+                entityType: nameof(Payment),
+                entityId: 9_999));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Skipped, operation.RollbackAction);
+        Assert.Contains("уже отсутствует", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedInvoiceSnapshotIsInvalid_ReturnsError()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Invoice rollback client",
+                CreatedAt = DateTime.UtcNow,
+            };
+            var invoice = new Invoice
+            {
+                Number = "INV-ERR",
+                Date = new DateTime(2026, 4, 10),
+            };
+            var payment = new Payment
+            {
+                Account = "INV-ERR",
+                AccountDate = invoice.Date,
+                Amount = 1_500m,
+                Date = invoice.Date,
+                PlannedDate = invoice.Date,
+                Description = "Broken snapshot invoice",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Income,
+                Client = client,
+                Invoice = invoice,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            db.Payments.Add(payment);
+            await db.SaveChangesAsync();
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "invoices",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Payment),
+                entityId: payment.Id,
+                afterJson: CaptureSnapshotJson("CaptureInvoiceSnapshot", payment)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Error, operation.RollbackAction);
+        Assert.Contains("исходный снапшот", operation.RollbackMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        await using var verificationDb = CreateContext(connection);
+        var storedOperation = await verificationDb.SpreadsheetImportBatchOperations.SingleAsync(item => item.BatchId == batchId);
+        Assert.Equal(SpreadsheetImportRollbackAction.Error, storedOperation.RollbackAction);
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedInvoiceRestoresSnapshot_AndRemovesOrphanInvoice()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var paymentId = 0;
+        var currentInvoiceId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Invoice restore client",
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            var currentInvoice = new Invoice
+            {
+                Number = "INV-NEW",
+                Date = new DateTime(2026, 4, 10),
+            };
+
+            var payment = new Payment
+            {
+                Account = "INV-NEW",
+                AccountDate = currentInvoice.Date,
+                Amount = 4_500m,
+                Date = currentInvoice.Date,
+                PlannedDate = currentInvoice.Date,
+                Description = "Current invoice snapshot",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                Client = client,
+                Invoice = currentInvoice,
+                InvoiceLineItems =
+                [
+                    new InvoiceLineItem
+                    {
+                        SortOrder = 1,
+                        Name = "Current line 1",
+                        Quantity = 1m,
+                        Unit = "шт",
+                        Price = 3_000m,
+                    },
+                    new InvoiceLineItem
+                    {
+                        SortOrder = 2,
+                        Name = "Current line 2",
+                        Quantity = 1m,
+                        Unit = "шт",
+                        Price = 1_500m,
+                    },
+                ],
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            db.Payments.Add(payment);
+            await db.SaveChangesAsync();
+
+            var beforePayment = new Payment
+            {
+                Id = payment.Id,
+                Account = "INV-OLD",
+                AccountDate = new DateTime(2026, 4, 1),
+                Amount = 2_000m,
+                Date = new DateTime(2026, 4, 1),
+                PlannedDate = new DateTime(2026, 4, 1),
+                Description = "Original invoice snapshot",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                InvoiceLineItems =
+                [
+                    new InvoiceLineItem
+                    {
+                        SortOrder = 1,
+                        Name = "Original line",
+                        Quantity = 1m,
+                        Unit = "шт",
+                        Price = 2_000m,
+                    },
+                ],
+            };
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "invoices",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Payment),
+                entityId: payment.Id,
+                beforeJson: CaptureSnapshotJson("CaptureInvoiceSnapshot", beforePayment),
+                afterJson: CaptureSnapshotJson("CaptureInvoiceSnapshot", payment)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            paymentId = payment.Id;
+            currentInvoiceId = currentInvoice.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBack, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Restored, operation.RollbackAction);
+
+        await using var verificationDb = CreateContext(connection);
+        var restoredPayment = await verificationDb.Payments
+            .Include(item => item.Invoice)
+            .Include(item => item.InvoiceLineItems)
+            .SingleAsync(item => item.Id == paymentId);
+
+        Assert.Equal("INV-OLD", restoredPayment.Account);
+        Assert.Equal(new DateTime(2026, 4, 1), restoredPayment.AccountDate);
+        Assert.Equal(2_000m, restoredPayment.Amount);
+        Assert.Equal(PaymentStatus.Pending, restoredPayment.Status);
+        Assert.Null(restoredPayment.InvoiceId);
+        Assert.Null(restoredPayment.Invoice);
+        Assert.Single(restoredPayment.InvoiceLineItems);
+        Assert.Equal("Original line", restoredPayment.InvoiceLineItems.Single().Name);
+        Assert.Null(await verificationDb.Invoices.FindAsync(currentInvoiceId));
+    }
+
+    [Fact]
+    public async Task RollbackAsync_WhenUpdatedInvoiceRestoresMissingInvoiceEntity_CreatesNewInvoice()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        var batchId = 0;
+        var paymentId = 0;
+        await using (var db = CreateContext(connection))
+        {
+            var client = new Client
+            {
+                Name = "Invoice restore without entity client",
+                CreatedAt = DateTime.UtcNow,
+            };
+            var payment = new Payment
+            {
+                Account = "INV-CURRENT",
+                AccountDate = new DateTime(2026, 4, 20),
+                Amount = 3_500m,
+                Date = new DateTime(2026, 4, 20),
+                PlannedDate = new DateTime(2026, 4, 20),
+                Description = "Current state without invoice entity",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                Client = client,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            db.Payments.Add(payment);
+            await db.SaveChangesAsync();
+
+            var beforePayment = new Payment
+            {
+                Id = payment.Id,
+                Account = "INV-RESTORED",
+                AccountDate = new DateTime(2026, 4, 5),
+                Amount = 2_800m,
+                Date = new DateTime(2026, 4, 5),
+                PlannedDate = new DateTime(2026, 4, 5),
+                Description = "State with restored invoice entity",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                Invoice = new Invoice
+                {
+                    Id = 7_777,
+                    Number = "INV-RESTORED",
+                    Date = new DateTime(2026, 4, 5),
+                },
+            };
+
+            var batch = CreateBatch();
+            batch.Operations.Add(CreateOperation(
+                sectionKey: "invoices",
+                action: SpreadsheetImportOperationAction.Updated,
+                entityType: nameof(Payment),
+                entityId: payment.Id,
+                beforeJson: CaptureSnapshotJson("CaptureInvoiceSnapshot", beforePayment),
+                afterJson: CaptureSnapshotJson("CaptureInvoiceSnapshot", payment)));
+
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+
+            batchId = batch.Id;
+            paymentId = payment.Id;
+        }
+
+        var rollback = await service.RollbackAsync(batchId);
+
+        Assert.Equal(SpreadsheetImportBatchStatus.RolledBack, rollback.Status);
+        var operation = Assert.Single(rollback.Operations);
+        Assert.Equal(SpreadsheetImportRollbackAction.Restored, operation.RollbackAction);
+
+        await using var verificationDb = CreateContext(connection);
+        var restoredPayment = await verificationDb.Payments
+            .Include(item => item.Invoice)
+            .SingleAsync(item => item.Id == paymentId);
+
+        Assert.Equal("INV-RESTORED", restoredPayment.Account);
+        Assert.NotNull(restoredPayment.Invoice);
+        Assert.NotNull(restoredPayment.InvoiceId);
+        Assert.Equal("INV-RESTORED", restoredPayment.Invoice!.Number);
+    }
+
+    [Fact]
+    public async Task GetBatchesAsync_ReturnsLatestBatchesFirst()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+
+        await using (var db = CreateContext(connection))
+        {
+            db.SpreadsheetImportBatches.AddRange(
+                new SpreadsheetImportBatch
+                {
+                    Title = "Older batch",
+                    Status = SpreadsheetImportBatchStatus.Applied,
+                    CreatedAt = new DateTime(2026, 4, 18, 8, 0, 0, DateTimeKind.Utc),
+                    Files =
+                    [
+                        new SpreadsheetImportBatchFile
+                        {
+                            FileName = "older.xlsx",
+                            FileHash = "older",
+                            DetectedKind = "invoices",
+                            RowCount = 1,
+                            CreatedAt = DateTime.UtcNow,
+                        },
+                    ],
+                },
+                new SpreadsheetImportBatch
+                {
+                    Title = "Newer batch",
+                    Status = SpreadsheetImportBatchStatus.RolledBack,
+                    CreatedAt = new DateTime(2026, 4, 19, 8, 0, 0, DateTimeKind.Utc),
+                    Files =
+                    [
+                        new SpreadsheetImportBatchFile
+                        {
+                            FileName = "newer.xlsx",
+                            FileHash = "newer",
+                            DetectedKind = "acts",
+                            RowCount = 2,
+                            CreatedAt = DateTime.UtcNow,
+                        },
+                    ],
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var batches = await service.GetBatchesAsync();
+
+        Assert.True(batches.Count >= 2);
+        Assert.Equal("Newer batch", batches.First().Title);
+        Assert.Equal("Older batch", batches.Skip(1).First().Title);
+    }
+
     private static SpreadsheetImportUploadFile CreateInvoiceFile(params string[][] rows)
         => CreateUploadFile("Счета.xlsx", CreateWorkbook(("Счета", rows)));
 
@@ -266,6 +1132,56 @@ public class SpreadsheetImportServiceTests
         var entry = archive.CreateEntry(path, CompressionLevel.NoCompression);
         using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         writer.Write(content);
+    }
+
+    private static SpreadsheetImportBatch CreateBatch()
+        => new()
+        {
+            Title = "Rollback coverage batch",
+            Status = SpreadsheetImportBatchStatus.Applied,
+            CreatedAt = DateTime.UtcNow,
+            AppliedAt = DateTime.UtcNow,
+        };
+
+    private static SpreadsheetImportBatchOperation CreateOperation(
+        string sectionKey,
+        string action,
+        string entityType,
+        int? entityId = null,
+        string? beforeJson = null,
+        string? afterJson = null,
+        string? metadataJson = null)
+        => new()
+        {
+            SectionKey = sectionKey,
+            SourceFileName = "test.xlsx",
+            SourceFileHash = "hash",
+            SourceRowId = "row-1",
+            SourceRowNumber = 1,
+            SourceKey = $"{sectionKey}-row-1",
+            SourceTitle = $"{sectionKey} rollback",
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            BeforeJson = beforeJson,
+            AfterJson = afterJson,
+            MetadataJson = metadataJson,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static string CaptureSnapshotJson(string captureMethodName, params object?[] args)
+    {
+        var captureMethod = typeof(SpreadsheetImportService).GetMethod(captureMethodName, BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(captureMethod);
+
+        var snapshot = captureMethod!.Invoke(null, args);
+        Assert.NotNull(snapshot);
+
+        var serializeMethod = typeof(SpreadsheetImportService).GetMethod("SerializeSnapshot", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(serializeMethod);
+
+        var genericSerialize = serializeMethod!.MakeGenericMethod(snapshot!.GetType());
+        return Assert.IsType<string>(genericSerialize.Invoke(null, [snapshot]));
     }
 
     private static string BuildContentTypesXml(int sheetCount)
