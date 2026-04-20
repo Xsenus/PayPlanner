@@ -390,7 +390,603 @@ public class PaymentsControllerTests
         Assert.Contains(InvoiceManagedPaymentRules.UpdateBlockedMessage, conflict.Value?.ToString());
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    [Fact]
+    public async Task Create_ResolvesInvoiceLinkFromPaymentHistory_AndNormalizesFields()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ РґР»СЏ РїСЂРёРІСЏР·РєРё",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Р”РµР»Рѕ РґР»СЏ РїСЂРёРІСЏР·РєРё",
+        };
+
+        var incomeType = new IncomeType
+        {
+            Name = "РћРїР»Р°С‚Р° РїРѕ СЃС‡С‘С‚Сѓ",
+            PaymentType = PaymentType.Income,
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "INV-400",
+            Date = new DateTime(2026, 4, 2),
+        };
+
+        db.AddRange(client, clientCase, incomeType, invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 20_000m, "РЎС‡С‘С‚ INV-400");
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.ClientCaseId = clientCase.Id;
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+        db.Payments.Add(invoiceDocument);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 4, 3), 5_500m, "Р”РѕРїР»Р°С‚Р° РїРѕ СЃС‡С‘С‚Сѓ");
+        model.ClientId = client.Id;
+        model.ClientCaseId = clientCase.Id;
+        model.IncomeTypeId = incomeType.Id;
+        model.Account = "  INV-400  ";
+        model.AccountDate = invoice.Date;
+        model.PaidAmount = 1_500m;
+        model.PaidDate = new DateTime(2026, 4, 4);
+        model.LastPaymentDate = null;
+        model.RescheduleCount = -5;
+        model.SystemNotes = null!;
+        model.DocumentKind = default;
+        var expectedLastPaymentDate = model.PaidDate.Value.Date;
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(DocumentKind.Payment, payment.DocumentKind);
+        Assert.Equal(invoice.Id, payment.InvoiceId);
+        Assert.Equal(invoice.Number, payment.Account);
+        Assert.Equal(invoice.Date, payment.AccountDate);
+        Assert.Equal(expectedLastPaymentDate, payment.LastPaymentDate);
+        Assert.Equal(0, payment.RescheduleCount);
+        Assert.Equal(incomeType.Id, payment.IncomeTypeId);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(invoice.Id, stored.InvoiceId);
+        Assert.Equal(invoice.Number, stored.Account);
+        Assert.Equal(invoice.Date, stored.AccountDate);
+        Assert.Equal(expectedLastPaymentDate, stored.LastPaymentDate);
+        Assert.Equal(0, stored.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task Update_StandalonePayment_RewritesInvoiceLink_AndAppendsSystemNotes()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Р”РµР»Рѕ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ",
+        };
+
+        var incomeType = new IncomeType
+        {
+            Name = "Р”РѕС…РѕРґ",
+            PaymentType = PaymentType.Income,
+        };
+
+        var paymentSource = new PaymentSource
+        {
+            Name = "Р‘Р°РЅРє",
+        };
+
+        var paymentStatus = new PaymentStatusEntity
+        {
+            Name = "Р’ СЂР°Р±РѕС‚Рµ",
+        };
+
+        var dealType = new DealType
+        {
+            Name = "РЎРґРµР»РєР°",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "INV-401",
+            Date = new DateTime(2026, 4, 8),
+        };
+
+        db.AddRange(client, clientCase, incomeType, paymentSource, paymentStatus, dealType, invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 12_000m, "РЎС‡С‘С‚ INV-401");
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.ClientCaseId = clientCase.Id;
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+        db.Payments.Add(invoiceDocument);
+
+        var standalonePayment = CreatePayment(new DateTime(2026, 4, 5), 4_500m, "РЎС‚Р°СЂС‹Р№ РїР»Р°С‚С‘Р¶");
+        standalonePayment.ClientId = client.Id;
+        standalonePayment.ClientCaseId = clientCase.Id;
+        standalonePayment.IncomeTypeId = incomeType.Id;
+        standalonePayment.SystemNotes = "РСЃС…РѕРґРЅР°СЏ Р·Р°РјРµС‚РєР°";
+        standalonePayment.RescheduleCount = 2;
+        db.Payments.Add(standalonePayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var updateModel = new Payment
+        {
+            Id = standalonePayment.Id,
+            Amount = 4_800m,
+            CounterpartyName = standalonePayment.CounterpartyName,
+            Date = new DateTime(2026, 4, 10),
+            PlannedDate = new DateTime(2026, 4, 12),
+            Description = "РћР±РЅРѕРІР»С‘РЅРЅС‹Р№ РїР»Р°С‚С‘Р¶",
+            DocumentKind = DocumentKind.Payment,
+            Notes = "РќРѕРІС‹Рµ Р·Р°РјРµС‚РєРё",
+            Status = PaymentStatus.Completed,
+            SystemNotes = "РСЃС…РѕРґРЅР°СЏ Р·Р°РјРµС‚РєР°\nР СѓС‡РЅРѕРµ РїСЂРёРјРµС‡Р°РЅРёРµ",
+            Type = PaymentType.Income,
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            IncomeTypeId = incomeType.Id,
+            PaymentSourceId = paymentSource.Id,
+            PaymentStatusId = paymentStatus.Id,
+            DealTypeId = dealType.Id,
+            InvoiceId = invoice.Id,
+            Account = "LEGACY-401",
+            AccountDate = invoice.Date.AddDays(1),
+            PaidAmount = 4_800m,
+            PaidDate = new DateTime(2026, 4, 11),
+            LastPaymentDate = null,
+        };
+
+        var actionResult = await controller.Update(standalonePayment.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(invoice.Id, updated.InvoiceId);
+        Assert.Equal(invoice.Number, updated.Account);
+        Assert.Equal(invoice.Date, updated.AccountDate);
+        Assert.Equal("LEGACY-401", updated.LegacyAccountNumber);
+        Assert.Equal(invoice.Date.AddDays(1), updated.LegacyAccountDate);
+        Assert.Equal(3, updated.RescheduleCount);
+        Assert.Equal(paymentSource.Id, updated.PaymentSourceId);
+        Assert.Equal(paymentStatus.Id, updated.PaymentStatusId);
+        Assert.Equal(dealType.Id, updated.DealTypeId);
+        Assert.Equal(updateModel.PaidDate!.Value.Date, updated.LastPaymentDate);
+        Assert.Contains("Р СѓС‡РЅРѕРµ РїСЂРёРјРµС‡Р°РЅРёРµ", updated.SystemNotes);
+        Assert.Equal(1, updated.SystemNotes.Split('\n').Count(line => line.Contains("РСЃС…РѕРґРЅР°СЏ")));
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == standalonePayment.Id);
+        Assert.Equal(invoice.Id, stored.InvoiceId);
+        Assert.Equal(invoice.Number, stored.Account);
+        Assert.Equal("LEGACY-401", stored.LegacyAccountNumber);
+        Assert.Equal(3, stored.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task RepairInvoiceLinks_ReassignsLinkedPayments_AndDowngradesDuplicateInvoiceDocuments()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ РґР»СЏ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Р”РµР»Рѕ РґР»СЏ repair",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "INV-402",
+            Date = new DateTime(2026, 4, 15),
+        };
+
+        db.AddRange(client, clientCase, invoice);
+        await db.SaveChangesAsync();
+
+        var primaryInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "РћСЃРЅРѕРІРЅРѕР№ С‡РµРє");
+        primaryInvoiceDocument.ClientId = client.Id;
+        primaryInvoiceDocument.ClientCaseId = clientCase.Id;
+        primaryInvoiceDocument.DocumentKind = DocumentKind.Invoice;
+        primaryInvoiceDocument.InvoiceId = invoice.Id;
+        primaryInvoiceDocument.Account = invoice.Number;
+        primaryInvoiceDocument.AccountDate = invoice.Date;
+        primaryInvoiceDocument.CreatedAt = new DateTime(2026, 4, 15, 8, 0, 0, DateTimeKind.Utc);
+
+        var duplicateInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "Р”СѓР±Р»СЊ С‡РµРєР°");
+        duplicateInvoiceDocument.ClientId = client.Id;
+        duplicateInvoiceDocument.ClientCaseId = clientCase.Id;
+        duplicateInvoiceDocument.DocumentKind = DocumentKind.Invoice;
+        duplicateInvoiceDocument.InvoiceId = invoice.Id;
+        duplicateInvoiceDocument.Account = invoice.Number;
+        duplicateInvoiceDocument.AccountDate = invoice.Date;
+        duplicateInvoiceDocument.CreatedAt = new DateTime(2026, 4, 15, 9, 0, 0, DateTimeKind.Utc);
+
+        var orphanPayment = CreatePayment(new DateTime(2026, 4, 16), 6_000m, "РћРїР»Р°С‚Р° Р±РµР· РїСЂРёРІСЏР·РєРё");
+        orphanPayment.ClientId = client.Id;
+        orphanPayment.ClientCaseId = clientCase.Id;
+        orphanPayment.DocumentKind = DocumentKind.Payment;
+        orphanPayment.Account = invoice.Number;
+        orphanPayment.AccountDate = invoice.Date;
+
+        db.Payments.AddRange(primaryInvoiceDocument, duplicateInvoiceDocument, orphanPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.RepairInvoiceLinks(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        Assert.NotNull(ok.Value);
+
+        var repairedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == orphanPayment.Id);
+        var correctedDuplicate = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == duplicateInvoiceDocument.Id);
+        var keptPrimary = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == primaryInvoiceDocument.Id);
+
+        Assert.Equal(invoice.Id, repairedPayment.InvoiceId);
+        Assert.Equal(invoice.Number, repairedPayment.Account);
+        Assert.Equal(invoice.Date, repairedPayment.AccountDate);
+        Assert.Equal(DocumentKind.Payment, correctedDuplicate.DocumentKind);
+        Assert.Equal(DocumentKind.Invoice, keptPrimary.DocumentKind);
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsNotFound_WhenPaymentMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.GetById(99_001, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsProjectedPayment_WhenPaymentExists()
+    {
+        await using var db = await CreateContextAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 6_500m, "Платёж для GetById");
+        payment.SystemNotes = "Системная заметка";
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.GetById(payment.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var result = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(payment.Id, result.Id);
+        Assert.Equal("Платёж для GetById", result.Description);
+        Assert.Equal(6_500m, result.Amount);
+    }
+
+    [Fact]
+    public async Task Update_WhenStoredPlannedDateIsDefault_PreservesOriginalDueDateAsPlanned()
+    {
+        await using var db = await CreateContextAsync();
+
+        var originalDate = new DateTime(2099, 5, 10);
+        var payment = CreatePayment(originalDate, 8_000m, "Платеж без planned date");
+        payment.PlannedDate = default;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var updateModel = new Payment
+        {
+            Amount = 8_500m,
+            CounterpartyName = payment.CounterpartyName,
+            Date = originalDate.AddDays(3),
+            PlannedDate = default,
+            Description = "Обновленный платеж",
+            DocumentKind = DocumentKind.Payment,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+        };
+
+        var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(originalDate, updated.PlannedDate);
+        Assert.Equal(originalDate.AddDays(3), updated.Date);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(originalDate, stored.PlannedDate);
+    }
+
+    [Fact]
+    public async Task Update_WithPositivePaidAmountAndNoPaidDates_LeavesLastPaymentDateEmpty()
+    {
+        await using var db = await CreateContextAsync();
+
+        var payment = CreatePayment(new DateTime(2099, 6, 1), 10_000m, "Частично оплаченный платеж");
+        payment.LastPaymentDate = null;
+        payment.PaidDate = null;
+        payment.PaidAmount = 0m;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var updateModel = new Payment
+        {
+            Amount = 10_000m,
+            CounterpartyName = payment.CounterpartyName,
+            Date = payment.Date,
+            PlannedDate = payment.PlannedDate,
+            Description = payment.Description,
+            DocumentKind = DocumentKind.Payment,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+            PaidAmount = 2_500m,
+            PaidDate = null,
+            LastPaymentDate = null,
+        };
+
+        var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(2_500m, updated.PaidAmount);
+        Assert.Null(updated.LastPaymentDate);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Null(stored.LastPaymentDate);
+    }
+
+    [Fact]
+    public async Task Update_WhenInvoiceIsFullyPaid_AutoCorrectsDate_AndAddsSystemNote()
+    {
+        await using var db = await CreateContextAsync();
+
+        var originalDate = new DateTime(2099, 7, 10);
+        var payment = CreatePayment(originalDate, 10_000m, "Полная оплата со сдвигом даты");
+        payment.PaidAmount = 0m;
+        payment.PaidDate = null;
+        payment.LastPaymentDate = null;
+        payment.SystemNotes = string.Empty;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var updateModel = new Payment
+        {
+            Amount = 10_000m,
+            CounterpartyName = payment.CounterpartyName,
+            Date = originalDate,
+            PlannedDate = payment.PlannedDate,
+            Description = payment.Description,
+            DocumentKind = DocumentKind.Payment,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+            PaidAmount = 10_000m,
+            PaidDate = new DateTime(2099, 7, 15),
+            LastPaymentDate = null,
+        };
+
+        var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(new DateTime(2099, 7, 15), updated.Date);
+        Assert.Equal(PaymentStatus.Completed, updated.Status);
+        Assert.Equal(payment.RescheduleCount, updated.RescheduleCount);
+        Assert.Contains("автоматически скорректирована", updated.SystemNotes, StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(new DateTime(2099, 7, 15), stored.Date);
+        Assert.Equal(PaymentStatus.Completed, stored.Status);
+        Assert.Equal(0, stored.RescheduleCount);
+        Assert.Contains("автоматически скорректирована", stored.SystemNotes, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RepairInvoiceLinks_ClearsBrokenInvoiceReference_AndReportsClearedLinks()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoice = new Invoice
+        {
+            Number = "INV-404",
+            Date = new DateTime(2026, 4, 18),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var brokenPayment = CreatePayment(new DateTime(2026, 4, 18), 3_000m, "Платеж с битой ссылкой");
+        brokenPayment.InvoiceId = invoice.Id;
+        brokenPayment.Account = null;
+        brokenPayment.AccountDate = new DateTime(2026, 4, 18);
+        brokenPayment.LegacyAccountNumber = "LEGACY-404";
+        brokenPayment.LegacyAccountDate = new DateTime(2026, 4, 17);
+        db.Payments.Add(brokenPayment);
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE Payments SET InvoiceId = {999_999} WHERE Id = {brokenPayment.Id}");
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.RepairInvoiceLinks(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var response = ok.Value;
+        Assert.NotNull(response);
+        Assert.Equal(1, Assert.IsType<int>(response.GetType().GetProperty("scanned")?.GetValue(response)));
+        Assert.Equal(0, Assert.IsType<int>(response.GetType().GetProperty("repairedLinks")?.GetValue(response)));
+        Assert.Equal(1, Assert.IsType<int>(response.GetType().GetProperty("clearedLinks")?.GetValue(response)));
+        Assert.Equal(0, Assert.IsType<int>(response.GetType().GetProperty("correctedKinds")?.GetValue(response)));
+
+        var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == brokenPayment.Id);
+        Assert.Null(stored.InvoiceId);
+        Assert.Null(stored.Account);
+        Assert.Null(stored.AccountDate);
+        Assert.Null(stored.LegacyAccountNumber);
+        Assert.Null(stored.LegacyAccountDate);
+    }
+
+    [Fact]
+    public async Task Create_LeavesInvoiceUnlinked_WhenHistoryHasNoMatches()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Клиент без истории",
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 4, 19), 4_000m, "Платеж без найденного счета");
+        model.ClientId = client.Id;
+        model.Account = "INV-NOT-FOUND";
+        model.AccountDate = new DateTime(2026, 4, 18);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Null(payment.InvoiceId);
+        Assert.Equal("INV-NOT-FOUND", payment.Account);
+        Assert.Equal(new DateTime(2026, 4, 18), payment.AccountDate);
+    }
+
+    [Fact]
+    public async Task Create_IgnoresHistoryCandidates_WithZeroInvoiceId()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Клиент с поврежденной историей",
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var historyPayment = CreatePayment(new DateTime(2026, 4, 20), 6_000m, "Поврежденный исторический платеж");
+        historyPayment.ClientId = client.Id;
+        historyPayment.Account = "INV-ZERO";
+        historyPayment.AccountDate = new DateTime(2026, 4, 20);
+        historyPayment.InvoiceId = null;
+        db.Payments.Add(historyPayment);
+        await db.SaveChangesAsync();
+
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE Payments SET InvoiceId = {0} WHERE Id = {historyPayment.Id}");
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 4, 21), 2_000m, "Новый платеж");
+        model.ClientId = client.Id;
+        model.Account = "INV-ZERO";
+        model.AccountDate = new DateTime(2026, 4, 20);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Null(payment.InvoiceId);
+        Assert.Equal("INV-ZERO", payment.Account);
+    }
+
+    [Fact]
+    public async Task Create_DeduplicatesLegacyAndCurrentLookupCandidates()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Клиент с дублем кандидатов",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "INV-DUP",
+            Date = new DateTime(2026, 4, 25),
+        };
+
+        db.AddRange(client, invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 9_000m, "Счет INV-DUP");
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+        db.Payments.Add(invoiceDocument);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 4, 26), 3_000m, "Платеж по найденному счету");
+        model.ClientId = client.Id;
+        model.Account = " INV-DUP ";
+        model.AccountDate = invoice.Date;
+        model.LegacyAccountNumber = "INV-DUP";
+        model.LegacyAccountDate = invoice.Date;
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(invoice.Id, payment.InvoiceId);
+        Assert.Equal(invoice.Number, payment.Account);
+        Assert.Equal(invoice.Date, payment.AccountDate);
+    }
+
+    [Fact]
+    public async Task Create_WithAuditModelDisabled_SkipsAuditMetadataPopulation()
+    {
+        await using var db = await CreateContextAsync(useObjectAuditModel: false);
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 4, 27), 5_000m, "Платеж без объектного аудита");
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Null(payment.AuditCreatedByUserId);
+        Assert.Null(payment.AuditCreatedByUserName);
+        Assert.Null(payment.AuditUpdatedAt);
+        Assert.Null(payment.AuditUpdatedByUserId);
+        Assert.Null(payment.AuditUpdatedByUserName);
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -399,7 +995,7 @@ public class PaymentsControllerTests
             .UseSqlite(connection)
             .Options;
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(options, useObjectAuditModel: useObjectAuditModel);
         await db.Database.EnsureCreatedAsync();
         return db;
     }
