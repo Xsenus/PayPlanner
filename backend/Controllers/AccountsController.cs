@@ -953,17 +953,17 @@ public class AccountsController : ControllerBase
             return "paid";
         }
 
+        if (paymentList.Any(payment => payment.Status == PaymentStatus.Overdue))
+        {
+            return "overdue";
+        }
+
         if (paymentList.Any(payment =>
                 payment.Status == PaymentStatus.Completed
                 || payment.Status == PaymentStatus.Processing
                 || payment.PaidAmount > 0m))
         {
             return "partial";
-        }
-
-        if (paymentList.Any(payment => payment.Status == PaymentStatus.Overdue))
-        {
-            return "overdue";
         }
 
         return "created";

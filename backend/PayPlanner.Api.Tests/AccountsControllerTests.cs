@@ -41,7 +41,7 @@ public class AccountsControllerTests
     }
 
     [Fact]
-    public async Task GetRegistry_ReturnsPartialStatus_WhenInstallmentInvoiceHasPaidProgress_AndOverdueTail()
+    public async Task GetRegistry_ReturnsOverdueStatus_WhenInstallmentInvoiceHasPaidProgress_AndOverdueTail()
     {
         await using var db = await CreateContextAsync();
         await CreateInstallmentInvoiceAggregateAsync(db);
@@ -64,7 +64,7 @@ public class AccountsControllerTests
         var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
         var row = Assert.Single(payload.Items);
 
-        Assert.Equal("partial", row.Status);
+        Assert.Equal("overdue", row.Status);
         Assert.True(row.IsOverdue);
         Assert.Equal(6, row.Payments.Count);
         Assert.DoesNotContain(row.Payments, payment => payment.DocumentKind == DocumentKind.Invoice);
