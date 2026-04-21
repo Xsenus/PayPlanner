@@ -759,14 +759,11 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Категория услуги' }));
-    expect(screen.getByText('Выбор категории услуги')).toBeTruthy();
-
-    fireEvent.change(screen.getByPlaceholderText('Поиск категории'), { target: { value: 'Гражд' } });
-    fireEvent.click(screen.getByRole('button', { name: /Гражданские дела/i }));
+    expect(screen.queryByRole('button', { name: 'Категория услуги' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' }));
     expect(screen.getByText('Выбор наименования услуги')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('invoice-line-item-lookup-filter-select'), { target: { value: '2' } });
 
     fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), { target: { value: 'Составл' } });
     fireEvent.click(screen.getByRole('button', { name: /Составление иска/i }));
@@ -775,6 +772,7 @@ describe('InvoiceModal integration', () => {
       expect((screen.getByLabelText('Единица измерения') as HTMLInputElement).value).toBe('усл.ед.');
       expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('15 000.00');
       expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Составление иска');
+      expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Гражданские дела');
     });
   });
 
@@ -844,7 +842,9 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(screen.getAllByTestId('invoice-line-item-service-trigger')[0]);
 
     const nameSearchInput = screen.getByTestId('invoice-line-item-lookup-query-input') as HTMLInputElement;
+    const categoryFilterSelect = screen.getByTestId('invoice-line-item-lookup-filter-select') as HTMLSelectElement;
     expect(nameSearchInput.value).toBe(serviceName);
+    expect(categoryFilterSelect.value).toBe('1');
 
     fireEvent.change(nameSearchInput, {
       target: { value: customServiceName },

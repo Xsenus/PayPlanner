@@ -75,14 +75,11 @@ type DraftActForm = {
   comment: string;
 };
 
-type LineItemLookupState =
-  | { kind: 'category'; lineItemId: string }
-  | { kind: 'service'; lineItemId: string }
-  | null;
+type LineItemLookupState = { lineItemId: string } | null;
 
 const LINE_ITEM_GRID_TEMPLATE =
-  'md:grid-cols-[minmax(14rem,1.1fr)_minmax(19rem,1.8fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.8fr)_minmax(8.5rem,0.8fr)_2.75rem]';
-const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[68rem]';
+  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
+const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -799,13 +796,11 @@ export function InvoiceModal({
 
     return lineItems.find((item) => item.id === lineItemLookupState.lineItemId) ?? null;
   }, [lineItemLookupState, lineItems]);
-  const lineItemCategoryLookupOptions = useMemo(
+  const lineItemCategoryFilterOptions = useMemo(
     () =>
       sortedServiceCategories.map((category) => ({
         value: String(category.id),
         label: category.name,
-        description: category.description?.trim() || undefined,
-        keywords: [category.name, category.description ?? ''],
       })),
     [sortedServiceCategories],
   );
@@ -920,10 +915,10 @@ export function InvoiceModal({
     updateLineItem(id, patch);
   };
 
-  const openLineItemLookup = (lookup: Exclude<LineItemLookupState, null>) => {
-    const currentLineItem = lineItems.find((item) => item.id === lookup.lineItemId);
-    setLineItemLookupQuery(lookup.kind === 'service' ? currentLineItem?.name ?? '' : '');
-    setLineItemLookupState(lookup);
+  const openLineItemLookup = (lineItemId: string) => {
+    const currentLineItem = lineItems.find((item) => item.id === lineItemId);
+    setLineItemLookupQuery(currentLineItem?.name ?? '');
+    setLineItemLookupState({ lineItemId });
   };
 
   const closeLineItemLookup = () => {
@@ -2897,7 +2892,7 @@ export function InvoiceModal({
   const activeLineItemSelectedServiceId = activeLineItemLookup
     ? String(resolveLineItemTemplate(activeLineItemLookup)?.id ?? '')
     : '';
-  const canApplyCustomServiceName = lineItemLookupState?.kind === 'service'
+  const canApplyCustomServiceName = Boolean(lineItemLookupState)
     && Boolean(lineItemLookupQueryTrimmed)
     && !lineItemServiceLookupOptions.some(
       (option) => normalizeLookupName(option.label) === normalizeLookupName(lineItemLookupQueryTrimmed),
@@ -3411,7 +3406,6 @@ export function InvoiceModal({
                           <div className="-mx-1 overflow-x-auto px-1">
                             <div className={`space-y-3 ${LINE_ITEM_GRID_MIN_WIDTH_CLASS}`}>
                               <div className={`hidden items-center gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid ${LINE_ITEM_GRID_TEMPLATE}`}>
-                                <span>Категория</span>
                                 <span>Наименование</span>
                                 <span className="text-center">Кол-во</span>
                                 <span>Ед.</span>
@@ -3431,31 +3425,31 @@ export function InvoiceModal({
                                     className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 ${LINE_ITEM_GRID_TEMPLATE}`}
                                   >
                                     <div className="space-y-1">
-                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Категория</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => openLineItemLookup({ kind: 'category', lineItemId: item.id })}
-                                        aria-label="Категория услуги"
-                                        title={categoryLabel}
-                                        className="flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                      >
-                                        <span className="min-w-0 flex-1 truncate">{categoryLabel}</span>
-                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
-                                      </button>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Наименование</span>
                                       <button
                                         type="button"
                                         data-testid="invoice-line-item-service-trigger"
-                                        onClick={() => openLineItemLookup({ kind: 'service', lineItemId: item.id })}
+                                        onClick={() => openLineItemLookup(item.id)}
                                         aria-label="Наименование услуги"
-                                        title={item.name || 'Выберите или введите наименование'}
-                                        className="flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                        title={item.name || 'Выберите категорию и наименование'}
+                                        className="flex min-h-[4.5rem] w-full items-start justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-3 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
                                       >
-                                        <span className={`min-w-0 flex-1 truncate ${item.name.trim() ? 'text-slate-700' : 'text-slate-400'}`}>
-                                          {item.name.trim() || 'Наименование'}
+                                        <span className="min-w-0 flex-1">
+                                          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Услуга</span>
+                                          <span
+                                            className={`mt-1 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                                              item.serviceCategoryId
+                                                ? 'border-blue-100 bg-blue-50 text-blue-700'
+                                                : 'border-slate-200 bg-slate-100 text-slate-600'
+                                            }`}
+                                          >
+                                            <span className="truncate">{categoryLabel}</span>
+                                          </span>
+                                          <span className={`mt-2 block truncate font-medium ${item.name.trim() ? 'text-slate-700' : 'text-slate-400'}`}>
+                                            {item.name.trim() || 'Выберите наименование услуги'}
+                                          </span>
+                                          <span className="mt-1 block text-xs text-slate-400">
+                                            Категория и шаблон услуги открываются в одном окне
+                                          </span>
                                         </span>
                                         <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
                                       </button>
@@ -4129,41 +4123,11 @@ export function InvoiceModal({
       )}
 
       <InvoiceLineItemLookupDialog
-        open={lineItemLookupState?.kind === 'category'}
-        title="Выбор категории услуги"
-        description="Выберите категорию из справочника для текущей позиции счёта."
-        query={lineItemLookupQuery}
-        value={activeLineItemLookup?.serviceCategoryId ?? ''}
-        options={lineItemCategoryLookupOptions}
-        searchPlaceholder="Поиск категории"
-        maxWidthClassName="max-w-2xl"
-        clearActionLabel="Все категории"
-        clearActionDescription="Оставить позицию без конкретной категории."
-        noOptionsText="Категории не найдены"
-        onQueryChange={setLineItemLookupQuery}
-        onClose={closeLineItemLookup}
-        onSelect={(value) => {
-          if (!lineItemLookupState?.lineItemId) {
-            return;
-          }
-          handleLineItemCategoryChange(lineItemLookupState.lineItemId, value);
-          closeLineItemLookup();
-        }}
-        onClear={() => {
-          if (!lineItemLookupState?.lineItemId) {
-            return;
-          }
-          handleLineItemCategoryChange(lineItemLookupState.lineItemId, '');
-          closeLineItemLookup();
-        }}
-      />
-
-      <InvoiceLineItemLookupDialog
-        open={lineItemLookupState?.kind === 'service'}
+        open={!!lineItemLookupState}
         title="Выбор наименования услуги"
         description={
           activeLineItemCategoryLabel === 'Все категории'
-            ? 'Можно искать по всем услугам или ввести своё наименование.'
+            ? 'Выберите категорию и подходящую услугу из справочника или введите своё наименование вручную.'
             : `Категория: ${activeLineItemCategoryLabel}. Можно выбрать из найденных услуг или ввести своё наименование.`
         }
         query={lineItemLookupQuery}
@@ -4171,6 +4135,11 @@ export function InvoiceModal({
         options={lineItemServiceLookupOptions}
         searchPlaceholder="Поиск наименования"
         maxWidthClassName="max-w-4xl"
+        filterLabel="РљР°С‚РµРіРѕСЂРёСЏ СѓСЃР»СѓРіРё"
+        filterValue={activeLineItemLookup?.serviceCategoryId ?? ''}
+        filterOptions={lineItemCategoryFilterOptions}
+        filterAllLabel="Р’СЃРµ РєР°С‚РµРіРѕСЂРёРё"
+        filterHelperText="РљР°С‚РµРіРѕСЂРёСЏ СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ Сѓ РїРѕР·РёС†РёРё СЃС‡С‘С‚Р° Рё СЃСЂР°Р·Сѓ РІР»РёСЏРµС‚ РЅР° СЃРїРёСЃРѕРє С€Р°Р±Р»РѕРЅРѕРІ, РµРґРёРЅРёС†Сѓ РёР·РјРµСЂРµРЅРёСЏ Рё С†РµРЅСѓ."
         clearActionLabel="Очистить наименование"
         clearActionDescription="Оставить позицию без выбранного шаблона услуги."
         customActionLabel={canApplyCustomServiceName ? `Использовать: ${lineItemLookupQueryTrimmed}` : undefined}
@@ -4181,6 +4150,12 @@ export function InvoiceModal({
         onSelect={handleLineItemServiceSelect}
         onClear={clearLineItemServiceName}
         onSelectCustomQuery={canApplyCustomServiceName ? applyCustomLineItemServiceName : undefined}
+        onFilterChange={(value) => {
+          if (!lineItemLookupState?.lineItemId) {
+            return;
+          }
+          handleLineItemCategoryChange(lineItemLookupState.lineItemId, value);
+        }}
       />
 
       {clientPickerOpen && (

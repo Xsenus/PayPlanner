@@ -1,4 +1,4 @@
-import { Check, Search, X } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -7,6 +7,11 @@ export interface InvoiceLineItemLookupOption {
   label: string;
   description?: string;
   keywords?: string[];
+}
+
+export interface InvoiceLineItemLookupFilterOption {
+  value: string;
+  label: string;
 }
 
 interface InvoiceLineItemLookupDialogProps {
@@ -23,11 +28,17 @@ interface InvoiceLineItemLookupDialogProps {
   clearActionDescription?: string;
   customActionLabel?: string;
   customActionDescription?: string;
+  filterLabel?: string;
+  filterValue?: string;
+  filterOptions?: InvoiceLineItemLookupFilterOption[];
+  filterAllLabel?: string;
+  filterHelperText?: string;
   onQueryChange: (value: string) => void;
   onClose: () => void;
   onSelect: (value: string) => void;
   onClear?: () => void;
   onSelectCustomQuery?: () => void;
+  onFilterChange?: (value: string) => void;
 }
 
 function normalizeLookupQuery(value: string): string {
@@ -48,11 +59,17 @@ export function InvoiceLineItemLookupDialog({
   clearActionDescription,
   customActionLabel,
   customActionDescription,
+  filterLabel,
+  filterValue = '',
+  filterOptions,
+  filterAllLabel = 'Все категории',
+  filterHelperText,
   onQueryChange,
   onClose,
   onSelect,
   onClear,
   onSelectCustomQuery,
+  onFilterChange,
 }: InvoiceLineItemLookupDialogProps) {
   useEffect(() => {
     if (!open) {
@@ -117,6 +134,35 @@ export function InvoiceLineItemLookupDialog({
         </div>
 
         <div className="space-y-4 px-6 py-5">
+          {filterOptions?.length && onFilterChange && filterLabel ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <label className="min-w-0 flex-1">
+                  <span className="mb-2 block text-sm font-medium text-slate-700">{filterLabel}</span>
+                  <div className="relative">
+                    <select
+                      value={filterValue}
+                      onChange={(event) => onFilterChange(event.target.value)}
+                      data-testid="invoice-line-item-lookup-filter-select"
+                      className="w-full appearance-none rounded-2xl border border-slate-300 bg-white px-4 py-3 pr-11 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="">{filterAllLabel}</option>
+                      {filterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </label>
+                {filterHelperText ? (
+                  <p className="max-w-md text-xs leading-5 text-slate-500">{filterHelperText}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
