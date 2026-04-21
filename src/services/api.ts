@@ -1398,6 +1398,13 @@ export class ApiService {
     });
   }
 
+  async updateInvoiceManagedPayment(id: number, payment: PaymentPayload) {
+    return this.request<Payment>(`/payments/${id}/invoice-managed`, {
+      method: 'PUT',
+      body: JSON.stringify(payment),
+    });
+  }
+
   async deletePayment(id: number) {
     return this.request<void>(`/payments/${id}`, { method: 'DELETE' });
   }

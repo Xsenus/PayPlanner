@@ -979,10 +979,11 @@ describe('InvoiceModal integration', () => {
         invoiceId: 553,
       }),
     );
+    expect(onEditRelatedPayment).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
   });
 
-  it('switches the page into invoice edit mode for invoice-managed related payments', async () => {
+  it('routes invoice-managed sidebar clicks through the payment edit callback', async () => {
     const onEditRelatedPayment = vi.fn();
     const invoice = {
       id: 554,
@@ -1032,13 +1033,16 @@ describe('InvoiceModal integration', () => {
 
     fireEvent.click(await screen.findByTestId('invoice-related-payment-link-884'));
 
-    expect(await screen.findByRole('button', { name: 'Сохранить' })).toBeTruthy();
-    expect(onEditRelatedPayment).not.toHaveBeenCalled();
+    expect(onEditRelatedPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 884,
+        invoiceId: 554,
+      }),
+    );
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
-    expect(screen.queryByTestId('installment-planner')).toBeNull();
   });
 
-  it('opens installment editing from the edit-page action button for invoice-managed related payments', async () => {
+  it('routes invoice-managed edit-page actions through the payment edit callback', async () => {
     const onEditRelatedPayment = vi.fn();
     const invoice = {
       id: 555,
@@ -1069,8 +1073,6 @@ describe('InvoiceModal integration', () => {
       systemNotes: '[pp:installment-payment] 2',
     } as unknown as Payment;
 
-    vi.mocked(apiService.getPayment).mockResolvedValue(relatedPayment);
-
     render(
       <InvoiceModal
         open
@@ -1091,8 +1093,12 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать счёт' }));
     fireEvent.click(await screen.findByTestId('invoice-related-payment-edit-885'));
 
-    expect(await screen.findByTestId('installment-planner')).toBeTruthy();
-    expect(onEditRelatedPayment).not.toHaveBeenCalled();
+    expect(onEditRelatedPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 885,
+        invoiceId: 555,
+      }),
+    );
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
   });
 
@@ -1161,7 +1167,7 @@ describe('InvoiceModal integration', () => {
     );
   });
 
-  it('keeps invoice-managed sidebar clicks inside the invoice editor instead of opening full payment actions', async () => {
+  it('routes invoice-managed sidebar clicks through the payment edit callback when it is available', async () => {
     const invoice = {
       id: 552,
       invoiceEntityId: 552,
@@ -1191,7 +1197,7 @@ describe('InvoiceModal integration', () => {
       systemNotes: '',
     } as unknown as Payment;
 
-    vi.mocked(apiService.getPayment).mockResolvedValue(relatedPayment);
+    const onEditRelatedPayment = vi.fn();
 
     render(
       <InvoiceModal
@@ -1199,7 +1205,7 @@ describe('InvoiceModal integration', () => {
         mode="edit"
         invoice={invoice}
         onClose={vi.fn()}
-        onOpenPayment={vi.fn()}
+        onEditRelatedPayment={onEditRelatedPayment}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         submitting={false}
         clients={[]}
@@ -1211,6 +1217,12 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(await screen.findByTestId('invoice-related-payment-link-882'));
+    expect(onEditRelatedPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 882,
+        invoiceId: 552,
+      }),
+    );
     expect(await screen.findByRole('button', { name: 'Сохранить' })).toBeTruthy();
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Открыть полный платеж' })).toBeNull();

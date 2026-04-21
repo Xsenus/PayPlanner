@@ -37,7 +37,7 @@ import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { filterRepresentativeInvoiceWhenInstallmentsExist, isGeneratedInstallmentPayment, isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { filterRepresentativeInvoiceWhenInstallmentsExist, isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type FormState = {
   number: string;
@@ -1589,15 +1589,12 @@ export function InvoiceModal({
   }, []);
 
   const openInvoiceManagedPaymentEditor = useCallback((payment: Payment) => {
-    closePaymentPreview();
-    setLocalError(null);
-    if (isPageMode) {
-      setPageViewMode(false);
+    if (onEditRelatedPayment) {
+      onEditRelatedPayment(payment);
+      return;
     }
-    if (form.type === 'Income' && isGeneratedInstallmentPayment(payment)) {
-      setInstallmentModalOpen(true);
-    }
-  }, [closePaymentPreview, form.type, isPageMode]);
+    void openPaymentPreview(payment);
+  }, [onEditRelatedPayment, openPaymentPreview]);
 
   useEffect(() => {
     if (!open) {
@@ -3096,11 +3093,12 @@ export function InvoiceModal({
                               key={payment.id}
                               type="button"
                               onClick={() => {
-                                if (isInvoiceManagedPayment(payment)) {
-                                  openInvoiceManagedPaymentEditor(payment);
-                                  return;
-                                }
-                                if (onEditRelatedPayment && !isInvoiceManagedPayment(payment)) {
+                                if (onEditRelatedPayment) {
+                                  closePaymentPreview();
+                                  setLocalError(null);
+                                  if (isPageMode) {
+                                    setPageViewMode(false);
+                                  }
                                   onEditRelatedPayment(payment);
                                   return;
                                 }
@@ -3571,8 +3569,8 @@ export function InvoiceModal({
                     {displayPayments.map((payment) => {
                       const invoiceManagedPayment = isInvoiceManagedPayment(payment);
                       const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
-                      const canEditInvoiceManagedPayment = isGeneratedInstallmentPayment(payment);
-                      const canEditRelatedPayment = Boolean(onEditRelatedPayment) && !invoiceManagedPayment;
+                      const canEditInvoiceManagedPayment = false;
+                      const canEditRelatedPayment = Boolean(onEditRelatedPayment);
                       const canDeleteRelatedPayment = Boolean(onDeleteRelatedPayment) && !invoiceManagedPayment;
                       const installmentSequenceLabel = installmentMeta
                         ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
@@ -3610,7 +3608,7 @@ export function InvoiceModal({
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
-                        {(canEditInvoiceManagedPayment || canEditRelatedPayment || canDeleteRelatedPayment) && (
+                        {(canEditRelatedPayment || canDeleteRelatedPayment) && (
                           <div className="flex items-center gap-2 self-end sm:self-start">
                             {canEditInvoiceManagedPayment && (
                               <button

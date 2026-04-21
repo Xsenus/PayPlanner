@@ -234,6 +234,143 @@ public class PaymentsController : ControllerBase
         return Ok(e);
     }
 
+    [HttpPut("{id:int}/invoice-managed")]
+    public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
+    {
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "РќРµ Р·Р°РїРѕР»РЅРµРЅС‹ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ", missingFields = missingUpdate });
+
+        var e = await _db.Payments.FindAsync(id);
+        if (e is null) return NotFound();
+        if (!InvoiceManagedPaymentRules.IsInvoiceManagedPayment(e))
+        {
+            return BadRequest(new { message = "Payment is not invoice-managed." });
+        }
+
+        if (model.IncomeTypeId.HasValue)
+        {
+            var it = await _db.IncomeTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
+            if (it is null) return BadRequest("Unknown IncomeTypeId");
+            if (it.PaymentType != e.Type) return BadRequest("IncomeType.PaymentType mismatches payment.Type");
+        }
+
+        var now = DateTime.UtcNow;
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var actor = User.GetDisplayName();
+
+        var originalDueDate = e.Date.Date;
+        var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
+        var originalPaidAmount = e.PaidAmount;
+        var originalStatus = e.Status;
+        var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
+        var originalSystemNotes = e.SystemNotes ?? string.Empty;
+
+        if (e.PlannedDate == default)
+        {
+            e.PlannedDate = originalPlannedDate;
+        }
+
+        var immutableInvoiceId = e.InvoiceId;
+        var immutableDocumentKind = e.DocumentKind;
+        var immutableAccount = e.Account;
+        var immutableAccountDate = e.AccountDate;
+        var immutableLegacyAccountNumber = e.LegacyAccountNumber;
+        var immutableLegacyAccountDate = e.LegacyAccountDate;
+        var immutableType = e.Type;
+
+        e.Date = model.Date;
+        if (model.PlannedDate != default)
+        {
+            e.PlannedDate = model.PlannedDate;
+        }
+        e.Amount = model.Amount;
+        e.Status = model.Status;
+        e.Description = model.Description ?? string.Empty;
+        e.Notes = model.Notes ?? string.Empty;
+        e.ClientId = model.ClientId;
+        e.ClientCaseId = model.ClientCaseId;
+        e.ContractId = model.ContractId;
+        e.DealTypeId = model.DealTypeId;
+        e.IncomeTypeId = model.IncomeTypeId;
+        e.PaymentSourceId = model.PaymentSourceId;
+        e.PaymentStatusId = model.PaymentStatusId;
+        e.PaidDate = model.PaidDate;
+        e.PaidAmount = model.PaidAmount;
+        e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
+        e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
+
+        e.InvoiceId = immutableInvoiceId;
+        e.DocumentKind = immutableDocumentKind;
+        e.Account = immutableAccount;
+        e.AccountDate = immutableAccountDate;
+        e.LegacyAccountNumber = immutableLegacyAccountNumber;
+        e.LegacyAccountDate = immutableLegacyAccountDate;
+        e.Type = immutableType;
+
+        PaymentDomainService.Normalize(e);
+
+        if (e.LastPaymentDate is null && e.PaidAmount > 0m)
+        {
+            e.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
+        }
+
+        PaymentDomainService.ApplyStatusRules(e, now);
+
+        var rescheduleCount = originalRescheduleCount;
+        var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
+        if (plannedDateChanged)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"РР·РјРµРЅРµРЅР° РїР»Р°РЅРѕРІР°СЏ РґР°С‚Р°: {originalPlannedDate:dd.MM.yyyy} в†’ {e.PlannedDate:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        var userChangedDueDate = model.Date.Date != originalDueDate;
+        if (userChangedDueDate)
+        {
+            rescheduleCount++;
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° РёР·РјРµРЅРµРЅР°: {originalDueDate:dd.MM.yyyy} в†’ {e.Date:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+        else if (originalDueDate != e.Date.Date)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅР° РЅР° {e.Date:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"РР·РјРµРЅРµРЅР° РѕРїР»Р°С‡РµРЅРЅР°СЏ СЃСѓРјРјР°: Р±С‹Р»Рѕ {originalPaidAmount.ToString("N2", culture)}, СЃС‚Р°Р»Рѕ {e.PaidAmount.ToString("N2", culture)}",
+                now,
+                actor);
+        }
+
+        if (originalStatus != e.Status)
+        {
+            PaymentDomainService.AppendSystemNote(
+                e,
+                $"РЎС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»С‘РЅ: {originalStatus.ToDisplayString()} в†’ {e.Status.ToDisplayString()}",
+                now,
+                actor);
+        }
+
+        e.RescheduleCount = rescheduleCount;
+
+        await _db.SaveChangesAsync();
+        PopulateAuditMetadata(_db, e);
+        return Ok(e);
+    }
+
     [HttpPost("repair-invoice-links")]
     public async Task<IActionResult> RepairInvoiceLinks(CancellationToken ct)
     {

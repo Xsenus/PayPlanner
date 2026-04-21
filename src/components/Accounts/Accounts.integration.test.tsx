@@ -15,6 +15,7 @@ const {
   paymentModalPropsSpy,
   refreshAccountsMock,
   toastErrorMock,
+  updateInvoiceManagedPaymentMock,
   updatePaymentMock,
 } = vi.hoisted(() => ({
   createPaymentMock: vi.fn(),
@@ -26,6 +27,7 @@ const {
   paymentModalPropsSpy: vi.fn(),
   refreshAccountsMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  updateInvoiceManagedPaymentMock: vi.fn(),
   updatePaymentMock: vi.fn(),
 }));
 
@@ -248,6 +250,7 @@ vi.mock('../../services/api', () => ({
     getInvoice: getInvoiceMock,
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,
+    updateInvoiceManagedPayment: updateInvoiceManagedPaymentMock,
     updatePayment: updatePaymentMock,
   },
 }));
@@ -264,6 +267,7 @@ vi.mock('./InvoiceModal', () => ({
     paymentsLoading?: boolean;
     onBack?: () => void;
     onClose?: () => void;
+    onEditRelatedPayment?: (payment: Payment) => void;
   }) => {
     invoiceModalPropsSpy(props);
     if (!props.open) {
@@ -276,7 +280,16 @@ vi.mock('./InvoiceModal', () => ({
         <button type="button" onClick={props.onBack}>invoice-back</button>
         <button type="button" onClick={props.onClose}>invoice-close</button>
         {(props.relatedPayments ?? []).map((payment) => (
-          <div key={payment.id}>{payment.description}</div>
+          <div key={payment.id}>
+            <div>{payment.description}</div>
+            <button
+              type="button"
+              data-testid={`invoice-related-payment-link-${payment.id}`}
+              onClick={() => props.onEditRelatedPayment?.(payment)}
+            >
+              {`open-related-payment-${payment.id}`}
+            </button>
+          </div>
         ))}
       </div>
     );
@@ -399,6 +412,7 @@ describe('Accounts integration', () => {
     paymentModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
     toastErrorMock.mockReset();
+    updateInvoiceManagedPaymentMock.mockReset();
     updatePaymentMock.mockReset();
     createPaymentMock.mockReset();
     clearInvoiceEditorDraftMock.mockReset();
@@ -417,6 +431,7 @@ describe('Accounts integration', () => {
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
     getActResponsiblesMock.mockResolvedValue([]);
+    updateInvoiceManagedPaymentMock.mockResolvedValue(createSiblingPayment());
     updatePaymentMock.mockResolvedValue(createSiblingPayment());
     createPaymentMock.mockResolvedValue(createSiblingPayment({ id: 600 }));
     clearInvoiceEditorDraftMock.mockImplementation(() => undefined);
@@ -588,9 +603,7 @@ describe('Accounts integration', () => {
     expect(screen.getByText('payment-description:Sibling payment for invoice 24')).toBeTruthy();
   });
 
-  it('opens the invoice editor instead of the payment modal for invoice-managed payments in the expanded operations panel', async () => {
-    const onRouteInvoiceChange = vi.fn();
-
+  it('opens the payment modal for invoice-managed payments in the expanded operations panel', async () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [
         createAccountRow({
@@ -611,20 +624,17 @@ describe('Accounts integration', () => {
       refresh: refreshAccountsMock,
     });
 
-    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+    render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: '24' }));
     fireEvent.click(await screen.findByText('Installment payment for invoice 24'));
 
-    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
-    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
-    expect(screen.queryByTestId('payment-modal')).toBeNull();
-    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('payment-id:531')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-id:24')).toBeTruthy();
   });
 
-  it('opens the invoice editor from the actions column for invoice-managed payments in the expanded operations panel', async () => {
-    const onRouteInvoiceChange = vi.fn();
-
+  it('opens the payment modal from the actions column for invoice-managed payments in the expanded operations panel', async () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [
         createAccountRow({
@@ -645,7 +655,7 @@ describe('Accounts integration', () => {
       refresh: refreshAccountsMock,
     });
 
-    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+    render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: '24' }));
 
@@ -655,10 +665,61 @@ describe('Accounts integration', () => {
 
     fireEvent.click(within(paymentRow as HTMLTableRowElement).getByRole('button', { name: 'Редактировать' }));
 
-    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('payment-id:532')).toBeTruthy();
+  });
+
+  it('opens the payment modal from the routed invoice page related payments list', async () => {
+    render(<Accounts routeInvoiceId={528} />);
+
     await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
-    expect(screen.queryByTestId('payment-modal')).toBeNull();
-    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-528'));
+
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('payment-id:528')).toBeTruthy();
+    expect(screen.getByText('linked-invoice-id:24')).toBeTruthy();
+  });
+
+  it('saves invoice-managed payments through the dedicated invoice-managed endpoint', async () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          payments: [
+            createSiblingPayment({
+              id: 533,
+              description: 'Invoice-managed payment save',
+              systemNotes: '[pp:installment-payment] 3',
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByText('Invoice-managed payment save'));
+
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'submit-payment' }));
+
+    await waitFor(() => {
+      expect(updateInvoiceManagedPaymentMock).toHaveBeenCalledWith(
+        533,
+        expect.objectContaining({
+          description: 'Invoice-managed payment save',
+          invoiceId: 24,
+        }),
+      );
+    });
+    expect(updatePaymentMock).not.toHaveBeenCalledWith(533, expect.anything());
   });
 
   it('shows an error toast when saving a regular payment from the expanded operations panel fails', async () => {

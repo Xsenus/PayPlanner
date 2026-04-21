@@ -1357,6 +1357,13 @@ export function Accounts({
     setPaymentModalOpen(true);
   };
 
+  const openLinkedPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
+    setEditingPayment(payment);
+    setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
+    setPaymentModalType(payment.type ?? 'Income');
+    setPaymentModalOpen(true);
+  };
+
   const handleClosePaymentModal = () => {
     setPaymentModalOpen(false);
     setEditingPayment(null);
@@ -1365,15 +1372,32 @@ export function Accounts({
 
   const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
     const isUpdate = 'id' in payload;
+    const invoiceManagedEditingPayment =
+      isUpdate
+      && editingPayment
+      && editingPayment.id === payload.id
+      && isInvoiceManagedPayment(editingPayment);
 
     try {
       if (isUpdate) {
-        await apiService.updatePayment(payload.id, payload);
+        if (invoiceManagedEditingPayment) {
+          await apiService.updateInvoiceManagedPayment(payload.id, payload);
+        } else {
+          await apiService.updatePayment(payload.id, payload);
+        }
       } else {
         await apiService.createPayment(payload as PaymentPayload);
       }
 
       await refreshAccounts();
+      if (pageEditingInvoiceId) {
+        try {
+          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
+          setPageEditingInvoice(refreshedInvoice);
+        } catch {
+          // Keep the current page state if the invoice refresh fails after a successful payment save.
+        }
+      }
       handleClosePaymentModal();
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось сохранить платёж.'), 'Платежи счета');
@@ -1580,11 +1604,15 @@ export function Accounts({
             }
           : undefined
       }
-      onCreateRemainder={async (payload) => {
-        const created = await apiService.createPayment(payload);
-        await refreshAccounts();
-        return created;
-      }}
+      onCreateRemainder={
+        !editingPayment || !isInvoiceManagedPayment(editingPayment)
+          ? async (payload) => {
+              const created = await apiService.createPayment(payload);
+              await refreshAccounts();
+              return created;
+            }
+          : undefined
+      }
     />
   );
 
@@ -1631,7 +1659,7 @@ export function Accounts({
           paymentsLoading={isLoading || isRefreshing}
           onRefreshRequested={refreshAccounts}
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
-          onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEdit ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
         />
         {paymentModalElement}
@@ -2228,7 +2256,7 @@ export function Accounts({
                                         <tr
                                           key={payment.id}
                                           className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
-                                          onClick={canEdit ? () => openPaymentEditModal(payment, invoice) : undefined}
+                                          onClick={canEdit ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
                                         >
                                           <td className="px-4 py-2">{formatDate(payment.plannedDate)}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
@@ -2248,7 +2276,7 @@ export function Accounts({
                                                     type="button"
                                                     onClick={(event) => {
                                                       event.stopPropagation();
-                                                      openPaymentEditModal(payment, invoice);
+                                                      openLinkedPaymentEditModal(payment, invoice);
                                                     }}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
                                                     title={t('edit') ?? 'Редактировать'}

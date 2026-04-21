@@ -465,6 +465,81 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_UpdatesGeneratedInstallmentPayment_AndPreservesInvoiceLink()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+        var installmentPayment = await db.Payments.FindAsync(invoice.InstallmentPaymentIds[0]);
+        Assert.NotNull(installmentPayment);
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var paidDate = new DateTime(2026, 4, 12);
+        var model = CreatePayment(new DateTime(2026, 4, 12), installmentPayment!.Amount, "Updated installment payment");
+        model.PlannedDate = new DateTime(2026, 4, 11);
+        model.PaidAmount = installmentPayment.Amount;
+        model.PaidDate = paidDate;
+        model.LastPaymentDate = paidDate;
+        model.Status = PaymentStatus.Completed;
+        model.InvoiceId = null;
+        model.Account = "CHANGED";
+        model.AccountDate = new DateTime(2027, 1, 1);
+        model.SystemNotes = installmentPayment.SystemNotes;
+
+        var actionResult = await controller.UpdateInvoiceManaged(
+            installmentPayment.Id,
+            model,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(invoice.InvoiceEntityId, updated.InvoiceId);
+        Assert.Null(updated.Account);
+        Assert.Contains(InstallmentPaymentMarker, updated.SystemNotes);
+        Assert.Equal("Updated installment payment", updated.Description);
+        Assert.Equal(PaymentStatus.Completed, updated.Status);
+        Assert.True(updated.IsPaid);
+        Assert.Equal(paidDate, updated.PaidDate);
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_UpdatesRepresentativeInvoicePayment_AndPreservesDocumentKind()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+        var parentPayment = await db.Payments.FindAsync(invoice.ParentPaymentId);
+        Assert.NotNull(parentPayment);
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var paidDate = new DateTime(2026, 4, 15);
+        var model = CreatePayment(parentPayment!.Date, parentPayment.Amount, "Updated representative payment");
+        model.PlannedDate = parentPayment.PlannedDate;
+        model.PaidAmount = parentPayment.Amount;
+        model.PaidDate = paidDate;
+        model.LastPaymentDate = paidDate;
+        model.Status = PaymentStatus.Completed;
+        model.DocumentKind = DocumentKind.Payment;
+        model.InvoiceId = null;
+        model.Account = "BROKEN";
+        model.AccountDate = new DateTime(2027, 2, 2);
+        model.SystemNotes = parentPayment.SystemNotes;
+
+        var actionResult = await controller.UpdateInvoiceManaged(
+            parentPayment.Id,
+            model,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(DocumentKind.Invoice, updated.DocumentKind);
+        Assert.Equal(invoice.InvoiceEntityId, updated.InvoiceId);
+        Assert.Equal("30", updated.Account);
+        Assert.Equal("Updated representative payment", updated.Description);
+        Assert.Equal(PaymentStatus.Completed, updated.Status);
+        Assert.True(updated.IsPaid);
+        Assert.Equal(paidDate, updated.PaidDate);
+    }
+
+    [Fact]
     public async Task Create_ResolvesInvoiceLinkFromPaymentHistory_AndNormalizesFields()
     {
         await using var db = await CreateContextAsync();
