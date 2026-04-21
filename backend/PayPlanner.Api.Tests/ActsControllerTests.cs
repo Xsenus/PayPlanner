@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,50 @@ namespace PayPlanner.Api.Tests;
 
 public class ActsControllerTests
 {
+    [Fact]
+    public async Task Create_AssignsCurrentUserAsResponsible_WhenResponsibleNotProvided()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var responsible = await CreateUserAsync(
+            db,
+            "Тестовый Ответственный",
+            "responsible@example.com",
+            isActive: true,
+            isApproved: true);
+
+        var controller = new ActsController(db, new NoopFormRequirementsService())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, responsible.Id.ToString()),
+                    ], "TestAuth")),
+                },
+            },
+        };
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-AUTH-1",
+                Date = new DateTime(2026, 4, 20),
+                Amount = 9_500m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(responsible.Id, dto.ResponsibleId);
+        Assert.Equal(responsible.FullName, dto.ResponsibleName);
+    }
+
     [Fact]
     public async Task Create_FullAct_UsesAllRemainingInvoiceLineItems()
     {

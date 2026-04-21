@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActDetailPage } from './ActDetailPage';
 
 const {
+  actModalSpy,
   getActMock,
   getClientsMock,
   getActResponsiblesMock,
   downloadActDocumentMock,
 } = vi.hoisted(() => ({
+  actModalSpy: vi.fn(),
   getActMock: vi.fn(),
   getClientsMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
@@ -59,7 +61,10 @@ vi.mock('../../services/api', () => ({
 }));
 
 vi.mock('./ActModal', () => ({
-  ActModal: () => null,
+  ActModal: (props: Record<string, unknown>) => {
+    actModalSpy(props);
+    return props.open ? <div data-testid="act-modal-page">{String(props.presentation)}</div> : null;
+  },
 }));
 
 vi.mock('../Clients/ClientStatusBadge', () => ({
@@ -122,8 +127,56 @@ describe('ActDetailPage', () => {
 
     expect(screen.getByText('Тестовый клиент')).toBeTruthy();
     expect(screen.getByText(/Юридическая услуга/)).toBeTruthy();
+    expect(screen.queryByText(/ИНН/i)).toBeNull();
     await waitFor(() => {
       expect(downloadActDocumentMock).toHaveBeenCalledWith(30, 'html', { includeSignatureAndSeal: false });
     });
+  });
+
+  it('opens the act editor in page mode instead of an overlay modal', async () => {
+    getActMock.mockResolvedValue({
+      id: 31,
+      number: '31',
+      date: '2026-04-09',
+      amount: 21_000,
+      status: 'Created',
+      type: 'Expense',
+      clientId: 7,
+      invoiceId: 618,
+      lineItems: [],
+    });
+    getClientsMock.mockResolvedValue({
+      items: [
+        {
+          id: 7,
+          name: 'Поставщик услуг',
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '2026-04-01T00:00:00Z',
+          isActive: true,
+        },
+      ],
+    });
+    getActResponsiblesMock.mockResolvedValue({ items: [] });
+
+    render(<ActDetailPage actId={31} onBack={vi.fn()} onOpenInvoice={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Поставщик услуг')).toBeTruthy();
+    });
+
+    screen.getByRole('button', { name: 'Редактировать акт' }).click();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('act-modal-page')).toBeTruthy();
+    });
+    expect(screen.getByTestId('act-modal-page').textContent).toBe('page');
+    expect(actModalSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      mode: 'edit',
+      presentation: 'page',
+    }));
   });
 });

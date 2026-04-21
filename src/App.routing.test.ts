@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  getInitialActReturnTab,
+  getInitialActId,
   getInitialContractId,
   getInitialContractReturnTab,
   getInitialPaymentId,
   getInitialTab,
+  getPathActId,
   getPathContractId,
   getPathPaymentId,
+  isActCreatePath,
+  isActsListPath,
   isContractsListPath,
   isPaymentsListPath,
 } from './App';
@@ -75,5 +80,40 @@ describe('App contract routing helpers', () => {
     window.history.replaceState({}, '', '/contracts/77?ppReturnTab=profile');
 
     expect(getInitialContractReturnTab()).toBe(null);
+  });
+});
+
+describe('App act routing helpers', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.clear();
+  });
+
+  it('parses an act id from the pathname', () => {
+    window.history.replaceState({}, '', '/acts/91');
+
+    expect(getPathActId()).toBe(91);
+    expect(getInitialActId()).toBe(91);
+    expect(getInitialTab()).toBe('actDetail');
+  });
+
+  it('detects the acts list pathname', () => {
+    window.history.replaceState({}, '', '/acts');
+
+    expect(isActsListPath()).toBe(true);
+    expect(getInitialTab()).toBe('acts');
+  });
+
+  it('detects the act create pathname', () => {
+    window.history.replaceState({}, '', '/acts/new');
+
+    expect(isActCreatePath()).toBe(true);
+    expect(getInitialTab()).toBe('actCreate');
+  });
+
+  it('restores the act return tab from an act create deep-link', () => {
+    window.history.replaceState({}, '', '/acts/new?ppReturnTab=actsExpense');
+
+    expect(getInitialActReturnTab()).toBe('actsExpense');
   });
 });

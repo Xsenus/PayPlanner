@@ -16,6 +16,7 @@ import type {
 } from '../../types';
 import type { BaseDictItem } from '../../types/dictionaries';
 import { apiService } from '../../services/api';
+import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 type ContractModalMockProps = {
   open: boolean;
@@ -208,6 +209,8 @@ function createTestClient(id: number, name: string): Client {
 }
 
 describe('InvoiceModal integration', () => {
+  const storeInvoiceEditorDraftMock = vi.mocked(storeInvoiceEditorDraft);
+
   beforeEach(() => {
     caseModalSubmitPayloadRef.current = {
       title: 'Case from invoice',
@@ -235,6 +238,7 @@ describe('InvoiceModal integration', () => {
     servicesMock.splice(0, servicesMock.length);
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    storeInvoiceEditorDraftMock.mockReset();
     vi.restoreAllMocks();
     Object.defineProperty(window, 'open', {
       configurable: true,
@@ -1412,9 +1416,9 @@ describe('InvoiceModal integration', () => {
     fireEvent.change(screen.getByLabelText(actNumberLabel), { target: { value: 'ACT-901' } });
     fireEvent.click(screen.getAllByRole('button', { name: createActLabel }).at(-1)!);
 
-    await waitFor(() => {
-      expect(createActMock).toHaveBeenCalledWith(expect.objectContaining({
-        number: 'ACT-901',
+      await waitFor(() => {
+        expect(createActMock).toHaveBeenCalledWith(expect.objectContaining({
+          number: 'ACT-901',
         amount: 0,
         creationMode: 'Full',
         invoiceId: 618,
@@ -1423,12 +1427,70 @@ describe('InvoiceModal integration', () => {
         contractId: 77,
         responsibleId: 9,
         status: 'Created',
-      }));
+        }));
+      });
     });
-  });
 
-  it('creates and loads client cases for the expense client on expense invoices', async () => {
-    const getCasesMock = vi.mocked(apiService.getCases);
+    it('routes act creation to a dedicated page and stores the page draft instead of opening an inline modal', async () => {
+      const onCreateActPage = vi.fn();
+
+      const invoice = {
+        id: 618,
+        invoiceEntityId: 618,
+        number: '36',
+        date: '2026-04-10',
+        dueDate: '2026-04-20',
+        amount: 18000,
+        type: 'Income',
+        status: 'Pending',
+        clientId: 1,
+        contractId: 77,
+        description: 'Счет на юридические услуги',
+        responsibles: [{ id: 9, fullName: 'Ответственный менеджер' }],
+        lineItems: [{ name: 'Составление иска', quantity: 1, unit: 'усл.ед.', price: 18000 }],
+      } as unknown as Invoice;
+
+      render(
+        <InvoiceModal
+          open
+          mode="edit"
+          presentation="page"
+          invoice={invoice}
+          onClose={vi.fn()}
+          onSubmit={vi.fn().mockResolvedValue(undefined)}
+          submitting={false}
+          clients={[createTestClient(1, 'Тестовый клиент')]}
+          responsibles={[{ id: 9, fullName: 'Ответственный менеджер' }]}
+          lookupsLoading={false}
+          relatedPayments={[]}
+          onCreateActPage={onCreateActPage}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Редактировать счёт' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Создать акт' }));
+
+      expect(screen.queryByLabelText('Номер акта')).toBeNull();
+      expect(storeInvoiceEditorDraftMock).toHaveBeenCalledTimes(1);
+      expect(storeInvoiceEditorDraftMock.mock.calls[0]?.[0]).toMatchObject({
+        invoiceId: 618,
+        mode: 'edit',
+        presentation: 'page',
+      });
+      expect(onCreateActPage).toHaveBeenCalledWith(expect.objectContaining({
+        number: '36',
+        amount: 18000,
+        creationMode: 'Full',
+        invoiceId: 618,
+        invoiceNumber: '36',
+        clientId: 1,
+        responsibleId: 9,
+        status: 'Created',
+      }), 618);
+    });
+  
+    it('creates and loads client cases for the expense client on expense invoices', async () => {
+      const getCasesMock = vi.mocked(apiService.getCases);
     const createCaseMock = vi.mocked(apiService.createCase);
     const onClientCaseCreated = vi.fn();
     getCasesMock.mockResolvedValue([]);

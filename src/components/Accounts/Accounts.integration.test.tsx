@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
-import type { AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } from '../../types';
+import type { Act, AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } from '../../types';
 import { clearInvoiceEditorDraft, peekInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 const {
@@ -477,6 +477,58 @@ describe('Accounts integration', () => {
     expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('Sibling payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('payments-loading:false')).toBeTruthy();
+  });
+
+  it('opens act creation as a dedicated page from the accounts registry', async () => {
+    const onCreateActPage = vi.fn();
+
+    render(<Accounts onCreateActPage={onCreateActPage} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать акт из счёта' }));
+
+    expect(onCreateActPage).toHaveBeenCalledWith(expect.objectContaining({
+      creationMode: 'Full',
+      invoiceId: 528,
+      invoiceNumber: '24',
+      number: '24',
+      amount: 15000,
+      clientId: 55,
+      status: 'Created',
+    }), {
+      invoiceId: 528,
+    });
+  });
+
+  it('opens an existing act as a dedicated page from the accounts registry', async () => {
+    const linkedAct = {
+      id: 901,
+      number: 'ACT-901',
+      date: '2026-04-05',
+      amount: 15000,
+      status: 'Created',
+    } as Act;
+    const onOpenActPage = vi.fn();
+
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [{
+        ...createAccountRow(),
+        acts: [linkedAct],
+      }],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts onOpenActPage={onOpenActPage} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-901/i }));
+
+    expect(onOpenActPage).toHaveBeenCalledWith(901, {
+      invoiceId: 528,
+    });
   });
 
   it('keeps grouped payments when the fetched invoice has another row id but the same invoice entity id', async () => {
