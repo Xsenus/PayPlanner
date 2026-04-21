@@ -46,7 +46,6 @@ const ACT_COLUMN_CONFIGS = [
   { key: 'amount', defaultVisible: true, defaultWidth: 150 },
   { key: 'invoiceNumber', defaultVisible: true, defaultWidth: 150 },
   { key: 'client', defaultVisible: true, defaultWidth: 250 },
-  { key: 'counterpartyInn', defaultVisible: true, defaultWidth: 150 },
   { key: 'status', defaultVisible: true, defaultWidth: 150 },
   { key: 'responsible', defaultVisible: true, defaultWidth: 180 },
   { key: 'actions', defaultVisible: true, defaultWidth: 130 },
@@ -84,11 +83,19 @@ interface ActsProps {
   defaultType?: PaymentKind;
   lockType?: boolean;
   onOpenAct?: (actId: number) => void;
+  onCreateActPage?: (initialValues?: Partial<ActInput> & { amount?: number | null }) => void;
   onOpenClient?: (clientId: number) => void;
   onOpenInvoiceEditor?: (invoiceId: number) => void;
 }
 
-export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, onOpenInvoiceEditor }: ActsProps) {
+export function Acts({
+  defaultType,
+  lockType = false,
+  onOpenAct,
+  onCreateActPage,
+  onOpenClient,
+  onOpenInvoiceEditor,
+}: ActsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -113,6 +120,7 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
   const [page, setPage] = useState(1);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const effectiveTypeFilter = lockType && defaultType ? defaultType : typeFilter;
+  const canOpenActPage = typeof onOpenAct === 'function';
 
   const tableColumnConfigs = useMemo(
     () => ACT_COLUMN_CONFIGS.filter((column) => (column.key === 'actions' ? canEdit || canDelete : true)),
@@ -278,7 +286,6 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
       { key: 'amount' as ActColumnKey, label: t('actAmount') ?? 'Сумма', sortable: true },
       { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
       { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
-      { key: 'counterpartyInn' as ActColumnKey, label: t('actInn') ?? 'ИНН', sortable: true },
       { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
       { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
       { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
@@ -352,6 +359,11 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
   }, [modalOpen, ensureLookups]);
 
   const openCreateModal = () => {
+    if (onCreateActPage) {
+      onCreateActPage({ status: 'Created' });
+      return;
+    }
+
     setSelectedAct(null);
     setModalOpen(true);
     setModalError(null);
@@ -490,8 +502,6 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
             </div>
           </td>
         );
-      case 'counterpartyInn':
-        return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{act.counterpartyInn || '—'}</td>;
       case 'status':
         return (
           <td key={key} className="px-4 py-3">
@@ -652,7 +662,7 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={t('actSearchPlaceholder') ?? 'Номер акта, название или ИНН'}
+              placeholder={t('actSearchPlaceholder') ?? 'Номер акта или название'}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 pl-10 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
             />
           </div>
@@ -816,9 +826,9 @@ export function Acts({ defaultType, lockType = false, onOpenAct, onOpenClient, o
                   acts.map((act) => (
                     <tr
                       key={act.id}
-                      className={`hover:bg-slate-50/80 ${canEdit ? 'cursor-pointer' : ''}`}
+                      className={`hover:bg-slate-50/80 ${canOpenActPage ? 'cursor-pointer' : ''}`}
                       onClick={() => {
-                        if (canEdit) onOpenAct?.(act.id);
+                        onOpenAct?.(act.id);
                       }}>
                       {visibleOrderedColumns.map((column) => renderActCell(act, column.key, column.key))}
                     </tr>

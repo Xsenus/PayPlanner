@@ -121,6 +121,18 @@ function buildActPayload(act: Act, overrides?: Partial<ActInput>): ActInput {
   };
 }
 
+function resolveCounterpartyLabel(type?: PaymentKind | null): string {
+  if (type === 'Expense') {
+    return 'Поставщик';
+  }
+
+  if (type === 'Income') {
+    return 'Клиент';
+  }
+
+  return 'Контрагент';
+}
+
 export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: ActDetailPageProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -298,6 +310,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       className: 'border border-slate-200 bg-slate-50 text-slate-600',
     };
   }, [act?.type, t]);
+  const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(act?.type), [act?.type]);
 
   const creationModeLabel = useMemo(() => {
     if (act?.creationMode === 'Full') return 'Полностью по счету';
@@ -483,6 +496,36 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const transferredDisabled = !canEdit || act?.status === 'Transferred' || act?.status === 'Signed' || act?.status === 'Terminated';
   const signedDisabled = !canEdit || act?.status === 'Signed' || act?.status === 'Terminated';
 
+  if (act && editorOpen) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <ActModal
+          open
+          mode="edit"
+          act={act}
+          onClose={() => {
+            if (editorSubmitting) return;
+            setEditorError(null);
+            setEditorOpen(false);
+          }}
+          onBack={() => {
+            if (editorSubmitting) return;
+            setEditorError(null);
+            setEditorOpen(false);
+          }}
+          onSubmit={handleActSubmit}
+          submitting={editorSubmitting}
+          errorMessage={editorError}
+          clients={clients}
+          responsibles={responsibles}
+          lookupsLoading={loading}
+          presentation="page"
+          onOpenInvoice={onOpenInvoice}
+        />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="p-8">
@@ -646,7 +689,6 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                     <p><span className="text-slate-500">Тип:</span> {typeMeta.label}</p>
                     <p><span className="text-slate-500">Режим:</span> {creationModeLabel}</p>
                     <p><span className="text-slate-500">Дата акта:</span> {formatDate(act.date)}</p>
-                    <p><span className="text-slate-500">ИНН:</span> {act.counterpartyInn || '—'}</p>
                     <p><span className="text-slate-500">Ответственный:</span> {selectedResponsibleLabel}</p>
                     <p><span className="text-slate-500">Комментарий:</span> {act.comment?.trim() || '—'}</p>
                     <p><span className="text-slate-500">Позиции:</span> {lineItems.length}</p>
@@ -657,10 +699,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6">
                 <div className="mb-3 flex items-center gap-2 font-medium">
                   <UserRound className="h-4 w-4" />
-                  Контрагент
+                  {counterpartyLabel}
                 </div>
                 <p>
-                  <span className="text-slate-500">Клиент:</span>{' '}
+                  <span className="text-slate-500">{counterpartyLabel}:</span>{' '}
                   {selectedClient && onOpenClient ? (
                     <button
                       type="button"
@@ -857,23 +899,6 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           </div>
         </div>
       </div>
-
-      <ActModal
-        open={editorOpen}
-        mode="edit"
-        act={act}
-        onClose={() => {
-          if (editorSubmitting) return;
-          setEditorError(null);
-          setEditorOpen(false);
-        }}
-        onSubmit={handleActSubmit}
-        submitting={editorSubmitting}
-        errorMessage={editorError}
-        clients={clients}
-        responsibles={responsibles}
-        lookupsLoading={loading}
-      />
     </div>
   );
 }

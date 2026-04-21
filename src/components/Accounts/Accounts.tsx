@@ -68,6 +68,11 @@ interface AccountsProps {
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenPayment?: (payment: Payment) => void;
+  onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
+  onCreateActPage?: (
+    initialValues?: Partial<ActInput> & { amount?: number | null },
+    options?: { invoiceId?: number | null },
+  ) => void;
 }
 
 type FilterType = PaymentKind | 'All';
@@ -256,6 +261,8 @@ export function Accounts({
   onOpenClient,
   onOpenContract,
   onOpenPayment,
+  onOpenActPage,
+  onCreateActPage,
 }: AccountsProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
@@ -698,6 +705,11 @@ export function Accounts({
 
   useEffect(() => {
     if (!routeInvoiceId || routeInvoiceId <= 0 || routeInvoiceId === pageEditingInvoiceId) {
+      return;
+    }
+
+    const draft = peekInvoiceEditorDraft();
+    if (draft?.invoiceId === routeInvoiceId) {
       return;
     }
 
@@ -1426,12 +1438,9 @@ export function Accounts({
   };
 
   const openActCreateModal = (row: AccountRow) => {
-    setActModalMode('create');
-    setActiveAct(null);
     const normalizedDate =
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
-    setActModalInvoice(row);
-    setActInitialValues({
+    const nextInitialValues: Partial<ActInput> & { amount?: number | null } = {
       creationMode: 'Full',
       invoiceId: row.invoice?.id ?? null,
       invoiceNumber: row.accountNumber,
@@ -1443,12 +1452,31 @@ export function Accounts({
       responsibleId: row.invoice?.responsibleId ?? null,
       comment: row.invoice?.actReference ?? '',
       status: 'Created',
-    });
+    };
+
+    if (onCreateActPage) {
+      onCreateActPage(nextInitialValues, {
+        invoiceId: row.invoice?.id ?? null,
+      });
+      return;
+    }
+
+    setActModalMode('create');
+    setActiveAct(null);
+    setActModalInvoice(row);
+    setActInitialValues(nextInitialValues);
     setActModalError(null);
     setActModalOpen(true);
   };
 
   const openActEditModal = (act: Act, row: AccountRow) => {
+    if (onOpenActPage) {
+      onOpenActPage(act.id, {
+        invoiceId: act.invoiceId ?? row.invoice?.id ?? null,
+      });
+      return;
+    }
+
     setActModalMode('edit');
     setActiveAct(act);
     setActModalInvoice(row);
@@ -1661,6 +1689,13 @@ export function Accounts({
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
           onEditRelatedPayment={canEdit ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
+          onCreateActPage={
+            onCreateActPage
+              ? (initialValues, invoiceId) => onCreateActPage(initialValues, {
+                invoiceId: invoiceId ?? currentPageInvoice.id,
+              })
+              : undefined
+          }
         />
         {paymentModalElement}
       </div>
@@ -2407,6 +2442,13 @@ export function Accounts({
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
           onRefreshRequested={refreshAccounts}
+          onCreateActPage={
+            onCreateActPage
+              ? (initialValues, invoiceId) => onCreateActPage(initialValues, {
+                invoiceId: invoiceId ?? selectedInvoice?.id ?? null,
+              })
+              : undefined
+          }
         />
 
         <ActModal

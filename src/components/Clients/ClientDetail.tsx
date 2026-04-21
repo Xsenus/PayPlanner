@@ -116,6 +116,11 @@ interface ClientDetailProps {
   initialCaseId?: number | 'all';
   initialSection?: ClientDetailSection;
   onOpenInvoicePage?: (invoiceId: number) => void;
+  onOpenActPage?: (actId: number, options?: { section?: 'acts' | 'accounts' }) => void;
+  onCreateActPage?: (
+    initialValues?: Partial<ActInput> & { amount?: number | null },
+    options?: { section?: 'acts' | 'accounts' },
+  ) => void;
 }
 
 type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
@@ -155,8 +160,7 @@ type ActTableColumnKey =
   | 'title'
   | 'amount'
   | 'status'
-  | 'responsible'
-  | 'counterpartyInn';
+  | 'responsible';
 
 type ContractTableColumnKey =
   | 'number'
@@ -233,7 +237,6 @@ const ACT_TABLE_COLUMNS: Array<{
   { key: 'amount', label: 'Сумма', defaultWidth: 160 },
   { key: 'status', label: 'Статус', defaultWidth: 160 },
   { key: 'responsible', label: 'Ответственный', defaultWidth: 180 },
-  { key: 'counterpartyInn', label: 'ИНН', defaultWidth: 160 },
 ];
 
 const CONTRACT_TABLE_COLUMNS: Array<{
@@ -993,6 +996,8 @@ export function ClientDetail({
   initialCaseId,
   initialSection,
   onOpenInvoicePage,
+  onOpenActPage,
+  onCreateActPage,
 }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
@@ -2657,6 +2662,19 @@ export function ClientDetail({
       showPermissionWarning('Недостаточно прав для добавления актов.');
       return;
     }
+
+    if (onCreateActPage) {
+      setActiveSection('acts');
+      onCreateActPage(
+        {
+          clientId,
+          status: 'Created',
+        },
+        { section: 'acts' },
+      );
+      return;
+    }
+
     setActiveSection('acts');
     setActModalMode('create');
     setSelectedAct(null);
@@ -2668,6 +2686,13 @@ export function ClientDetail({
       showPermissionWarning('Недостаточно прав для редактирования актов.');
       return;
     }
+
+    if (onOpenActPage) {
+      setActiveSection('acts');
+      onOpenActPage(act.id, { section: 'acts' });
+      return;
+    }
+
     setActiveSection('acts');
     setActModalMode('edit');
     setSelectedAct(act);
@@ -5303,7 +5328,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       aria-label="Поиск актов клиента"
                       value={actSearch}
                       onChange={(event) => setActSearch(event.target.value)}
-                      placeholder={t('actSearchPlaceholder') ?? 'Номер акта, название или ИНН контрагента'}
+                      placeholder={t('actSearchPlaceholder') ?? 'Номер акта или название'}
                       className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />
                   </div>
@@ -5501,9 +5526,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                                           <span className="text-gray-900">
                                             {act.responsibleName ?? t('actResponsibleNotSelected') ?? '—'}
                                           </span>
-                                        ) : (
-                                          <span className="text-gray-900">{act.counterpartyInn ?? '—'}</span>
-                                        )}
+                                        ) : null}
                                       </td>
                                     ))}
                                     <td className="px-4 py-3">
@@ -5898,6 +5921,11 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
           paymentsLoading={invoiceModalPaymentsLoading}
           onRefreshRequested={refreshInvoiceModalData}
           onClientCaseCreated={handleInvoiceCaseCreated}
+          onCreateActPage={
+            onCreateActPage
+              ? (initialValues) => onCreateActPage(initialValues, { section: 'accounts' })
+              : undefined
+          }
         />
 
         <ActModal

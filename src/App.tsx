@@ -6,7 +6,7 @@ import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
 import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
-import type { Payment } from './types';
+import type { Act, ActInput, Payment } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions } from './hooks/useRolePermissions';
@@ -18,6 +18,12 @@ import type { User as AppUser } from './services/authService';
 import { type ContactScope } from './services/api';
 
 type AuthView = 'login' | 'register' | 'awaiting';
+type ActListTab = 'acts' | 'actsIncome' | 'actsExpense';
+type ActReturnContext =
+  | { tab: ActListTab }
+  | { tab: 'accounts' | 'accountsIncome' | 'accountsExpense'; invoiceId?: number | null }
+  | { tab: 'clientDetail'; clientId: number; section?: 'acts' | 'accounts' }
+  | { tab: 'contractDetail'; contractId: number };
 
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
@@ -29,6 +35,7 @@ const ClientDetail = lazy(() => import('./components/Clients/ClientDetail').then
 const Accounts = lazy(() => import('./components/Accounts/Accounts').then((module) => ({ default: module.Accounts })));
 const Installments = lazy(() => import('./components/Accounts/Installments').then((module) => ({ default: module.Installments })));
 const Acts = lazy(() => import('./components/Acts/Acts').then((module) => ({ default: module.Acts })));
+const ActCreatePage = lazy(() => import('./components/Acts/ActCreatePage').then((module) => ({ default: module.ActCreatePage })));
 const ActDetailPage = lazy(() => import('./components/Acts/ActDetailPage').then((module) => ({ default: module.ActDetailPage })));
 const Contracts = lazy(() => import('./components/Contracts/Contracts').then((module) => ({ default: module.Contracts })));
 const ContractCreatePage = lazy(() => import('./components/Contracts/ContractCreatePage').then((module) => ({ default: module.ContractCreatePage })));
@@ -63,6 +70,7 @@ const ALL_TABS: Tab[] = [
   'acts',
   'actsIncome',
   'actsExpense',
+  'actCreate',
   'actDetail',
   'paymentsIncome',
   'paymentsExpense',
@@ -177,6 +185,14 @@ export function isActsListPath(): boolean {
   return /^\/acts\/?$/i.test(window.location.pathname);
 }
 
+export function isActCreatePath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/acts\/new\/?$/i.test(window.location.pathname);
+}
+
 function isPaymentsTab(tab: Tab): tab is 'payments' | 'paymentsIncome' | 'paymentsExpense' {
   return tab === 'payments' || tab === 'paymentsIncome' || tab === 'paymentsExpense';
 }
@@ -219,6 +235,10 @@ export function getInitialTab(): Tab {
 
   if (isContractsListPath()) {
     return 'contracts';
+  }
+
+  if (isActCreatePath()) {
+    return 'actCreate';
   }
 
   if (getPathActId()) {
@@ -287,7 +307,7 @@ export function getInitialActId(): number | null {
 }
 
 export function getInitialActReturnTab(): 'acts' | 'actsIncome' | 'actsExpense' | null {
-  if (typeof window === 'undefined' || !getPathActId()) {
+  if (typeof window === 'undefined' || (!getPathActId() && !isActCreatePath())) {
     return null;
   }
 
@@ -323,6 +343,7 @@ function AppContent() {
       acts: 'Акты',
       actsIncome: 'Доходные акты',
       actsExpense: 'Расходные акты',
+      actCreate: 'Новый акт',
       actDetail: 'Акт',
       paymentsIncome: 'Доходные платежи',
       paymentsExpense: 'Расходные платежи',
@@ -353,11 +374,13 @@ function AppContent() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
-  const [initialClientSection, setInitialClientSection] = useState<'accounts' | undefined>(undefined);
+  const [initialClientSection, setInitialClientSection] = useState<'accounts' | 'acts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(getInitialContractId);
   const [selectedActId, setSelectedActId] = useState<number | null>(getInitialActId);
-  const [actReturnTab, setActReturnTab] = useState<'acts' | 'actsIncome' | 'actsExpense'>(getInitialActReturnTab() ?? 'acts');
+  const [actReturnTab, setActReturnTab] = useState<ActListTab>(getInitialActReturnTab() ?? 'acts');
+  const [actReturnContext, setActReturnContext] = useState<ActReturnContext>(() => ({ tab: getInitialActReturnTab() ?? 'acts' }));
+  const [actCreateInitialValues, setActCreateInitialValues] = useState<(Partial<ActInput> & { amount?: number | null }) | null>(null);
   const [invoicePageReturnClientId, setInvoicePageReturnClientId] = useState<number | null>(null);
   const [contractReturnTab, setContractReturnTab] = useState<Tab | null>(getInitialContractReturnTab);
   const [clientReturnTab, setClientReturnTab] = useState<{
@@ -428,6 +451,8 @@ function AppContent() {
         case 'actsExpense':
         case 'actDetail':
           return permissions.acts.canView;
+        case 'actCreate':
+          return permissions.acts.canCreate;
         case 'payments':
         case 'paymentsIncome':
         case 'paymentsExpense':
@@ -553,6 +578,74 @@ function AppContent() {
     [permissions.payments.canView],
   );
 
+  const applyActReturnContext = useCallback((context: ActReturnContext) => {
+    setActReturnContext(context);
+    if (context.tab === 'acts' || context.tab === 'actsIncome' || context.tab === 'actsExpense') {
+      setActReturnTab(context.tab);
+    } else {
+      setActReturnTab('acts');
+    }
+  }, []);
+
+  const openActDetail = useCallback((actId: number, context: ActReturnContext) => {
+    if (!permissions.acts.canView || !(actId > 0)) {
+      return;
+    }
+
+    setSelectedActId(actId);
+    setActCreateInitialValues(null);
+    applyActReturnContext(context);
+    setActiveTab('actDetail');
+  }, [applyActReturnContext, permissions.acts.canView]);
+
+  const openActCreate = useCallback((options?: {
+    initialValues?: Partial<ActInput> & { amount?: number | null };
+    returnTo?: ActReturnContext;
+  }) => {
+    if (!permissions.acts.canCreate) {
+      return;
+    }
+
+    setSelectedActId(null);
+    setActCreateInitialValues(options?.initialValues ?? null);
+    applyActReturnContext(options?.returnTo ?? { tab: 'acts' });
+    setActiveTab('actCreate');
+  }, [applyActReturnContext, permissions.acts.canCreate]);
+
+  const handleActBack = useCallback(() => {
+    setActCreateInitialValues(null);
+    setSelectedActId(null);
+
+    if (actReturnContext.tab === 'clientDetail') {
+      setSelectedClientId(actReturnContext.clientId);
+      setInitialClientSection(actReturnContext.section);
+      setActiveTab('clientDetail');
+      return;
+    }
+
+    if (actReturnContext.tab === 'contractDetail') {
+      setSelectedContractId(actReturnContext.contractId);
+      setActiveTab('contractDetail');
+      return;
+    }
+
+    if (
+      actReturnContext.tab === 'accounts'
+      || actReturnContext.tab === 'accountsIncome'
+      || actReturnContext.tab === 'accountsExpense'
+    ) {
+      setSelectedInvoiceId(actReturnContext.invoiceId ?? null);
+      setActiveTab(actReturnContext.tab);
+      return;
+    }
+
+    setActiveTab(actReturnContext.tab);
+  }, [actReturnContext]);
+
+  const handleActCreated = useCallback((act: Act) => {
+    openActDetail(act.id, actReturnContext);
+  }, [actReturnContext, openActDetail]);
+
   const handleOpenProfile = useCallback(() => {
     setActiveTab('profile');
   }, []);
@@ -605,6 +698,10 @@ function AppContent() {
         setSelectedActId(null);
       }
 
+      if (tab !== 'actCreate') {
+        setActCreateInitialValues(null);
+      }
+
       setActiveTab(tab);
     },
     [activeTab, canViewTab],
@@ -622,6 +719,8 @@ function AppContent() {
       url.pathname = selectedPaymentId ? `/payments/${selectedPaymentId}` : '/payments';
     } else if (activeTab === 'acts' || activeTab === 'actsIncome' || activeTab === 'actsExpense') {
       url.pathname = '/acts';
+    } else if (activeTab === 'actCreate') {
+      url.pathname = '/acts/new';
     } else if (activeTab === 'actDetail') {
       url.pathname = selectedActId ? `/acts/${selectedActId}` : '/acts';
     } else if (activeTab === 'contracts') {
@@ -632,7 +731,7 @@ function AppContent() {
       url.pathname = '/';
     } else if (/^\/payments(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
-    } else if (/^\/acts(?:\/\d+)?\/?$/i.test(url.pathname)) {
+    } else if (/^\/acts(?:\/(?:new|\d+))?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/contracts(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -653,7 +752,7 @@ function AppContent() {
 
     if (activeTab === 'contractDetail' && contractReturnTab) {
       url.searchParams.set('ppReturnTab', contractReturnTab);
-    } else if (activeTab === 'actDetail' && actReturnTab !== 'acts') {
+    } else if ((activeTab === 'actDetail' || activeTab === 'actCreate') && actReturnTab !== 'acts') {
       url.searchParams.set('ppReturnTab', actReturnTab);
     } else {
       url.searchParams.delete('ppReturnTab');
@@ -844,6 +943,27 @@ function AppContent() {
             initialCaseId={initialCaseId}
             initialSection={initialClientSection}
             onOpenInvoicePage={(invoiceId) => openInvoicePage(invoiceId, { returnClientId: selectedClientId })}
+            onOpenActPage={(id, options) =>
+              openActDetail(id, {
+                tab: 'clientDetail',
+                clientId: selectedClientId,
+                section: options?.section ?? 'acts',
+              })
+            }
+            onCreateActPage={(initialValues, options) =>
+              openActCreate({
+                initialValues: {
+                  ...initialValues,
+                  clientId: initialValues?.clientId ?? selectedClientId,
+                  status: initialValues?.status ?? 'Created',
+                },
+                returnTo: {
+                  tab: 'clientDetail',
+                  clientId: selectedClientId,
+                  section: options?.section ?? 'acts',
+                },
+              })
+            }
             onBack={() => {
               const target = clientReturnTab?.tab ?? 'clients';
               if (target === 'contractDetail' && clientReturnTab?.contractId) {
@@ -877,6 +997,13 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accounts' })}
                 onOpenPayment={openPaymentDetail}
+                onOpenActPage={(id, options) => openActDetail(id, { tab: 'accounts', invoiceId: options?.invoiceId ?? null })}
+                onCreateActPage={(initialValues, options) =>
+                  openActCreate({
+                    initialValues,
+                    returnTo: { tab: 'accounts', invoiceId: options?.invoiceId ?? null },
+                  })
+                }
               />
             )
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
@@ -893,6 +1020,15 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsIncome' })}
                 onOpenPayment={openPaymentDetail}
+                onOpenActPage={(id, options) =>
+                  openActDetail(id, { tab: 'accountsIncome', invoiceId: options?.invoiceId ?? null })
+                }
+                onCreateActPage={(initialValues, options) =>
+                  openActCreate({
+                    initialValues,
+                    returnTo: { tab: 'accountsIncome', invoiceId: options?.invoiceId ?? null },
+                  })
+                }
               />
             )
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
@@ -909,6 +1045,15 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsExpense' })}
                 onOpenPayment={openPaymentDetail}
+                onOpenActPage={(id, options) =>
+                  openActDetail(id, { tab: 'accountsExpense', invoiceId: options?.invoiceId ?? null })
+                }
+                onCreateActPage={(initialValues, options) =>
+                  openActCreate({
+                    initialValues,
+                    returnTo: { tab: 'accountsExpense', invoiceId: options?.invoiceId ?? null },
+                  })
+                }
               />
             )
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
@@ -922,11 +1067,8 @@ function AppContent() {
         return permissions.acts.canView
           ? (
               <Acts
-                onOpenAct={(id) => {
-                  setSelectedActId(id);
-                  setActReturnTab('acts');
-                  setActiveTab('actDetail');
-                }}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'acts' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'acts' } })}
                 onOpenInvoiceEditor={(id) => openInvoicePage(id)}
               />
@@ -939,11 +1081,8 @@ function AppContent() {
               <Acts
                 defaultType="Income"
                 lockType
-                onOpenAct={(id) => {
-                  setSelectedActId(id);
-                  setActReturnTab('actsIncome');
-                  setActiveTab('actDetail');
-                }}
+                onOpenAct={(id) => openActDetail(id, { tab: 'actsIncome' })}
+                onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'actsIncome' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actsIncome' } })}
                 onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Income' })}
               />
@@ -956,23 +1095,33 @@ function AppContent() {
               <Acts
                 defaultType="Expense"
                 lockType
-                onOpenAct={(id) => {
-                  setSelectedActId(id);
-                  setActReturnTab('actsExpense');
-                  setActiveTab('actDetail');
-                }}
+                onOpenAct={(id) => openActDetail(id, { tab: 'actsExpense' })}
+                onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'actsExpense' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actsExpense' } })}
                 onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Expense' })}
               />
             )
           : renderNoAccess('Р Р°Р·РґРµР» Р°РєС‚РѕРІ РЅРµРґРѕСЃС‚СѓРїРµРЅ РґР»СЏ РІР°С€РµР№ СЂРѕР»Рё.');
 
+      case 'actCreate':
+        return permissions.acts.canCreate
+          ? (
+              <ActCreatePage
+                onBack={handleActBack}
+                onCreated={handleActCreated}
+                initialValues={actCreateInitialValues ?? undefined}
+                defaultResponsibleId={user?.id}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+              />
+            )
+          : renderNoAccess('Создание актов недоступно для вашей роли.');
+
       case 'actDetail':
         return permissions.acts.canView && selectedActId
           ? (
               <ActDetailPage
                 actId={selectedActId}
-                onBack={() => setActiveTab(actReturnTab)}
+                onBack={handleActBack}
                 onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'actDetail', actId: selectedActId } })
@@ -1077,6 +1226,8 @@ function AppContent() {
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })
                 }
+                onOpenInvoiceEditor={(id) => openInvoicePage(id)}
+                onOpenActEditor={(id) => openActDetail(id, { tab: 'contractDetail', contractId: selectedContractId })}
               />
             )
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');

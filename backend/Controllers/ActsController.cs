@@ -234,7 +234,7 @@ public class ActsController : ControllerBase
             CounterpartyInn = Normalize(request.CounterpartyInn),
             Status = request.Status,
             ClientId = request.ClientId,
-            ResponsibleId = request.ResponsibleId,
+            ResponsibleId = request.ResponsibleId ?? User.GetUserId(),
             Comment = Normalize(request.Comment),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

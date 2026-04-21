@@ -1,4 +1,4 @@
-import { Loader2, X } from 'lucide-react';
+import { ArrowLeft, Link2, Loader2, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../services/api';
 import type {
@@ -11,6 +11,7 @@ import type {
   Client,
   Invoice,
   InvoiceLineItem,
+  PaymentKind,
 } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
@@ -34,6 +35,9 @@ interface ActModalProps {
   defaultClientId?: number | null;
   defaultResponsibleId?: number | null;
   initialValues?: Partial<ActInput> & { amount?: number | null };
+  presentation?: 'modal' | 'page';
+  onBack?: () => void;
+  onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
 }
 
 type FormState = {
@@ -64,6 +68,7 @@ type InvoiceLineAvailabilityRow = {
 };
 
 const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
+const QUANTITY_EPSILON = 0.0001;
 
 function parseDecimalInput(value: string): number | null {
   const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
@@ -82,6 +87,10 @@ function formatDecimalInput(value: number): string {
 
   const rounded = Math.round(value * 10_000) / 10_000;
   return String(rounded).replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+}
+
+function quantitiesEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) < QUANTITY_EPSILON;
 }
 
 function buildInvoiceLineSourceKey(item: InvoiceLineItem, index: number): string {
@@ -115,6 +124,42 @@ function sumLineItemQuantities(lineItems?: ActLineItem[] | null): Map<string, nu
   return quantities;
 }
 
+function resolveCounterpartyLabel(type?: PaymentKind | null): string {
+  if (type === 'Expense') {
+    return 'Поставщик';
+  }
+
+  if (type === 'Income') {
+    return 'Клиент';
+  }
+
+  return 'Контрагент';
+}
+
+function resolveCounterpartyClientId(invoice: Invoice | null): number | null {
+  if (!invoice) {
+    return null;
+  }
+
+  if (invoice.type === 'Expense') {
+    return invoice.expenseClientId ?? invoice.clientId ?? null;
+  }
+
+  return invoice.clientId ?? invoice.expenseClientId ?? null;
+}
+
+function resolveCounterpartyName(invoice: Invoice | null): string {
+  if (!invoice) {
+    return '';
+  }
+
+  if (invoice.type === 'Expense') {
+    return invoice.expenseClientName?.trim() || invoice.clientName?.trim() || '';
+  }
+
+  return invoice.clientName?.trim() || invoice.expenseClientName?.trim() || '';
+}
+
 function normalizeActToForm(
   act: Act | null,
   defaultClientId?: number | null,
@@ -124,7 +169,6 @@ function normalizeActToForm(
   if (!act) {
     const today = toDateInputValue(new Date());
     const initialInvoiceId = initialValues?.invoiceId ? String(initialValues.invoiceId) : '';
-    const initialCreationMode = initialValues?.creationMode ?? (initialInvoiceId ? 'Full' : 'Manual');
 
     return {
       number: initialValues?.number ?? '',
@@ -134,7 +178,7 @@ function normalizeActToForm(
         initialValues?.amount !== undefined && initialValues.amount !== null
           ? String(initialValues.amount)
           : '',
-      creationMode: initialCreationMode,
+      creationMode: initialInvoiceId ? 'Partial' : 'Manual',
       invoiceNumber: initialValues?.invoiceNumber ?? '',
       invoiceId: initialInvoiceId,
       counterpartyInn: initialValues?.counterpartyInn ?? '',
@@ -158,7 +202,7 @@ function normalizeActToForm(
     title: act.title ?? '',
     date: toDateInputValue(act.date) || toDateInputValue(new Date()),
     amount: act.amount !== undefined && act.amount !== null ? String(act.amount) : '',
-    creationMode: act.creationMode ?? (act.invoiceId ? 'Full' : 'Manual'),
+    creationMode: act.creationMode === 'Manual' ? 'Manual' : 'Partial',
     invoiceNumber: act.invoiceNumber ?? '',
     invoiceId: act.invoiceId ? String(act.invoiceId) : '',
     counterpartyInn: act.counterpartyInn ?? '',
@@ -188,6 +232,9 @@ export function ActModal({
   defaultClientId,
   defaultResponsibleId,
   initialValues,
+  presentation = 'modal',
+  onBack,
+  onOpenInvoice,
 }: ActModalProps) {
   const { t } = useTranslation();
   const { isRequired } = useFormRequirements('acts', open);
@@ -204,6 +251,10 @@ export function ActModal({
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
   const selectionSeedRef = useRef<string | null>(null);
 
+  const isEdit = mode === 'edit';
+  const isPageMode = presentation === 'page';
+  const linkedInvoiceId = form.invoiceId ? Number(form.invoiceId) : null;
+
   useEffect(() => {
     if (open) {
       setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues));
@@ -216,9 +267,6 @@ export function ActModal({
       selectionSeedRef.current = null;
     }
   }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
-
-  const isEdit = mode === 'edit';
-  const linkedInvoiceId = form.invoiceId ? Number(form.invoiceId) : null;
 
   useEffect(() => {
     if (!open || !linkedInvoiceId) {
@@ -301,6 +349,46 @@ export function ActModal({
   }, [open, isEdit, act]);
 
   const currentAct = useMemo(() => actDetails ?? act, [act, actDetails]);
+  const actType = useMemo<PaymentKind | null>(
+    () => invoiceDetails?.type ?? act?.type ?? null,
+    [act?.type, invoiceDetails?.type],
+  );
+  const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(actType), [actType]);
+  const linkedCounterpartyClientId = useMemo(() => resolveCounterpartyClientId(invoiceDetails), [invoiceDetails]);
+  const linkedCounterpartyName = useMemo(() => resolveCounterpartyName(invoiceDetails), [invoiceDetails]);
+
+  useEffect(() => {
+    if (!open || !invoiceDetails) {
+      return;
+    }
+
+    setForm((previous) => {
+      let next = previous;
+      let changed = false;
+
+      if (invoiceDetails.number?.trim() && previous.invoiceNumber !== invoiceDetails.number) {
+        next = { ...next, invoiceNumber: invoiceDetails.number };
+        changed = true;
+      }
+
+      if (linkedCounterpartyClientId && previous.clientId !== String(linkedCounterpartyClientId)) {
+        next = { ...next, clientId: String(linkedCounterpartyClientId) };
+        changed = true;
+      }
+
+      if (!previous.number.trim() && invoiceDetails.number?.trim()) {
+        next = { ...next, number: invoiceDetails.number };
+        changed = true;
+      }
+
+      if (!previous.title.trim() && invoiceDetails.description?.trim()) {
+        next = { ...next, title: invoiceDetails.description.trim() };
+        changed = true;
+      }
+
+      return changed ? next : previous;
+    });
+  }, [linkedCounterpartyClientId, invoiceDetails, open]);
 
   const invoiceLineAvailability = useMemo<InvoiceLineAvailabilityRow[]>(() => {
     const sourceItems = invoiceDetails?.lineItems ?? [];
@@ -354,23 +442,20 @@ export function ActModal({
 
   const currentActLineQuantities = useMemo(() => sumLineItemQuantities(currentAct?.lineItems), [currentAct?.lineItems]);
   const hasInvoiceLineItems = invoiceLineAvailability.length > 0;
+  const availabilityBySourceKey = useMemo(
+    () => new Map(invoiceLineAvailability.map((item) => [item.sourceKey, item])),
+    [invoiceLineAvailability],
+  );
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    if (hasInvoiceLineItems) {
-      if (mode === 'create' && form.creationMode === 'Manual') {
-        setForm((prev) => ({ ...prev, creationMode: 'Full' }));
-      }
-      return;
+    if (linkedInvoiceId && !hasInvoiceLineItems && form.creationMode !== 'Manual') {
+      setForm((previous) => ({ ...previous, creationMode: 'Manual' }));
     }
-
-    if (form.creationMode !== 'Manual') {
-      setForm((prev) => ({ ...prev, creationMode: 'Manual' }));
-    }
-  }, [form.creationMode, hasInvoiceLineItems, mode, open]);
+  }, [form.creationMode, hasInvoiceLineItems, linkedInvoiceId, open]);
 
   const selectionSeedKey = useMemo(() => {
     const availabilityKey = invoiceLineAvailability
@@ -381,8 +466,8 @@ export function ActModal({
       .map(([sourceKey, quantity]) => `${sourceKey}:${quantity}`)
       .join('|');
 
-    return `${open ? 1 : 0}:${linkedInvoiceId ?? 0}:${form.creationMode}:${currentAct?.id ?? 0}:${availabilityKey}:${currentActKey}`;
-  }, [currentAct?.id, currentActLineQuantities, form.creationMode, invoiceLineAvailability, linkedInvoiceId, open]);
+    return `${open ? 1 : 0}:${linkedInvoiceId ?? 0}:${currentAct?.id ?? 0}:${availabilityKey}:${currentActKey}`;
+  }, [currentAct?.id, currentActLineQuantities, invoiceLineAvailability, linkedInvoiceId, open]);
 
   useEffect(() => {
     if (!open) {
@@ -402,49 +487,35 @@ export function ActModal({
 
     selectionSeedRef.current = selectionSeedKey;
 
-    if (form.creationMode === 'Full') {
+    if (currentActLineQuantities.size > 0) {
       const next: Record<string, string> = {};
       invoiceLineAvailability.forEach((item) => {
-        if (item.availableQuantity > 0) {
-          next[item.sourceKey] = formatDecimalInput(item.availableQuantity);
+        const quantity = Math.min(item.availableQuantity, currentActLineQuantities.get(item.sourceKey) ?? 0);
+        if (quantity > 0) {
+          next[item.sourceKey] = formatDecimalInput(quantity);
         }
       });
       setSelectedLineQuantities(next);
       return;
     }
 
-    if (form.creationMode === 'Partial') {
-      if (currentActLineQuantities.size > 0) {
-        const next: Record<string, string> = {};
-        invoiceLineAvailability.forEach((item) => {
-          const quantity = Math.min(item.availableQuantity, currentActLineQuantities.get(item.sourceKey) ?? 0);
-          if (quantity > 0) {
-            next[item.sourceKey] = formatDecimalInput(quantity);
-          }
-        });
-        setSelectedLineQuantities(next);
-        return;
+    const next: Record<string, string> = {};
+    invoiceLineAvailability.forEach((item) => {
+      if (item.availableQuantity > 0) {
+        next[item.sourceKey] = formatDecimalInput(item.availableQuantity);
       }
-
-      setSelectedLineQuantities((previous) => {
-        const next: Record<string, string> = {};
-        invoiceLineAvailability.forEach((item) => {
-          const parsed = parseDecimalInput(previous[item.sourceKey] ?? '');
-          if (parsed && parsed > 0) {
-            next[item.sourceKey] = formatDecimalInput(Math.min(item.availableQuantity, parsed));
-          }
-        });
-        return next;
-      });
-      return;
-    }
-
-    setSelectedLineQuantities({});
-  }, [form.creationMode, hasInvoiceLineItems, invoiceLineAvailability, currentActLineQuantities, open, selectionSeedKey]);
+    });
+    setSelectedLineQuantities(next);
+  }, [currentActLineQuantities, hasInvoiceLineItems, invoiceLineAvailability, open, selectionSeedKey]);
 
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === String(form.clientId)) ?? null,
     [clients, form.clientId],
+  );
+
+  const selectedResponsible = useMemo(
+    () => responsibles.find((responsible) => String(responsible.id) === String(form.responsibleId)) ?? null,
+    [form.responsibleId, responsibles],
   );
 
   const statusOptions = useMemo(
@@ -463,29 +534,16 @@ export function ActModal({
     [t],
   );
 
-  const creationModeOptions = useMemo(() => {
-    const options: Array<{ value: ActCreationMode; label: string }> = [];
-    if (!hasInvoiceLineItems || form.creationMode === 'Manual') {
-      options.push({ value: 'Manual', label: 'Ручной акт' });
-    }
-    if (hasInvoiceLineItems) {
-      options.push({ value: 'Full', label: 'Полностью по счету' });
-      options.push({ value: 'Partial', label: 'Частично по счету' });
-    }
-    return options;
-  }, [form.creationMode, hasInvoiceLineItems]);
+  const isUsingInvoiceItems = linkedInvoiceId !== null && hasInvoiceLineItems && form.creationMode !== 'Manual';
 
   const selectedLineItems = useMemo(() => {
-    if (!hasInvoiceLineItems || form.creationMode === 'Manual') {
+    if (!isUsingInvoiceItems) {
       return [];
     }
 
     return invoiceLineAvailability
       .map((item) => {
-        const selectedQuantity =
-          form.creationMode === 'Full'
-            ? item.availableQuantity
-            : parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
+        const selectedQuantity = parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
 
         return {
           ...item,
@@ -494,32 +552,92 @@ export function ActModal({
         };
       })
       .filter((item) => item.selectedQuantity > 0);
-  }, [form.creationMode, hasInvoiceLineItems, invoiceLineAvailability, selectedLineQuantities]);
+  }, [invoiceLineAvailability, isUsingInvoiceItems, selectedLineQuantities]);
 
   const computedAmount = useMemo(
     () => selectedLineItems.reduce((sum, item) => sum + item.lineAmount, 0),
     [selectedLineItems],
   );
 
-  const effectiveAmount = form.creationMode === 'Manual' || !hasInvoiceLineItems
-    ? parseDecimalInput(form.amount) ?? 0
-    : computedAmount;
-  const amountReadonly = hasInvoiceLineItems && form.creationMode !== 'Manual';
+  const effectiveAmount = isUsingInvoiceItems
+    ? computedAmount
+    : parseDecimalInput(form.amount) ?? 0;
+  const amountReadonly = isUsingInvoiceItems;
   const availableLinesCount = useMemo(
     () => invoiceLineAvailability.filter((item) => item.availableQuantity > 0).length,
     [invoiceLineAvailability],
+  );
+  const selectedCounterpartyName = selectedClient?.name || linkedCounterpartyName || 'Не выбран';
+  const selectedResponsibleLabel = selectedResponsible?.fullName
+    || (form.responsibleId ? `#${form.responsibleId}` : 'Будет указан автоматически');
+  const allAvailableSelected = useMemo(
+    () =>
+      isUsingInvoiceItems
+      && invoiceLineAvailability.every((item) => {
+        if (item.availableQuantity <= 0) {
+          return true;
+        }
+
+        const selectedQuantity = parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
+        return quantitiesEqual(selectedQuantity, item.availableQuantity);
+      }),
+    [invoiceLineAvailability, isUsingInvoiceItems, selectedLineQuantities],
   );
 
   const handleChange = (field: keyof FormState) => (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const value = event.target.value;
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((previous) => ({ ...previous, [field]: value }));
   };
 
   const handleQuantityChange = (sourceKey: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
-    setSelectedLineQuantities((prev) => ({ ...prev, [sourceKey]: value }));
+    const availableQuantity = availabilityBySourceKey.get(sourceKey)?.availableQuantity ?? 0;
+
+    if (!value.trim()) {
+      setSelectedLineQuantities((previous) => ({ ...previous, [sourceKey]: '' }));
+      return;
+    }
+
+    const parsed = parseDecimalInput(value);
+    if (parsed === null) {
+      setSelectedLineQuantities((previous) => ({ ...previous, [sourceKey]: value }));
+      return;
+    }
+
+    const normalized = formatDecimalInput(Math.min(Math.max(parsed, 0), availableQuantity));
+    setSelectedLineQuantities((previous) => ({ ...previous, [sourceKey]: normalized }));
+  };
+
+  const handleRemoveLineItem = (sourceKey: string) => {
+    setSelectedLineQuantities((previous) => ({ ...previous, [sourceKey]: '' }));
+  };
+
+  const handleSelectAllLineItems = () => {
+    const next: Record<string, string> = {};
+    invoiceLineAvailability.forEach((item) => {
+      if (item.availableQuantity > 0) {
+        next[item.sourceKey] = formatDecimalInput(item.availableQuantity);
+      }
+    });
+    setSelectedLineQuantities(next);
+    setForm((previous) => ({ ...previous, creationMode: 'Partial' }));
+  };
+
+  const handleClearAllLineItems = () => {
+    setSelectedLineQuantities({});
+  };
+
+  const handleEnableInvoiceMode = () => {
+    setForm((previous) => ({ ...previous, creationMode: 'Partial' }));
+    if (selectedLineItems.length === 0) {
+      handleSelectAllLineItems();
+    }
+  };
+
+  const handleEnableManualMode = () => {
+    setForm((previous) => ({ ...previous, creationMode: 'Manual' }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -541,33 +659,19 @@ export function ActModal({
     let creationMode: ActCreationMode = form.creationMode;
     let lineItems: Pick<ActLineItem, 'sourceKey' | 'quantity'>[] = [];
 
-    if (linkedToInvoice && hasInvoiceLineItems) {
-      if (form.creationMode === 'Manual') {
-        const parsedAmount = parseDecimalInput(form.amount);
-        if (parsedAmount === null) {
-          setLocalError('Введите корректную сумму');
-          return;
-        }
+    if (linkedToInvoice && hasInvoiceLineItems && form.creationMode !== 'Manual') {
+      lineItems = selectedLineItems.map((item) => ({
+        sourceKey: item.sourceKey,
+        quantity: item.selectedQuantity,
+      }));
 
-        amount = parsedAmount;
-      } else {
-        creationMode = form.creationMode === 'Partial' ? 'Partial' : 'Full';
-        lineItems = selectedLineItems.map((item) => ({
-          sourceKey: item.sourceKey,
-          quantity: item.selectedQuantity,
-        }));
-
-        if (lineItems.length === 0) {
-          setLocalError(
-            creationMode === 'Partial'
-              ? 'Для частичного акта выберите хотя бы одну позицию счета'
-              : 'По счету не осталось доступных позиций для акта',
-          );
-          return;
-        }
-
-        amount = computedAmount;
+      if (lineItems.length === 0) {
+        setLocalError('Выберите хотя бы одну позицию счета для акта');
+        return;
       }
+
+      creationMode = allAvailableSelected ? 'Full' : 'Partial';
+      amount = computedAmount;
     } else {
       creationMode = 'Manual';
       const parsedAmount = parseDecimalInput(form.amount);
@@ -587,7 +691,7 @@ export function ActModal({
       creationMode,
       invoiceNumber: form.invoiceNumber.trim() ? form.invoiceNumber.trim() : undefined,
       invoiceId: linkedInvoiceId ?? undefined,
-      counterpartyInn: form.counterpartyInn.trim() ? form.counterpartyInn.trim() : undefined,
+      counterpartyInn: undefined,
       status: form.status,
       clientId: form.clientId ? Number(form.clientId) : undefined,
       responsibleId: form.responsibleId ? Number(form.responsibleId) : undefined,
@@ -608,343 +712,529 @@ export function ActModal({
     return null;
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+  const content = (
+    <div className={`relative w-full overflow-hidden rounded-2xl bg-white ${isPageMode ? 'max-w-none border border-slate-200 shadow-sm' : 'max-w-6xl shadow-2xl'}`}>
+      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center gap-3">
+          {isPageMode ? (
+            <button
+              type="button"
+              onClick={onBack ?? onClose}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Назад
+            </button>
+          ) : null}
           <div>
             <h2 className="text-xl font-semibold text-slate-900">
               {isEdit ? t('actEdit') ?? 'Редактировать акт' : t('actCreate') ?? 'Создать акт'}
             </h2>
             <p className="text-sm text-slate-500">
-              {hasInvoiceLineItems
-                ? 'Можно выставить акт полностью по счету или выбрать только выполненные позиции.'
-                : t('actModalSubtitle') ?? 'Создайте или обновите данные по акту'}
+              {linkedInvoiceId
+                ? 'Акт связан со счетом: позиции подтянутся автоматически, а лишние строки можно исключить.'
+                : 'Создайте пустой акт вручную или откройте создание из нужного счета.'}
             </p>
           </div>
+        </div>
+        {!isPageMode ? (
           <button
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-            aria-label={t('close') ?? 'Закрыть'}>
+            aria-label={t('close') ?? 'Закрыть'}
+          >
             <X className="h-5 w-5" />
           </button>
+        ) : null}
+      </div>
+
+      <form id="act-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[82vh] overflow-y-auto px-6 py-5'} space-y-6`}>
+        <div className={isPageMode ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]' : 'space-y-6'}>
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Основное</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">
+                    {t('actNumber') ?? 'Номер акта'} {isRequired('Number') ? '*' : ''}
+                  </span>
+                  <input
+                    type="text"
+                    value={form.number}
+                    onChange={handleChange('number')}
+                    className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                      isRequired('Number')
+                        ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
+                    }`}
+                    required
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">
+                    {t('actDate') ?? 'Дата'} {isRequired('Date') ? '*' : ''}
+                  </span>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={handleChange('date')}
+                    className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                      isRequired('Date')
+                        ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
+                    }`}
+                    required
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">{t('actStatus') ?? 'Статус'}</span>
+                  <select
+                    value={form.status}
+                    onChange={handleChange('status')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    {statusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">
+                    {t('actAmount') ?? 'Сумма'} {isRequired('Amount') ? '*' : ''}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={amountReadonly ? formatDecimalInput(effectiveAmount) : form.amount}
+                    onChange={handleChange('amount')}
+                    readOnly={amountReadonly}
+                    className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                      amountReadonly
+                        ? 'border-slate-200 bg-slate-100 text-slate-600 focus:border-slate-200 focus:ring-slate-100'
+                        : isRequired('Amount')
+                          ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
+                          : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
+                    }`}
+                    placeholder="0.00"
+                  />
+                  {amountReadonly ? (
+                    <span className="text-xs text-slate-500">Сумма считается по выбранным позициям счета.</span>
+                  ) : null}
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm xl:col-span-2">
+                  <span className="font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
+                  <input
+                    type="text"
+                    value={form.title}
+                    onChange={handleChange('title')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    placeholder="Например: услуги за отчетный период"
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Основание</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {linkedInvoiceId
+                      ? 'Тип акта и контрагент определяются по связанному счету.'
+                      : 'Это пустой акт без привязки к счету. Контрагента можно выбрать вручную.'}
+                  </p>
+                </div>
+                {linkedInvoiceId && hasInvoiceLineItems ? (
+                  <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleEnableInvoiceMode}
+                      className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                        form.creationMode !== 'Manual'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      По счету
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEnableManualMode}
+                      className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                        form.creationMode === 'Manual'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      Пустой акт
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              {linkedInvoiceId ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                      actType === 'Expense'
+                        ? 'border border-rose-200 bg-rose-50 text-rose-700'
+                        : actType === 'Income'
+                          ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border border-slate-200 bg-white text-slate-600'
+                    }`}>
+                      {actType === 'Expense' ? 'Расходный акт' : actType === 'Income' ? 'Доходный акт' : 'Акт без типа'}
+                    </span>
+                    {hasInvoiceLineItems ? (
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                        Доступно позиций: {availableLinesCount}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Счет</div>
+                      {invoiceLoading ? (
+                        <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-500">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Загружаю связанный счет...
+                        </div>
+                      ) : invoiceDetails ? (
+                        onOpenInvoice ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenInvoice(linkedInvoiceId, actType ?? undefined)}
+                            className="mt-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-50"
+                          >
+                            <Link2 className="h-4 w-4" />
+                            Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                          </button>
+                        ) : (
+                          <div className="mt-2 text-sm font-medium text-slate-900">
+                            Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                          </div>
+                        )
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-500">
+                          Связанный счет будет показан после загрузки.
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">{selectedCounterpartyName}</div>
+                      {selectedClient?.clientStatus ? (
+                        <div className="mt-2">
+                          <ClientStatusBadge status={selectedClient.clientStatus} />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ответственный</div>
+                      <div className="mt-2 text-sm text-slate-700">{selectedResponsibleLabel}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Режим</div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        {form.creationMode === 'Manual'
+                          ? 'Пустой акт'
+                          : allAvailableSelected
+                            ? 'По счету целиком'
+                            : 'По счету с выбором позиций'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-xs leading-5 text-slate-500">
+                    Если в акт попадут не все позиции счета, следующий акт по этому счету заберет только неиспользованный остаток.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-slate-700">{counterpartyLabel}</span>
+                    <select
+                      value={form.clientId}
+                      onChange={handleChange('clientId')}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    >
+                      <option value="">{t('selectClient') ?? 'Выберите контрагента'}</option>
+                      {clients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name}
+                          {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                          {client.company ? ` — ${client.company}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedClient?.clientStatus ? (
+                      <div className="mt-1">
+                        <ClientStatusBadge status={selectedClient.clientStatus} />
+                      </div>
+                    ) : null}
+                  </label>
+
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div className="font-medium text-slate-700">Ответственный</div>
+                    <div className="mt-2">{selectedResponsibleLabel}</div>
+                    <p className="mt-3 text-xs leading-5 text-slate-500">
+                      Ответственный подставляется автоматически как пользователь, который создает акт.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <label className="mt-4 flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
+                <textarea
+                  value={form.comment}
+                  onChange={handleChange('comment')}
+                  rows={3}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  placeholder="Короткое пояснение по акту"
+                />
+              </label>
+            </section>
+
+            {hasInvoiceLineItems ? (
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Позиции счета</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Выберите позиции, которые должны попасть в этот акт. Лишние строки можно исключить.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllLineItems}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Выбрать все
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearAllLineItems}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Очистить
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {form.creationMode === 'Manual' ? (
+                  <div className="px-4 py-5">
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                      Позиции счета пока не используются, потому что выбран режим пустого акта.
+                      <button
+                        type="button"
+                        onClick={handleEnableInvoiceMode}
+                        className="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+                      >
+                        Вернуть позиции счета
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead className="bg-white">
+                          <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                            <th className="px-4 py-3 font-medium">Позиция</th>
+                            <th className="px-4 py-3 text-right font-medium">Всего</th>
+                            <th className="px-4 py-3 text-right font-medium">Уже в актах</th>
+                            <th className="px-4 py-3 text-right font-medium">Остаток</th>
+                            <th className="px-4 py-3 text-right font-medium">В этот акт</th>
+                            <th className="px-4 py-3 text-right font-medium">Цена</th>
+                            <th className="px-4 py-3 text-right font-medium">Сумма</th>
+                            <th className="px-4 py-3 text-right font-medium">Действие</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {invoiceLineAvailability.map((item) => {
+                            const selectedQuantity = parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
+                            const lineAmount = selectedQuantity * item.price;
+                            const disabled = item.availableQuantity <= 0;
+
+                            return (
+                              <tr key={item.sourceKey} className="align-top">
+                                <td className="px-4 py-3">
+                                  <div className="font-medium text-slate-900">{item.name}</div>
+                                  <div className="mt-1 text-xs text-slate-500">{item.unit}</div>
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-700">{formatDecimalInput(item.totalQuantity)}</td>
+                                <td className="px-4 py-3 text-right text-slate-500">{formatDecimalInput(item.usedByOtherActsQuantity)}</td>
+                                <td className="px-4 py-3 text-right font-medium text-slate-900">{formatDecimalInput(item.availableQuantity)}</td>
+                                <td className="px-4 py-3 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    max={formatDecimalInput(item.availableQuantity)}
+                                    value={selectedLineQuantities[item.sourceKey] ?? ''}
+                                    onChange={handleQuantityChange(item.sourceKey)}
+                                    disabled={disabled}
+                                    className={`w-28 rounded-lg border px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 ${
+                                      disabled
+                                        ? 'border-slate-200 bg-slate-50 text-slate-400 focus:border-slate-200 focus:ring-slate-100'
+                                        : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
+                                    }`}
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-700">{formatCurrencySmart(item.price).full}</td>
+                                <td className="px-4 py-3 text-right font-medium text-slate-900">{formatCurrencySmart(lineAmount).full}</td>
+                                <td className="px-4 py-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveLineItem(item.sourceKey)}
+                                    disabled={disabled || selectedQuantity <= 0}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Исключить позицию из акта"
+                                    aria-label="Исключить позицию из акта"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-4 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-slate-500">
+                        Выбрано позиций: <span className="font-medium text-slate-900">{selectedLineItems.length}</span>
+                      </div>
+                      <div className="text-base font-semibold text-slate-900">
+                        Итого по акту: {formatCurrencySmart(effectiveAmount).full}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            ) : linkedInvoiceId ? (
+              <section className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                У этого счета пока нет строк, поэтому акт можно сохранить только как пустой.
+              </section>
+            ) : null}
+          </div>
+
+          {isPageMode ? (
+            <aside className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Сводка</div>
+                <div className="mt-3 text-2xl font-semibold text-slate-900">{formatCurrencySmart(effectiveAmount).full}</div>
+                <div className="mt-2 text-sm text-slate-500">
+                  {isUsingInvoiceItems
+                    ? `Позиции в акте: ${selectedLineItems.length}`
+                    : 'Сумма указана вручную'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Тип акта</div>
+                <div className="mt-3">
+                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                    actType === 'Expense'
+                      ? 'border border-rose-200 bg-rose-50 text-rose-700'
+                      : actType === 'Income'
+                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border border-slate-200 bg-slate-50 text-slate-600'
+                  }`}>
+                    {actType === 'Expense' ? 'Расходный' : actType === 'Income' ? 'Доходный' : 'Без типа'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm text-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
+                <div className="mt-2 font-medium text-slate-900">{selectedCounterpartyName}</div>
+                {selectedClient?.clientStatus ? (
+                  <div className="mt-3">
+                    <ClientStatusBadge status={selectedClient.clientStatus} />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm text-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ответственный</div>
+                <div className="mt-2 text-slate-700">{selectedResponsibleLabel}</div>
+              </div>
+            </aside>
+          ) : null}
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[82vh] overflow-y-auto px-6 py-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">
-                {t('actNumber') ?? 'Номер акта'} {isRequired('Number') ? '*' : ''}
-              </span>
-              <input
-                type="text"
-                value={form.number}
-                onChange={handleChange('number')}
-                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${isRequired('Number') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
-                required
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">
-                {t('actDate') ?? 'Дата'} {isRequired('Date') ? '*' : ''}
-              </span>
-              <input
-                type="date"
-                value={form.date}
-                onChange={handleChange('date')}
-                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
-                required
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Режим акта</span>
-              <select
-                value={form.creationMode}
-                onChange={handleChange('creationMode')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                {creationModeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">
-                {t('actAmount') ?? 'Сумма'} {isRequired('Amount') ? '*' : ''}
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                value={amountReadonly ? formatDecimalInput(effectiveAmount) : form.amount}
-                onChange={handleChange('amount')}
-                readOnly={amountReadonly}
-                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${amountReadonly ? 'border-slate-200 bg-slate-50 text-slate-600 focus:border-slate-200 focus:ring-slate-100' : isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
-                placeholder="0.00"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actInvoice') ?? 'Счет'}</span>
-              <input
-                type="text"
-                value={form.invoiceNumber}
-                onChange={handleChange('invoiceNumber')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">ID счета</span>
-              <input
-                type="number"
-                value={form.invoiceId}
-                onChange={handleChange('invoiceId')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm xl:col-span-3">
-              <span className="font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>
-              <input
-                type="text"
-                value={form.title}
-                onChange={handleChange('title')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actClient') ?? 'Контрагент'}</span>
-              <select
-                value={form.clientId}
-                onChange={handleChange('clientId')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                <option value="">{t('selectClient') ?? 'Выберите клиента'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                    {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                    {client.company ? ` — ${client.company}` : ''}
-                  </option>
-                ))}
-              </select>
-              {selectedClient?.clientStatus ? (
-                <div className="mt-1">
-                  <ClientStatusBadge status={selectedClient.clientStatus} />
-                </div>
-              ) : null}
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actInn') ?? 'ИНН контрагента'}</span>
-              <input
-                type="text"
-                value={form.counterpartyInn}
-                onChange={handleChange('counterpartyInn')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actStatus') ?? 'Статус'}</span>
-              <select
-                value={form.status}
-                onChange={handleChange('status')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">{t('actResponsible') ?? 'Ответственный'}</span>
-              <select
-                value={form.responsibleId}
-                onChange={handleChange('responsibleId')}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                <option value="">{t('actResponsibleNotSelected') ?? 'Ответственный не выбран'}</option>
-                {responsibles.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm xl:col-span-2">
-              <span className="font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
-              <textarea
-                value={form.comment}
-                onChange={handleChange('comment')}
-                rows={3}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              />
-            </label>
+        {(lookupsLoading || invoiceLoading || actDetailsLoading) && (
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>{t('loading') ?? 'Загрузка...'}...</span>
           </div>
+        )}
 
-          {linkedInvoiceId ? (
-            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="font-medium">Счет привязан к акту.</span>
-                {invoiceLoading ? (
-                  <span className="inline-flex items-center gap-2 text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Загружаю позиции счета...
-                  </span>
-                ) : invoiceDetails ? (
-                  <span>
-                    №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
-                  </span>
-                ) : null}
-                {hasInvoiceLineItems ? (
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">
-                    Доступно позиций: {availableLinesCount}
-                  </span>
-                ) : null}
-              </div>
-              {hasInvoiceLineItems ? (
-                <p className="mt-2 text-xs text-slate-500">
-                  Для последующих актов будут доступны только те позиции и количества, которые еще не закрыты предыдущими актами.
-                </p>
-              ) : (
-                <p className="mt-2 text-xs text-slate-500">
-                  У этого счета пока нет позиций, поэтому акт можно сохранить только в ручном режиме.
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          {hasInvoiceLineItems ? (
-            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                <h3 className="text-sm font-semibold text-slate-900">Позиции счета для акта</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  {form.creationMode === 'Full'
-                    ? 'В полном режиме в акт автоматически попадет весь доступный остаток по счету.'
-                    : form.creationMode === 'Partial'
-                      ? 'В частичном режиме укажи количество по тем позициям, которые выполнены сейчас.'
-                      : 'Ручной режим оставлен только для совместимости со старыми актами.'}
-                </p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-white">
-                    <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                      <th className="px-4 py-3 font-medium">Услуга</th>
-                      <th className="px-4 py-3 text-right font-medium">Всего</th>
-                      <th className="px-4 py-3 text-right font-medium">Уже в актах</th>
-                      <th className="px-4 py-3 text-right font-medium">Доступно</th>
-                      <th className="px-4 py-3 text-right font-medium">В этот акт</th>
-                      <th className="px-4 py-3 text-right font-medium">Цена</th>
-                      <th className="px-4 py-3 text-right font-medium">Сумма</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {invoiceLineAvailability.map((item) => {
-                      const selectedQuantity =
-                        form.creationMode === 'Full'
-                          ? item.availableQuantity
-                          : parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
-                      const lineAmount = selectedQuantity * item.price;
-                      const disabled = form.creationMode === 'Full' || item.availableQuantity <= 0;
-
-                      return (
-                        <tr key={item.sourceKey} className="align-top">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-slate-900">{item.name}</div>
-                            <div className="mt-1 text-xs text-slate-500">{item.unit}</div>
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-700">{formatDecimalInput(item.totalQuantity)}</td>
-                          <td className="px-4 py-3 text-right text-slate-500">{formatDecimalInput(item.usedByOtherActsQuantity)}</td>
-                          <td className="px-4 py-3 text-right font-medium text-slate-900">{formatDecimalInput(item.availableQuantity)}</td>
-                          <td className="px-4 py-3 text-right">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.0001"
-                              max={formatDecimalInput(item.availableQuantity)}
-                              value={
-                                form.creationMode === 'Full'
-                                  ? formatDecimalInput(item.availableQuantity)
-                                  : selectedLineQuantities[item.sourceKey] ?? ''
-                              }
-                              onChange={handleQuantityChange(item.sourceKey)}
-                              readOnly={form.creationMode === 'Full'}
-                              disabled={disabled}
-                              className={`w-28 rounded-lg border px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 ${disabled ? 'border-slate-200 bg-slate-50 text-slate-500 focus:border-slate-200 focus:ring-slate-100' : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'}`}
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-700">{formatCurrencySmart(item.price).full}</td>
-                          <td className="px-4 py-3 text-right font-medium text-slate-900">{formatCurrencySmart(lineAmount).full}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-slate-500">
-                  Выбрано позиций: <span className="font-medium text-slate-900">{selectedLineItems.length}</span>
-                </div>
-                <div className="text-base font-semibold text-slate-900">
-                  Итого по акту: {formatCurrencySmart(effectiveAmount).full}
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {(lookupsLoading || invoiceLoading || actDetailsLoading) && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t('loading') ?? 'Загрузка...'}...</span>
-            </div>
-          )}
-
-          {(lookupsError || invoiceError || actDetailsError) && (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              {lookupsError || invoiceError || actDetailsError}
-            </div>
-          )}
-
-          {(localError || errorMessage) && (
-            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {localError || errorMessage}
-            </div>
-          )}
-
-          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">
-              {t('cancel') ?? 'Отмена'}
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || invoiceLoading || actDetailsLoading}
-              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300">
-              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {submitting
-                ? isEdit
-                  ? t('saving') ?? 'Сохранение...'
-                  : t('adding') ?? 'Добавление...'
-                : isEdit
-                  ? t('save') ?? 'Сохранить'
-                  : t('create') ?? 'Создать'}
-            </button>
+        {(lookupsError || invoiceError || actDetailsError) && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            {lookupsError || invoiceError || actDetailsError}
           </div>
-        </form>
-      </div>
+        )}
+
+        {(localError || errorMessage) && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {localError || errorMessage}
+          </div>
+        )}
+
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={isPageMode ? (onBack ?? onClose) : onClose}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          >
+            {t('cancel') ?? 'Отмена'}
+          </button>
+          <button
+            type="submit"
+            disabled={submitting || invoiceLoading || actDetailsLoading}
+            className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+          >
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {submitting
+              ? isEdit
+                ? t('saving') ?? 'Сохранение...'
+                : t('adding') ?? 'Добавление...'
+              : isEdit
+                ? t('save') ?? 'Сохранить'
+                : t('create') ?? 'Создать'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  if (isPageMode) {
+    return <div className="w-full px-4 py-6 sm:px-6 lg:px-8">{content}</div>;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
+      {content}
     </div>
   );
 }

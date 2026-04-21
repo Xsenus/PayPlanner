@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
+  ActInput,
   ActStatus,
   ActResponsible,
   Client,
@@ -211,6 +212,10 @@ interface InvoiceModalProps {
   onEditRelatedPayment?: (payment: Payment) => void;
   onDeleteRelatedPayment?: (payment: Payment) => Promise<void> | void;
   onClientCaseCreated?: (clientCase: ClientCase) => void;
+  onCreateActPage?: (
+    initialValues?: Partial<ActInput> & { amount?: number | null },
+    invoiceId?: number | null,
+  ) => void;
 }
 
 function normalizeInvoiceToForm(
@@ -671,6 +676,7 @@ export function InvoiceModal({
   onEditRelatedPayment,
   onDeleteRelatedPayment,
   onClientCaseCreated,
+  onCreateActPage,
 }: InvoiceModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -1863,6 +1869,10 @@ export function InvoiceModal({
   };
 
   const handleCreateAct = async () => {
+    if (openActCreatePage()) {
+      return;
+    }
+
     if (!draftAct.number.trim()) {
       setCreateActError(t('actNumber') ?? 'Номер акта обязателен');
       return;
@@ -2070,6 +2080,59 @@ export function InvoiceModal({
     selectedClientCaseIds,
     installmentPlan,
   }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds]);
+
+  const openActCreatePage = useCallback(() => {
+    if (!onCreateActPage) {
+      return false;
+    }
+
+    const linkedInvoiceId = typeof invoice?.id === 'number' && invoice.id > 0 ? invoice.id : null;
+    const resolvedClientId =
+      form.type === 'Expense'
+        ? (form.expenseClientId ? Number(form.expenseClientId) : form.clientId ? Number(form.clientId) : null)
+        : (form.clientId ? Number(form.clientId) : form.expenseClientId ? Number(form.expenseClientId) : null);
+
+    if (isPageMode) {
+      storeInvoiceEditorDraft(buildInvoiceEditorDraft());
+    }
+    onCreateActPage(
+      {
+        number: draftAct.number.trim() || form.number.trim(),
+        title: draftAct.title.trim() || form.description.trim(),
+        date: draftAct.date || form.date || formatLocalYMD(new Date()),
+        amount: parseMoneyInput(draftAct.amount || form.amount),
+        creationMode: linkedInvoiceId ? 'Full' : 'Manual',
+        invoiceId: linkedInvoiceId,
+        invoiceNumber: form.number.trim() || undefined,
+        clientId: resolvedClientId,
+        contractId: form.contractId ? Number(form.contractId) : null,
+        responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : null,
+        status: 'Created',
+        comment: draftAct.comment.trim() || undefined,
+      },
+      linkedInvoiceId,
+    );
+
+    return true;
+  }, [
+    buildInvoiceEditorDraft,
+    draftAct.amount,
+    draftAct.comment,
+    draftAct.date,
+    draftAct.number,
+    draftAct.title,
+    form.amount,
+    form.clientId,
+    form.contractId,
+    form.date,
+    form.description,
+    form.expenseClientId,
+    form.number,
+    form.type,
+    invoice?.id,
+    onCreateActPage,
+    selectedResponsibleId,
+  ]);
 
   const handleOpenClientCard = (clientId: number) => {
     storeInvoiceEditorDraft(buildInvoiceEditorDraft());
@@ -2770,6 +2833,9 @@ export function InvoiceModal({
                 title="Создать акт"
                 aria-label="Создать акт"
                 onClick={() => {
+                  if (openActCreatePage()) {
+                    return;
+                  }
                   setDraftAct((prev) => ({
                     ...prev,
                     date: form.date || prev.date,
@@ -4236,7 +4302,7 @@ export function InvoiceModal({
         overlayClassName="z-[2300]"
       />
 
-      {createActOpen && (
+      {createActOpen && !onCreateActPage && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-2">
