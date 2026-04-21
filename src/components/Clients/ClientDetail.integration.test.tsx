@@ -21,6 +21,12 @@ const {
   toastErrorMock,
   toastSuccessMock,
   toastWarningMock,
+  twoTypeStatsMock,
+  useActsMock,
+  useClientCasesMock,
+  useContractsMock,
+  useInvoicesMock,
+  usePaymentsPagedMock,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
   emptyActsResult: {
@@ -68,6 +74,7 @@ const {
     payments: [] as unknown[],
     total: 0,
     loading: false,
+    refreshing: false,
     error: null,
     refresh: vi.fn(),
   },
@@ -76,14 +83,20 @@ const {
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   toastWarningMock: vi.fn(),
+  twoTypeStatsMock: vi.fn(),
+  useActsMock: vi.fn(),
+  useClientCasesMock: vi.fn(),
+  useContractsMock: vi.fn(),
+  useInvoicesMock: vi.fn(),
+  usePaymentsPagedMock: vi.fn(),
 }));
 
 function createPermissions() {
   return {
     clients: { canView: true, canCreate: false, canEdit: true, canDelete: false },
-    accounts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    acts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    contracts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+    accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   };
 }
 
@@ -174,6 +187,13 @@ function getPowerOfAttorneyCard(text: string): HTMLElement {
   return container as HTMLElement;
 }
 
+function formatLocalYmd(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 7, role: { id: 1 } },
@@ -215,7 +235,7 @@ vi.mock('../../hooks/useClientStatuses', () => ({
 }));
 
 vi.mock('../../hooks/useClientCases', () => ({
-  useClientCases: () => emptyClientCasesResult,
+  useClientCases: (...args: unknown[]) => useClientCasesMock(...args),
 }));
 
 vi.mock('../../hooks/useDebouncedValue', () => ({
@@ -223,19 +243,19 @@ vi.mock('../../hooks/useDebouncedValue', () => ({
 }));
 
 vi.mock('../../hooks/useActs', () => ({
-  useActs: () => emptyActsResult,
+  useActs: (...args: unknown[]) => useActsMock(...args),
 }));
 
 vi.mock('../../hooks/useInvoices', () => ({
-  useInvoices: () => emptyInvoicesResult,
+  useInvoices: (...args: unknown[]) => useInvoicesMock(...args),
 }));
 
 vi.mock('../../hooks/useContracts', () => ({
-  useContracts: () => emptyContractsResult,
+  useContracts: (...args: unknown[]) => useContractsMock(...args),
 }));
 
 vi.mock('../../hooks/usePaymentsPaged', () => ({
-  usePaymentsPaged: () => emptyPaymentsResult,
+  usePaymentsPaged: (...args: unknown[]) => usePaymentsPagedMock(...args),
 }));
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
@@ -254,6 +274,7 @@ vi.mock('../../services/api', () => ({
     updateClient: vi.fn(),
     deleteClient: vi.fn(),
     getClientPowersOfAttorney: vi.fn(),
+    getClientCaseFinanceSummaries: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
     updateClientPowerOfAttorney: vi.fn(),
     deleteClientPowerOfAttorney: vi.fn(),
@@ -298,11 +319,87 @@ vi.mock('./CaseModal', () => ({
 }));
 
 vi.mock('../Statistics/TwoTypeStats', () => ({
-  TwoTypeStats: () => null,
+  TwoTypeStats: (props: unknown) => {
+    twoTypeStatsMock(props);
+    return null;
+  },
 }));
 
 vi.mock('../MonthRange/MonthRangePicker', () => ({
-  MonthRangePicker: () => null,
+  MonthRangePicker: ({
+    value,
+    onChange,
+  }: {
+    value: { from?: string; to?: string };
+    onChange: (next: { from?: string; to?: string }) => void;
+  }) => (
+    <div>
+      <label>
+        <span>Month from</span>
+        <input
+          aria-label="month-range-from"
+          value={value.from ?? ''}
+          onChange={(event) => onChange({ from: event.target.value || undefined, to: value.to })}
+        />
+      </label>
+      <label>
+        <span>Month to</span>
+        <input
+          aria-label="month-range-to"
+          value={value.to ?? ''}
+          onChange={(event) => onChange({ from: value.from, to: event.target.value || undefined })}
+        />
+      </label>
+    </div>
+  ),
+}));
+
+vi.mock('../DateRange/DatePeriodPicker', () => ({
+  DatePeriodPicker: ({
+    label = 'Period',
+    value,
+    onChange,
+  }: {
+    label?: string;
+    value: { mode: 'preset'; preset: string } | { mode: 'custom'; from?: string; to?: string };
+    onChange: (next: { mode: 'preset'; preset: string } | { mode: 'custom'; from?: string; to?: string }) => void;
+  }) => (
+    <div>
+      <div>{label}</div>
+      <label>
+        <span>{`${label} from`}</span>
+        <input
+          aria-label="date-period-from"
+          value={value.mode === 'custom' ? value.from ?? '' : ''}
+          onChange={(event) =>
+            onChange({
+              mode: 'custom',
+              from: event.target.value || undefined,
+              to: value.mode === 'custom' ? value.to : undefined,
+            })}
+        />
+      </label>
+      <label>
+        <span>{`${label} to`}</span>
+        <input
+          aria-label="date-period-to"
+          value={value.mode === 'custom' ? value.to ?? '' : ''}
+          onChange={(event) =>
+            onChange({
+              mode: 'custom',
+              from: value.mode === 'custom' ? value.from : undefined,
+              to: event.target.value || undefined,
+            })}
+        />
+      </label>
+      <button type="button" onClick={() => onChange({ mode: 'preset', preset: 'year_to_date' })}>
+        Apply year to date
+      </button>
+      <button type="button" onClick={() => onChange({ mode: 'custom' })}>
+        Clear period
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../ui/LookupSelect', () => ({
@@ -362,10 +459,23 @@ describe('ClientDetail integration', () => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     toastWarningMock.mockReset();
+    twoTypeStatsMock.mockReset();
+    useClientCasesMock.mockReset();
+    useActsMock.mockReset();
+    useInvoicesMock.mockReset();
+    useContractsMock.mockReset();
+    usePaymentsPagedMock.mockReset();
+
+    useClientCasesMock.mockReturnValue(emptyClientCasesResult);
+    useActsMock.mockReturnValue(emptyActsResult);
+    useInvoicesMock.mockReturnValue(emptyInvoicesResult);
+    useContractsMock.mockReturnValue(emptyContractsResult);
+    usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
 
     vi.mocked(apiService.getClient).mockResolvedValue(createClient());
     vi.mocked(apiService.updateClient).mockResolvedValue(createClient());
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
@@ -547,5 +657,407 @@ describe('ClientDetail integration', () => {
         validTo: '',
       }),
     );
+  });
+
+  it('filters client cases inside the cases tab', async () => {
+    const user = userEvent.setup();
+
+    useClientCasesMock.mockReturnValue({
+      cases: [
+        {
+          id: 11,
+          clientId: 1,
+          title: 'Наследственное дело',
+          description: 'Подготовка документов',
+          status: 'Open',
+          createdAt: '2026-04-10T10:00:00Z',
+        },
+        {
+          id: 12,
+          clientId: 1,
+          title: 'Исполнительное производство',
+          description: 'Закрыто после исполнения',
+          status: 'Closed',
+          createdAt: '2026-04-11T10:00:00Z',
+        },
+      ],
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+
+    const searchInput = await screen.findByLabelText('Поиск дел клиента');
+    expect(screen.getByText('Наследственное дело')).toBeTruthy();
+    expect(screen.getByText('Исполнительное производство')).toBeTruthy();
+
+    await user.type(searchInput, 'наслед');
+    expect(screen.getByText('Наследственное дело')).toBeTruthy();
+    expect(screen.queryByText('Исполнительное производство')).toBeNull();
+
+    await user.clear(searchInput);
+    await user.selectOptions(screen.getByLabelText('Статус дел клиента'), 'closed');
+    expect(screen.queryByText('Наследственное дело')).toBeNull();
+    expect(screen.getByText('Исполнительное производство')).toBeTruthy();
+  });
+
+  it('shows active case filter badges and clears them with reset', async () => {
+    const user = userEvent.setup();
+
+    useClientCasesMock.mockReturnValue({
+      cases: [
+        {
+          id: 11,
+          clientId: 1,
+          title: 'Наследственное дело',
+          description: 'Подготовка документов',
+          status: 'Open',
+          createdAt: '2026-04-10T10:00:00Z',
+        },
+        {
+          id: 12,
+          clientId: 1,
+          title: 'Исполнительное производство',
+          description: 'Закрыто после исполнения',
+          status: 'Closed',
+          createdAt: '2026-04-11T10:00:00Z',
+        },
+      ],
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+
+    await user.type(await screen.findByLabelText('Поиск дел клиента'), 'наслед');
+    await user.selectOptions(screen.getByLabelText('Статус дел клиента'), 'open');
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Поиск: наслед')).toBeTruthy();
+    expect(screen.getByText('Статус: Открыто')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Применены фильтры:')).toBeNull();
+      expect(screen.getByText('Наследственное дело')).toBeTruthy();
+      expect(screen.getByText('Исполнительное производство')).toBeTruthy();
+    });
+  });
+
+  it('passes payment filters from the client tab to the payments hook', async () => {
+    const user = userEvent.setup();
+
+    useClientCasesMock.mockReturnValue({
+      cases: [
+        {
+          id: 22,
+          clientId: 1,
+          title: 'Дело по взысканию',
+          description: '',
+          status: 'Open',
+          createdAt: '2026-04-10T10:00:00Z',
+        },
+      ],
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    const searchInput = await screen.findByLabelText('Поиск платежей клиента');
+    await user.type(searchInput, '10000');
+    await user.selectOptions(screen.getByLabelText('Статус платежей клиента'), 'overdue');
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: '10000',
+          status: 'Overdue',
+        }),
+      );
+    });
+  });
+
+  it('shows payment filter badges and resets the payment query state', async () => {
+    const user = userEvent.setup();
+
+    useClientCasesMock.mockReturnValue({
+      cases: [
+        {
+          id: 22,
+          clientId: 1,
+          title: 'Дело по взысканию',
+          description: '',
+          status: 'Open',
+          createdAt: '2026-04-10T10:00:00Z',
+        },
+      ],
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await user.type(await screen.findByLabelText('month-range-from'), '2026-03');
+    await user.type(screen.getByLabelText('month-range-to'), '2026-04');
+    await user.type(screen.getByLabelText('Поиск платежей клиента'), '10000');
+    await user.selectOptions(screen.getByLabelText('Статус платежей клиента'), 'overdue');
+    await user.click(screen.getByRole('button', { name: 'Дело по взысканию' }));
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Поиск: 10000')).toBeTruthy();
+    expect(screen.getByText('Статус: Просрочено')).toBeTruthy();
+    expect(screen.getByText('Дело: Дело по взысканию')).toBeTruthy();
+    expect(screen.getByText(/Период:/)).toBeTruthy();
+
+    await waitFor(() => {
+      const lastQuery = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastQuery).toEqual(
+        expect.objectContaining({
+          caseId: 22,
+          search: '10000',
+          status: 'Overdue',
+          from: '2026-03-01',
+          to: '2026-04-30',
+        }),
+      );
+      const statsCall = twoTypeStatsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(statsCall).toEqual(
+        expect.objectContaining({
+          caseId: 22,
+          search: '10000',
+          statusFilter: 'Overdue',
+          from: '2026-03-01',
+          to: '2026-04-30',
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      const lastQuery = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastQuery).toEqual(
+        expect.objectContaining({
+          caseId: undefined,
+          search: undefined,
+          status: undefined,
+          from: '1900-01-01',
+          to: '2100-12-31',
+        }),
+      );
+      const statsCall = twoTypeStatsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(statsCall).toEqual(
+        expect.objectContaining({
+          caseId: undefined,
+          search: undefined,
+          statusFilter: 'All',
+          from: '1900-01-01',
+          to: '2100-12-31',
+        }),
+      );
+      expect(screen.queryByText('Применены фильтры:')).toBeNull();
+    });
+  });
+
+  it('passes account filters from the client tab to the invoices hook', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    const searchInput = await screen.findByLabelText('Поиск счетов клиента');
+    await user.type(searchInput, '31');
+    await user.selectOptions(screen.getByLabelText('Статус счетов клиента'), 'Overdue');
+
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          type: 'Income',
+          search: '31',
+          status: 'Overdue',
+        }),
+      );
+    });
+  });
+
+  it('shows account filter badges and resets the invoice query state', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    await user.type(await screen.findByLabelText('date-period-from'), '2026-03-01');
+    await user.type(screen.getByLabelText('date-period-to'), '2026-03-31');
+    await user.type(screen.getByLabelText('Поиск счетов клиента'), '31');
+    await user.selectOptions(screen.getByLabelText('Статус счетов клиента'), 'Overdue');
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Поиск: 31')).toBeTruthy();
+    expect(screen.getByText('Статус: Просрочено')).toBeTruthy();
+    expect(screen.getByText(/Период:/)).toBeTruthy();
+
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          type: 'Income',
+          search: '31',
+          status: 'Overdue',
+          from: '2026-03-01',
+          to: '2026-03-31',
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          type: 'Income',
+          search: undefined,
+          status: undefined,
+          from: undefined,
+          to: undefined,
+        }),
+      );
+      expect(screen.queryByText('Применены фильтры:')).toBeNull();
+    });
+  });
+
+  it('passes act filters from the client tab to the acts hook', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="acts" />);
+
+    const searchInput = await screen.findByLabelText('Поиск актов клиента');
+    await user.type(searchInput, 'акт 15');
+    await user.selectOptions(screen.getByLabelText('Статус актов клиента'), 'Signed');
+
+    await waitFor(() => {
+      const lastCall = useActsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: 'акт 15',
+          status: 'Signed',
+        }),
+      );
+    });
+  });
+
+  it('shows act filter badges and resets the act query state', async () => {
+    const user = userEvent.setup();
+    const today = new Date();
+    const expectedFrom = `${today.getFullYear()}-01-01`;
+    const expectedTo = formatLocalYmd(today);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="acts" />);
+
+    fireEvent.change(await screen.findByDisplayValue(expectedFrom), { target: { value: '2026-02-01' } });
+    fireEvent.change(screen.getByDisplayValue(expectedTo), { target: { value: '2026-02-28' } });
+    await user.type(screen.getByLabelText('Поиск актов клиента'), 'акт 15');
+    await user.selectOptions(screen.getByLabelText('Статус актов клиента'), 'Signed');
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Поиск: акт 15')).toBeTruthy();
+    expect(screen.getByText('Статус: Подписано')).toBeTruthy();
+    expect(screen.getByText(/Период:/)).toBeTruthy();
+
+    await waitFor(() => {
+      const lastCall = useActsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: 'акт 15',
+          status: 'Signed',
+          from: '2026-02-01',
+          to: '2026-02-28',
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      const lastCall = useActsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: undefined,
+          status: undefined,
+          from: expectedFrom,
+          to: expectedTo,
+        }),
+      );
+      expect(screen.queryByText('Поиск: акт 15')).toBeNull();
+      expect(screen.queryByText('Статус: Подписано')).toBeNull();
+      expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+      expect(screen.getByText(/Период:/)).toBeTruthy();
+    });
+  });
+
+  it('passes contract filters from the client tab to the contracts hook', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
+
+    const searchInput = await screen.findByLabelText('Поиск договоров клиента');
+    await user.type(searchInput, '42/2026');
+
+    await waitFor(() => {
+      const lastCall = useContractsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: '42/2026',
+        }),
+      );
+    });
+  });
+
+  it('shows contract filter badges and resets the contract query state', async () => {
+    const user = userEvent.setup();
+    const today = new Date();
+    const expectedFrom = `${today.getFullYear()}-01-01`;
+    const expectedTo = formatLocalYmd(today);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
+
+    fireEvent.change(await screen.findByDisplayValue(expectedFrom), { target: { value: '2026-01-15' } });
+    fireEvent.change(screen.getByDisplayValue(expectedTo), { target: { value: '2026-04-10' } });
+    await user.type(screen.getByLabelText('Поиск договоров клиента'), '42/2026');
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Поиск: 42/2026')).toBeTruthy();
+    expect(screen.getByText(/Период:/)).toBeTruthy();
+
+    await waitFor(() => {
+      const lastCall = useContractsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: '42/2026',
+          from: '2026-01-15',
+          to: '2026-04-10',
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      const lastCall = useContractsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: undefined,
+          from: expectedFrom,
+          to: expectedTo,
+        }),
+      );
+      expect(screen.queryByText('Поиск: 42/2026')).toBeNull();
+      expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+      expect(screen.getByText(/Период:/)).toBeTruthy();
+    });
   });
 });

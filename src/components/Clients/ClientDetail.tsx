@@ -81,6 +81,7 @@ import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import {
   loadClientInvoiceRelatedPayments,
 } from '../../utils/clientInvoiceRelatedPayments';
@@ -89,6 +90,7 @@ import { bindClientInvoiceModalApi } from '../../utils/clientInvoiceModalApi';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getVisibleNotes, getVisibleSystemNotes } from '../../utils/systemNotes';
 import { getContractEffectiveAmount } from '../../utils/contracts';
+import { formatPeriodLabel, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import {
   createEmptyClientRelative as createEmptyRelative,
   normalizeClientRelative,
@@ -119,6 +121,7 @@ interface ClientDetailProps {
 type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
+type ClientCaseListStatus = 'all' | 'open' | 'hold' | 'closed';
 
 type ClientDetailSection =
   | 'profile'
@@ -320,6 +323,68 @@ const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
   Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
 };
 
+function ClientSectionFilterPanel({
+  children,
+  footer,
+  badges,
+  onReset,
+}: {
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  badges: string[];
+  onReset?: () => void;
+}) {
+  return (
+    <div className="mb-6 space-y-3">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">{children}</div>
+        {footer ? <div className="mt-4 border-t border-slate-200 pt-4">{footer}</div> : null}
+      </div>
+
+      {badges.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-sm font-semibold text-slate-700">Применены фильтры:</span>
+          {badges.map((badge) => (
+            <span
+              key={badge}
+              className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+            >
+              {badge}
+            </span>
+          ))}
+          {onReset ? (
+            <button
+              type="button"
+              onClick={onReset}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Сбросить все
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ClientSectionFilterField({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={`flex min-w-[180px] flex-col gap-1.5 ${className}`}>
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function normalizeStatus(s?: string): NormalizedStatus {
   const v = (s ?? '').toLowerCase();
   if (v.includes('complete') || v.includes('выполн')) return 'completed';
@@ -342,6 +407,36 @@ function caseStatusLabel(s?: string) {
   if (v.includes('hold')) return 'Приостановлено';
   if (v.includes('closed')) return 'Закрыто';
   return s ?? '';
+}
+
+function normalizeCaseStatusFilter(s?: string): Exclude<ClientCaseListStatus, 'all'> | '' {
+  const value = (s ?? '').toLowerCase();
+  if (value.includes('open')) return 'open';
+  if (value.includes('hold')) return 'hold';
+  if (value.includes('closed')) return 'closed';
+  return '';
+}
+
+function formatMonthFilterLabel(from?: string, to?: string): string {
+  const formatter = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' });
+  const formatSingle = (value: string) => {
+    const [yearRaw, monthRaw] = value.split('-').map(Number);
+    if (!yearRaw || !monthRaw) {
+      return value;
+    }
+    return formatter.format(new Date(yearRaw, monthRaw - 1, 1));
+  };
+
+  if (from && to) {
+    return `${formatSingle(from)} — ${formatSingle(to)}`;
+  }
+  if (from) {
+    return `с ${formatSingle(from)}`;
+  }
+  if (to) {
+    return `по ${formatSingle(to)}`;
+  }
+  return '';
 }
 
 function formatAuditShortDate(value?: string | null): string {
@@ -1173,6 +1268,8 @@ export function ClientDetail({
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
   const cases = useMemo(() => casesLocal ?? serverCases, [casesLocal, serverCases]);
+  const [caseSearch, setCaseSearch] = useState('');
+  const [caseStatusFilter, setCaseStatusFilter] = useState<ClientCaseListStatus>('all');
   const [caseFinanceSummaries, setCaseFinanceSummaries] = useState<Record<number, ClientCaseFinanceSummary>>({});
   const [caseFinanceLoading, setCaseFinanceLoading] = useState(false);
   const [caseFinanceError, setCaseFinanceError] = useState<string | null>(null);
@@ -1197,6 +1294,8 @@ export function ClientDetail({
   const [monthFrom, setMonthFrom] = useState<string>('');
   const [monthTo, setMonthTo] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | NormalizedStatus>('all');
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const debouncedPaymentSearch = useDebouncedValue(paymentSearch.trim(), 400);
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentTableSettingsOpen, setPaymentTableSettingsOpen] = useState(false);
   const {
@@ -1226,10 +1325,7 @@ export function ClientDetail({
     minColumnWidth: 120,
   });
 
-  const [actFrom, setActFrom] = useState<string>(() =>
-    formatLocalYMD(new Date(new Date().getFullYear(), 0, 1)),
-  );
-  const [actTo, setActTo] = useState<string>(() => formatLocalYMD(new Date()));
+  const [actPeriod, setActPeriod] = useState<PeriodFilter>({ mode: 'preset', preset: 'year_to_date' });
   const [actStatusFilter, setActStatusFilter] = useState<'all' | ActStatus>('all');
   const [actSearch, setActSearch] = useState('');
   const debouncedActSearch = useDebouncedValue(actSearch.trim(), 400);
@@ -1279,12 +1375,11 @@ export function ClientDetail({
   const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
   const today = useMemo(() => new Date(), []);
-  const startOfYear = useMemo(
-    () => formatLocalYMD(new Date(today.getFullYear(), 0, 1)),
-    [today],
-  );
-  const todayYMD = useMemo(() => formatLocalYMD(today), [today]);
 
+  const [invoicePeriod, setInvoicePeriod] = useState<PeriodFilter>({ mode: 'custom' });
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'all' | PaymentStatus>('all');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
   const [invoiceSort, setInvoiceSort] = useState<{ key: InvoicesSortKey; direction: 'asc' | 'desc' }>({
     key: 'date',
     direction: 'desc',
@@ -1318,8 +1413,7 @@ export function ClientDetail({
     minColumnWidth: 120,
   });
 
-  const [contractFrom, setContractFrom] = useState<string>(startOfYear);
-  const [contractTo, setContractTo] = useState<string>(todayYMD);
+  const [contractPeriod, setContractPeriod] = useState<PeriodFilter>({ mode: 'preset', preset: 'year_to_date' });
   const [contractSearch, setContractSearch] = useState('');
   const debouncedContractSearch = useDebouncedValue(contractSearch.trim(), 400);
   const [contractSort, setContractSort] = useState<{ key: ContractsSortKey; direction: 'asc' | 'desc' }>({
@@ -1373,6 +1467,58 @@ export function ClientDetail({
   const [contractModalError, setContractModalError] = useState<string | null>(null);
   const [contractActionError, setContractActionError] = useState<string | null>(null);
 
+  const resolvedActPeriod = useMemo(() => resolvePeriod(actPeriod), [actPeriod]);
+  const resolvedInvoicePeriod = useMemo(() => resolvePeriod(invoicePeriod), [invoicePeriod]);
+  const resolvedContractPeriod = useMemo(() => resolvePeriod(contractPeriod), [contractPeriod]);
+  const actFrom = resolvedActPeriod.from ?? '';
+  const actTo = resolvedActPeriod.to ?? '';
+  const contractFrom = resolvedContractPeriod.from ?? '';
+  const contractTo = resolvedContractPeriod.to ?? '';
+
+  const handleActFromChange = useCallback((value: string) => {
+    setActPeriod((prev) => {
+      const current = resolvePeriod(prev);
+      return {
+        mode: 'custom',
+        from: value || undefined,
+        to: current.to,
+      };
+    });
+  }, []);
+
+  const handleActToChange = useCallback((value: string) => {
+    setActPeriod((prev) => {
+      const current = resolvePeriod(prev);
+      return {
+        mode: 'custom',
+        from: current.from,
+        to: value || undefined,
+      };
+    });
+  }, []);
+
+  const handleContractFromChange = useCallback((value: string) => {
+    setContractPeriod((prev) => {
+      const current = resolvePeriod(prev);
+      return {
+        mode: 'custom',
+        from: value || undefined,
+        to: current.to,
+      };
+    });
+  }, []);
+
+  const handleContractToChange = useCallback((value: string) => {
+    setContractPeriod((prev) => {
+      const current = resolvePeriod(prev);
+      return {
+        mode: 'custom',
+        from: current.from,
+        to: value || undefined,
+      };
+    });
+  }, []);
+
   const {
     acts: clientActs,
     loading: actsLoading,
@@ -1385,8 +1531,8 @@ export function ClientDetail({
     updateAct,
     deleteAct,
   } = useActs({
-    from: actFrom || undefined,
-    to: actTo || undefined,
+    from: resolvedActPeriod.from,
+    to: resolvedActPeriod.to,
     status: actStatusFilter === 'all' ? undefined : actStatusFilter,
     clientId,
     search: debouncedActSearch || undefined,
@@ -1398,7 +1544,7 @@ export function ClientDetail({
 
   useEffect(() => {
     setActPage(1);
-  }, [actFrom, actTo, actStatusFilter, debouncedActSearch, clientId, actPageSize]);
+  }, [resolvedActPeriod.from, resolvedActPeriod.to, actStatusFilter, debouncedActSearch, clientId, actPageSize]);
 
   const {
     invoices: clientInvoices,
@@ -1412,7 +1558,11 @@ export function ClientDetail({
     updateInvoice: updateClientInvoice,
     deleteInvoice: deleteClientInvoice,
   } = useInvoices({
+    from: resolvedInvoicePeriod.from,
+    to: resolvedInvoicePeriod.to,
+    status: invoiceStatusFilter === 'all' ? undefined : invoiceStatusFilter,
     clientId,
+    search: debouncedInvoiceSearch || undefined,
     type: 'Income',
     sortBy: invoiceSort.key,
     sortDir: invoiceSort.direction,
@@ -1422,7 +1572,7 @@ export function ClientDetail({
 
   useEffect(() => {
     setInvoicePage(1);
-  }, [clientId, invoicePageSize]);
+  }, [clientId, invoicePageSize, resolvedInvoicePeriod.from, resolvedInvoicePeriod.to, invoiceStatusFilter, debouncedInvoiceSearch]);
 
   const invoiceTotalPages = useMemo(() => {
     if (!invoicesPagination.pageSize) return 1;
@@ -1455,8 +1605,8 @@ export function ClientDetail({
     updateContract,
     deleteContract,
   } = useContracts({
-    from: contractFrom || undefined,
-    to: contractTo || undefined,
+    from: resolvedContractPeriod.from,
+    to: resolvedContractPeriod.to,
     search: debouncedContractSearch || undefined,
     clientId,
     sortBy: contractSort.key,
@@ -1467,7 +1617,7 @@ export function ClientDetail({
 
   useEffect(() => {
     setContractPage(1);
-  }, [contractFrom, contractTo, debouncedContractSearch, clientId, contractPageSize]);
+  }, [resolvedContractPeriod.from, resolvedContractPeriod.to, debouncedContractSearch, clientId, contractPageSize]);
 
   const contractTotalPages = useMemo(() => {
     if (!contractsPagination.pageSize) return 1;
@@ -1600,10 +1750,31 @@ export function ClientDetail({
     }
   };
 
+  const resetPaymentFilters = () => {
+    setMonthFrom('');
+    setMonthTo('');
+    setStatusFilter('all');
+    setSelectedCaseId('all');
+    setPaymentSearch('');
+    setPaymentPage(1);
+  };
+
+  const resetInvoiceFilters = () => {
+    setInvoicePeriod({ mode: 'custom' });
+    setInvoiceStatusFilter('all');
+    setInvoiceSearch('');
+    setInvoicePage(1);
+  };
+
   const resetContractFilters = () => {
-    setContractFrom(startOfYear);
-    setContractTo(todayYMD);
+    setContractPeriod({ mode: 'preset', preset: 'year_to_date' });
     setContractSearch('');
+    setContractPage(1);
+  };
+
+  const resetCaseFilters = () => {
+    setCaseSearch('');
+    setCaseStatusFilter('all');
   };
 
   const handleInvoiceSort = (key: InvoicesSortKey) => {
@@ -1971,6 +2142,17 @@ export function ClientDetail({
   }, [clientData]);
 
   const caseIdForQuery = selectedCaseId === 'all' ? undefined : Number(selectedCaseId);
+  const filteredCases = useMemo(() => {
+    const query = caseSearch.trim().toLowerCase();
+    return cases.filter((caseItem) => {
+      const matchesSearch = query.length === 0
+        || caseItem.title?.toLowerCase().includes(query)
+        || caseItem.description?.toLowerCase().includes(query);
+      const normalizedStatus = normalizeCaseStatusFilter(caseItem.status);
+      const matchesStatus = caseStatusFilter === 'all' || normalizedStatus === caseStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [caseSearch, caseStatusFilter, cases]);
 
   const { fromDateStr, toDateStr } = useMemo(() => {
     if (monthFrom && monthTo) {
@@ -1999,6 +2181,7 @@ export function ClientDetail({
     clientId,
     caseId: caseIdForQuery,
     status: toPaymentStatusFilter(statusFilter),
+    search: debouncedPaymentSearch || undefined,
     sortBy: 'date',
     sortDir: 'asc',
     page: paymentPage,
@@ -2100,6 +2283,96 @@ export function ClientDetail({
     return Math.max(1, Math.ceil((paymentsTotal ?? 0) / paymentPageSize));
   }, [paymentPageSize, paymentsTotal]);
 
+  const caseFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    if (caseSearch.trim()) {
+      badges.push(`Поиск: ${caseSearch.trim()}`);
+    }
+    if (caseStatusFilter !== 'all') {
+      const statusLabels: Record<Exclude<ClientCaseListStatus, 'all'>, string> = {
+        open: 'Открыто',
+        hold: 'Приостановлено',
+        closed: 'Закрыто',
+      };
+      badges.push(`Статус: ${statusLabels[caseStatusFilter]}`);
+    }
+    return badges;
+  }, [caseSearch, caseStatusFilter]);
+
+  const paymentFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    const monthLabel = formatMonthFilterLabel(monthFrom, monthTo);
+    if (monthLabel) {
+      badges.push(`Период: ${monthLabel}`);
+    }
+    if (statusFilter !== 'all') {
+      const statusLabels: Record<NormalizedStatus, string> = {
+        pending: 'Ожидается',
+        completed: 'Выполнено',
+        overdue: 'Просрочено',
+      };
+      badges.push(`Статус: ${statusLabels[statusFilter]}`);
+    }
+    if (selectedCaseId !== 'all') {
+      const selectedCase = cases.find((caseItem) => caseItem.id === selectedCaseId);
+      if (selectedCase?.title) {
+        badges.push(`Дело: ${selectedCase.title}`);
+      }
+    }
+    if (paymentSearch.trim()) {
+      badges.push(`Поиск: ${paymentSearch.trim()}`);
+    }
+    return badges;
+  }, [cases, monthFrom, monthTo, paymentSearch, selectedCaseId, statusFilter]);
+
+  const invoiceFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    const periodLabel = formatPeriodLabel(invoicePeriod, today, '');
+    if (periodLabel) {
+      badges.push(`Период: ${periodLabel}`);
+    }
+    if (invoiceStatusFilter !== 'all') {
+      badges.push(`Статус: ${invoiceStatusLabels[invoiceStatusFilter]}`);
+    }
+    if (invoiceSearch.trim()) {
+      badges.push(`Поиск: ${invoiceSearch.trim()}`);
+    }
+    return badges;
+  }, [invoicePeriod, invoiceSearch, invoiceStatusFilter, invoiceStatusLabels, today]);
+
+  const actFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    const statusLabels: Record<ActStatus, string> = {
+      Created: 'Создан',
+      Transferred: 'Передано',
+      Signed: 'Подписано',
+      Terminated: 'Расторгнуто',
+    };
+    const periodLabel = formatPeriodLabel(actPeriod, today, '');
+    if (periodLabel) {
+      badges.push(`Период: ${periodLabel}`);
+    }
+    if (actStatusFilter !== 'all') {
+      badges.push(`Статус: ${statusLabels[actStatusFilter]}`);
+    }
+    if (actSearch.trim()) {
+      badges.push(`Поиск: ${actSearch.trim()}`);
+    }
+    return badges;
+  }, [actPeriod, actSearch, actStatusFilter, today]);
+
+  const contractFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    const periodLabel = formatPeriodLabel(contractPeriod, today, '');
+    if (periodLabel) {
+      badges.push(`Период: ${periodLabel}`);
+    }
+    if (contractSearch.trim()) {
+      badges.push(`Поиск: ${contractSearch.trim()}`);
+    }
+    return badges;
+  }, [contractPeriod, contractSearch, today]);
+
   useEffect(() => {
     if (activeSection !== 'payments') setPaymentTableSettingsOpen(false);
     if (activeSection !== 'accounts') setInvoiceTableSettingsOpen(false);
@@ -2109,7 +2382,7 @@ export function ClientDetail({
 
   useEffect(() => {
     setPaymentPage(1);
-  }, [caseIdForQuery, fromDateStr, paymentPageSize, statusFilter, toDateStr]);
+  }, [caseIdForQuery, fromDateStr, paymentPageSize, statusFilter, toDateStr, debouncedPaymentSearch]);
 
   const actModalClients = useMemo(() => {
     const normalizedName = clientName && clientName !== '...' ? clientName : `Клиент #${clientId}`;
@@ -2548,8 +2821,7 @@ export function ClientDetail({
   };
 
   const resetActFilters = () => {
-    setActFrom(formatLocalYMD(new Date(new Date().getFullYear(), 0, 1)));
-    setActTo(formatLocalYMD(new Date()));
+    setActPeriod({ mode: 'preset', preset: 'year_to_date' });
     setActStatusFilter('all');
     setActSearch('');
     setActPage(1);
@@ -3903,6 +4175,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
               from={fromDateStr}
               to={toDateStr}
               statusFilter={toStatsStatusFilter(statusFilter)}
+              search={debouncedPaymentSearch || undefined}
               reloadToken={statsReloadToken}
               storageKey={`pp.client-detail.stats_panels.${user?.id ?? 'guest'}`}
               className="mb-6"
@@ -3922,6 +4195,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
 
                 <div className="relative w-full sm:w-56">
                   <select
+                    aria-label="Статус платежей клиента"
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value as 'all' | NormalizedStatus)}
                     className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
@@ -3930,6 +4204,18 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <option value="completed">Выполнено</option>
                     <option value="overdue">Просрочено</option>
                   </select>
+                </div>
+
+                <div className="relative min-w-[240px] flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="search"
+                    aria-label="Поиск платежей клиента"
+                    value={paymentSearch}
+                    onChange={(event) => setPaymentSearch(event.target.value)}
+                    placeholder="Поиск по сумме, комментарию или документу"
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-700 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  />
                 </div>
 
               </div>
@@ -3974,6 +4260,30 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                   })}
                 </div>
               </div>
+
+              {paymentFilterBadges.length > 0 ? (
+                <div className="border-t border-gray-100 px-6 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-700">Применены фильтры:</span>
+                    {paymentFilterBadges.map((badge) => (
+                      <span
+                        key={badge}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={resetPaymentFilters}
+                      className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Сбросить все
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </>
         ) : activeSection === 'accounts' ? (
@@ -4053,6 +4363,46 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                 </div>
               </div>
             </div>
+
+            <ClientSectionFilterPanel
+              badges={invoiceFilterBadges}
+              onReset={invoiceFilterBadges.length > 0 ? resetInvoiceFilters : undefined}
+            >
+              <DatePeriodPicker
+                label="Период"
+                value={invoicePeriod}
+                onChange={setInvoicePeriod}
+                className="w-full min-w-[220px] sm:w-auto"
+              />
+              <ClientSectionFilterField label="Статус" className="w-full sm:w-56">
+                <select
+                  aria-label="Статус счетов клиента"
+                  value={invoiceStatusFilter}
+                  onChange={(event) => setInvoiceStatusFilter(event.target.value as 'all' | PaymentStatus)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+                  <option value="all">Все статусы</option>
+                  <option value="Pending">{invoiceStatusLabels.Pending}</option>
+                  <option value="Completed">{invoiceStatusLabels.Completed}</option>
+                  <option value="Overdue">{invoiceStatusLabels.Overdue}</option>
+                  <option value="Processing">{invoiceStatusLabels.Processing}</option>
+                  <option value="Cancelled">{invoiceStatusLabels.Cancelled}</option>
+                </select>
+              </ClientSectionFilterField>
+              <ClientSectionFilterField label="Поиск" className="min-w-[260px] flex-1">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    aria-label="Поиск счетов клиента"
+                    value={invoiceSearch}
+                    onChange={(event) => setInvoiceSearch(event.target.value)}
+                    placeholder="Номер счета, сумма или комментарий"
+                    className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                  />
+                </div>
+              </ClientSectionFilterField>
+            </ClientSectionFilterPanel>
 
             <div className="mb-6 flex justify-end">
               <button
@@ -4136,8 +4486,40 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                       </div>
                     </div>
 
+                    <ClientSectionFilterPanel
+                      badges={caseFilterBadges}
+                      onReset={caseFilterBadges.length > 0 ? resetCaseFilters : undefined}
+                    >
+                      <ClientSectionFilterField label="Поиск" className="min-w-[260px] flex-1">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="search"
+                            aria-label="Поиск дел клиента"
+                            value={caseSearch}
+                            onChange={(event) => setCaseSearch(event.target.value)}
+                            placeholder="Название или описание дела"
+                            className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                          />
+                        </div>
+                      </ClientSectionFilterField>
+                      <ClientSectionFilterField label="Статус" className="w-full sm:w-56">
+                        <select
+                          aria-label="Статус дел клиента"
+                          value={caseStatusFilter}
+                          onChange={(event) => setCaseStatusFilter(event.target.value as ClientCaseListStatus)}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                        >
+                          <option value="all">Все статусы</option>
+                          <option value="open">Открыто</option>
+                          <option value="hold">Приостановлено</option>
+                          <option value="closed">Закрыто</option>
+                        </select>
+                      </ClientSectionFilterField>
+                    </ClientSectionFilterPanel>
+
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {cases.map((caseItem) => {
+                      {filteredCases.map((caseItem) => {
                         const statusValue = (caseItem.status ?? '').toLowerCase();
                         const finance = caseFinanceSummaries[caseItem.id];
                         const statusClass = statusValue.includes('open')
@@ -4888,19 +5270,20 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <input
                       type="date"
                       value={actFrom}
-                      onChange={(event) => setActFrom(event.target.value)}
+                      onChange={(event) => handleActFromChange(event.target.value)}
                       className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />
                     <span className="text-gray-500">—</span>
                     <input
                       type="date"
                       value={actTo}
-                      onChange={(event) => setActTo(event.target.value)}
+                      onChange={(event) => handleActToChange(event.target.value)}
                       className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />
                   </div>
                   <div>
                     <select
+                      aria-label="Статус актов клиента"
                       value={actStatusFilter}
                       onChange={(event) => setActStatusFilter(event.target.value as 'all' | ActStatus)}
                       className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -4917,6 +5300,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                     <input
                       type="search"
+                      aria-label="Поиск актов клиента"
                       value={actSearch}
                       onChange={(event) => setActSearch(event.target.value)}
                       placeholder={t('actSearchPlaceholder') ?? 'Номер акта, название или ИНН контрагента'}
@@ -4931,6 +5315,28 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     {t('actFiltersReset') ?? 'Сбросить'}
                   </button>
                 </div>
+
+                {actFilterBadges.length > 0 ? (
+                  <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <span className="text-sm font-semibold text-slate-700">Применены фильтры:</span>
+                    {actFilterBadges.map((badge) => (
+                      <span
+                        key={badge}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={resetActFilters}
+                      className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Сбросить все
+                    </button>
+                  </div>
+                ) : null}
 
                 {actTableSettingsOpen ? (
                   <div className="mb-6">
@@ -5162,14 +5568,14 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <input
                       type="date"
                       value={contractFrom}
-                      onChange={(event) => setContractFrom(event.target.value)}
+                      onChange={(event) => handleContractFromChange(event.target.value)}
                       className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     />
                     <span className="text-gray-500">—</span>
                     <input
                       type="date"
                       value={contractTo}
-                      onChange={(event) => setContractTo(event.target.value)}
+                      onChange={(event) => handleContractToChange(event.target.value)}
                       className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     />
                   </div>
@@ -5177,6 +5583,7 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                     <input
                       type="search"
+                      aria-label="Поиск договоров клиента"
                       value={contractSearch}
                       onChange={(event) => setContractSearch(event.target.value)}
                       placeholder={
@@ -5204,6 +5611,28 @@ const updateEducation = (index: number, key: keyof ClientEducationItem, value: s
                     </button>
                   </div>
                 </div>
+
+                {contractFilterBadges.length > 0 ? (
+                  <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <span className="text-sm font-semibold text-slate-700">Применены фильтры:</span>
+                    {contractFilterBadges.map((badge) => (
+                      <span
+                        key={badge}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={resetContractFilters}
+                      className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Сбросить все
+                    </button>
+                  </div>
+                ) : null}
 
                 {contractActionError ? (
                   <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
