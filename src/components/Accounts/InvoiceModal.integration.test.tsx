@@ -923,7 +923,7 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText('Платеж поступил по банку')).toBeTruthy();
   });
 
-  it('opens the existing payment modal callback from the page sidebar when edit mode is available', async () => {
+  it('opens the existing payment modal callback for regular related payments when edit mode is available', async () => {
     const onEditRelatedPayment = vi.fn();
     const invoice = {
       id: 553,
@@ -940,7 +940,7 @@ describe('InvoiceModal integration', () => {
     const relatedPayment = {
       id: 883,
       invoiceId: 553,
-      documentKind: 'Invoice',
+      documentKind: 'Payment',
       amount: 7000,
       date: '2026-04-10',
       plannedDate: '2026-04-10',
@@ -980,6 +980,125 @@ describe('InvoiceModal integration', () => {
       }),
     );
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
+  });
+
+  it('opens a preview instead of the edit callback for invoice-managed related payments', async () => {
+    const onEditRelatedPayment = vi.fn();
+    const invoice = {
+      id: 554,
+      invoiceEntityId: 554,
+      number: '554',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'шт', price: 21000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 884,
+      invoiceId: 554,
+      documentKind: 'Payment',
+      amount: 7000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Invoice-managed related payment',
+      account: '554',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '[pp:installment-payment] 1',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.getPayment).mockResolvedValue(relatedPayment);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onEditRelatedPayment={onEditRelatedPayment}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-link-884'));
+
+    expect(await screen.findByTestId('invoice-related-payment-preview')).toBeTruthy();
+    expect(onEditRelatedPayment).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(884);
+    });
+  });
+
+  it('opens a preview from the edit-page action button for invoice-managed related payments', async () => {
+    const onEditRelatedPayment = vi.fn();
+    const invoice = {
+      id: 555,
+      invoiceEntityId: 555,
+      number: '555',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'шт', price: 21000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 885,
+      invoiceId: 555,
+      documentKind: 'Payment',
+      amount: 7000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Invoice-managed action button',
+      account: '555',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '[pp:installment-payment] 2',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.getPayment).mockResolvedValue(relatedPayment);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onEditRelatedPayment={onEditRelatedPayment}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать счёт' }));
+    fireEvent.click(await screen.findByTestId('invoice-related-payment-open-885'));
+
+    expect(await screen.findByTestId('invoice-related-payment-preview')).toBeTruthy();
+    expect(onEditRelatedPayment).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(885);
+    });
   });
 
   it('opens the full payment callback from a standalone payment preview', async () => {

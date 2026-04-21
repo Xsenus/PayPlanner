@@ -3085,7 +3085,7 @@ export function InvoiceModal({
                               key={payment.id}
                               type="button"
                               onClick={() => {
-                                if (onEditRelatedPayment) {
+                                if (onEditRelatedPayment && !isInvoiceManagedPayment(payment)) {
                                   onEditRelatedPayment(payment);
                                   return;
                                 }
@@ -3554,6 +3554,9 @@ export function InvoiceModal({
                 ) : (
                   <div className="space-y-3">
                     {displayPayments.map((payment) => {
+                      const invoiceManagedPayment = isInvoiceManagedPayment(payment);
+                      const canEditRelatedPayment = Boolean(onEditRelatedPayment) && !invoiceManagedPayment;
+                      const canDeleteRelatedPayment = Boolean(onDeleteRelatedPayment) && !invoiceManagedPayment;
                       const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
                       const installmentSequenceLabel = installmentMeta
                         ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
@@ -3591,12 +3594,27 @@ export function InvoiceModal({
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
-                        {(onEditRelatedPayment || (onDeleteRelatedPayment && !isInvoiceManagedPayment(payment))) && (
+                        {(invoiceManagedPayment || canEditRelatedPayment || canDeleteRelatedPayment) && (
                           <div className="flex items-center gap-2 self-end sm:self-start">
-                            {onEditRelatedPayment && (
+                            {invoiceManagedPayment && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void openPaymentPreview(payment);
+                                }}
+                                data-testid={`invoice-related-payment-open-${payment.id}`}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
+                                title="Открыть"
+                                aria-label="Открыть"
+                              >
+                                <Link2 className="h-4 w-4" />
+                              </button>
+                            )}
+                            {canEditRelatedPayment && (
                               <button
                                 type="button"
                                 onClick={() => onEditRelatedPayment(payment)}
+                                data-testid={`invoice-related-payment-edit-${payment.id}`}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
                                 title={t('edit') ?? 'Редактировать'}
                                 aria-label={t('edit') ?? 'Редактировать'}
@@ -3604,7 +3622,7 @@ export function InvoiceModal({
                                 <Pencil className="h-4 w-4" />
                               </button>
                             )}
-                            {onDeleteRelatedPayment && !isInvoiceManagedPayment(payment) && (
+                            {canDeleteRelatedPayment && (
                               <button
                                 type="button"
                                 onClick={() => {
