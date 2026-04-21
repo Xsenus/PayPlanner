@@ -41,7 +41,7 @@ import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
+import { formatPeriodLabel, normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import {
   clearInvoiceEditorDraft,
   peekInvoiceEditorDraft,
@@ -308,6 +308,7 @@ export function Accounts({
   const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
   const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
+  const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
 
   const {
     columnOrder,
@@ -369,12 +370,8 @@ export function Accounts({
   }, [periodRange.from, periodRange.to, statusFilter, debouncedSearch, typeFilter, pageSize]);
 
   useEffect(() => {
-    if (!defaultType) {
-      setTypeFilter('All');
-      return;
-    }
-    setTypeFilter(defaultType);
-  }, [defaultType]);
+    setTypeFilter(baseTypeFilter);
+  }, [baseTypeFilter]);
 
   useEffect(() => {
     setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
@@ -469,6 +466,44 @@ export function Accounts({
         : t('invoiceSectionDescriptionAll') ??
           t('invoiceSectionDescription') ??
           'Просматривайте все входящие и исходящие счета компании.';
+
+  const hasCustomPeriod = useMemo(
+    () => JSON.stringify(period) !== JSON.stringify(defaultPeriod),
+    [defaultPeriod, period],
+  );
+  const hasCustomStatusFilter = statusFilter !== 'all';
+  const hasCustomSearch = search.trim().length > 0;
+  const hasCustomTypeFilter = typeFilter !== baseTypeFilter;
+  const activeFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+
+    if (hasCustomPeriod) {
+      badges.push(`Период: ${formatPeriodLabel(period, new Date())}`);
+    }
+    if (hasCustomStatusFilter) {
+      badges.push(`Статус: ${accountStatusLabels[statusFilter]}`);
+    }
+    if (hasCustomTypeFilter) {
+      badges.push(`Тип: ${typeFilterLabels[typeFilter]}`);
+    }
+    if (hasCustomSearch) {
+      badges.push(`Поиск: ${search.trim()}`);
+    }
+
+    return badges;
+  }, [
+    hasCustomPeriod,
+    hasCustomSearch,
+    hasCustomStatusFilter,
+    hasCustomTypeFilter,
+    period,
+    accountStatusLabels,
+    statusFilter,
+    search,
+    typeFilter,
+    typeFilterLabels,
+  ]);
+  const hasActiveFilters = activeFilterBadges.length > 0;
 
   const handleSort = (key: SortState['key']) => {
     setSortState((prev) => {
@@ -883,7 +918,9 @@ export function Accounts({
   const handleResetFilters = () => {
     setPeriod(defaultPeriod);
     setStatusFilter('all');
+    setTypeFilter(baseTypeFilter);
     setSearch('');
+    setPage(1);
   };
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
@@ -1746,6 +1783,29 @@ export function Accounts({
                   </div>
                 </div>
               </div>
+
+              {hasActiveFilters ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-amber-900">
+                    <span className="font-semibold">Применены фильтры:</span>
+                    {activeFilterBadges.map((badge) => (
+                      <span
+                        key={badge}
+                        className="inline-flex items-center rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-medium text-amber-800"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={handleResetFilters}
+                      className="ml-auto inline-flex items-center rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
+                    >
+                      Сбросить все
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

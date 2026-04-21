@@ -370,6 +370,36 @@ describe('Accounts integration', () => {
     peekInvoiceEditorDraftMock.mockReturnValue(null);
   });
 
+  it('shows a visible summary when a saved period filter hides part of the registry', () => {
+    window.localStorage.setItem(
+      'pp.accounts.7.period',
+      JSON.stringify({ mode: 'custom', from: '2026-04-10', to: '2026-04-12' }),
+    );
+
+    render(<Accounts />);
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Период: 10.04.2026 — 12.04.2026')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Сбросить все' })).toBeTruthy();
+  });
+
+  it('resets the type filter back to all accounts', async () => {
+    render(<Accounts />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Расходные счета' }));
+
+    expect(screen.getByText('Применены фильтры:')).toBeTruthy();
+    expect(screen.getByText('Тип: Расходные счета')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Расходные счета' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить все' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Применены фильтры:')).toBeNull();
+    });
+    expect(screen.getByRole('heading', { name: 'Все счета' })).toBeTruthy();
+  });
+
   it('passes grouped invoice operations into the editor opened from the accounts registry', async () => {
     render(<Accounts routeInvoiceId={528} />);
 
