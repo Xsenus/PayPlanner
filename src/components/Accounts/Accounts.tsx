@@ -1337,13 +1337,6 @@ export function Accounts({
     setPaymentModalOpen(true);
   };
 
-  const openRelatedPaymentModal = (payment: Payment, invoice?: Invoice | null) => {
-    setEditingPayment(payment);
-    setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
-    setPaymentModalType(payment.type ?? 'Income');
-    setPaymentModalOpen(true);
-  };
-
   const openPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
     if (isInvoiceManagedPayment(payment)) {
       if (invoice?.id) {
@@ -1368,14 +1361,19 @@ export function Accounts({
   const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
     const isUpdate = 'id' in payload;
 
-    if (isUpdate) {
-      await apiService.updatePayment(payload.id, payload);
-    } else {
-      await apiService.createPayment(payload as PaymentPayload);
-    }
+    try {
+      if (isUpdate) {
+        await apiService.updatePayment(payload.id, payload);
+      } else {
+        await apiService.createPayment(payload as PaymentPayload);
+      }
 
-    await refreshAccounts();
-    handleClosePaymentModal();
+      await refreshAccounts();
+      handleClosePaymentModal();
+    } catch (err) {
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось сохранить платёж.'), 'Платежи счета');
+      throw err;
+    }
   };
 
   const handleDeletePayment = async (payment: Payment) => {
@@ -1628,7 +1626,7 @@ export function Accounts({
           paymentsLoading={isLoading || isRefreshing}
           onRefreshRequested={refreshAccounts}
           onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
-          onEditRelatedPayment={canEdit ? (payment) => openRelatedPaymentModal(payment, currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEdit ? (payment) => openPaymentEditModal(payment, currentPageInvoice) : undefined}
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
         />
         {paymentModalElement}
@@ -2225,7 +2223,7 @@ export function Accounts({
                                         <tr
                                           key={payment.id}
                                           className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
-                                          onClick={canEdit ? () => openRelatedPaymentModal(payment, invoice) : undefined}
+                                          onClick={canEdit ? () => openPaymentEditModal(payment, invoice) : undefined}
                                         >
                                           <td className="px-4 py-2">{formatDate(payment.plannedDate)}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
@@ -2245,7 +2243,7 @@ export function Accounts({
                                                     type="button"
                                                     onClick={(event) => {
                                                       event.stopPropagation();
-                                                      openRelatedPaymentModal(payment, invoice);
+                                                      openPaymentEditModal(payment, invoice);
                                                     }}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
                                                     title={t('edit') ?? 'Редактировать'}

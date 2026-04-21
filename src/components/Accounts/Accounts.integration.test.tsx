@@ -539,6 +539,40 @@ describe('Accounts integration', () => {
     expect(screen.getByText('payment-description:Sibling payment for invoice 24')).toBeTruthy();
   });
 
+  it('opens the invoice editor instead of the payment modal for invoice-managed payments in the expanded operations panel', async () => {
+    const onRouteInvoiceChange = vi.fn();
+
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          payments: [
+            createSiblingPayment({
+              id: 531,
+              description: 'Installment payment for invoice 24',
+              systemNotes: '[pp:installment-payment] 1',
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByText('Installment payment for invoice 24'));
+
+    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+    expect(screen.queryByTestId('payment-modal')).toBeNull();
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+  });
+
   it('does not show the invoice edit shortcut in the expanded operations panel', async () => {
     render(<Accounts />);
 
