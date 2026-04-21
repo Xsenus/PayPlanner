@@ -323,6 +323,63 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task GetDocument_ForPartialAct_RendersOnlySelectedActLineItems()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoicePayment = await CreateInvoiceAsync(
+            db,
+            "INV-104-P",
+            new DateTime(2026, 4, 15),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Prep docs", Quantity = 2m, Unit = "pcs", Price = 4_000m, SortOrder = 0 },
+                new InvoiceLineItem { Name = "Court visit", Quantity = 1m, Unit = "pcs", Price = 8_000m, SortOrder = 1 },
+            ]);
+
+        var sourceKey = await db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == invoicePayment.Id && item.SortOrder == 0)
+            .Select(item => $"db:{item.Id}")
+            .SingleAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+        var createRequest = new UpsertActRequest
+        {
+            Number = "ACT-104-P",
+            Date = new DateTime(2026, 4, 16),
+            Amount = 0m,
+            InvoiceId = invoicePayment.Id,
+            ClientId = client.Id,
+            Status = ActStatus.Created,
+            CreationMode = ActCreationMode.Partial,
+            LineItems =
+            [
+                new ActLineItemRequest
+                {
+                    SourceKey = sourceKey,
+                    Quantity = 1m,
+                },
+            ],
+        };
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+
+        var documentResult = await controller.GetDocument(dto.Id, "html", true, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(documentResult);
+        var normalizedHtml = content.Content!.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("ACT-104-P", normalizedHtml);
+        Assert.Contains("Prep docs", normalizedHtml);
+        Assert.DoesNotContain("Court visit", normalizedHtml);
+        Assert.Contains("Всего оказано услуг 1", normalizedHtml);
+        Assert.Contains("4 000,00", normalizedHtml);
+    }
+
+    [Fact]
     public void ActDocumentTemplateEngine_RendersReferenceLikeTemplate()
     {
         var client = new Client
