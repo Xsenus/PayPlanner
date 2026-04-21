@@ -6,6 +6,7 @@ import type { AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } fr
 import { clearInvoiceEditorDraft, peekInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 const {
+  createPaymentMock,
   getActResponsiblesMock,
   getAccountsRegistryResultMock,
   getClientsMock,
@@ -13,7 +14,10 @@ const {
   invoiceModalPropsSpy,
   paymentModalPropsSpy,
   refreshAccountsMock,
+  toastErrorMock,
+  updatePaymentMock,
 } = vi.hoisted(() => ({
+  createPaymentMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
   getAccountsRegistryResultMock: vi.fn(),
   getClientsMock: vi.fn(),
@@ -21,6 +25,8 @@ const {
   invoiceModalPropsSpy: vi.fn(),
   paymentModalPropsSpy: vi.fn(),
   refreshAccountsMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+  updatePaymentMock: vi.fn(),
 }));
 
 function createPermissions() {
@@ -201,7 +207,7 @@ vi.mock('../../hooks/useDebouncedValue', () => ({
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     success: vi.fn(),
-    error: vi.fn(),
+    error: toastErrorMock,
     info: vi.fn(),
     warning: vi.fn(),
   }),
@@ -238,9 +244,11 @@ vi.mock('../../hooks/useTableSelection', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    createPayment: createPaymentMock,
     getInvoice: getInvoiceMock,
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,
+    updatePayment: updatePaymentMock,
   },
 }));
 
@@ -278,6 +286,7 @@ vi.mock('./InvoiceModal', () => ({
 vi.mock('../Calendar/PaymentModal', () => ({
   PaymentModal: (props: {
     isOpen: boolean;
+    onSubmit?: (payload: unknown) => Promise<unknown>;
     payment?: Payment;
     linkedInvoice?: {
       invoiceEntityId: number;
@@ -305,6 +314,41 @@ vi.mock('../Calendar/PaymentModal', () => ({
         <div>{`linked-client-id:${props.linkedInvoice?.clientId ?? ''}`}</div>
         <div>{`linked-case-id:${props.linkedInvoice?.clientCaseId ?? ''}`}</div>
         <div>{`linked-type:${props.linkedInvoice?.type ?? ''}`}</div>
+        <button
+          type="button"
+          onClick={() => {
+            const payment = props.payment;
+            if (!payment || !props.onSubmit) {
+              return;
+            }
+
+            const payload = {
+              id: payment.id,
+              date: payment.date,
+              plannedDate: payment.plannedDate ?? payment.date,
+              amount: payment.amount,
+              paidAmount: payment.amount,
+              lastPaymentDate: payment.paidDate ?? payment.date,
+              type: payment.type,
+              status: payment.status,
+              description: payment.description ?? '',
+              isPaid: payment.isPaid,
+              paidDate: payment.paidDate ?? payment.date,
+              notes: payment.notes ?? '',
+              systemNotes: payment.systemNotes ?? '',
+              rescheduleCount: payment.rescheduleCount ?? 0,
+              clientId: payment.clientId ?? 55,
+              clientCaseId: payment.clientCaseId ?? 701,
+              invoiceId: payment.invoiceId ?? 24,
+              account: payment.account ?? '24',
+              accountDate: payment.accountDate ?? '2026-04-02',
+            };
+
+            void props.onSubmit(payload).catch(() => undefined);
+          }}
+        >
+          submit-payment
+        </button>
       </div>
     );
   },
@@ -354,6 +398,9 @@ describe('Accounts integration', () => {
     invoiceModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
+    toastErrorMock.mockReset();
+    updatePaymentMock.mockReset();
+    createPaymentMock.mockReset();
     clearInvoiceEditorDraftMock.mockReset();
     peekInvoiceEditorDraftMock.mockReset();
     window.localStorage.clear();
@@ -370,6 +417,8 @@ describe('Accounts integration', () => {
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
     getActResponsiblesMock.mockResolvedValue([]);
+    updatePaymentMock.mockResolvedValue(createSiblingPayment());
+    createPaymentMock.mockResolvedValue(createSiblingPayment({ id: 600 }));
     clearInvoiceEditorDraftMock.mockImplementation(() => undefined);
     peekInvoiceEditorDraftMock.mockReturnValue(null);
   });
@@ -571,6 +620,70 @@ describe('Accounts integration', () => {
     await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
     expect(screen.queryByTestId('payment-modal')).toBeNull();
     expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+  });
+
+  it('opens the invoice editor from the actions column for invoice-managed payments in the expanded operations panel', async () => {
+    const onRouteInvoiceChange = vi.fn();
+
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          payments: [
+            createSiblingPayment({
+              id: 532,
+              description: 'Installment payment action for invoice 24',
+              systemNotes: '[pp:installment-payment] 2',
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+
+    const operationsCell = await screen.findByText('Installment payment action for invoice 24');
+    const paymentRow = operationsCell.closest('tr');
+    expect(paymentRow).toBeTruthy();
+
+    fireEvent.click(within(paymentRow as HTMLTableRowElement).getByRole('button', { name: 'Редактировать' }));
+
+    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+    expect(screen.queryByTestId('payment-modal')).toBeNull();
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+  });
+
+  it('shows an error toast when saving a regular payment from the expanded operations panel fails', async () => {
+    updatePaymentMock.mockRejectedValueOnce(new Error('Конфликт сохранения'));
+
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByText('Sibling payment for invoice 24'));
+
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-payment' }));
+
+    await waitFor(() => {
+      expect(updatePaymentMock).toHaveBeenCalledWith(
+        529,
+        expect.objectContaining({
+          description: 'Sibling payment for invoice 24',
+          invoiceId: 24,
+        }),
+      );
+    });
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Конфликт сохранения', 'Платежи счета'));
+    expect(refreshAccountsMock).not.toHaveBeenCalled();
   });
 
   it('does not show the invoice edit shortcut in the expanded operations panel', async () => {
