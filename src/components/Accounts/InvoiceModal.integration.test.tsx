@@ -25,6 +25,7 @@ type ContractModalMockProps = {
 type CaseModalMockProps = {
   isOpen: boolean;
   onSave: (payload: Partial<ClientCase>) => void | Promise<void>;
+  overlayClassName?: string;
 };
 
 type InstallmentPlannerMockProps = {
@@ -33,6 +34,7 @@ type InstallmentPlannerMockProps = {
 
 const {
   caseModalSubmitPayloadRef,
+  caseModalPropsSpy,
   confirmMock,
   installmentPlannerPlanRef,
   installmentPlannerPropsSpy,
@@ -50,6 +52,7 @@ const {
       status: 'Open',
     } as Partial<ClientCase>,
   },
+  caseModalPropsSpy: vi.fn(),
   confirmMock: vi.fn(),
   installmentPlannerPlanRef: { current: null as InstallmentPlanInput | null },
   installmentPlannerPropsSpy: vi.fn(),
@@ -119,6 +122,7 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../Clients/CaseModal', () => ({
   CaseModal: (props: CaseModalMockProps) => {
+    caseModalPropsSpy(props);
     if (!props.isOpen) return null;
     return (
       <div data-testid="case-modal">
@@ -210,6 +214,7 @@ describe('InvoiceModal integration', () => {
       description: 'Created from invoice',
       status: 'Open',
     };
+    caseModalPropsSpy.mockReset();
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     installmentPlannerPlanRef.current = null;
@@ -1355,6 +1360,70 @@ describe('InvoiceModal integration', () => {
       title: 'Case from invoice',
     }));
     expect(await screen.findByText('Case from invoice')).toBeTruthy();
+  });
+
+  it('opens the client case modal above the invoice overlay', async () => {
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+
+    expect(await screen.findByTestId('case-modal')).toBeTruthy();
+    expect(caseModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      isOpen: true,
+      overlayClassName: 'z-[2300]',
+    }));
+  });
+
+  it('opens the client case modal above the invoice overlay in edit mode', async () => {
+    const invoice = {
+      id: 822,
+      invoiceEntityId: 822,
+      number: '822',
+      date: '2026-04-15',
+      dueDate: '2026-04-20',
+      amount: 5000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Услуга', quantity: 1, unit: 'шт', price: 5000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+
+    expect(await screen.findByTestId('case-modal')).toBeTruthy();
+    expect(caseModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      isOpen: true,
+      overlayClassName: 'z-[2300]',
+    }));
   });
 
   it('submits an empty client case list after unlinking the selected case from the invoice', async () => {

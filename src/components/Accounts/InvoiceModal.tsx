@@ -4243,6 +4243,7 @@ export function InvoiceModal({
         onClose={() => setCreateCaseOpen(false)}
         caseData={createCaseStub}
         onSave={handleCreateClientCase}
+        overlayClassName="z-[2300]"
       />
 
       {createActOpen && (

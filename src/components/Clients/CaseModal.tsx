@@ -10,6 +10,7 @@ interface CaseModalProps {
   caseData: ClientCase; // для create передаём «пустой» кейс
   onSave: (patch: Partial<ClientCase>) => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
+  overlayClassName?: string;
 }
 
 type StatusValue = 'Open' | 'OnHold' | 'Closed';
@@ -20,7 +21,7 @@ const STATUS_OPTIONS: Array<{ value: StatusValue; label: string }> = [
   { value: 'Closed', label: 'Закрыто' },
 ];
 
-export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete }: CaseModalProps) {
+export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, overlayClassName }: CaseModalProps) {
   const { confirm } = useDialog();
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
@@ -96,7 +97,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete }: CaseM
   };
 
   const modal = (
-    <div className="fixed inset-0 z-[1000] bg-black/30 flex items-center justify-center p-4">
+    <div className={`fixed inset-0 ${overlayClassName ?? 'z-[1000]'} bg-black/30 flex items-center justify-center p-4`}>
       <div
         className="w-full max-w-xl bg-white rounded-2xl shadow-xl"
         role="dialog"
