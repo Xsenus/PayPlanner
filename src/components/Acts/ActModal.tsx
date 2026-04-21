@@ -1,4 +1,4 @@
-import { ArrowLeft, Link2, Loader2, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Link2, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../services/api';
 import type {
@@ -19,6 +19,7 @@ import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 interface ActModalProps {
   open: boolean;
@@ -67,8 +68,22 @@ type InvoiceLineAvailabilityRow = {
   availableQuantity: number;
 };
 
+type InvoiceLookupRecord = Pick<
+  Invoice,
+  | 'id'
+  | 'number'
+  | 'date'
+  | 'amount'
+  | 'type'
+  | 'clientName'
+  | 'expenseClientName'
+>;
+
 const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 const QUANTITY_EPSILON = 0.0001;
+const LINE_ITEM_GRID_TEMPLATE =
+  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
+const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
 
 function parseDecimalInput(value: string): number | null {
   const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
@@ -160,6 +175,25 @@ function resolveCounterpartyName(invoice: Invoice | null): string {
   return invoice.clientName?.trim() || invoice.expenseClientName?.trim() || '';
 }
 
+function formatInvoiceLookupDate(value?: string | null): string {
+  return toDateInputValue(value ?? '') || value || '';
+}
+
+function buildInvoiceLookupLabel(invoice: InvoiceLookupRecord): string {
+  const dateLabel = formatInvoiceLookupDate(invoice.date);
+  return dateLabel
+    ? `Счет №${invoice.number} от ${dateLabel}`
+    : `Счет №${invoice.number}`;
+}
+
+function buildInvoiceLookupDescription(invoice: InvoiceLookupRecord): string {
+  const counterpartyName = invoice.type === 'Expense'
+    ? invoice.expenseClientName?.trim() || invoice.clientName?.trim() || 'Без контрагента'
+    : invoice.clientName?.trim() || invoice.expenseClientName?.trim() || 'Без контрагента';
+  const typeLabel = invoice.type === 'Expense' ? 'Расходный счет' : 'Доходный счет';
+  return `${typeLabel} • ${counterpartyName} • ${formatCurrencySmart(invoice.amount ?? 0).full}`;
+}
+
 function normalizeActToForm(
   act: Act | null,
   defaultClientId?: number | null,
@@ -245,11 +279,15 @@ export function ActModal({
   const [invoiceDetails, setInvoiceDetails] = useState<Invoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceOptions, setInvoiceOptions] = useState<InvoiceLookupRecord[]>([]);
+  const [invoiceOptionsLoading, setInvoiceOptionsLoading] = useState(false);
+  const [invoiceOptionsError, setInvoiceOptionsError] = useState<string | null>(null);
   const [actDetails, setActDetails] = useState<Act | null>(null);
   const [actDetailsLoading, setActDetailsLoading] = useState(false);
   const [actDetailsError, setActDetailsError] = useState<string | null>(null);
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
   const selectionSeedRef = useRef<string | null>(null);
+  const [lineItemPickerOpen, setLineItemPickerOpen] = useState(false);
 
   const isEdit = mode === 'edit';
   const isPageMode = presentation === 'page';
@@ -261,12 +299,66 @@ export function ActModal({
       setLocalError(null);
       setInvoiceDetails(null);
       setInvoiceError(null);
+      setInvoiceOptionsError(null);
       setActDetails(null);
       setActDetailsError(null);
       setSelectedLineQuantities({});
       selectionSeedRef.current = null;
+      setLineItemPickerOpen(false);
     }
   }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
+
+  useEffect(() => {
+    if (!open) {
+      setInvoiceOptions([]);
+      setInvoiceOptionsLoading(false);
+      setInvoiceOptionsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setInvoiceOptionsLoading(true);
+    setInvoiceOptionsError(null);
+
+    void apiService
+      .getInvoices({ page: 1, pageSize: 200 })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        setInvoiceOptions(
+          (response.items ?? [])
+            .filter((invoice): invoice is InvoiceLookupRecord => typeof invoice?.id === 'number' && invoice.id > 0)
+            .map((invoice) => ({
+              id: invoice.id,
+              number: invoice.number,
+              date: invoice.date,
+              amount: invoice.amount,
+              type: invoice.type,
+              clientName: invoice.clientName,
+              expenseClientName: invoice.expenseClientName,
+            })),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setInvoiceOptions([]);
+        setInvoiceOptionsError(extractDisplayErrorMessage(error, 'Не удалось загрузить список счетов'));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setInvoiceOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open || !linkedInvoiceId) {
@@ -356,6 +448,37 @@ export function ActModal({
   const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(actType), [actType]);
   const linkedCounterpartyClientId = useMemo(() => resolveCounterpartyClientId(invoiceDetails), [invoiceDetails]);
   const linkedCounterpartyName = useMemo(() => resolveCounterpartyName(invoiceDetails), [invoiceDetails]);
+  const invoiceLookupOptions = useMemo<LookupSelectOption[]>(() => {
+    const items = [...invoiceOptions];
+
+    if (
+      linkedInvoiceId
+      && !items.some((item) => item.id === linkedInvoiceId)
+      && (invoiceDetails || form.invoiceNumber.trim())
+    ) {
+      items.unshift({
+        id: linkedInvoiceId,
+        number: invoiceDetails?.number ?? (form.invoiceNumber.trim() || `#${linkedInvoiceId}`),
+        date: invoiceDetails?.date ?? '',
+        amount: invoiceDetails?.amount ?? 0,
+        type: invoiceDetails?.type ?? 'Income',
+        clientName: invoiceDetails?.clientName ?? null,
+        expenseClientName: invoiceDetails?.expenseClientName ?? null,
+      });
+    }
+
+    return items.map((invoice) => ({
+      value: String(invoice.id),
+      label: buildInvoiceLookupLabel(invoice),
+      description: buildInvoiceLookupDescription(invoice),
+      keywords: [
+        invoice.number,
+        invoice.clientName ?? '',
+        invoice.expenseClientName ?? '',
+        invoice.type === 'Expense' ? 'расход поставщик' : 'доход клиент',
+      ],
+    }));
+  }, [form.invoiceNumber, invoiceDetails, invoiceOptions, linkedInvoiceId]);
 
   useEffect(() => {
     if (!open || !invoiceDetails) {
@@ -446,16 +569,36 @@ export function ActModal({
     () => new Map(invoiceLineAvailability.map((item) => [item.sourceKey, item])),
     [invoiceLineAvailability],
   );
+  const unselectedInvoiceLineItems = useMemo(
+    () =>
+      invoiceLineAvailability.filter((item) => {
+        if (item.availableQuantity <= 0) {
+          return false;
+        }
+
+        const selectedQuantity = parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
+        return selectedQuantity <= 0;
+      }),
+    [invoiceLineAvailability, selectedLineQuantities],
+  );
+
+  useEffect(() => {
+    if (unselectedInvoiceLineItems.length > 0) {
+      return;
+    }
+
+    setLineItemPickerOpen(false);
+  }, [unselectedInvoiceLineItems.length]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    if (linkedInvoiceId && !hasInvoiceLineItems && form.creationMode !== 'Manual') {
+    if (linkedInvoiceId && invoiceDetails && !invoiceLoading && !hasInvoiceLineItems && form.creationMode !== 'Manual') {
       setForm((previous) => ({ ...previous, creationMode: 'Manual' }));
     }
-  }, [form.creationMode, hasInvoiceLineItems, linkedInvoiceId, open]);
+  }, [form.creationMode, hasInvoiceLineItems, invoiceDetails, invoiceLoading, linkedInvoiceId, open]);
 
   const selectionSeedKey = useMemo(() => {
     const availabilityKey = invoiceLineAvailability
@@ -591,6 +734,33 @@ export function ActModal({
     setForm((previous) => ({ ...previous, [field]: value }));
   };
 
+  const handleInvoiceSelect = (value: string) => {
+    selectionSeedRef.current = null;
+    setSelectedLineQuantities({});
+    setLineItemPickerOpen(false);
+    setInvoiceError(null);
+    setInvoiceDetails(null);
+
+    if (!value) {
+      setForm((previous) => ({
+        ...previous,
+        invoiceId: '',
+        invoiceNumber: '',
+        creationMode: 'Manual',
+      }));
+      return;
+    }
+
+    const selectedInvoice = invoiceOptions.find((item) => String(item.id) === value) ?? null;
+
+    setForm((previous) => ({
+      ...previous,
+      invoiceId: value,
+      invoiceNumber: selectedInvoice?.number ?? previous.invoiceNumber,
+      creationMode: 'Partial',
+    }));
+  };
+
   const handleQuantityChange = (sourceKey: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     const availableQuantity = availabilityBySourceKey.get(sourceKey)?.availableQuantity ?? 0;
@@ -612,6 +782,20 @@ export function ActModal({
 
   const handleRemoveLineItem = (sourceKey: string) => {
     setSelectedLineQuantities((previous) => ({ ...previous, [sourceKey]: '' }));
+  };
+
+  const handleAddInvoiceLineItem = (sourceKey: string) => {
+    const availableQuantity = availabilityBySourceKey.get(sourceKey)?.availableQuantity ?? 0;
+    if (availableQuantity <= 0) {
+      return;
+    }
+
+    setSelectedLineQuantities((previous) => ({
+      ...previous,
+      [sourceKey]: formatDecimalInput(availableQuantity),
+    }));
+    setForm((previous) => ({ ...previous, creationMode: 'Partial' }));
+    setLineItemPickerOpen(false);
   };
 
   const handleSelectAllLineItems = () => {
@@ -849,8 +1033,8 @@ export function ActModal({
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Основание</h3>
                   <p className="mt-1 text-sm text-slate-500">
                     {linkedInvoiceId
-                      ? 'Тип акта и контрагент определяются по связанному счету.'
-                      : 'Это пустой акт без привязки к счету. Контрагента можно выбрать вручную.'}
+                      ? 'Тип акта, контрагент и доступные позиции определяются по выбранному счету.'
+                      : 'Можно выбрать счет из справочника или оставить акт пустым и заполнить его вручную.'}
                   </p>
                 </div>
                 {linkedInvoiceId && hasInvoiceLineItems ? (
@@ -881,121 +1065,149 @@ export function ActModal({
                 ) : null}
               </div>
 
-              {linkedInvoiceId ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                      actType === 'Expense'
-                        ? 'border border-rose-200 bg-rose-50 text-rose-700'
-                        : actType === 'Income'
-                          ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border border-slate-200 bg-white text-slate-600'
-                    }`}>
-                      {actType === 'Expense' ? 'Расходный акт' : actType === 'Income' ? 'Доходный акт' : 'Акт без типа'}
-                    </span>
-                    {hasInvoiceLineItems ? (
-                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                        Доступно позиций: {availableLinesCount}
-                      </span>
-                    ) : null}
-                  </div>
+              <div className="space-y-4">
+                <LookupSelect
+                  label="Счет"
+                  value={form.invoiceId}
+                  options={invoiceLookupOptions}
+                  onChange={handleInvoiceSelect}
+                  title="Выбор счета"
+                  dictionaryLabel="Справочник"
+                  placeholder={invoiceOptionsLoading ? 'Загружаю счета...' : 'Выберите счет'}
+                  searchPlaceholder="Поиск по номеру счета, клиенту или поставщику"
+                  emptyOptionLabel="Без счета"
+                  emptyOptionDescription="Оставить акт пустым и заполнить сумму вручную."
+                  helperText={
+                    linkedInvoiceId
+                      ? 'Счет, тип акта, контрагент и позиции в акте связаны между собой.'
+                      : 'После выбора счета контрагент и позиции подтянутся автоматически.'
+                  }
+                  noOptionsText={invoiceOptionsLoading ? 'Загружаем счета...' : 'Счета не найдены'}
+                  disabled={invoiceOptionsLoading}
+                />
 
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Счет</div>
-                      {invoiceLoading ? (
-                        <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-500">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Загружаю связанный счет...
-                        </div>
-                      ) : invoiceDetails ? (
-                        onOpenInvoice ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenInvoice(linkedInvoiceId, actType ?? undefined)}
-                            className="mt-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-50"
-                          >
-                            <Link2 className="h-4 w-4" />
-                            Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
-                          </button>
-                        ) : (
-                          <div className="mt-2 text-sm font-medium text-slate-900">
-                            Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
-                          </div>
-                        )
-                      ) : (
-                        <div className="mt-2 text-sm text-slate-500">
-                          Связанный счет будет показан после загрузки.
-                        </div>
-                      )}
+                {invoiceOptionsError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    {invoiceOptionsError}
+                  </div>
+                ) : null}
+
+                {linkedInvoiceId ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                        actType === 'Expense'
+                          ? 'border border-rose-200 bg-rose-50 text-rose-700'
+                          : actType === 'Income'
+                            ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border border-slate-200 bg-white text-slate-600'
+                      }`}>
+                        {actType === 'Expense' ? 'Расходный акт' : actType === 'Income' ? 'Доходный акт' : 'Акт без типа'}
+                      </span>
+                      {hasInvoiceLineItems ? (
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                          Доступно позиций: {availableLinesCount}
+                        </span>
+                      ) : null}
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
-                      <div className="mt-2 text-sm font-medium text-slate-900">{selectedCounterpartyName}</div>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Счет</div>
+                        {invoiceLoading ? (
+                          <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Загружаю связанный счет...
+                          </div>
+                        ) : invoiceDetails ? (
+                          onOpenInvoice ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenInvoice(linkedInvoiceId, actType ?? undefined)}
+                              className="mt-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-50"
+                            >
+                              <Link2 className="h-4 w-4" />
+                              Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                            </button>
+                          ) : (
+                            <div className="mt-2 text-sm font-medium text-slate-900">
+                              Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                            </div>
+                          )
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-500">
+                            Связанный счет будет показан после загрузки.
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
+                        <div className="mt-2 text-sm font-medium text-slate-900">{selectedCounterpartyName}</div>
+                        {selectedClient?.clientStatus ? (
+                          <div className="mt-2">
+                            <ClientStatusBadge status={selectedClient.clientStatus} />
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ответственный</div>
+                        <div className="mt-2 text-sm text-slate-700">{selectedResponsibleLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Режим</div>
+                        <div className="mt-2 text-sm text-slate-700">
+                          {form.creationMode === 'Manual'
+                            ? 'Пустой акт'
+                            : allAvailableSelected
+                              ? 'По счету целиком'
+                              : 'По счету с выбором позиций'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="mt-4 text-xs leading-5 text-slate-500">
+                      Если в акт попадут не все позиции счета, следующий акт по этому счету заберет только неиспользованный остаток.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span className="font-medium text-slate-700">{counterpartyLabel}</span>
+                      <select
+                        value={form.clientId}
+                        onChange={handleChange('clientId')}
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      >
+                        <option value="">{t('selectClient') ?? 'Выберите контрагента'}</option>
+                        {clients.map((client) => (
+                          <option key={client.id} value={client.id}>
+                            {client.name}
+                            {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
+                            {client.company ? ` — ${client.company}` : ''}
+                          </option>
+                        ))}
+                      </select>
                       {selectedClient?.clientStatus ? (
-                        <div className="mt-2">
+                        <div className="mt-1">
                           <ClientStatusBadge status={selectedClient.clientStatus} />
                         </div>
                       ) : null}
+                    </label>
+
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <div className="font-medium text-slate-700">Ответственный</div>
+                      <div className="mt-2">{selectedResponsibleLabel}</div>
+                      <p className="mt-3 text-xs leading-5 text-slate-500">
+                        Ответственный подставляется автоматически как пользователь, который создает акт.
+                      </p>
                     </div>
                   </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ответственный</div>
-                      <div className="mt-2 text-sm text-slate-700">{selectedResponsibleLabel}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Режим</div>
-                      <div className="mt-2 text-sm text-slate-700">
-                        {form.creationMode === 'Manual'
-                          ? 'Пустой акт'
-                          : allAvailableSelected
-                            ? 'По счету целиком'
-                            : 'По счету с выбором позиций'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="mt-4 text-xs leading-5 text-slate-500">
-                    Если в акт попадут не все позиции счета, следующий акт по этому счету заберет только неиспользованный остаток.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium text-slate-700">{counterpartyLabel}</span>
-                    <select
-                      value={form.clientId}
-                      onChange={handleChange('clientId')}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                    >
-                      <option value="">{t('selectClient') ?? 'Выберите контрагента'}</option>
-                      {clients.map((client) => (
-                        <option key={client.id} value={client.id}>
-                          {client.name}
-                          {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                          {client.company ? ` — ${client.company}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedClient?.clientStatus ? (
-                      <div className="mt-1">
-                        <ClientStatusBadge status={selectedClient.clientStatus} />
-                      </div>
-                    ) : null}
-                  </label>
-
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <div className="font-medium text-slate-700">Ответственный</div>
-                    <div className="mt-2">{selectedResponsibleLabel}</div>
-                    <p className="mt-3 text-xs leading-5 text-slate-500">
-                      Ответственный подставляется автоматически как пользователь, который создает акт.
-                    </p>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <label className="mt-4 flex flex-col gap-1 text-sm">
                 <span className="font-medium text-slate-700">{t('actComment') ?? 'Комментарий'}</span>
@@ -1010,16 +1222,26 @@ export function ActModal({
             </section>
 
             {hasInvoiceLineItems ? (
-              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Позиции счета</h3>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Выберите позиции, которые должны попасть в этот акт. Лишние строки можно исключить.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Позиции счета</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Сумма акта считается по выбранным позициям. Лишние строки можно удалить, а затем вернуть через кнопку добавления.
+                    </p>
+                  </div>
+
+                  {form.creationMode !== 'Manual' ? (
+                    <div className="relative flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLineItemPickerOpen((previous) => !previous)}
+                        disabled={unselectedInvoiceLineItems.length === 0}
+                        aria-expanded={lineItemPickerOpen}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                      >
+                        + Добавить
+                      </button>
                       <button
                         type="button"
                         onClick={handleSelectAllLineItems}
@@ -1034,92 +1256,143 @@ export function ActModal({
                       >
                         Очистить
                       </button>
+
+                      {lineItemPickerOpen && unselectedInvoiceLineItems.length > 0 ? (
+                        <div className="absolute right-0 top-full z-10 mt-2 w-full min-w-[20rem] rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:w-[24rem]">
+                          <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Доступные позиции
+                          </div>
+                          <div className="max-h-72 space-y-2 overflow-y-auto">
+                            {unselectedInvoiceLineItems.map((item) => (
+                              <button
+                                key={item.sourceKey}
+                                type="button"
+                                onClick={() => handleAddInvoiceLineItem(item.sourceKey)}
+                                className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50/40"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-slate-900">{item.name}</div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    Остаток: {formatDecimalInput(item.availableQuantity)} {item.unit} • {formatCurrencySmart(item.price).full}
+                                  </div>
+                                </div>
+                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                                  Добавить
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
+                  ) : null}
                 </div>
 
                 {form.creationMode === 'Manual' ? (
-                  <div className="px-4 py-5">
-                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                      Позиции счета пока не используются, потому что выбран режим пустого акта.
-                      <button
-                        type="button"
-                        onClick={handleEnableInvoiceMode}
-                        className="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
-                      >
-                        Вернуть позиции счета
-                      </button>
-                    </div>
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                    Позиции счета сейчас не используются, потому что выбран режим пустого акта. Сумму можно указать вручную.
+                    <button
+                      type="button"
+                      onClick={handleEnableInvoiceMode}
+                      className="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+                    >
+                      Вернуть позиции счета
+                    </button>
                   </div>
                 ) : (
                   <>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-slate-200 text-sm">
-                        <thead className="bg-white">
-                          <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                            <th className="px-4 py-3 font-medium">Позиция</th>
-                            <th className="px-4 py-3 text-right font-medium">Всего</th>
-                            <th className="px-4 py-3 text-right font-medium">Уже в актах</th>
-                            <th className="px-4 py-3 text-right font-medium">Остаток</th>
-                            <th className="px-4 py-3 text-right font-medium">В этот акт</th>
-                            <th className="px-4 py-3 text-right font-medium">Цена</th>
-                            <th className="px-4 py-3 text-right font-medium">Сумма</th>
-                            <th className="px-4 py-3 text-right font-medium">Действие</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {invoiceLineAvailability.map((item) => {
-                            const selectedQuantity = parseDecimalInput(selectedLineQuantities[item.sourceKey] ?? '') ?? 0;
-                            const lineAmount = selectedQuantity * item.price;
-                            const disabled = item.availableQuantity <= 0;
+                    <div className="-mx-1 mt-4 overflow-x-auto px-1">
+                      <div className={`space-y-3 ${LINE_ITEM_GRID_MIN_WIDTH_CLASS}`}>
+                        <div className={`hidden items-center gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid ${LINE_ITEM_GRID_TEMPLATE}`}>
+                          <span>Наименование</span>
+                          <span className="text-center">Кол-во</span>
+                          <span>Ед.</span>
+                          <span className="text-right">Цена</span>
+                          <span className="text-right">Сумма</span>
+                          <span className="sr-only">Действия</span>
+                        </div>
 
-                            return (
-                              <tr key={item.sourceKey} className="align-top">
-                                <td className="px-4 py-3">
-                                  <div className="font-medium text-slate-900">{item.name}</div>
-                                  <div className="mt-1 text-xs text-slate-500">{item.unit}</div>
-                                </td>
-                                <td className="px-4 py-3 text-right text-slate-700">{formatDecimalInput(item.totalQuantity)}</td>
-                                <td className="px-4 py-3 text-right text-slate-500">{formatDecimalInput(item.usedByOtherActsQuantity)}</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900">{formatDecimalInput(item.availableQuantity)}</td>
-                                <td className="px-4 py-3 text-right">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.0001"
-                                    max={formatDecimalInput(item.availableQuantity)}
-                                    value={selectedLineQuantities[item.sourceKey] ?? ''}
-                                    onChange={handleQuantityChange(item.sourceKey)}
-                                    disabled={disabled}
-                                    className={`w-28 rounded-lg border px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 ${
-                                      disabled
-                                        ? 'border-slate-200 bg-slate-50 text-slate-400 focus:border-slate-200 focus:ring-slate-100'
-                                        : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-200'
-                                    }`}
-                                  />
-                                </td>
-                                <td className="px-4 py-3 text-right text-slate-700">{formatCurrencySmart(item.price).full}</td>
-                                <td className="px-4 py-3 text-right font-medium text-slate-900">{formatCurrencySmart(lineAmount).full}</td>
-                                <td className="px-4 py-3 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveLineItem(item.sourceKey)}
-                                    disabled={disabled || selectedQuantity <= 0}
-                                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
-                                    title="Исключить позицию из акта"
-                                    aria-label="Исключить позицию из акта"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                        {selectedLineItems.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                            <div className="font-medium text-slate-900">Пока в акт не добавлена ни одна позиция счета.</div>
+                            <p className="mt-2 text-slate-500">
+                              Добавьте нужные строки из счета или переключите акт в ручной режим.
+                            </p>
+                          </div>
+                        ) : (
+                          selectedLineItems.map((item) => (
+                            <div
+                              key={item.sourceKey}
+                              className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 ${LINE_ITEM_GRID_TEMPLATE}`}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex min-h-[3.25rem] w-full items-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 md:h-10 md:min-h-10 md:py-2">
+                                  <span className="min-w-0 flex-1">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">
+                                      Наименование
+                                    </span>
+                                    <span className="mt-1 block truncate font-medium text-slate-700 md:mt-0">{item.name}</span>
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                                  <span>Всего: {formatDecimalInput(item.totalQuantity)}</span>
+                                  <span>Уже в актах: {formatDecimalInput(item.usedByOtherActsQuantity)}</span>
+                                  <span>Остаток: {formatDecimalInput(item.availableQuantity)}</span>
+                                </div>
+                              </div>
+
+                              <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Кол-во</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.0001"
+                                  max={formatDecimalInput(item.availableQuantity)}
+                                  value={selectedLineQuantities[item.sourceKey] ?? ''}
+                                  onChange={handleQuantityChange(item.sourceKey)}
+                                  className="w-full rounded-lg border border-slate-300 px-2 py-2 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                />
+                              </label>
+
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Ед.</span>
+                                <div className="inline-flex min-h-10 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                  {item.unit || '—'}
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Цена</span>
+                                <output className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+                                  {formatCurrencySmart(item.price).full}
+                                </output>
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Сумма</span>
+                                <output className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+                                  {formatCurrencySmart(item.lineAmount).full}
+                                </output>
+                              </div>
+
+                              <div className="flex items-end justify-end md:justify-start">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveLineItem(item.sourceKey)}
+                                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                                  aria-label="Удалить позицию"
+                                  title="Удалить позицию"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-4 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-slate-500">
                         Выбрано позиций: <span className="font-medium text-slate-900">{selectedLineItems.length}</span>
                       </div>

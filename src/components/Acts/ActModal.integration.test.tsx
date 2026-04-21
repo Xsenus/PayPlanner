@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActModal } from './ActModal';
 import type { ActResponsible, Client, Invoice } from '../../types';
 
-const { getActMock, getInvoiceMock } = vi.hoisted(() => ({
+const { getActMock, getInvoiceMock, getInvoicesMock } = vi.hoisted(() => ({
   getActMock: vi.fn(),
   getInvoiceMock: vi.fn(),
+  getInvoicesMock: vi.fn(),
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
@@ -23,6 +24,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getAct: getActMock,
     getInvoice: getInvoiceMock,
+    getInvoices: getInvoicesMock,
   },
 }));
 
@@ -56,6 +58,7 @@ describe('ActModal integration', () => {
     vi.clearAllMocks();
     getActMock.mockResolvedValue(null);
     getInvoiceMock.mockResolvedValue(null);
+    getInvoicesMock.mockResolvedValue({ items: [] });
   });
 
   it('uses the invoice type, hides inn fields and submits only the selected invoice positions', async () => {
@@ -111,15 +114,15 @@ describe('ActModal integration', () => {
     expect(screen.getAllByText('Мария Менеджер').length).toBeGreaterThan(0);
     expect(screen.getByText('Доступно позиций: 2')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Сч[её]т №INV-618/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Сч[её]т №INV-618/i })[1]);
     expect(onOpenInvoice).toHaveBeenCalledWith(618, 'Expense');
 
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-618-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'По счету' }));
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Исключить позицию из акта' }).length).toBe(2);
+      expect(screen.getAllByRole('button', { name: 'Удалить позицию' }).length).toBe(2);
     });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Исключить позицию из акта' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Удалить позицию' })[1]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
 
@@ -143,6 +146,79 @@ describe('ActModal integration', () => {
     expect(payload.lineItems).toEqual([{ sourceKey: 'db:101', quantity: 2 }]);
   });
 
+  it('allows selecting an invoice from the dictionary and recalculates the amount by selected positions', async () => {
+    const invoice = {
+      id: 618,
+      number: 'INV-618',
+      date: '2026-04-10',
+      amount: 18000,
+      description: 'Юридические услуги за апрель',
+      type: 'Expense',
+      clientId: 1,
+      clientName: 'Базовый клиент',
+      expenseClientId: 2,
+      expenseClientName: 'ООО Поставщик',
+      lineItems: [
+        { id: 101, sourceKey: 'db:101', name: 'Подготовка документов', quantity: 2, unit: 'усл.', price: 5000, sortOrder: 0 },
+        { id: 102, sourceKey: 'db:102', name: 'Выезд в суд', quantity: 1, unit: 'усл.', price: 8000, sortOrder: 1 },
+      ],
+      acts: [],
+    } as unknown as Invoice;
+
+    getInvoicesMock.mockResolvedValue({ items: [invoice] });
+    getInvoiceMock.mockResolvedValue(invoice);
+
+    render(
+      <ActModal
+        open
+        mode="create"
+        act={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[
+          createClient(1, 'Базовый клиент'),
+          createClient(2, 'ООО Поставщик'),
+        ]}
+        responsibles={[createResponsible(5, 'Мария Менеджер')]}
+        lookupsLoading={false}
+        defaultResponsibleId={5}
+        presentation="page"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getInvoicesMock).toHaveBeenCalledWith({ page: 1, pageSize: 200 });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Справочник' }));
+    fireEvent.click((await screen.findByText(/Счет №INV-618 от 2026-04-10/i)).closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(getInvoiceMock).toHaveBeenCalledWith(618);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Выбрать все' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Очистить' }));
+    expect(screen.getByText('Пока в акт не добавлена ни одна позиция счета.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Добавить' }));
+    fireEvent.click((await screen.findByText(/Подготовка документов/i)).closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Удалить позицию' }).length).toBe(1);
+    });
+
+    expect(screen.getByDisplayValue('10000').hasAttribute('readonly')).toBe(true);
+    fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '1' } });
+    expect(screen.getByDisplayValue('5000').hasAttribute('readonly')).toBe(true);
+    expect(screen.getByText(/Выбрано позиций:/i).textContent ?? '').toContain('1');
+    expect(screen.getAllByText('Поставщик').length).toBeGreaterThan(0);
+  });
+
   it('allows creating an empty manual act without inn and invoice id fields', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -164,7 +240,9 @@ describe('ActModal integration', () => {
     expect(screen.queryByText(/ИНН/i)).toBeNull();
     expect(screen.queryByText(/ID сч[её]та/i)).toBeNull();
     expect(screen.getAllByText('Будет указан автоматически').length).toBeGreaterThan(0);
-    expect(screen.getByText('Это пустой акт без привязки к счету. Контрагента можно выбрать вручную.')).toBeTruthy();
+    expect(
+      screen.getByText('Можно выбрать счет из справочника или оставить акт пустым и заполнить его вручную.'),
+    ).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'MANUAL-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '4321.50' } });
