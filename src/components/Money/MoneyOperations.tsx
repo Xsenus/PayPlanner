@@ -20,6 +20,7 @@ import { useMoneyOperations } from '../../hooks/useMoneyOperations';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import { useTabNavigation } from '../../contexts/TabContext';
+import { fromInputToApiDate, toDateInputValue, todayYMD } from '../../utils/dateUtils';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -72,7 +73,7 @@ const DEFAULT_FORM: MoneyOperation = {
   amount: 0,
   currency: 'RUB',
   paymentOrderNumber: '',
-  date: new Date().toISOString().slice(0, 10),
+  date: '',
   recognitionDate: '',
   isAdvancePayment: false,
   purpose: '',
@@ -86,6 +87,30 @@ const DEFAULT_FORM: MoneyOperation = {
   createdAt: new Date().toISOString(),
   updatedAt: null,
 };
+
+function createDefaultForm(source: MoneyOperationSource): MoneyOperation {
+  return {
+    ...DEFAULT_FORM,
+    source,
+    date: todayYMD(),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function mapMoneyOperationToForm(source: MoneyOperationSource, initialData?: MoneyOperation | null): MoneyOperation {
+  if (!initialData) {
+    return createDefaultForm(source);
+  }
+
+  return {
+    ...createDefaultForm(source),
+    ...initialData,
+    source: initialData.source ?? source,
+    date: toDateInputValue(initialData.date) || todayYMD(),
+    recognitionDate: toDateInputValue(initialData.recognitionDate) || '',
+    createdAt: initialData.createdAt ?? new Date().toISOString(),
+  };
+}
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
@@ -137,12 +162,12 @@ function MoneyOperationModal({
   onSave: (payload: MoneyOperation) => Promise<void>;
   isSaving: boolean;
 }) {
-  const [form, setForm] = useState<MoneyOperation>(() => ({ ...DEFAULT_FORM, source }));
+  const [form, setForm] = useState<MoneyOperation>(() => mapMoneyOperationToForm(source, initialData));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setForm(initialData ? { ...initialData } : { ...DEFAULT_FORM, source });
+      setForm(mapMoneyOperationToForm(source, initialData));
       setError(null);
     }
   }, [initialData, open, source]);
@@ -156,7 +181,11 @@ function MoneyOperationModal({
   const handleSubmit = async () => {
     setError(null);
     try {
-      await onSave(form);
+      await onSave({
+        ...form,
+        date: fromInputToApiDate(form.date) ?? form.date,
+        recognitionDate: fromInputToApiDate(form.recognitionDate) ?? '',
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось сохранить операцию.';
       setError(message);
@@ -565,10 +594,12 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     try {
       const normalizedRecognitionDate =
         payload.recognitionDate && payload.recognitionDate.trim() !== '' ? payload.recognitionDate : null;
+      const normalizedDate = fromInputToApiDate(payload.date) ?? payload.date;
       const normalizedPaidAmount = Number.isFinite(payload.paidAmount ?? NaN) ? payload.paidAmount : null;
       const prepared = {
         ...payload,
         source: apiSource ?? payload.source,
+        date: normalizedDate,
         recognitionDate: normalizedRecognitionDate,
         paidAmount: normalizedPaidAmount,
       };
