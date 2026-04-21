@@ -3415,9 +3415,6 @@ export function InvoiceModal({
                               </div>
                               {lineItems.map((item) => {
                                 const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price);
-                                const categoryLabel = item.serviceCategoryId
-                                  ? serviceCategoryById.get(Number(item.serviceCategoryId)) ?? 'Категория не найдена'
-                                  : 'Все категории';
 
                                 return (
                                   <div
@@ -3430,25 +3427,13 @@ export function InvoiceModal({
                                         data-testid="invoice-line-item-service-trigger"
                                         onClick={() => openLineItemLookup(item.id)}
                                         aria-label="Наименование услуги"
-                                        title={item.name || 'Выберите категорию и наименование'}
-                                        className="flex min-h-[4.5rem] w-full items-start justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-3 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                        title={item.name || 'Выберите наименование услуги'}
+                                        className="flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
                                       >
                                         <span className="min-w-0 flex-1">
                                           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Услуга</span>
-                                          <span
-                                            className={`mt-1 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                                              item.serviceCategoryId
-                                                ? 'border-blue-100 bg-blue-50 text-blue-700'
-                                                : 'border-slate-200 bg-slate-100 text-slate-600'
-                                            }`}
-                                          >
-                                            <span className="truncate">{categoryLabel}</span>
-                                          </span>
-                                          <span className={`mt-2 block truncate font-medium ${item.name.trim() ? 'text-slate-700' : 'text-slate-400'}`}>
+                                          <span className={`mt-1 block truncate font-medium ${item.name.trim() ? 'text-slate-700' : 'text-slate-400'}`}>
                                             {item.name.trim() || 'Выберите наименование услуги'}
-                                          </span>
-                                          <span className="mt-1 block text-xs text-slate-400">
-                                            Категория и шаблон услуги открываются в одном окне
                                           </span>
                                         </span>
                                         <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
@@ -4135,11 +4120,11 @@ export function InvoiceModal({
         options={lineItemServiceLookupOptions}
         searchPlaceholder="Поиск наименования"
         maxWidthClassName="max-w-4xl"
-        filterLabel="РљР°С‚РµРіРѕСЂРёСЏ СѓСЃР»СѓРіРё"
+        filterLabel="Категория услуги"
         filterValue={activeLineItemLookup?.serviceCategoryId ?? ''}
         filterOptions={lineItemCategoryFilterOptions}
-        filterAllLabel="Р’СЃРµ РєР°С‚РµРіРѕСЂРёРё"
-        filterHelperText="РљР°С‚РµРіРѕСЂРёСЏ СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ Сѓ РїРѕР·РёС†РёРё СЃС‡С‘С‚Р° Рё СЃСЂР°Р·Сѓ РІР»РёСЏРµС‚ РЅР° СЃРїРёСЃРѕРє С€Р°Р±Р»РѕРЅРѕРІ, РµРґРёРЅРёС†Сѓ РёР·РјРµСЂРµРЅРёСЏ Рё С†РµРЅСѓ."
+        filterAllLabel="Все категории"
+        filterHelperText="Категория сохраняется у позиции счёта и сразу фильтрует подходящие шаблоны услуги."
         clearActionLabel="Очистить наименование"
         clearActionDescription="Оставить позицию без выбранного шаблона услуги."
         customActionLabel={canApplyCustomServiceName ? `Использовать: ${lineItemLookupQueryTrimmed}` : undefined}

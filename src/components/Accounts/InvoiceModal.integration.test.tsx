@@ -763,7 +763,12 @@ describe('InvoiceModal integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' }));
     expect(screen.getByText('Выбор наименования услуги')).toBeTruthy();
+    expect(screen.getByText('Категория услуги')).toBeTruthy();
+    expect(screen.getByText('Категория сохраняется у позиции счёта и сразу фильтрует подходящие шаблоны услуги.')).toBeTruthy();
     fireEvent.change(screen.getByTestId('invoice-line-item-lookup-filter-select'), { target: { value: '2' } });
+    await waitFor(() => {
+      expect(screen.getByText(/Категория: Гражданские дела\./i)).toBeTruthy();
+    });
 
     fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), { target: { value: 'Составл' } });
     fireEvent.click(screen.getByRole('button', { name: /Составление иска/i }));
@@ -772,7 +777,7 @@ describe('InvoiceModal integration', () => {
       expect((screen.getByLabelText('Единица измерения') as HTMLInputElement).value).toBe('усл.ед.');
       expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('15 000.00');
       expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Составление иска');
-      expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Гражданские дела');
+      expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).not.toContain('Гражданские дела');
     });
   });
 
