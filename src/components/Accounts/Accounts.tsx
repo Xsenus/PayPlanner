@@ -427,6 +427,8 @@ export function Accounts({
     overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
     cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
   };
+  const statusBadgeClass =
+    'inline-flex max-w-full items-center justify-center rounded-full px-3 py-1 text-center text-xs font-medium leading-tight whitespace-normal';
   void statusLabels;
   void statusClasses;
 
@@ -2059,13 +2061,15 @@ export function Accounts({
                                 );
                               case 'status':
                                 return (
-                                  <td key={column.key} className="px-4 py-3">
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${accountStatusClasses[accountStatus]}`}
-                                    >
-                                      {accountStatusLabels[accountStatus]}
-                                    </span>
-                                    {invoice?.paymentStatusName && <div className="mt-1 text-xs text-gray-500">{invoice.paymentStatusName}</div>}
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className={`${statusBadgeClass} ${accountStatusClasses[accountStatus]}`}>
+                                        {accountStatusLabels[accountStatus]}
+                                      </span>
+                                      {invoice?.paymentStatusName && (
+                                        <div className="text-center text-xs text-gray-500">{invoice.paymentStatusName}</div>
+                                      )}
+                                    </div>
                                   </td>
                                 );
                               case 'dueDate':
@@ -2187,17 +2191,6 @@ export function Accounts({
                                     {canEdit && invoice && (
                                       <button
                                         type="button"
-                                        onClick={() => openEditPage(invoice.id)}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
-                                        title={`Редактировать счёт №${invoice.number}`}
-                                        aria-label={`Редактировать счёт №${invoice.number}`}
-                                      >
-                                        <Pencil className="h-4 w-4" />
-                                      </button>
-                                    )}
-                                    {canEdit && invoice && (
-                                      <button
-                                        type="button"
                                         onClick={() => openPaymentCreateModal(invoice)}
                                         className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
                                       >
@@ -2238,8 +2231,8 @@ export function Accounts({
                                           <td className="px-4 py-2 font-semibold text-gray-900">
                                             {formatCurrencySmart(payment.amount).full}
                                           </td>
-                                          <td className="px-4 py-2">
-                                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusClasses[deriveStatusFromPayments([payment], invoice)]}`}>
+                                          <td className="px-4 py-2 text-center align-middle">
+                                            <span className={`${statusBadgeClass} ${accountStatusClasses[deriveStatusFromPayments([payment], invoice)]}`}>
                                               {accountStatusLabels[deriveStatusFromPayments([payment], invoice)]}
                                             </span>
                                           </td>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
@@ -103,7 +103,11 @@ function createLegacySiblingPayment(overrides: Partial<Payment> = {}): Payment {
   });
 }
 
-function createAccountRow(options?: { invoice?: Invoice; payments?: Payment[] }): AccountRegistryRow {
+function createAccountRow(options?: {
+  invoice?: Invoice;
+  payments?: Payment[];
+  status?: AccountRegistryRow['status'];
+}): AccountRegistryRow {
   const payments = options?.payments ?? [createRepresentativePayment(), createSiblingPayment()];
   return {
     groupKey: 'invoice-24',
@@ -114,7 +118,7 @@ function createAccountRow(options?: { invoice?: Invoice; payments?: Payment[] })
     totalAmount: payments.reduce((sum, payment) => sum + (payment.amount ?? 0), 0),
     dueDate: '2026-04-03',
     paidDate: '2026-04-03',
-    status: 'paid',
+    status: options?.status ?? 'paid',
     type: 'Income',
     isOverdue: false,
   };
@@ -535,14 +539,62 @@ describe('Accounts integration', () => {
     expect(screen.getByText('payment-description:Sibling payment for invoice 24')).toBeTruthy();
   });
 
-  it('opens the invoice editor from the expanded operations panel', async () => {
-    const onRouteInvoiceChange = vi.fn();
-
-    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+  it('does not show the invoice edit shortcut in the expanded operations panel', async () => {
+    render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: '24' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт №24' }));
 
-    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
+    expect(await screen.findByText('Добавить платеж')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Редактировать счёт №24' })).toBeNull();
+  });
+
+  it('keeps centered status badges in the registry row and expanded payments table', async () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          status: 'overdue',
+          payments: [
+            createRepresentativePayment({
+              id: 530,
+              status: 'Pending',
+              isPaid: false,
+              paidDate: null,
+              description: 'Pending payment for invoice 24',
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    const expandButton = await screen.findByRole('button', { name: '24' });
+    const registryStatusBadge = screen
+      .getAllByText('Просрочен')
+      .find((element) => element.tagName === 'SPAN');
+    expect(registryStatusBadge).toBeTruthy();
+    expect((registryStatusBadge as HTMLSpanElement).className).toContain('justify-center');
+    expect((registryStatusBadge as HTMLSpanElement).className).toContain('text-center');
+    expect((registryStatusBadge as HTMLSpanElement).className).toContain('whitespace-normal');
+
+    fireEvent.click(expandButton);
+
+    const operationsCell = await screen.findByText('Pending payment for invoice 24');
+    const paymentRow = operationsCell.closest('tr');
+    expect(paymentRow).toBeTruthy();
+
+    const paymentStatusBadge = within(paymentRow as HTMLTableRowElement)
+      .getAllByText('Не оплачен')
+      .find((element) => element.tagName === 'SPAN');
+    expect(paymentStatusBadge).toBeTruthy();
+    expect((paymentStatusBadge as HTMLSpanElement).className).toContain('justify-center');
+    expect((paymentStatusBadge as HTMLSpanElement).className).toContain('text-center');
+    expect((paymentStatusBadge as HTMLSpanElement).className).toContain('whitespace-normal');
   });
 });

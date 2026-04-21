@@ -130,6 +130,60 @@ public class AccountsControllerTests
         Assert.Equal(new DateTime(2026, 4, 4), row.DueDate);
     }
 
+    [Fact]
+    public async Task GetRegistry_UsesInvoiceNumberAsTieBreaker_WhenDatesMatch()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateInvoiceDocumentAsync(db, "31", new DateTime(2026, 4, 8), 10_000m);
+        await CreateInvoiceDocumentAsync(db, "30", new DateTime(2026, 4, 8), 18_000m);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: "date",
+            sortDir: "desc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+
+        Assert.Equal(new[] { "31", "30" }, payload.Items.Select(item => item.AccountNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task GetRegistry_SortsInvoiceNumbersNaturally_WhenSortingByNumber()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateInvoiceDocumentAsync(db, "10", new DateTime(2026, 4, 8), 10_000m);
+        await CreateInvoiceDocumentAsync(db, "2", new DateTime(2026, 4, 8), 18_000m);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+
+        Assert.Equal(new[] { "2", "10" }, payload.Items.Select(item => item.AccountNumber).ToArray());
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -264,6 +318,28 @@ public class AccountsControllerTests
         legacySiblingPayment.LastPaymentDate = legacySiblingPayment.Date;
 
         db.Payments.AddRange(representativePayment, legacySiblingPayment);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateInvoiceDocumentAsync(PaymentContext db, string number, DateTime date, decimal amount)
+    {
+        var invoice = new Invoice
+        {
+            Number = number,
+            Date = date,
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(date, amount, $"Invoice {number}");
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date;
+        payment.Status = PaymentStatus.Pending;
+
+        db.Payments.Add(payment);
         await db.SaveChangesAsync();
     }
 

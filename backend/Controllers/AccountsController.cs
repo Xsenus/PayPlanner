@@ -15,6 +15,7 @@ namespace PayPlanner.Api.Controllers;
 public class AccountsController : ControllerBase
 {
     private readonly PaymentContext _db;
+    private static readonly IComparer<string?> NaturalAccountComparer = Comparer<string?>.Create(CompareAccountNumbers);
 
     public AccountsController(PaymentContext db) => _db = db;
 
@@ -515,8 +516,12 @@ public class AccountsController : ControllerBase
         return (sortBy ?? "date").Trim().ToLowerInvariant() switch
         {
             "number" => desc
-                ? groups.OrderByDescending(group => group.Representative.Number, StringComparer.OrdinalIgnoreCase).ThenByDescending(group => group.GroupKey)
-                : groups.OrderBy(group => group.Representative.Number, StringComparer.OrdinalIgnoreCase).ThenBy(group => group.GroupKey),
+                ? groups.OrderByDescending(group => group.Representative.Number, NaturalAccountComparer)
+                    .ThenByDescending(group => group.Representative.Date)
+                    .ThenByDescending(group => group.GroupKey, StringComparer.OrdinalIgnoreCase)
+                : groups.OrderBy(group => group.Representative.Number, NaturalAccountComparer)
+                    .ThenBy(group => group.Representative.Date)
+                    .ThenBy(group => group.GroupKey, StringComparer.OrdinalIgnoreCase),
             "amount" => desc
                 ? groups.OrderByDescending(group => group.TotalAmount).ThenByDescending(group => group.GroupKey)
                 : groups.OrderBy(group => group.TotalAmount).ThenBy(group => group.GroupKey),
@@ -534,9 +539,107 @@ public class AccountsController : ControllerBase
                 : groups.OrderBy(group => group.Representative.ResponsibleName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ThenBy(group => group.GroupKey),
             _ => desc
-                ? groups.OrderByDescending(group => group.Representative.Date).ThenByDescending(group => group.GroupKey)
-                : groups.OrderBy(group => group.Representative.Date).ThenBy(group => group.GroupKey),
+                ? groups.OrderByDescending(group => group.Representative.Date)
+                    .ThenByDescending(group => group.Representative.Number, NaturalAccountComparer)
+                    .ThenByDescending(group => group.GroupKey, StringComparer.OrdinalIgnoreCase)
+                : groups.OrderBy(group => group.Representative.Date)
+                    .ThenBy(group => group.Representative.Number, NaturalAccountComparer)
+                    .ThenBy(group => group.GroupKey, StringComparer.OrdinalIgnoreCase),
         };
+    }
+
+    private static int CompareAccountNumbers(string? left, string? right)
+    {
+        var leftValue = (left ?? string.Empty).Trim();
+        var rightValue = (right ?? string.Empty).Trim();
+        var leftIndex = 0;
+        var rightIndex = 0;
+
+        while (leftIndex < leftValue.Length && rightIndex < rightValue.Length)
+        {
+            var leftChar = leftValue[leftIndex];
+            var rightChar = rightValue[rightIndex];
+
+            if (char.IsDigit(leftChar) && char.IsDigit(rightChar))
+            {
+                var leftDigitsStart = leftIndex;
+                while (leftIndex < leftValue.Length && char.IsDigit(leftValue[leftIndex]))
+                {
+                    leftIndex++;
+                }
+
+                var rightDigitsStart = rightIndex;
+                while (rightIndex < rightValue.Length && char.IsDigit(rightValue[rightIndex]))
+                {
+                    rightIndex++;
+                }
+
+                var numberComparison = CompareNumericSegments(
+                    leftValue.AsSpan(leftDigitsStart, leftIndex - leftDigitsStart),
+                    rightValue.AsSpan(rightDigitsStart, rightIndex - rightDigitsStart));
+
+                if (numberComparison != 0)
+                {
+                    return numberComparison;
+                }
+
+                continue;
+            }
+
+            var normalizedLeft = char.ToUpperInvariant(leftChar);
+            var normalizedRight = char.ToUpperInvariant(rightChar);
+            if (normalizedLeft != normalizedRight)
+            {
+                return normalizedLeft.CompareTo(normalizedRight);
+            }
+
+            leftIndex++;
+            rightIndex++;
+        }
+
+        if (leftIndex < leftValue.Length)
+        {
+            return 1;
+        }
+
+        if (rightIndex < rightValue.Length)
+        {
+            return -1;
+        }
+
+        return 0;
+    }
+
+    private static int CompareNumericSegments(ReadOnlySpan<char> left, ReadOnlySpan<char> right)
+    {
+        var normalizedLeft = TrimLeadingZeros(left);
+        var normalizedRight = TrimLeadingZeros(right);
+
+        if (normalizedLeft.Length != normalizedRight.Length)
+        {
+            return normalizedLeft.Length.CompareTo(normalizedRight.Length);
+        }
+
+        for (var index = 0; index < normalizedLeft.Length; index++)
+        {
+            if (normalizedLeft[index] != normalizedRight[index])
+            {
+                return normalizedLeft[index].CompareTo(normalizedRight[index]);
+            }
+        }
+
+        return left.Length.CompareTo(right.Length);
+    }
+
+    private static ReadOnlySpan<char> TrimLeadingZeros(ReadOnlySpan<char> value)
+    {
+        var index = 0;
+        while (index < value.Length - 1 && value[index] == '0')
+        {
+            index++;
+        }
+
+        return value[index..];
     }
 
     private static AccountsSummaryDto BuildSummary(IEnumerable<WorkingAccountGroup> groups)
