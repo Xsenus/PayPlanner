@@ -585,13 +585,18 @@ export function Accounts({
 
   const openEditPage = useCallback((invoiceId: number, draft: InvoiceEditorDraftState | null = null) => {
     clearInvoiceEditorDraft();
+    if (pageEditingInvoiceId === invoiceId) {
+      setResumeInvoiceDraft(draft);
+      setModalError(null);
+      return;
+    }
     setPageEditingInvoiceId(invoiceId);
     setPageEditingInvoice(null);
     setPageInvoiceLoading(true);
     setResumeInvoiceDraft(draft);
     setModalError(null);
     onRouteInvoiceChange?.(invoiceId);
-  }, [onRouteInvoiceChange]);
+  }, [onRouteInvoiceChange, pageEditingInvoiceId]);
 
   useEffect(() => {
     if (!pageEditingInvoiceId) return;

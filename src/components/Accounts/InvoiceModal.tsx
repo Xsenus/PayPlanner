@@ -37,7 +37,7 @@ import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { filterRepresentativeInvoiceWhenInstallmentsExist, isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { filterRepresentativeInvoiceWhenInstallmentsExist, isGeneratedInstallmentPayment, isInvoiceManagedPayment } from '../../utils/invoicePayments';
 
 type FormState = {
   number: string;
@@ -1588,6 +1588,17 @@ export function InvoiceModal({
     }
   }, []);
 
+  const openInvoiceManagedPaymentEditor = useCallback((payment: Payment) => {
+    closePaymentPreview();
+    setLocalError(null);
+    if (isPageMode) {
+      setPageViewMode(false);
+    }
+    if (form.type === 'Income' && isGeneratedInstallmentPayment(payment)) {
+      setInstallmentModalOpen(true);
+    }
+  }, [closePaymentPreview, form.type, isPageMode]);
+
   useEffect(() => {
     if (!open) {
       closeContractPreview();
@@ -3085,6 +3096,10 @@ export function InvoiceModal({
                               key={payment.id}
                               type="button"
                               onClick={() => {
+                                if (isInvoiceManagedPayment(payment)) {
+                                  openInvoiceManagedPaymentEditor(payment);
+                                  return;
+                                }
                                 if (onEditRelatedPayment && !isInvoiceManagedPayment(payment)) {
                                   onEditRelatedPayment(payment);
                                   return;
@@ -3555,9 +3570,10 @@ export function InvoiceModal({
                   <div className="space-y-3">
                     {displayPayments.map((payment) => {
                       const invoiceManagedPayment = isInvoiceManagedPayment(payment);
+                      const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                      const canEditInvoiceManagedPayment = isGeneratedInstallmentPayment(payment);
                       const canEditRelatedPayment = Boolean(onEditRelatedPayment) && !invoiceManagedPayment;
                       const canDeleteRelatedPayment = Boolean(onDeleteRelatedPayment) && !invoiceManagedPayment;
-                      const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
                       const installmentSequenceLabel = installmentMeta
                         ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
                         : null;
@@ -3594,20 +3610,18 @@ export function InvoiceModal({
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
-                        {(invoiceManagedPayment || canEditRelatedPayment || canDeleteRelatedPayment) && (
+                        {(canEditInvoiceManagedPayment || canEditRelatedPayment || canDeleteRelatedPayment) && (
                           <div className="flex items-center gap-2 self-end sm:self-start">
-                            {invoiceManagedPayment && (
+                            {canEditInvoiceManagedPayment && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  void openPaymentPreview(payment);
-                                }}
-                                data-testid={`invoice-related-payment-open-${payment.id}`}
+                                onClick={() => openInvoiceManagedPaymentEditor(payment)}
+                                data-testid={`invoice-related-payment-edit-${payment.id}`}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-50"
-                                title="Открыть"
-                                aria-label="Открыть"
+                                title={t('edit') ?? 'Редактировать'}
+                                aria-label={t('edit') ?? 'Редактировать'}
                               >
-                                <Link2 className="h-4 w-4" />
+                                <Pencil className="h-4 w-4" />
                               </button>
                             )}
                             {canEditRelatedPayment && (
