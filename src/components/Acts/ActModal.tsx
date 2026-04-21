@@ -1,4 +1,4 @@
-import { ArrowLeft, Link2, Loader2, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../services/api';
 import type {
@@ -75,6 +75,8 @@ type InvoiceLookupRecord = Pick<
   | 'date'
   | 'amount'
   | 'type'
+  | 'clientId'
+  | 'expenseClientId'
   | 'clientName'
   | 'expenseClientName'
 >;
@@ -164,6 +166,30 @@ function resolveCounterpartyClientId(invoice: Invoice | null): number | null {
 }
 
 function resolveCounterpartyName(invoice: Invoice | null): string {
+  if (!invoice) {
+    return '';
+  }
+
+  if (invoice.type === 'Expense') {
+    return invoice.expenseClientName?.trim() || invoice.clientName?.trim() || '';
+  }
+
+  return invoice.clientName?.trim() || invoice.expenseClientName?.trim() || '';
+}
+
+function resolveInvoiceLookupCounterpartyClientId(invoice: InvoiceLookupRecord | null): number | null {
+  if (!invoice) {
+    return null;
+  }
+
+  if (invoice.type === 'Expense') {
+    return invoice.expenseClientId ?? invoice.clientId ?? null;
+  }
+
+  return invoice.clientId ?? invoice.expenseClientId ?? null;
+}
+
+function resolveInvoiceLookupCounterpartyName(invoice: InvoiceLookupRecord | null): string {
   if (!invoice) {
     return '';
   }
@@ -336,6 +362,8 @@ export function ActModal({
               date: invoice.date,
               amount: invoice.amount,
               type: invoice.type,
+              clientId: invoice.clientId,
+              expenseClientId: invoice.expenseClientId,
               clientName: invoice.clientName,
               expenseClientName: invoice.expenseClientName,
             })),
@@ -441,13 +469,46 @@ export function ActModal({
   }, [open, isEdit, act]);
 
   const currentAct = useMemo(() => actDetails ?? act, [act, actDetails]);
+  const selectedInvoiceLookupRecord = useMemo(
+    () => invoiceOptions.find((item) => String(item.id) === String(form.invoiceId)) ?? null,
+    [form.invoiceId, invoiceOptions],
+  );
   const actType = useMemo<PaymentKind | null>(
-    () => invoiceDetails?.type ?? act?.type ?? null,
-    [act?.type, invoiceDetails?.type],
+    () => invoiceDetails?.type ?? selectedInvoiceLookupRecord?.type ?? act?.type ?? null,
+    [act?.type, invoiceDetails?.type, selectedInvoiceLookupRecord?.type],
   );
   const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(actType), [actType]);
-  const linkedCounterpartyClientId = useMemo(() => resolveCounterpartyClientId(invoiceDetails), [invoiceDetails]);
-  const linkedCounterpartyName = useMemo(() => resolveCounterpartyName(invoiceDetails), [invoiceDetails]);
+  const linkedCounterpartyClientId = useMemo(
+    () => resolveCounterpartyClientId(invoiceDetails) ?? resolveInvoiceLookupCounterpartyClientId(selectedInvoiceLookupRecord),
+    [invoiceDetails, selectedInvoiceLookupRecord],
+  );
+  const linkedCounterpartyName = useMemo(
+    () => resolveCounterpartyName(invoiceDetails) || resolveInvoiceLookupCounterpartyName(selectedInvoiceLookupRecord),
+    [invoiceDetails, selectedInvoiceLookupRecord],
+  );
+  const selectedCounterpartyClientId = useMemo(
+    () => (form.clientId ? Number(form.clientId) : null),
+    [form.clientId],
+  );
+  const counterpartyLookupOptions = useMemo<LookupSelectOption[]>(
+    () =>
+      [...clients]
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
+        .map((client) => ({
+          value: String(client.id),
+          label: client.name,
+          description: [
+            client.clientStatus?.name?.trim() || '',
+            client.company?.trim() || '',
+          ].filter(Boolean).join(' • '),
+          keywords: [
+            client.name,
+            client.company ?? '',
+            client.clientStatus?.name ?? '',
+          ],
+        })),
+    [clients],
+  );
   const invoiceLookupOptions = useMemo<LookupSelectOption[]>(() => {
     const items = [...invoiceOptions];
 
@@ -462,12 +523,18 @@ export function ActModal({
         date: invoiceDetails?.date ?? '',
         amount: invoiceDetails?.amount ?? 0,
         type: invoiceDetails?.type ?? 'Income',
+        clientId: invoiceDetails?.clientId ?? null,
+        expenseClientId: invoiceDetails?.expenseClientId ?? null,
         clientName: invoiceDetails?.clientName ?? null,
         expenseClientName: invoiceDetails?.expenseClientName ?? null,
       });
     }
 
-    return items.map((invoice) => ({
+    const filteredItems = selectedCounterpartyClientId
+      ? items.filter((invoice) => resolveInvoiceLookupCounterpartyClientId(invoice) === selectedCounterpartyClientId)
+      : items;
+
+    return filteredItems.map((invoice) => ({
       value: String(invoice.id),
       label: buildInvoiceLookupLabel(invoice),
       description: buildInvoiceLookupDescription(invoice),
@@ -478,7 +545,7 @@ export function ActModal({
         invoice.type === 'Expense' ? 'расход поставщик' : 'доход клиент',
       ],
     }));
-  }, [form.invoiceNumber, invoiceDetails, invoiceOptions, linkedInvoiceId]);
+  }, [form.invoiceNumber, invoiceDetails, invoiceOptions, linkedInvoiceId, selectedCounterpartyClientId]);
 
   useEffect(() => {
     if (!open || !invoiceDetails) {
@@ -734,6 +801,35 @@ export function ActModal({
     setForm((previous) => ({ ...previous, [field]: value }));
   };
 
+  const handleCounterpartySelect = (value: string) => {
+    const nextCounterpartyId = value ? Number(value) : null;
+    const shouldClearInvoice = linkedInvoiceId !== null
+      && linkedCounterpartyClientId !== null
+      && linkedCounterpartyClientId !== nextCounterpartyId;
+
+    if (shouldClearInvoice) {
+      selectionSeedRef.current = null;
+      setSelectedLineQuantities({});
+      setLineItemPickerOpen(false);
+      setInvoiceError(null);
+      setInvoiceDetails(null);
+
+      setForm((previous) => ({
+        ...previous,
+        clientId: value,
+        invoiceId: '',
+        invoiceNumber: '',
+        creationMode: 'Manual',
+      }));
+      return;
+    }
+
+    setForm((previous) => ({
+      ...previous,
+      clientId: value,
+    }));
+  };
+
   const handleInvoiceSelect = (value: string) => {
     selectionSeedRef.current = null;
     setSelectedLineQuantities({});
@@ -752,9 +848,11 @@ export function ActModal({
     }
 
     const selectedInvoice = invoiceOptions.find((item) => String(item.id) === value) ?? null;
+    const counterpartyClientId = resolveInvoiceLookupCounterpartyClientId(selectedInvoice);
 
     setForm((previous) => ({
       ...previous,
+      clientId: counterpartyClientId ? String(counterpartyClientId) : previous.clientId,
       invoiceId: value,
       invoiceNumber: selectedInvoice?.number ?? previous.invoiceNumber,
       creationMode: 'Partial',
@@ -1066,6 +1164,36 @@ export function ActModal({
               </div>
 
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <LookupSelect
+                    label={counterpartyLabel}
+                    value={form.clientId}
+                    options={counterpartyLookupOptions}
+                    onChange={handleCounterpartySelect}
+                    title="Выбор контрагента"
+                    dictionaryLabel="Справочник"
+                    placeholder="Выберите контрагента"
+                    searchPlaceholder="Поиск по имени компании, клиенту или статусу"
+                    emptyOptionLabel="Без контрагента"
+                    emptyOptionDescription="Оставить акт без выбранного контрагента."
+                    helperText={
+                      linkedInvoiceId
+                        ? 'Контрагент синхронизируется с выбранным счетом. При смене контрагента счет будет сброшен.'
+                        : selectedCounterpartyClientId
+                          ? 'Теперь в справочнике счетов будут показаны только документы этого контрагента.'
+                          : 'Сначала можно выбрать контрагента, а потом сузить список счетов.'
+                    }
+                    noOptionsText={lookupsLoading ? 'Загружаем контрагентов...' : 'Контрагенты не найдены'}
+                    disabled={lookupsLoading}
+                  />
+
+                  {selectedClient?.clientStatus ? (
+                    <div>
+                      <ClientStatusBadge status={selectedClient.clientStatus} />
+                    </div>
+                  ) : null}
+                </div>
+
                 <LookupSelect
                   label="Счет"
                   value={form.invoiceId}
@@ -1080,9 +1208,17 @@ export function ActModal({
                   helperText={
                     linkedInvoiceId
                       ? 'Счет, тип акта, контрагент и позиции в акте связаны между собой.'
-                      : 'После выбора счета контрагент и позиции подтянутся автоматически.'
+                      : selectedCounterpartyClientId
+                        ? 'Показываем только счета выбранного контрагента.'
+                        : 'После выбора счета контрагент и позиции подтянутся автоматически.'
                   }
-                  noOptionsText={invoiceOptionsLoading ? 'Загружаем счета...' : 'Счета не найдены'}
+                  noOptionsText={
+                    invoiceOptionsLoading
+                      ? 'Загружаем счета...'
+                      : selectedCounterpartyClientId
+                        ? 'У выбранного контрагента нет счетов'
+                        : 'Счета не найдены'
+                  }
                   disabled={invoiceOptionsLoading}
                 />
 
@@ -1113,6 +1249,16 @@ export function ActModal({
 
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
+                        <div className="mt-2 text-sm font-medium text-slate-900">{selectedCounterpartyName}</div>
+                        {selectedClient?.clientStatus ? (
+                          <div className="mt-2">
+                            <ClientStatusBadge status={selectedClient.clientStatus} />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div>
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Счет</div>
                         {invoiceLoading ? (
                           <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-500">
@@ -1140,16 +1286,6 @@ export function ActModal({
                           </div>
                         )}
                       </div>
-
-                      <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
-                        <div className="mt-2 text-sm font-medium text-slate-900">{selectedCounterpartyName}</div>
-                        {selectedClient?.clientStatus ? (
-                          <div className="mt-2">
-                            <ClientStatusBadge status={selectedClient.clientStatus} />
-                          </div>
-                        ) : null}
-                      </div>
                     </div>
 
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -1175,28 +1311,13 @@ export function ActModal({
                   </div>
                 ) : (
                   <div className="grid gap-4 md:grid-cols-2">
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="font-medium text-slate-700">{counterpartyLabel}</span>
-                      <select
-                        value={form.clientId}
-                        onChange={handleChange('clientId')}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                      >
-                        <option value="">{t('selectClient') ?? 'Выберите контрагента'}</option>
-                        {clients.map((client) => (
-                          <option key={client.id} value={client.id}>
-                            {client.name}
-                            {client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}
-                            {client.company ? ` — ${client.company}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedClient?.clientStatus ? (
-                        <div className="mt-1">
-                          <ClientStatusBadge status={selectedClient.clientStatus} />
-                        </div>
-                      ) : null}
-                    </label>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{counterpartyLabel}</div>
+                      <div className="mt-2 font-medium text-slate-900">{selectedCounterpartyName}</div>
+                      <p className="mt-3 text-xs leading-5 text-slate-500">
+                        Если сначала выбрать контрагента, список счетов автоматически отфильтруется по нему.
+                      </p>
+                    </div>
 
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                       <div className="font-medium text-slate-700">Ответственный</div>
@@ -1326,13 +1447,18 @@ export function ActModal({
                               className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 ${LINE_ITEM_GRID_TEMPLATE}`}
                             >
                               <div className="space-y-1">
-                                <div className="flex min-h-[3.25rem] w-full items-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 md:h-10 md:min-h-10 md:py-2">
+                                <div
+                                  className="flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-left text-sm md:h-10 md:min-h-10 md:py-2"
+                                  aria-label="Наименование услуги"
+                                  title={item.name}
+                                >
                                   <span className="min-w-0 flex-1">
-                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">
-                                      Наименование
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Услуга</span>
+                                    <span className="mt-1 block truncate font-medium text-slate-700 md:mt-0">
+                                      {item.name}
                                     </span>
-                                    <span className="mt-1 block truncate font-medium text-slate-700 md:mt-0">{item.name}</span>
                                   </span>
+                                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-300" />
                                 </div>
                                 <div className="flex flex-wrap gap-3 text-xs text-slate-500">
                                   <span>Всего: {formatDecimalInput(item.totalQuantity)}</span>
@@ -1344,29 +1470,32 @@ export function ActModal({
                               <label className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Кол-во</span>
                                 <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  max={formatDecimalInput(item.availableQuantity)}
+                                  type="text"
+                                  inputMode="decimal"
                                   value={selectedLineQuantities[item.sourceKey] ?? ''}
                                   onChange={handleQuantityChange(item.sourceKey)}
+                                  placeholder="Кол-во"
+                                  aria-label="Количество"
                                   className="w-full rounded-lg border border-slate-300 px-2 py-2 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                                 />
                               </label>
 
-                              <div className="space-y-1">
+                              <label className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Ед.</span>
-                                <div className="inline-flex min-h-10 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                <div className="inline-flex min-h-10 w-full items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
                                   {item.unit || '—'}
                                 </div>
-                              </div>
+                              </label>
 
-                              <div className="space-y-1">
+                              <label className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Цена</span>
-                                <output className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+                                <output
+                                  aria-label="Цена"
+                                  className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums text-slate-700"
+                                >
                                   {formatCurrencySmart(item.price).full}
                                 </output>
-                              </div>
+                              </label>
 
                               <div className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Сумма</span>

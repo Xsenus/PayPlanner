@@ -146,7 +146,7 @@ describe('ActModal integration', () => {
     expect(payload.lineItems).toEqual([{ sourceKey: 'db:101', quantity: 2 }]);
   });
 
-  it('allows selecting an invoice from the dictionary and recalculates the amount by selected positions', async () => {
+  it('filters invoices by selected counterparty and recalculates the amount by selected positions', async () => {
     const invoice = {
       id: 618,
       number: 'INV-618',
@@ -164,8 +164,19 @@ describe('ActModal integration', () => {
       ],
       acts: [],
     } as unknown as Invoice;
+    const foreignInvoice = {
+      id: 999,
+      number: 'INV-999',
+      date: '2026-04-11',
+      amount: 7000,
+      type: 'Expense',
+      clientId: 1,
+      clientName: 'Базовый клиент',
+      expenseClientId: 9,
+      expenseClientName: 'Другой поставщик',
+    } as unknown as Invoice;
 
-    getInvoicesMock.mockResolvedValue({ items: [invoice] });
+    getInvoicesMock.mockResolvedValue({ items: [invoice, foreignInvoice] });
     getInvoiceMock.mockResolvedValue(invoice);
 
     render(
@@ -179,6 +190,7 @@ describe('ActModal integration', () => {
         clients={[
           createClient(1, 'Базовый клиент'),
           createClient(2, 'ООО Поставщик'),
+          createClient(9, 'Другой поставщик'),
         ]}
         responsibles={[createResponsible(5, 'Мария Менеджер')]}
         lookupsLoading={false}
@@ -191,7 +203,12 @@ describe('ActModal integration', () => {
       expect(getInvoicesMock).toHaveBeenCalledWith({ page: 1, pageSize: 200 });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Справочник' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
+    fireEvent.click((await screen.findByText('ООО Поставщик')).closest('button') as HTMLButtonElement);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[1]);
+    expect(await screen.findByText(/Счет №INV-618 от 2026-04-10/i)).toBeTruthy();
+    expect(screen.queryByText(/Счет №INV-999 от 2026-04-11/i)).toBeNull();
     fireEvent.click((await screen.findByText(/Счет №INV-618 от 2026-04-10/i)).closest('button') as HTMLButtonElement);
 
     await waitFor(() => {
@@ -244,9 +261,11 @@ describe('ActModal integration', () => {
       screen.getByText('Можно выбрать счет из справочника или оставить акт пустым и заполнить его вручную.'),
     ).toBeTruthy();
 
+    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
+    fireEvent.click((await screen.findByText('Иван Иванов')).closest('button') as HTMLButtonElement);
+
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'MANUAL-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '4321.50' } });
-    fireEvent.change(screen.getByLabelText('Контрагент'), { target: { value: '7' } });
     fireEvent.change(screen.getByLabelText('Комментарий'), { target: { value: 'Пустой акт без счета' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
 
