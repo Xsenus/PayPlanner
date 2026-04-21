@@ -124,6 +124,11 @@ public class AccountsController : ControllerBase
                     .ToList();
 
                 var representative = orderedGroup[0];
+                var editorPaymentId = group
+                    .OrderByDescending(item => item.DocumentKind == DocumentKind.Invoice)
+                    .ThenBy(item => item.Id)
+                    .Select(item => item.Id)
+                    .FirstOrDefault();
                 var invoiceEntityId = orderedGroup
                     .Select(item => item.InvoiceEntityId)
                     .FirstOrDefault(value => value.HasValue && value.Value > 0);
@@ -132,6 +137,7 @@ public class AccountsController : ControllerBase
                 {
                     GroupKey = group.Key,
                     Representative = representative,
+                    EditorPaymentId = editorPaymentId > 0 ? editorPaymentId : representative.Id,
                     InvoiceEntityId = invoiceEntityId,
                     LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.ClientCaseId, representative.Type),
                     FallbackAmount = orderedGroup.Sum(item => item.Amount),
@@ -263,7 +269,7 @@ public class AccountsController : ControllerBase
             .ToList();
 
         var representativeIds = pagedGroups
-            .Select(group => group.Representative.Id)
+            .Select(group => group.EditorPaymentId)
             .Distinct()
             .ToList();
 
@@ -340,8 +346,8 @@ public class AccountsController : ControllerBase
 
             var invoice = BuildInvoiceDto(
                 group,
-                responsiblesMap.GetValueOrDefault(group.Representative.Id),
-                clientCasesMap.GetValueOrDefault(group.Representative.Id),
+                responsiblesMap.GetValueOrDefault(group.EditorPaymentId),
+                clientCasesMap.GetValueOrDefault(group.EditorPaymentId),
                 groupActs);
 
             var payments = group.RelatedPaymentIds
@@ -693,7 +699,7 @@ public class AccountsController : ControllerBase
         var representative = group.Representative;
         var invoice = new InvoiceDto
         {
-            Id = representative.Id,
+            Id = group.EditorPaymentId,
             InvoiceEntityId = representative.InvoiceEntityId,
             Number = representative.Number,
             Date = representative.Date,
@@ -1096,6 +1102,7 @@ public class AccountsController : ControllerBase
     {
         public string GroupKey { get; init; } = string.Empty;
         public AccountInvoiceCandidate Representative { get; init; } = null!;
+        public int EditorPaymentId { get; init; }
         public int? InvoiceEntityId { get; init; }
         public string? LegacyGroupKey { get; init; }
         public HashSet<int> InvoicePaymentIds { get; init; } = new();

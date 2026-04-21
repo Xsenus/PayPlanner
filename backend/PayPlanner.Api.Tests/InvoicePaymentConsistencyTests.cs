@@ -161,6 +161,46 @@ public class InvoicePaymentConsistencyTests
     }
 
     [Fact]
+    public async Task AccountsRegistry_ReturnsOpenableParentInvoiceId_ForInstallmentInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+
+        var invoicesController = CreateInvoicesController(db);
+        var accountsController = new AccountsController(db);
+
+        var accountsResult = await accountsController.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var accountsOk = Assert.IsType<OkObjectResult>(accountsResult.Result);
+        var accountsPayload = Assert.IsType<AccountsPageResponse>(accountsOk.Value);
+        var registryRow = Assert.Single(accountsPayload.Items);
+
+        Assert.Equal("27", registryRow.AccountNumber);
+        Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
+        Assert.Equal(
+            aggregate.InstallmentPaymentIds.OrderBy(id => id).ToArray(),
+            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+
+        var openedInvoiceResult = await invoicesController.GetById(registryRow.Invoice!.Id, CancellationToken.None);
+        var openedInvoiceOk = Assert.IsType<OkObjectResult>(openedInvoiceResult.Result);
+        var openedInvoice = Assert.IsType<InvoiceDto>(openedInvoiceOk.Value);
+
+        Assert.Equal(aggregate.InvoicePaymentId, openedInvoice.Id);
+        Assert.Equal(aggregate.InvoiceEntityId, openedInvoice.InvoiceEntityId);
+    }
+
+    [Fact]
     public async Task PaymentUpdate_NormalizesInvoiceLink_AndKeepsInvoiceReadsConsistent()
     {
         await using var db = await CreateContextAsync();
@@ -587,6 +627,99 @@ public class InvoicePaymentConsistencyTests
         await db.SaveChangesAsync();
 
         return (representativePayment.Id, siblingPayment.Id, invoice.Id, client.Id, clientCase.Id);
+    }
+
+    private static async Task<(int InvoicePaymentId, int[] InstallmentPaymentIds, int InvoiceEntityId, int ClientId, int ClientCaseId)> CreateInstallmentInvoiceAggregateAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Артамонов Александр Александрович",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "АРТАМОНОВ - ОФОРМЛЕНИЕ ГАРАЖА",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "27",
+            Date = new DateTime(2026, 4, 2),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = new Payment
+        {
+            Amount = 30_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 4, 2),
+            PlannedDate = new DateTime(2026, 4, 2),
+            PaidDate = new DateTime(2026, 4, 2),
+            LastPaymentDate = new DateTime(2026, 4, 2),
+            PaidAmount = 30_000m,
+            Description = "Счет №27",
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            ClientCase = clientCase,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+        };
+
+        var firstInstallment = new Payment
+        {
+            Amount = 15_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 4, 10),
+            PlannedDate = new DateTime(2026, 4, 10),
+            PaidDate = new DateTime(2026, 4, 10),
+            LastPaymentDate = new DateTime(2026, 4, 10),
+            PaidAmount = 15_000m,
+            Description = "Платеж 1/2 по счету №27",
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            ClientCase = clientCase,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 1",
+        };
+
+        var secondInstallment = new Payment
+        {
+            Amount = 15_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            Description = "Платеж 2/2 по счету №27",
+            Status = PaymentStatus.Pending,
+            IsPaid = false,
+            Type = PaymentType.Income,
+            Client = client,
+            ClientCase = clientCase,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 2",
+        };
+
+        db.Payments.AddRange(representativePayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        return (
+            representativePayment.Id,
+            new[] { firstInstallment.Id, secondInstallment.Id },
+            invoice.Id,
+            client.Id,
+            clientCase.Id);
     }
 
     private static InvoicesController CreateInvoicesController(PaymentContext db)
