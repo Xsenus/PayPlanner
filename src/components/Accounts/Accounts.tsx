@@ -2123,16 +2123,29 @@ export function Accounts({
                                   <div className="text-xs font-semibold uppercase text-gray-500">
                                     {t('paymentOperations') ?? 'Операции по счёту'}
                                   </div>
-                                  {canEdit && invoice && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openPaymentCreateModal(invoice)}
-                                      className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
-                                    >
-                                      <Plus className="h-3.5 w-3.5" />
-                                      {t('addPayment') ?? 'Добавить платеж'}
-                                    </button>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {canEdit && invoice && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditPage(invoice.id)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
+                                        title={`Редактировать счёт №${invoice.number}`}
+                                        aria-label={`Редактировать счёт №${invoice.number}`}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    {canEdit && invoice && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openPaymentCreateModal(invoice)}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                                      >
+                                        <Plus className="h-3.5 w-3.5" />
+                                        {t('addPayment') ?? 'Добавить платеж'}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="overflow-x-auto">
                                   <table className="min-w-full table-fixed divide-y divide-gray-100 text-sm">
@@ -2156,7 +2169,11 @@ export function Accounts({
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
                                       {row.payments.map((payment) => (
-                                        <tr key={payment.id}>
+                                        <tr
+                                          key={payment.id}
+                                          className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
+                                          onClick={canEdit ? () => openRelatedPaymentModal(payment, invoice) : undefined}
+                                        >
                                           <td className="px-4 py-2">{formatDate(payment.plannedDate)}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
                                             {formatCurrencySmart(payment.amount).full}
@@ -2173,7 +2190,10 @@ export function Accounts({
                                                 {canEdit && (
                                                   <button
                                                     type="button"
-                                                    onClick={() => openRelatedPaymentModal(payment, invoice)}
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      openRelatedPaymentModal(payment, invoice);
+                                                    }}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition hover:bg-gray-50"
                                                     title={t('edit') ?? 'Редактировать'}
                                                     aria-label={t('edit') ?? 'Редактировать'}
@@ -2184,7 +2204,10 @@ export function Accounts({
                                                 {canDelete && !isInvoiceManagedPayment(payment) && (
                                                   <button
                                                     type="button"
-                                                    onClick={() => void handleDeletePayment(payment)}
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      void handleDeletePayment(payment);
+                                                    }}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-red-600 transition hover:bg-red-50"
                                                     title={t('delete') ?? 'Удалить'}
                                                     aria-label={t('delete') ?? 'Удалить'}

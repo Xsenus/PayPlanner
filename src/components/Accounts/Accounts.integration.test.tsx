@@ -274,6 +274,7 @@ vi.mock('./InvoiceModal', () => ({
 vi.mock('../Calendar/PaymentModal', () => ({
   PaymentModal: (props: {
     isOpen: boolean;
+    payment?: Payment;
     linkedInvoice?: {
       invoiceEntityId: number;
       invoiceRecordId?: number | null;
@@ -291,6 +292,8 @@ vi.mock('../Calendar/PaymentModal', () => ({
 
     return (
       <div data-testid="payment-modal">
+        <div>{`payment-id:${props.payment?.id ?? ''}`}</div>
+        <div>{`payment-description:${props.payment?.description ?? ''}`}</div>
         <div>{`linked-invoice-id:${props.linkedInvoice?.invoiceEntityId ?? ''}`}</div>
         <div>{`linked-invoice-record-id:${props.linkedInvoice?.invoiceRecordId ?? ''}`}</div>
         <div>{`linked-invoice-number:${props.linkedInvoice?.number ?? ''}`}</div>
@@ -481,6 +484,7 @@ describe('Accounts integration', () => {
     fireEvent.click(await screen.findByText('Добавить платеж'));
 
     expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('payment-id:')).toBeTruthy();
     expect(screen.getByText('linked-invoice-id:24')).toBeTruthy();
     expect(screen.getByText('linked-invoice-record-id:528')).toBeTruthy();
     expect(screen.getByText('linked-invoice-number:24')).toBeTruthy();
@@ -488,5 +492,27 @@ describe('Accounts integration', () => {
     expect(screen.getByText('linked-client-id:55')).toBeTruthy();
     expect(screen.getByText('linked-case-id:701')).toBeTruthy();
     expect(screen.getByText('linked-type:Income')).toBeTruthy();
+  });
+
+  it('opens the payment editor when clicking a payment row in the expanded operations panel', async () => {
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByText('Sibling payment for invoice 24'));
+
+    expect(await screen.findByTestId('payment-modal')).toBeTruthy();
+    expect(screen.getByText('payment-id:529')).toBeTruthy();
+    expect(screen.getByText('payment-description:Sibling payment for invoice 24')).toBeTruthy();
+  });
+
+  it('opens the invoice editor from the expanded operations panel', async () => {
+    const onRouteInvoiceChange = vi.fn();
+
+    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать счёт №24' }));
+
+    await waitFor(() => expect(onRouteInvoiceChange).toHaveBeenCalledWith(528));
   });
 });
