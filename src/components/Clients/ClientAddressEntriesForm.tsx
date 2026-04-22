@@ -1,10 +1,11 @@
-import { Trash2 } from 'lucide-react';
+import { Trash2 } from "lucide-react";
 
-import type { DadataAddressSuggestion } from '../../types';
-import { ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE } from '../../config/features';
+import type { DadataAddressSuggestion } from "../../types";
+import { ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE } from "../../config/features";
 
 export interface ClientAddressEntryFormValue {
   type: string;
+  isPrimary: boolean;
   additionalTypes: string[];
   fullAddress: string;
   postalCode: string;
@@ -37,19 +38,29 @@ interface ClientAddressEntriesFormProps {
   validityDateInputClassName?: string;
   addressTypeOptions: AddressTypeOption[];
   suggestionsByIndex: Record<number, DadataAddressSuggestion[]>;
-  onUpdateEntry: (index: number, key: keyof ClientAddressEntryFormValue, value: string) => void;
+  onUpdateEntry: (
+    index: number,
+    key: keyof ClientAddressEntryFormValue,
+    value: string,
+  ) => void;
+  onSetPrimary: (index: number) => void;
   onRemoveEntry: (index: number) => void | Promise<void>;
   onAddEntry: () => void;
   onToggleAdditionalType: (index: number, type: string) => void;
   onScheduleSuggestions: (index: number, query: string) => void;
   onFindAddress: (index: number) => void;
-  onApplySuggestion: (index: number, suggestion: DadataAddressSuggestion) => Promise<void>;
+  onApplySuggestion: (
+    index: number,
+    suggestion: DadataAddressSuggestion,
+  ) => Promise<void>;
 }
 
 const ADDRESS_DELETE_ICON_BUTTON_CLASS =
-  'inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60';
+  "inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60";
+const ADDRESS_PRIMARY_BUTTON_CLASS =
+  "inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60";
 const ADDRESS_ENTRY_VALIDITY_DATE_INPUT_CLASS =
-  'w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100';
+  "w-full rounded-lg border border-gray-300 px-3 py-2 text-center disabled:bg-gray-100";
 
 export function ClientAddressEntriesForm({
   entries,
@@ -60,6 +71,7 @@ export function ClientAddressEntriesForm({
   addressTypeOptions,
   suggestionsByIndex,
   onUpdateEntry,
+  onSetPrimary,
   onRemoveEntry,
   onAddEntry,
   onToggleAdditionalType,
@@ -68,7 +80,8 @@ export function ClientAddressEntriesForm({
   onApplySuggestion,
 }: ClientAddressEntriesFormProps) {
   const showReadonlyControls = !compactReadOnly;
-  const shouldShowValidityFields = showValidityFields ?? ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE;
+  const shouldShowValidityFields =
+    showValidityFields ?? ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE;
 
   return (
     <div className="space-y-4 md:col-span-2">
@@ -77,21 +90,59 @@ export function ClientAddressEntriesForm({
           key={`address-entry-${index}`}
           className="rounded-xl border border-slate-200 bg-slate-50 p-4"
         >
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800">Адрес #{index + 1}</h3>
-            {showReadonlyControls ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void onRemoveEntry(index);
-                }}
-                disabled={!canEdit}
-                className={ADDRESS_DELETE_ICON_BUTTON_CLASS}
-                title="Удалить адрес"
-                aria-label="Удалить адрес"
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-800">
+                Адрес #{index + 1}
+              </h3>
+              <span
+                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  entry.isPrimary
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-200 text-slate-600"
+                }`}
               >
-                <Trash2 className="h-4 w-4" />
-              </button>
+                {entry.isPrimary ? "По умолчанию" : "Дополнительный"}
+              </span>
+            </div>
+            {showReadonlyControls ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSetPrimary(index)}
+                  disabled={!canEdit || entry.isPrimary}
+                  className={`${ADDRESS_PRIMARY_BUTTON_CLASS} ${
+                    entry.isPrimary
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700"
+                  }`}
+                  title={
+                    entry.isPrimary
+                      ? "Адрес по умолчанию"
+                      : "Сделать адресом по умолчанию"
+                  }
+                  aria-label={
+                    entry.isPrimary
+                      ? "Адрес по умолчанию"
+                      : "Сделать адресом по умолчанию"
+                  }
+                  aria-pressed={entry.isPrimary}
+                >
+                  {entry.isPrimary ? "По умолчанию" : "Сделать основным"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onRemoveEntry(index);
+                  }}
+                  disabled={!canEdit}
+                  className={ADDRESS_DELETE_ICON_BUTTON_CLASS}
+                  title="Удалить адрес"
+                  aria-label="Удалить адрес"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -100,7 +151,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Основной тип</span>
               <select
                 value={entry.type}
-                onChange={(event) => onUpdateEntry(index, 'type', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "type", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               >
@@ -119,7 +172,9 @@ export function ClientAddressEntriesForm({
                   <input
                     type="date"
                     value={entry.validFrom}
-                    onChange={(event) => onUpdateEntry(index, 'validFrom', event.target.value)}
+                    onChange={(event) =>
+                      onUpdateEntry(index, "validFrom", event.target.value)
+                    }
                     disabled={!canEdit}
                     className={validityDateInputClassName}
                   />
@@ -130,7 +185,9 @@ export function ClientAddressEntriesForm({
                   <input
                     type="date"
                     value={entry.validTo}
-                    onChange={(event) => onUpdateEntry(index, 'validTo', event.target.value)}
+                    onChange={(event) =>
+                      onUpdateEntry(index, "validTo", event.target.value)
+                    }
                     disabled={!canEdit}
                     className={validityDateInputClassName}
                   />
@@ -139,7 +196,9 @@ export function ClientAddressEntriesForm({
             ) : null}
 
             <div className="xl:col-span-2">
-              <span className="mb-1 block text-sm text-slate-700">Дополнительно относится к</span>
+              <span className="mb-1 block text-sm text-slate-700">
+                Дополнительно относится к
+              </span>
               <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-2">
                 {addressTypeOptions.map((option) => (
                   <label
@@ -149,7 +208,9 @@ export function ClientAddressEntriesForm({
                     <input
                       type="checkbox"
                       checked={entry.additionalTypes.includes(option.value)}
-                      onChange={() => onToggleAdditionalType(index, option.value)}
+                      onChange={() =>
+                        onToggleAdditionalType(index, option.value)
+                      }
                       disabled={!canEdit}
                     />
                     {option.label}
@@ -160,14 +221,14 @@ export function ClientAddressEntriesForm({
 
             <label
               className={`text-sm text-slate-700 ${
-                showReadonlyControls ? 'xl:col-span-3' : 'xl:col-span-4'
+                showReadonlyControls ? "xl:col-span-3" : "xl:col-span-4"
               }`}
             >
               <span className="mb-1 block">Полный адрес</span>
               <input
                 value={entry.fullAddress}
                 onChange={(event) => {
-                  onUpdateEntry(index, 'fullAddress', event.target.value);
+                  onUpdateEntry(index, "fullAddress", event.target.value);
                   onScheduleSuggestions(index, event.target.value);
                 }}
                 disabled={!canEdit}
@@ -188,7 +249,8 @@ export function ClientAddressEntriesForm({
               </div>
             ) : null}
 
-            {showReadonlyControls && (suggestionsByIndex[index]?.length ?? 0) > 0 ? (
+            {showReadonlyControls &&
+            (suggestionsByIndex[index]?.length ?? 0) > 0 ? (
               <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 xl:col-span-4">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">
                   Подсказки адреса
@@ -196,7 +258,7 @@ export function ClientAddressEntriesForm({
                 <div className="flex flex-wrap gap-2">
                   {suggestionsByIndex[index].map((item) => (
                     <button
-                      key={`${item.value}-${item.unrestrictedValue ?? ''}`}
+                      key={`${item.value}-${item.unrestrictedValue ?? ""}`}
                       type="button"
                       onClick={() => {
                         void onApplySuggestion(index, item);
@@ -214,7 +276,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Индекс</span>
               <input
                 value={entry.postalCode}
-                onChange={(event) => onUpdateEntry(index, 'postalCode', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "postalCode", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -224,7 +288,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Область</span>
               <input
                 value={entry.region}
-                onChange={(event) => onUpdateEntry(index, 'region', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "region", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -234,7 +300,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Район</span>
               <input
                 value={entry.district}
-                onChange={(event) => onUpdateEntry(index, 'district', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "district", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -244,7 +312,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Город</span>
               <input
                 value={entry.city}
-                onChange={(event) => onUpdateEntry(index, 'city', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "city", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -254,7 +324,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Населённый пункт</span>
               <input
                 value={entry.settlement}
-                onChange={(event) => onUpdateEntry(index, 'settlement', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "settlement", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -264,7 +336,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Улица</span>
               <input
                 value={entry.street}
-                onChange={(event) => onUpdateEntry(index, 'street', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "street", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -274,7 +348,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Дом</span>
               <input
                 value={entry.house}
-                onChange={(event) => onUpdateEntry(index, 'house', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "house", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
@@ -284,7 +360,9 @@ export function ClientAddressEntriesForm({
               <span className="mb-1 block">Квартира</span>
               <input
                 value={entry.flat}
-                onChange={(event) => onUpdateEntry(index, 'flat', event.target.value)}
+                onChange={(event) =>
+                  onUpdateEntry(index, "flat", event.target.value)
+                }
                 disabled={!canEdit}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />

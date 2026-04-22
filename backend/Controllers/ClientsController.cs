@@ -52,6 +52,22 @@ public class ClientsController : ControllerBase
         return string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName;
     }
 
+    private static void OrderClientAddresses(Client client)
+    {
+        client.Addresses = client.Addresses
+            .OrderByDescending(address => address.IsPrimary)
+            .ThenBy(address => address.CreatedAt)
+            .ToList();
+    }
+
+    private static void OrderClientAddresses(IEnumerable<Client> clients)
+    {
+        foreach (var client in clients)
+        {
+            OrderClientAddresses(client);
+        }
+    }
+
     private static void PopulateResponsibleUserNames(IEnumerable<Client> clients)
     {
         foreach (var client in clients)
@@ -135,6 +151,7 @@ public class ClientsController : ControllerBase
             .OrderBy(c => c.Name)
             .ToListAsync(ct);
 
+        OrderClientAddresses(clients);
         PopulateResponsibleUserNames(clients);
         return Ok(clients);
     }
@@ -157,6 +174,7 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is not null)
         {
+            OrderClientAddresses(client);
             client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
             PopulateAuditMetadata(_db, client);
             foreach (var clientCase in client.Cases)
@@ -527,6 +545,7 @@ public class ClientsController : ControllerBase
             .Include(c => c.Passports)
             .FirstAsync(c => c.Id == clientId, ct);
 
+        OrderClientAddresses(client);
         client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
         return client;
     }
@@ -548,31 +567,44 @@ public class ClientsController : ControllerBase
 
         if (profile.AddressEntries is { Count: > 0 })
         {
-            var normalizedEntries = profile.AddressEntries
-                .Select((item, index) => new AddressRecord
+            var addressEntries = profile.AddressEntries
+                .Select(item => new
+                {
+                    Item = item,
+                    Value = NormalizeOptional(item.FullAddress) ?? NormalizeOptional(item.SourceQuery),
+                })
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Value))
+                .ToList();
+            var primaryIndex = addressEntries.FindIndex(entry => entry.Item.IsPrimary == true);
+            if (primaryIndex < 0 && addressEntries.Count > 0)
+            {
+                primaryIndex = 0;
+            }
+
+            var normalizedEntries = addressEntries
+                .Select((entry, index) => new AddressRecord
                 {
                     ClientId = client.Id,
-                    Type = ParseAddressType(item.Type),
-                    IsPrimary = index == 0,
-                    Value = NormalizeOptional(item.FullAddress) ?? NormalizeOptional(item.SourceQuery) ?? string.Empty,
-                    UnrestrictedValue = NormalizeOptional(item.FullAddress),
-                    PostalCode = NormalizeOptional(item.PostalCode),
-                    Country = NormalizeOptional(item.Country),
-                    RegionWithType = NormalizeOptional(item.Region),
-                    AreaWithType = NormalizeOptional(item.District),
-                    CityWithType = NormalizeOptional(item.City),
-                    SettlementWithType = NormalizeOptional(item.Settlement),
-                    StreetWithType = NormalizeOptional(item.Street),
-                    House = NormalizeOptional(item.House),
-                    Flat = NormalizeOptional(item.Flat),
-                    FiasId = NormalizeOptional(item.FiasId),
-                    KladrId = NormalizeOptional(item.KladrId),
-                    GeoLat = NormalizeOptional(item.GeoLat),
-                    GeoLon = NormalizeOptional(item.GeoLon),
+                    Type = ParseAddressType(entry.Item.Type),
+                    IsPrimary = index == primaryIndex,
+                    Value = entry.Value ?? string.Empty,
+                    UnrestrictedValue = NormalizeOptional(entry.Item.FullAddress),
+                    PostalCode = NormalizeOptional(entry.Item.PostalCode),
+                    Country = NormalizeOptional(entry.Item.Country),
+                    RegionWithType = NormalizeOptional(entry.Item.Region),
+                    AreaWithType = NormalizeOptional(entry.Item.District),
+                    CityWithType = NormalizeOptional(entry.Item.City),
+                    SettlementWithType = NormalizeOptional(entry.Item.Settlement),
+                    StreetWithType = NormalizeOptional(entry.Item.Street),
+                    House = NormalizeOptional(entry.Item.House),
+                    Flat = NormalizeOptional(entry.Item.Flat),
+                    FiasId = NormalizeOptional(entry.Item.FiasId),
+                    KladrId = NormalizeOptional(entry.Item.KladrId),
+                    GeoLat = NormalizeOptional(entry.Item.GeoLat),
+                    GeoLon = NormalizeOptional(entry.Item.GeoLon),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 })
-                .Where(x => !string.IsNullOrWhiteSpace(x.Value))
                 .ToList();
 
             if (existing.Count > 0)
@@ -582,6 +614,10 @@ public class ClientsController : ControllerBase
 
             if (normalizedEntries.Count > 0)
             {
+                client.Address = normalizedEntries
+                    .OrderByDescending(entry => entry.IsPrimary)
+                    .Select(entry => entry.UnrestrictedValue ?? entry.Value)
+                    .FirstOrDefault() ?? client.Address;
                 _db.AddressRecords.AddRange(normalizedEntries);
             }
 
@@ -593,14 +629,20 @@ public class ClientsController : ControllerBase
         var actualValue = NormalizeOptional(profile.ActualAddressMatchesRegistration == true
             ? profile.RegistrationAddress
             : profile.ActualAddress);
+        var primaryLegacyAddress = registrationValue ?? actualValue;
 
-        UpsertAddress(existing, client.Id, AddressType.Registration, true,
+        UpsertAddress(existing, client.Id, AddressType.Registration, registrationValue == primaryLegacyAddress && !string.IsNullOrWhiteSpace(registrationValue),
             registrationValue, null, profile.RegistrationAddressPostalCode, profile.RegistrationAddressFiasId, profile.RegistrationAddressKladrId,
             profile.RegistrationAddressGeoLat, profile.RegistrationAddressGeoLon);
 
-        UpsertAddress(existing, client.Id, AddressType.Actual, true,
+        UpsertAddress(existing, client.Id, AddressType.Actual, actualValue == primaryLegacyAddress && !string.IsNullOrWhiteSpace(actualValue),
             actualValue, null, profile.ActualAddressPostalCode, profile.ActualAddressFiasId, profile.ActualAddressKladrId,
             profile.ActualAddressGeoLat, profile.ActualAddressGeoLon);
+
+        if (!string.IsNullOrWhiteSpace(primaryLegacyAddress))
+        {
+            client.Address = primaryLegacyAddress;
+        }
 
         var activeTypes = new HashSet<AddressType>();
         if (!string.IsNullOrWhiteSpace(registrationValue)) activeTypes.Add(AddressType.Registration);
@@ -1096,6 +1138,7 @@ public sealed class ClientAddressProfile
 public sealed class ClientAddressEntryProfile
 {
     public string? Type { get; init; }
+    public bool? IsPrimary { get; init; }
     public string? SourceQuery { get; init; }
     public string? FullAddress { get; init; }
     public string? PostalCode { get; init; }

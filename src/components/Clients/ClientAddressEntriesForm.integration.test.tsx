@@ -1,49 +1,55 @@
-import { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
-import { ClientAddressEntriesForm, type ClientAddressEntryFormValue } from './ClientAddressEntriesForm';
-import type { DadataAddressSuggestion } from '../../types';
+import {
+  ClientAddressEntriesForm,
+  type ClientAddressEntryFormValue,
+} from "./ClientAddressEntriesForm";
+import type { DadataAddressSuggestion } from "../../types";
 
-const initialFullAddress = '633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19';
-const updatedFullAddress = '633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12';
+const initialFullAddress =
+  "633208, Новосибирская обл, г Искитим, Южный мкр, д 37, кв 19";
+const updatedFullAddress =
+  "633208, Новосибирская обл, г Искитим, Южный мкр, д 38, кв 12";
 
 const baseEntry: ClientAddressEntryFormValue = {
-  type: 'legal',
+  type: "legal",
+  isPrimary: true,
   additionalTypes: [],
   fullAddress: initialFullAddress,
-  postalCode: '633208',
-  region: 'Новосибирская обл',
-  district: '',
-  city: 'г Искитим',
-  settlement: '',
-  street: 'Южный мкр',
-  house: '37',
-  flat: '19',
-  validFrom: '',
-  validTo: '',
+  postalCode: "633208",
+  region: "Новосибирская обл",
+  district: "",
+  city: "г Искитим",
+  settlement: "",
+  street: "Южный мкр",
+  house: "37",
+  flat: "19",
+  validFrom: "",
+  validTo: "",
 };
 
 const addressTypeOptions = [
-  { value: 'legal', label: 'Юридический адрес' },
-  { value: 'actual', label: 'Фактический адрес' },
+  { value: "legal", label: "Юридический адрес" },
+  { value: "actual", label: "Фактический адрес" },
 ];
 
-describe('ClientAddressEntriesForm integration', () => {
-  it('shows full address suggestions and applies the selected suggestion', async () => {
+describe("ClientAddressEntriesForm integration", () => {
+  it("shows full address suggestions and applies the selected suggestion", async () => {
     const user = userEvent.setup();
     const onApplySuggestion = vi.fn().mockResolvedValue(undefined);
 
     const fullSuggestion: DadataAddressSuggestion = {
-      value: 'г Искитим, Южный мкр, д 37',
+      value: "г Искитим, Южный мкр, д 37",
       unrestrictedValue: initialFullAddress,
-      postalCode: '633208',
-      regionWithType: 'Новосибирская обл',
-      cityWithType: 'г Искитим',
-      streetWithType: 'Южный мкр',
-      house: '37',
-      flat: '19',
+      postalCode: "633208",
+      regionWithType: "Новосибирская обл",
+      cityWithType: "г Искитим",
+      streetWithType: "Южный мкр",
+      house: "37",
+      flat: "19",
     };
 
     render(
@@ -53,6 +59,7 @@ describe('ClientAddressEntriesForm integration', () => {
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{ 0: [fullSuggestion] }}
         onUpdateEntry={vi.fn()}
+        onSetPrimary={vi.fn()}
         onRemoveEntry={vi.fn()}
         onAddEntry={vi.fn()}
         onToggleAdditionalType={vi.fn()}
@@ -62,18 +69,22 @@ describe('ClientAddressEntriesForm integration', () => {
       />,
     );
 
-    const suggestionButton = screen.getByRole('button', { name: initialFullAddress });
+    const suggestionButton = screen.getByRole("button", {
+      name: initialFullAddress,
+    });
 
     await user.click(suggestionButton);
 
     expect(onApplySuggestion).toHaveBeenCalledWith(0, fullSuggestion);
   });
 
-  it('keeps full address input as the primary editable field and schedules lookup from it', () => {
+  it("keeps full address input as the primary editable field and schedules lookup from it", () => {
     const onScheduleSuggestions = vi.fn();
 
     function Harness() {
-      const [entries, setEntries] = useState<ClientAddressEntryFormValue[]>([baseEntry]);
+      const [entries, setEntries] = useState<ClientAddressEntryFormValue[]>([
+        baseEntry,
+      ]);
 
       return (
         <ClientAddressEntriesForm
@@ -88,6 +99,7 @@ describe('ClientAddressEntriesForm integration', () => {
               ),
             );
           }}
+          onSetPrimary={vi.fn()}
           onRemoveEntry={vi.fn()}
           onAddEntry={vi.fn()}
           onToggleAdditionalType={vi.fn()}
@@ -109,10 +121,13 @@ describe('ClientAddressEntriesForm integration', () => {
     });
 
     expect(screen.getByDisplayValue(updatedFullAddress)).toBeTruthy();
-    expect(onScheduleSuggestions).toHaveBeenLastCalledWith(0, updatedFullAddress);
+    expect(onScheduleSuggestions).toHaveBeenLastCalledWith(
+      0,
+      updatedFullAddress,
+    );
   });
 
-  it('renders address removal as an icon-only action with an accessible label', () => {
+  it("renders address removal as an icon-only action with an accessible label", () => {
     render(
       <ClientAddressEntriesForm
         entries={[baseEntry]}
@@ -120,6 +135,7 @@ describe('ClientAddressEntriesForm integration', () => {
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{}}
         onUpdateEntry={vi.fn()}
+        onSetPrimary={vi.fn()}
         onRemoveEntry={vi.fn()}
         onAddEntry={vi.fn()}
         onToggleAdditionalType={vi.fn()}
@@ -129,11 +145,11 @@ describe('ClientAddressEntriesForm integration', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Удалить адрес' })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Удалить адрес" })).toBeTruthy();
     expect(screen.queryByText(/^Удалить$/)).toBeNull();
   });
 
-  it('shows additional address types instead of validity dates', () => {
+  it("shows additional address types instead of validity dates", () => {
     render(
       <ClientAddressEntriesForm
         entries={[baseEntry]}
@@ -141,6 +157,7 @@ describe('ClientAddressEntriesForm integration', () => {
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{}}
         onUpdateEntry={vi.fn()}
+        onSetPrimary={vi.fn()}
         onRemoveEntry={vi.fn()}
         onAddEntry={vi.fn()}
         onToggleAdditionalType={vi.fn()}
@@ -150,12 +167,12 @@ describe('ClientAddressEntriesForm integration', () => {
       />,
     );
 
-    expect(screen.getByText('Дополнительно относится к')).toBeTruthy();
-    expect(screen.queryByText('Действует с')).toBeNull();
-    expect(screen.queryByText('Действует по')).toBeNull();
+    expect(screen.getByText("Дополнительно относится к")).toBeTruthy();
+    expect(screen.queryByText("Действует с")).toBeNull();
+    expect(screen.queryByText("Действует по")).toBeNull();
   });
 
-  it('can restore validity dates through the shared toggle without changing the form markup', () => {
+  it("can restore validity dates through the shared toggle without changing the form markup", () => {
     render(
       <ClientAddressEntriesForm
         entries={[baseEntry]}
@@ -164,6 +181,7 @@ describe('ClientAddressEntriesForm integration', () => {
         addressTypeOptions={addressTypeOptions}
         suggestionsByIndex={{}}
         onUpdateEntry={vi.fn()}
+        onSetPrimary={vi.fn()}
         onRemoveEntry={vi.fn()}
         onAddEntry={vi.fn()}
         onToggleAdditionalType={vi.fn()}
@@ -173,7 +191,34 @@ describe('ClientAddressEntriesForm integration', () => {
       />,
     );
 
-    expect(screen.getByText('Действует с')).toBeTruthy();
-    expect(screen.getByText('Действует по')).toBeTruthy();
+    expect(screen.getByText("Действует с")).toBeTruthy();
+    expect(screen.getByText("Действует по")).toBeTruthy();
+  });
+  it("renders and triggers the primary-address action", async () => {
+    const user = userEvent.setup();
+    const onSetPrimary = vi.fn();
+
+    render(
+      <ClientAddressEntriesForm
+        entries={[{ ...baseEntry, isPrimary: false }]}
+        canEdit
+        addressTypeOptions={addressTypeOptions}
+        suggestionsByIndex={{}}
+        onUpdateEntry={vi.fn()}
+        onSetPrimary={onSetPrimary}
+        onRemoveEntry={vi.fn()}
+        onAddEntry={vi.fn()}
+        onToggleAdditionalType={vi.fn()}
+        onScheduleSuggestions={vi.fn()}
+        onFindAddress={vi.fn()}
+        onApplySuggestion={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Сделать адресом по умолчанию" }),
+    );
+
+    expect(onSetPrimary).toHaveBeenCalledWith(0);
   });
 });

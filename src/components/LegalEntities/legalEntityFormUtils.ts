@@ -1,6 +1,7 @@
-import type { LegalEntityAddressInput } from '../../types';
-import type { ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
-import { chooseBestDisplayAddress } from '../Clients/addressEntryUtils';
+import type { LegalEntityAddressInput } from "../../types";
+import type { ClientAddressEntryFormValue } from "../Clients/ClientAddressEntriesForm";
+import { ensureSinglePrimaryAddressEntryList } from "../Clients/addressEntryPersistence";
+import { chooseBestDisplayAddress } from "../Clients/addressEntryUtils";
 
 type ComparableAddress = {
   type?: string | number | null;
@@ -24,30 +25,32 @@ type ComparableAddress = {
 };
 
 function normalizeAddressToken(value?: string | number | null): string {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined) return "";
   return String(value)
     .trim()
     .toLowerCase()
-    .replace(/[.,]/g, ' ')
-    .replace(/\b\d{6}\b/gu, ' ')
-    .replace(/россия/giu, ' ')
-    .replace(/рф/giu, ' ')
-    .replace(/город/giu, ' ')
-    .replace(/гор/giu, ' ')
-    .replace(/(^|\s)г(?=\s|$)/giu, ' ')
-    .replace(/улица/giu, ' ')
-    .replace(/(^|\s)ул(?=\s|$)/giu, ' ')
-    .replace(/дом/giu, ' ')
-    .replace(/(^|\s)д(?=\s|$)/giu, ' ')
-    .replace(/квартира/giu, ' ')
-    .replace(/(^|\s)кв(?=\s|$)/giu, ' ')
-    .replace(/область/giu, ' ')
-    .replace(/(^|\s)обл(?=\s|$)/giu, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/[^\p{L}\p{N}]+/gu, '');
+    .replace(/[.,]/g, " ")
+    .replace(/\b\d{6}\b/gu, " ")
+    .replace(/россия/giu, " ")
+    .replace(/рф/giu, " ")
+    .replace(/город/giu, " ")
+    .replace(/гор/giu, " ")
+    .replace(/(^|\s)г(?=\s|$)/giu, " ")
+    .replace(/улица/giu, " ")
+    .replace(/(^|\s)ул(?=\s|$)/giu, " ")
+    .replace(/дом/giu, " ")
+    .replace(/(^|\s)д(?=\s|$)/giu, " ")
+    .replace(/квартира/giu, " ")
+    .replace(/(^|\s)кв(?=\s|$)/giu, " ")
+    .replace(/область/giu, " ")
+    .replace(/(^|\s)обл(?=\s|$)/giu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
-function buildStructuredLegalEntityAddressKey(address: ComparableAddress): string {
+function buildStructuredLegalEntityAddressKey(
+  address: ComparableAddress,
+): string {
   return [
     address.country,
     address.regionWithType ?? address.region,
@@ -60,7 +63,7 @@ function buildStructuredLegalEntityAddressKey(address: ComparableAddress): strin
   ]
     .map((item) => normalizeAddressToken(item))
     .filter(Boolean)
-    .join('|');
+    .join("|");
 }
 
 function buildTextLegalEntityAddressKey(address: ComparableAddress): string {
@@ -97,13 +100,13 @@ export function buildLegalEntityAddressKey(address: ComparableAddress): string {
 }
 
 function preferIncoming(current: string, incoming?: string | null): string {
-  const normalizedIncoming = (incoming ?? '').trim();
+  const normalizedIncoming = (incoming ?? "").trim();
   return normalizedIncoming || current;
 }
 
 function fillIfEmpty(current: string, incoming?: string | null): string {
   if (current.trim()) return current;
-  return (incoming ?? '').trim();
+  return (incoming ?? "").trim();
 }
 
 export function mergeLegalEntityAddressEntry(
@@ -130,7 +133,7 @@ export function mergeLegalEntityAddressEntry(
       incoming.fullAddress,
     ),
     postalCode: fillIfEmpty(current.postalCode, incoming.postalCode),
-    country: fillIfEmpty(current.country ?? '', incoming.country),
+    country: fillIfEmpty(current.country ?? "", incoming.country),
     region: fillIfEmpty(current.region, incoming.region),
     district: fillIfEmpty(current.district, incoming.district),
     city: fillIfEmpty(current.city, incoming.city),
@@ -138,14 +141,18 @@ export function mergeLegalEntityAddressEntry(
     street: fillIfEmpty(current.street, incoming.street),
     house: fillIfEmpty(current.house, incoming.house),
     flat: fillIfEmpty(current.flat, incoming.flat),
-    fiasId: fillIfEmpty(current.fiasId ?? '', incoming.fiasId),
-    kladrId: fillIfEmpty(current.kladrId ?? '', incoming.kladrId),
-    geoLat: fillIfEmpty(current.geoLat ?? '', incoming.geoLat),
-    geoLon: fillIfEmpty(current.geoLon ?? '', incoming.geoLon),
+    fiasId: fillIfEmpty(current.fiasId ?? "", incoming.fiasId),
+    kladrId: fillIfEmpty(current.kladrId ?? "", incoming.kladrId),
+    geoLat: fillIfEmpty(current.geoLat ?? "", incoming.geoLat),
+    geoLon: fillIfEmpty(current.geoLon ?? "", incoming.geoLon),
     validFrom: fillIfEmpty(current.validFrom, incoming.validFrom),
     validTo: fillIfEmpty(current.validTo, incoming.validTo),
+    isPrimary: Boolean(current.isPrimary || incoming.isPrimary),
     additionalTypes: Array.from(
-      new Set([...(current.additionalTypes ?? []), ...(incoming.additionalTypes ?? [])]),
+      new Set([
+        ...(current.additionalTypes ?? []),
+        ...(incoming.additionalTypes ?? []),
+      ]),
     ),
   };
 }
@@ -169,22 +176,24 @@ export function findMatchingLegalEntityAddressEntryIndex(
     fiasId: incoming.fiasId,
   });
 
-  const incomingKeys = new Set(buildLegalEntityAddressKeys({
-    type: incoming.type,
-    fullAddress: incoming.fullAddress,
-    postalCode: incoming.postalCode,
-    country: incoming.country,
-    region: incoming.region,
-    district: incoming.district,
-    city: incoming.city,
-    settlement: incoming.settlement,
-    street: incoming.street,
-    house: incoming.house,
-    flat: incoming.flat,
-    fiasId: incoming.fiasId,
-  }));
+  const incomingKeys = new Set(
+    buildLegalEntityAddressKeys({
+      type: incoming.type,
+      fullAddress: incoming.fullAddress,
+      postalCode: incoming.postalCode,
+      country: incoming.country,
+      region: incoming.region,
+      district: incoming.district,
+      city: incoming.city,
+      settlement: incoming.settlement,
+      street: incoming.street,
+      house: incoming.house,
+      flat: incoming.flat,
+      fiasId: incoming.fiasId,
+    }),
+  );
 
-  if (incomingKeys.size === 0 || !incomingKey.replace(/\|/g, '')) return -1;
+  if (incomingKeys.size === 0 || !incomingKey.replace(/\|/g, "")) return -1;
 
   return entries.findIndex((entry) => {
     const entryKeys = buildLegalEntityAddressKeys({
@@ -210,13 +219,20 @@ export function upsertLegalEntityAddressEntry(
   entries: ClientAddressEntryFormValue[],
   incoming: ClientAddressEntryFormValue,
 ): ClientAddressEntryFormValue[] {
-  const matchIndex = findMatchingLegalEntityAddressEntryIndex(entries, incoming);
+  const matchIndex = findMatchingLegalEntityAddressEntryIndex(
+    entries,
+    incoming,
+  );
   if (matchIndex < 0) {
-    return [incoming, ...entries];
+    return ensureSinglePrimaryAddressEntryList([incoming, ...entries]);
   }
 
-  return entries.map((entry, index) =>
-    index === matchIndex ? mergeLegalEntityAddressEntry(entry, incoming) : entry,
+  return ensureSinglePrimaryAddressEntryList(
+    entries.map((entry, index) =>
+      index === matchIndex
+        ? mergeLegalEntityAddressEntry(entry, incoming)
+        : entry,
+    ),
   );
 }
 
@@ -236,7 +252,8 @@ function mergeLegalEntityAddressInput(
     regionWithType: current.regionWithType || incoming.regionWithType || null,
     areaWithType: current.areaWithType || incoming.areaWithType || null,
     cityWithType: current.cityWithType || incoming.cityWithType || null,
-    settlementWithType: current.settlementWithType || incoming.settlementWithType || null,
+    settlementWithType:
+      current.settlementWithType || incoming.settlementWithType || null,
     streetWithType: current.streetWithType || incoming.streetWithType || null,
     house: current.house || incoming.house || null,
     flat: current.flat || incoming.flat || null,
@@ -271,7 +288,7 @@ export function dedupeLegalEntityAddressInputs(
       fiasId: address.fiasId,
     });
 
-    if (!key.replace(/\|/g, '')) continue;
+    if (!key.replace(/\|/g, "")) continue;
 
     if (!deduped.has(key)) {
       deduped.set(key, { ...address });

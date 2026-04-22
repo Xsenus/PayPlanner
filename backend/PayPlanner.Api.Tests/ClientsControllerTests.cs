@@ -87,6 +87,61 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task Create_UsesExplicitPrimaryStructuredAddress_ForLegacyAddressAndOrdering()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var controller = CreateController(db, userId);
+
+        var model = new Client
+        {
+            Name = "Primary Address Client",
+            Address = "Fallback address",
+            Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
+            {
+                addressEntries = new[]
+                {
+                    new
+                    {
+                        type = "registration",
+                        fullAddress = "First structured address",
+                        isPrimary = false,
+                    },
+                    new
+                    {
+                        type = "actual",
+                        fullAddress = "Second structured address",
+                        isPrimary = true,
+                    },
+                },
+            }),
+            IsActive = true,
+        };
+
+        var action = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action);
+        var dto = Assert.IsType<Client>(created.Value);
+
+        Assert.Equal("Second structured address", dto.Address);
+        Assert.Equal(2, dto.Addresses.Count);
+        Assert.Equal("Second structured address", dto.Addresses.First().UnrestrictedValue);
+        Assert.True(dto.Addresses.First().IsPrimary);
+
+        var storedAddresses = await db.AddressRecords
+            .AsNoTracking()
+            .Where(item => item.ClientId == dto.Id)
+            .OrderByDescending(item => item.IsPrimary)
+            .ThenBy(item => item.CreatedAt)
+            .ToListAsync();
+
+        Assert.Equal(2, storedAddresses.Count);
+        Assert.Equal("Second structured address", storedAddresses[0].UnrestrictedValue);
+        Assert.True(storedAddresses[0].IsPrimary);
+        Assert.False(storedAddresses[1].IsPrimary);
+    }
+
+    [Fact]
     public async Task GetStats_IncludesPaymentsLinkedThroughInvoiceCases_ForSelectedCase()
     {
         await using var db = await CreateContextAsync();

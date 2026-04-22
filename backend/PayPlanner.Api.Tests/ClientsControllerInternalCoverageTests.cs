@@ -180,6 +180,41 @@ public class ClientsControllerInternalCoverageTests
     }
 
     [Fact]
+    public async Task SyncClientAddressesAsync_KeepsOnlyOnePrimaryAddress_ForLegacyFields()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Legacy primary client",
+            IsActive = true,
+        };
+
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUserId: null);
+        var payload = JsonSerializer.Serialize(new ClientAddressProfile
+        {
+            RegistrationAddress = "Registration address",
+            ActualAddress = "Actual address",
+        });
+
+        await InvokePrivateAsync(controller, "SyncClientAddressesAsync", client, payload);
+        await db.SaveChangesAsync();
+
+        var addresses = await db.AddressRecords
+            .AsNoTracking()
+            .Where(item => item.ClientId == client.Id)
+            .OrderBy(item => item.Type)
+            .ToListAsync();
+
+        Assert.Equal(2, addresses.Count);
+        Assert.Equal("Registration address", client.Address);
+        Assert.True(addresses.Single(item => item.Type == AddressType.Registration).IsPrimary);
+        Assert.False(addresses.Single(item => item.Type == AddressType.Actual).IsPrimary);
+    }
+
+    [Fact]
     public async Task RemoveClientProfileArtifactsAsync_ReturnsEarly_ForEmptyIds()
     {
         await using var db = await CreateContextAsync();
