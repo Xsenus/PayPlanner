@@ -173,8 +173,10 @@ public class InvoicesController : ControllerBase
             })
             .ToListAsync(ct);
 
-        decimal totalAmount = grouped.Sum(x => x.Amount);
-        int totalCount = grouped.Sum(x => x.Count);
+        var includeCancelledInTotal = status == PaymentStatus.Cancelled;
+        var totalGroups = grouped.Where(x => includeCancelledInTotal || x.Status != PaymentStatus.Cancelled);
+        decimal totalAmount = totalGroups.Sum(x => x.Amount);
+        int totalCount = totalGroups.Sum(x => x.Count);
 
         var pending = grouped.FirstOrDefault(x => x.Status == PaymentStatus.Pending);
         var paid = grouped.FirstOrDefault(x => x.Status == PaymentStatus.Completed);

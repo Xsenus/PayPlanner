@@ -32,6 +32,7 @@ public class InvoicesControllerCoverageTests
         await CreateInvoicePaymentAsync(db, "SUM-005", clientId, today.AddDays(-45), 500m, PaymentStatus.Overdue, PaymentType.Income);
         await CreateInvoicePaymentAsync(db, "SUM-006", clientId, today.AddDays(-75), 600m, PaymentStatus.Overdue, PaymentType.Income);
         await CreateInvoicePaymentAsync(db, "SUM-007", clientId, today.AddDays(-120), 700m, PaymentStatus.Overdue, PaymentType.Income);
+        await CreateInvoicePaymentAsync(db, "SUM-007-C", clientId, today.AddDays(-2), 900m, PaymentStatus.Cancelled, PaymentType.Income);
         await CreateInvoicePaymentAsync(db, "SUM-008", clientId, today.AddDays(-3), 800m, PaymentStatus.Overdue, PaymentType.Expense);
 
         var controller = CreateController(db, isAdmin: true, userId: null);
@@ -64,6 +65,77 @@ public class InvoicesControllerCoverageTests
         Assert.Equal(600m, summary.OverdueAging.Day61To90);
         Assert.Equal(700m, summary.OverdueAging.Day91Plus);
         Assert.Equal(2_500m, summary.OverdueAging.Total);
+    }
+
+    [Fact]
+    public async Task GetSummary_WhenFilteringAllStatuses_ExcludesCancelledInvoicesFromTotal()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Cancelled Summary Client");
+        var today = DateTime.UtcNow.Date;
+
+        await CreateInvoicePaymentAsync(db, "SUM-CAN-001", clientId, today.AddDays(5), 100m, PaymentStatus.Pending, PaymentType.Income);
+        await CreateInvoicePaymentAsync(db, "SUM-CAN-002", clientId, today.AddDays(-1), 200m, PaymentStatus.Completed, PaymentType.Income);
+        await CreateInvoicePaymentAsync(db, "SUM-CAN-003", clientId, today.AddDays(-2), 300m, PaymentStatus.Cancelled, PaymentType.Income);
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var action = await controller.GetSummary(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Income,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceSummaryDto>(ok.Value);
+
+        Assert.Equal(2, summary.Total.Count);
+        Assert.Equal(300m, summary.Total.Amount);
+        Assert.Equal(1, summary.Pending.Count);
+        Assert.Equal(100m, summary.Pending.Amount);
+        Assert.Equal(1, summary.Paid.Count);
+        Assert.Equal(200m, summary.Paid.Amount);
+    }
+
+    [Fact]
+    public async Task GetSummary_WhenFilteringCancelled_IncludesCancelledInvoicesInTotal()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Cancelled Only Client");
+        var today = DateTime.UtcNow.Date;
+
+        await CreateInvoicePaymentAsync(db, "SUM-CAN-101", clientId, today.AddDays(5), 100m, PaymentStatus.Pending, PaymentType.Income);
+        await CreateInvoicePaymentAsync(db, "SUM-CAN-102", clientId, today.AddDays(-2), 300m, PaymentStatus.Cancelled, PaymentType.Income);
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var action = await controller.GetSummary(
+            from: null,
+            to: null,
+            status: PaymentStatus.Cancelled,
+            clientId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Income,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceSummaryDto>(ok.Value);
+
+        Assert.Equal(1, summary.Total.Count);
+        Assert.Equal(300m, summary.Total.Amount);
+        Assert.Equal(0, summary.Pending.Count);
+        Assert.Equal(0m, summary.Pending.Amount);
+        Assert.Equal(0, summary.Paid.Count);
+        Assert.Equal(0m, summary.Paid.Amount);
+        Assert.Equal(0, summary.Overdue.Count);
+        Assert.Equal(0m, summary.Overdue.Amount);
     }
 
     [Fact]
