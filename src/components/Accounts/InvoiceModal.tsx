@@ -38,7 +38,11 @@ import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { filterRepresentativeInvoiceWhenInstallmentsExist, isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import {
+  filterRepresentativeInvoiceWhenInstallmentsExist,
+  getStatusSourcePaymentsForInvoice,
+  isInvoiceManagedPayment,
+} from '../../utils/invoicePayments';
 
 type FormState = {
   number: string;
@@ -437,11 +441,6 @@ type InvoiceStatusSnapshot = {
   timeline: StatusTimelineEntry[];
 };
 
-function getStatusSourcePayments(payments: Payment[]): Payment[] {
-  const linkedPayments = payments.filter((payment) => payment.documentKind !== 'Invoice');
-  return linkedPayments.length > 0 ? linkedPayments : payments;
-}
-
 function resolvePaidAmount(payment: Payment): number {
   if (Number.isFinite(payment.paidAmount) && payment.paidAmount > 0) {
     return payment.paidAmount;
@@ -475,7 +474,7 @@ function deriveInvoiceStatusFromPayments(
   fallbackStatus: PaymentStatus,
   fallbackDueDate?: string | null,
 ): PaymentStatus {
-  const sourcePayments = getStatusSourcePayments(payments);
+  const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
 
   if (sourcePayments.length === 0) {
     if (fallbackStatus === 'Completed' || fallbackStatus === 'Cancelled' || fallbackStatus === 'Processing' || fallbackStatus === 'Overdue') {
@@ -578,7 +577,7 @@ function buildInvoiceStatusSnapshot(
   fallbackDueDate?: string | null,
   fallbackAmount?: string | number | null,
 ): InvoiceStatusSnapshot {
-  const sourcePayments = getStatusSourcePayments(payments);
+  const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
   const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate);
   const fallbackAmountValue = parseMoneyInput(fallbackAmount);
   const aggregatedTotalFromPayments = sourcePayments.reduce((sum, payment) => {
@@ -1969,8 +1968,8 @@ export function InvoiceModal({
   };
 
   const statusSnapshot = useMemo(
-    () => buildInvoiceStatusSnapshot(displayPayments, form.status, form.dueDate, form.amount),
-    [displayPayments, form.amount, form.dueDate, form.status],
+    () => buildInvoiceStatusSnapshot(relatedPayments, form.status, form.dueDate, form.amount),
+    [form.amount, form.dueDate, form.status, relatedPayments],
   );
 
   const effectiveInvoiceStatus = form.status;

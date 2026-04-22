@@ -44,12 +44,15 @@ public class AccountsController : ControllerBase
                 Number = payment.Invoice != null ? payment.Invoice.Number : (payment.Account ?? string.Empty),
                 Date = payment.Invoice != null ? payment.Invoice.Date : (payment.AccountDate ?? payment.Date),
                 DueDate = payment.Date,
+                PlannedDate = payment.PlannedDate,
                 Amount = payment.Amount,
                 PaidAmount = payment.PaidAmount,
                 Type = payment.Type,
                 Status = payment.Status,
                 IsPaid = payment.IsPaid,
                 PaidDate = payment.PaidDate,
+                HasInstallmentMarker = payment.SystemNotes != null
+                    && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
                 ClientName = payment.Client != null ? payment.Client.Name : null,
                 ClientCompany = payment.Client != null ? payment.Client.Company : null,
@@ -123,12 +126,12 @@ public class AccountsController : ControllerBase
                     .ThenByDescending(item => item.Id)
                     .ToList();
 
-                var representative = orderedGroup[0];
                 var editorPaymentId = group
                     .OrderByDescending(item => item.DocumentKind == DocumentKind.Invoice)
                     .ThenBy(item => item.Id)
                     .Select(item => item.Id)
                     .FirstOrDefault();
+                var representative = orderedGroup.FirstOrDefault(item => item.Id == editorPaymentId) ?? orderedGroup[0];
                 var invoiceEntityId = orderedGroup
                     .Select(item => item.InvoiceEntityId)
                     .FirstOrDefault(value => value.HasValue && value.Value > 0);
@@ -140,9 +143,9 @@ public class AccountsController : ControllerBase
                     EditorPaymentId = editorPaymentId > 0 ? editorPaymentId : representative.Id,
                     InvoiceEntityId = invoiceEntityId,
                     LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.ClientCaseId, representative.Type),
-                    FallbackAmount = orderedGroup.Sum(item => item.Amount),
+                    FallbackAmount = representative.Amount,
                     InvoicePaymentIds = orderedGroup.Select(item => item.Id).ToHashSet(),
-                    StatusSeedPayments = orderedGroup.Select(CreateStatusSourcePayment).ToList(),
+                    CandidatePayments = orderedGroup.Select(CreateAggregateItem).ToList(),
                     Type = representative.Type,
                 };
             })
@@ -179,16 +182,13 @@ public class AccountsController : ControllerBase
                 PaidAmount = payment.PaidAmount,
                 Status = payment.Status,
                 DocumentKind = payment.DocumentKind,
+                HasInstallmentMarker = payment.SystemNotes != null
+                    && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
                 ClientCaseId = payment.ClientCaseId,
                 Type = payment.Type,
             })
             .ToListAsync(ct);
-
-        var paymentsByInvoiceEntityId = paymentAggregateItems
-            .Where(item => item.DocumentKind != DocumentKind.Invoice && item.InvoiceId.HasValue)
-            .GroupBy(item => item.InvoiceId!.Value)
-            .ToDictionary(group => group.Key, group => group.ToList());
 
         var paymentsByLegacyKey = paymentAggregateItems
             .Where(item => item.DocumentKind != DocumentKind.Invoice && !item.InvoiceId.HasValue)
@@ -202,18 +202,12 @@ public class AccountsController : ControllerBase
 
         foreach (var group in groups)
         {
-            var groupPayments = new List<PaymentAggregateItem>();
-
-            if (group.InvoiceEntityId.HasValue
-                && paymentsByInvoiceEntityId.TryGetValue(group.InvoiceEntityId.Value, out var canonicalPayments))
-            {
-                groupPayments.AddRange(canonicalPayments);
-            }
+            var groupPayments = group.CandidatePayments.ToList();
 
             if (!string.IsNullOrWhiteSpace(group.LegacyGroupKey)
                 && paymentsByLegacyKey.TryGetValue(group.LegacyGroupKey, out var legacyPayments))
             {
-                groupPayments.AddRange(legacyPayments);
+                groupPayments.AddRange(legacyPayments.Where(item => !group.InvoicePaymentIds.Contains(item.Id)));
             }
 
             groupPayments = groupPayments
@@ -221,32 +215,35 @@ public class AccountsController : ControllerBase
                 .Select(grouped => grouped.First())
                 .ToList();
 
-            var statusPayments = group.StatusSeedPayments
-                .Concat(groupPayments.Select(CreateStatusSourcePayment))
-                .GroupBy(item => item.Id)
-                .Select(grouped => grouped.First())
-                .ToList();
+            var statusSourcePayments = SelectStatusSourcePayments(
+                groupPayments,
+                group.EditorPaymentId,
+                group.Representative.Amount);
 
-            group.RelatedPaymentIds = group.InvoicePaymentIds
-                .Concat(groupPayments.Select(item => item.Id))
+            group.RelatedPaymentIds = groupPayments
+                .Select(item => item.Id)
                 .Distinct()
                 .ToList();
 
-            group.DueDate = groupPayments
+            group.DueDate = statusSourcePayments
                 .Select(item => EffectivePlannedDate(item))
                 .DefaultIfEmpty(group.Representative.DueDate)
                 .Max();
 
-            group.PaidDate = groupPayments
+            group.PaidDate = statusSourcePayments
                 .Where(item => item.PaidDate.HasValue)
                 .Select(item => item.PaidDate)
                 .DefaultIfEmpty(group.Representative.PaidDate)
                 .Max();
 
-            var totalAmount = groupPayments.Sum(item => item.Amount);
-            group.TotalAmount = totalAmount > 0m ? totalAmount : group.FallbackAmount;
-            group.Status = DeriveAccountStatus(statusPayments, group.Representative.Status, group.Representative.PaidAmount);
-            group.IsOverdue = statusPayments.Any(item => item.Status == PaymentStatus.Overdue);
+            var totalAmount = statusSourcePayments.Sum(item => item.Amount);
+            group.TotalAmount = Math.Max(group.FallbackAmount, totalAmount);
+            group.Status = DeriveAccountStatus(
+                statusSourcePayments.Select(CreateStatusSourcePayment),
+                group.Representative.Status,
+                group.Representative.PaidAmount);
+            group.IsOverdue = statusSourcePayments.Any(item => item.Status == PaymentStatus.Overdue)
+                || (statusSourcePayments.Count == 0 && group.Representative.Status == PaymentStatus.Overdue);
         }
 
         var normalizedStatus = NormalizeAccountStatus(status);
@@ -377,7 +374,7 @@ public class AccountsController : ControllerBase
                 .ToList();
 
             var visiblePayments = InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(payments)
-                ? payments.Where(payment => payment.DocumentKind != DocumentKind.Invoice).ToList()
+                ? payments.Where(payment => payment.Id != group.EditorPaymentId).ToList()
                 : payments;
 
             return new AccountRegistryRowDto
@@ -970,13 +967,24 @@ public class AccountsController : ControllerBase
                 group => group.Select(row => row.LineItem).ToList());
     }
 
-    private static StatusSourcePayment CreateStatusSourcePayment(AccountInvoiceCandidate payment)
+    private static PaymentAggregateItem CreateAggregateItem(AccountInvoiceCandidate payment)
         => new()
         {
             Id = payment.Id,
+            InvoiceId = payment.InvoiceEntityId,
+            Account = payment.Number,
+            AccountDate = payment.Date,
+            Date = payment.DueDate ?? payment.Date,
+            PlannedDate = payment.PlannedDate ?? payment.DueDate ?? payment.Date,
+            PaidDate = payment.PaidDate,
             Amount = payment.Amount,
             PaidAmount = payment.PaidAmount,
             Status = payment.Status,
+            DocumentKind = payment.DocumentKind,
+            HasInstallmentMarker = payment.HasInstallmentMarker,
+            ClientId = payment.ClientId,
+            ClientCaseId = payment.ClientCaseId,
+            Type = payment.Type,
         };
 
     private static StatusSourcePayment CreateStatusSourcePayment(PaymentAggregateItem payment)
@@ -987,6 +995,77 @@ public class AccountsController : ControllerBase
             PaidAmount = payment.PaidAmount,
             Status = payment.Status,
         };
+
+    private static List<PaymentAggregateItem> SelectStatusSourcePayments(
+        IReadOnlyCollection<PaymentAggregateItem> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        if (payments.Count == 0)
+        {
+            return new List<PaymentAggregateItem>();
+        }
+
+        var ordered = payments
+            .OrderBy(payment => EffectivePlannedDate(payment) ?? DateTime.MaxValue)
+            .ThenBy(payment => payment.Id)
+            .ToList();
+
+        if (ShouldHideRepresentativeInvoice(ordered, representativePaymentId, representativeAmount))
+        {
+            return ordered
+                .Where(payment => payment.Id != representativePaymentId)
+                .ToList();
+        }
+
+        var linkedPayments = ordered
+            .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
+            .ToList();
+
+        return linkedPayments.Count > 0 ? linkedPayments : ordered;
+    }
+
+    private static bool ShouldHideRepresentativeInvoice(
+        IReadOnlyCollection<PaymentAggregateItem> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        return payments.Any(payment => payment.HasInstallmentMarker)
+            || IsLegacyBrokenInstallmentAggregate(payments, representativePaymentId, representativeAmount);
+    }
+
+    private static bool IsLegacyBrokenInstallmentAggregate(
+        IReadOnlyCollection<PaymentAggregateItem> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        if (payments.Count < 3 || payments.Any(payment => payment.HasInstallmentMarker))
+        {
+            return false;
+        }
+
+        var invoiceRows = payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
+            .ToList();
+        if (invoiceRows.Count < 2)
+        {
+            return false;
+        }
+
+        var nonInvoiceCount = payments.Count - invoiceRows.Count;
+        if (nonInvoiceCount > 1)
+        {
+            return false;
+        }
+
+        var maxSiblingAmount = payments
+            .Where(payment => payment.Id != representativePaymentId)
+            .Select(payment => payment.Amount)
+            .DefaultIfEmpty(0m)
+            .Max();
+
+        return representativeAmount > maxSiblingAmount;
+    }
 
     private static string DeriveAccountStatus(
         IEnumerable<StatusSourcePayment> payments,
@@ -1102,12 +1181,14 @@ public class AccountsController : ControllerBase
         public string Number { get; init; } = string.Empty;
         public DateTime Date { get; init; }
         public DateTime? DueDate { get; init; }
+        public DateTime? PlannedDate { get; init; }
         public decimal Amount { get; init; }
         public decimal PaidAmount { get; init; }
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
+        public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
         public string? ClientName { get; init; }
         public string? ClientCompany { get; init; }
@@ -1147,6 +1228,7 @@ public class AccountsController : ControllerBase
         public decimal PaidAmount { get; init; }
         public PaymentStatus Status { get; init; }
         public DocumentKind DocumentKind { get; init; }
+        public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
         public int? ClientCaseId { get; init; }
         public PaymentType Type { get; init; }
@@ -1168,7 +1250,7 @@ public class AccountsController : ControllerBase
         public int? InvoiceEntityId { get; init; }
         public string? LegacyGroupKey { get; init; }
         public HashSet<int> InvoicePaymentIds { get; init; } = new();
-        public List<StatusSourcePayment> StatusSeedPayments { get; init; } = new();
+        public List<PaymentAggregateItem> CandidatePayments { get; init; } = new();
         public List<int> RelatedPaymentIds { get; set; } = new();
         public decimal FallbackAmount { get; init; }
         public decimal TotalAmount { get; set; }

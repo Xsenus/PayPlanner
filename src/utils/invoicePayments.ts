@@ -90,10 +90,82 @@ export function isInvoiceManagedPayment(
   return payment.documentKind === 'Invoice' || isGeneratedInstallmentPayment(payment);
 }
 
-export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {
-  if (!payments.some(isGeneratedInstallmentPayment)) {
+function getRepresentativeInvoicePayment(payments: Payment[]): Payment | null {
+  const invoiceRows = payments.filter((payment) => payment.documentKind === 'Invoice');
+  if (invoiceRows.length === 0) {
+    return null;
+  }
+
+  return [...invoiceRows].sort((left, right) => {
+    const amountDiff = (right.amount ?? 0) - (left.amount ?? 0);
+    return amountDiff || left.id - right.id;
+  })[0] ?? null;
+}
+
+function isLegacyBrokenInstallmentAggregate(payments: Payment[]): boolean {
+  if (payments.length < 3 || payments.some(isGeneratedInstallmentPayment)) {
+    return false;
+  }
+
+  const invoiceRows = payments.filter((payment) => payment.documentKind === 'Invoice');
+  if (invoiceRows.length < 2) {
+    return false;
+  }
+
+  const nonInvoiceCount = payments.length - invoiceRows.length;
+  if (nonInvoiceCount > 1) {
+    return false;
+  }
+
+  const representativeInvoice = getRepresentativeInvoicePayment(payments);
+  if (!representativeInvoice) {
+    return false;
+  }
+
+  const maxSiblingAmount = payments
+    .filter((payment) => payment.id !== representativeInvoice.id)
+    .reduce((maxAmount, payment) => Math.max(maxAmount, payment.amount ?? 0), 0);
+
+  return (representativeInvoice.amount ?? 0) > maxSiblingAmount;
+}
+
+function isLegacyInstallmentChildrenSet(payments: Payment[]): boolean {
+  if (payments.length < 3 || payments.some(isGeneratedInstallmentPayment)) {
+    return false;
+  }
+
+  const invoiceRows = payments.filter((payment) => payment.documentKind === 'Invoice');
+  if (invoiceRows.length < 2) {
+    return false;
+  }
+
+  const nonInvoiceCount = payments.length - invoiceRows.length;
+  return nonInvoiceCount <= 1;
+}
+
+export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[] {
+  const representativeInvoice = getRepresentativeInvoicePayment(payments);
+  if (representativeInvoice && isLegacyBrokenInstallmentAggregate(payments)) {
+    return payments.filter((payment) => payment.id !== representativeInvoice.id);
+  }
+
+  if (!representativeInvoice && isLegacyInstallmentChildrenSet(payments)) {
     return payments;
   }
 
-  return payments.filter((payment) => payment.documentKind !== 'Invoice');
+  const linkedPayments = payments.filter((payment) => payment.documentKind !== 'Invoice');
+  return linkedPayments.length > 0 ? linkedPayments : payments;
+}
+
+export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {
+  const representativeInvoice = getRepresentativeInvoicePayment(payments);
+  if (!representativeInvoice) {
+    return payments;
+  }
+
+  if (!payments.some(isGeneratedInstallmentPayment) && !isLegacyBrokenInstallmentAggregate(payments)) {
+    return payments;
+  }
+
+  return payments.filter((payment) => payment.id !== representativeInvoice.id);
 }
