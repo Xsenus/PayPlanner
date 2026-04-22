@@ -1218,6 +1218,191 @@ public class InvoicesControllerCoverageTests
         Assert.Equal("12", migratedInvoice.Number);
     }
 
+    [Fact]
+    public async Task RepairLegacyInstallments_RequiresAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "Regular User");
+        var controller = CreateController(db, isAdmin: false, userId: userId);
+
+        var action = await controller.RepairLegacyInstallments(49, false, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task RepairLegacyInstallments_NormalizesBrokenLegacyAggregate_AndReportsRemainingGap()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Repair Client");
+        var clientCaseId = await CreateClientCaseAsync(db, clientId, "Repair Case");
+        var extraCaseId = await CreateClientCaseAsync(db, clientId, "Wrong Legacy Case");
+
+        var invoice = new Invoice
+        {
+            Number = "155",
+            Date = new DateTime(2025, 10, 24),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representative = new Payment
+        {
+            Account = "155",
+            AccountDate = invoice.Date,
+            Amount = 115_000m,
+            ClientId = clientId,
+            ClientCaseId = clientCaseId,
+            Date = new DateTime(2026, 3, 25),
+            PlannedDate = invoice.Date,
+            Description = "Representative invoice",
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceId = invoice.Id,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+        };
+        representative.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            ClientCaseId = extraCaseId,
+        });
+
+        var installments = new[]
+        {
+            new Payment
+            {
+                Account = null,
+                AccountDate = null,
+                Amount = 18_000m,
+                ClientId = clientId,
+                ClientCaseId = clientCaseId,
+                Date = new DateTime(2025, 11, 27),
+                PlannedDate = new DateTime(2025, 11, 27),
+                Description = "Installment 1",
+                DocumentKind = DocumentKind.Invoice,
+                InvoiceId = invoice.Id,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                PaidAmount = 18_000m,
+                PaidDate = new DateTime(2025, 11, 27),
+                LastPaymentDate = new DateTime(2025, 11, 27),
+                IsPaid = true,
+            },
+            new Payment
+            {
+                Account = "155",
+                AccountDate = new DateTime(2025, 10, 20),
+                Amount = 18_000m,
+                ClientId = clientId,
+                ClientCaseId = clientCaseId,
+                Date = new DateTime(2025, 12, 25),
+                PlannedDate = new DateTime(2025, 12, 25),
+                Description = "Installment 2",
+                DocumentKind = DocumentKind.Invoice,
+                InvoiceId = invoice.Id,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                PaidAmount = 18_000m,
+                PaidDate = new DateTime(2025, 12, 25),
+                LastPaymentDate = new DateTime(2025, 12, 25),
+                IsPaid = true,
+            },
+            new Payment
+            {
+                Account = "155",
+                AccountDate = invoice.Date,
+                Amount = 18_000m,
+                ClientId = clientId,
+                ClientCaseId = clientCaseId,
+                Date = new DateTime(2026, 1, 30),
+                PlannedDate = new DateTime(2026, 1, 30),
+                Description = "Installment 3",
+                DocumentKind = DocumentKind.Payment,
+                InvoiceId = invoice.Id,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                PaidAmount = 18_000m,
+                PaidDate = new DateTime(2026, 1, 30),
+                LastPaymentDate = new DateTime(2026, 1, 30),
+                IsPaid = true,
+            },
+            new Payment
+            {
+                Account = "155",
+                AccountDate = invoice.Date,
+                Amount = 18_000m,
+                ClientId = clientId,
+                ClientCaseId = clientCaseId,
+                Date = new DateTime(2026, 2, 25),
+                PlannedDate = new DateTime(2026, 2, 25),
+                Description = "Installment 4",
+                DocumentKind = DocumentKind.Invoice,
+                InvoiceId = invoice.Id,
+                Status = PaymentStatus.Overdue,
+                Type = PaymentType.Income,
+            },
+            new Payment
+            {
+                Account = "155",
+                AccountDate = invoice.Date,
+                Amount = 18_000m,
+                ClientId = clientId,
+                ClientCaseId = clientCaseId,
+                Date = new DateTime(2026, 3, 25),
+                PlannedDate = new DateTime(2026, 3, 25),
+                Description = "Installment 5",
+                DocumentKind = DocumentKind.Invoice,
+                InvoiceId = invoice.Id,
+                Status = PaymentStatus.Overdue,
+                Type = PaymentType.Income,
+            },
+        };
+
+        db.Payments.Add(representative);
+        db.Payments.AddRange(installments);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var action = await controller.RepairLegacyInstallments(invoice.Id, false, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceLegacyInstallmentRepairSummaryDto>(ok.Value);
+        Assert.True(summary.LegacyAggregateDetected);
+        Assert.True(summary.Repaired);
+        Assert.Equal(invoice.Id, summary.InvoiceEntityId);
+        Assert.Equal("155", summary.InvoiceNumber);
+        Assert.Equal(representative.Id, summary.RepresentativePaymentId);
+        Assert.Equal(6, summary.ScannedPayments);
+        Assert.Equal(5, summary.ChildPayments);
+        Assert.Equal(4, summary.UpdatedKinds);
+        Assert.Equal(5, summary.AddedMarkers);
+        Assert.Equal(2, summary.NormalizedLinks);
+        Assert.Equal(1, summary.UpdatedCaseLinks);
+        Assert.Equal(115_000m, summary.InvoiceAmount);
+        Assert.Equal(90_000m, summary.ChildPaymentsTotal);
+        Assert.Equal(25_000m, summary.RemainingUnscheduledAmount);
+
+        db.ChangeTracker.Clear();
+
+        var storedRepresentative = await db.Payments.AsNoTracking()
+            .Include(payment => payment.InvoiceClientCases)
+            .SingleAsync(payment => payment.Id == representative.Id);
+        Assert.Equal(DocumentKind.Invoice, storedRepresentative.DocumentKind);
+        Assert.Equal([clientCaseId], storedRepresentative.InvoiceClientCases.Select(link => link.ClientCaseId).ToArray());
+
+        var storedInstallments = await db.Payments.AsNoTracking()
+            .Where(payment => payment.InvoiceId == invoice.Id && payment.Id != representative.Id)
+            .OrderBy(payment => payment.Id)
+            .ToListAsync();
+        Assert.Equal(5, storedInstallments.Count);
+        Assert.All(storedInstallments, payment =>
+        {
+            Assert.Equal(DocumentKind.Payment, payment.DocumentKind);
+            Assert.Contains("[pp:installment-payment]", payment.SystemNotes, StringComparison.Ordinal);
+            Assert.Equal("155", payment.Account);
+            Assert.Equal(invoice.Date, payment.AccountDate);
+        });
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

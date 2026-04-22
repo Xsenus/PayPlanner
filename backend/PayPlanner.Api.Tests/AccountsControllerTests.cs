@@ -131,6 +131,40 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_UsesFullLegacyInstallmentAggregate_WhenChildrenWereSavedAsInvoiceRows()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateLegacyBrokenInstallmentAggregateAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("155", row.AccountNumber);
+        Assert.Equal("partial", row.Status);
+        Assert.Equal(205_000m, row.TotalAmount);
+        Assert.Equal(new DateTime(2026, 1, 30), row.DueDate);
+        Assert.Equal(new DateTime(2025, 12, 25), row.PaidDate);
+        Assert.Equal(3, row.Payments.Count);
+        Assert.Equal(new[] { 18_000m, 18_000m, 18_000m }, row.Payments.Select(payment => payment.Amount).OrderBy(amount => amount).ToArray());
+        Assert.DoesNotContain(row.Payments, payment => payment.Amount == 205_000m);
+    }
+
+    [Fact]
     public async Task GetRegistry_UsesInvoiceNumberAsTieBreaker_WhenDatesMatch()
     {
         await using var db = await CreateContextAsync();
@@ -419,6 +453,69 @@ public class AccountsControllerTests
         legacySiblingPayment.LastPaymentDate = legacySiblingPayment.Date;
 
         db.Payments.AddRange(representativePayment, legacySiblingPayment);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateLegacyBrokenInstallmentAggregateAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Broken Legacy Client",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Broken Legacy Case",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "155",
+            Date = new DateTime(2025, 10, 24),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = CreatePayment(new DateTime(2026, 8, 25), 205_000m, "Representative payment for invoice 155");
+        representativePayment.DocumentKind = DocumentKind.Invoice;
+        representativePayment.InvoiceId = invoice.Id;
+        representativePayment.Account = invoice.Number;
+        representativePayment.AccountDate = invoice.Date;
+        representativePayment.Client = client;
+        representativePayment.ClientCase = clientCase;
+        representativePayment.CounterpartyName = client.Name;
+        representativePayment.Status = PaymentStatus.Pending;
+        representativePayment.PlannedDate = invoice.Date;
+
+        var firstInstallment = CreateLinkedPayment(invoice, new DateTime(2025, 11, 27), 18_000m, PaymentStatus.Completed);
+        firstInstallment.DocumentKind = DocumentKind.Invoice;
+        firstInstallment.Client = client;
+        firstInstallment.ClientCase = clientCase;
+        firstInstallment.CounterpartyName = client.Name;
+        firstInstallment.PaidAmount = firstInstallment.Amount;
+        firstInstallment.PaidDate = firstInstallment.Date;
+        firstInstallment.LastPaymentDate = firstInstallment.Date;
+        firstInstallment.IsPaid = true;
+
+        var secondInstallment = CreateLinkedPayment(invoice, new DateTime(2025, 12, 25), 18_000m, PaymentStatus.Completed);
+        secondInstallment.DocumentKind = DocumentKind.Payment;
+        secondInstallment.Client = client;
+        secondInstallment.ClientCase = clientCase;
+        secondInstallment.CounterpartyName = client.Name;
+        secondInstallment.PaidAmount = secondInstallment.Amount;
+        secondInstallment.PaidDate = secondInstallment.Date;
+        secondInstallment.LastPaymentDate = secondInstallment.Date;
+        secondInstallment.IsPaid = true;
+
+        var thirdInstallment = CreateLinkedPayment(invoice, new DateTime(2026, 1, 30), 18_000m, PaymentStatus.Pending);
+        thirdInstallment.DocumentKind = DocumentKind.Invoice;
+        thirdInstallment.Client = client;
+        thirdInstallment.ClientCase = clientCase;
+        thirdInstallment.CounterpartyName = client.Name;
+
+        db.Payments.AddRange(representativePayment, firstInstallment, secondInstallment, thirdInstallment);
         await db.SaveChangesAsync();
     }
 

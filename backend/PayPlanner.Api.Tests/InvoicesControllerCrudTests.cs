@@ -471,6 +471,214 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_ForksProtectedRepresentativePayment_WhenInvoiceWouldOverwriteLegacyAdvance()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Legacy");
+        var contractId1 = await CreateContractAsync(db, clientId, "CTR-LEGACY-A");
+        var contractId2 = await CreateContractAsync(db, clientId, "CTR-LEGACY-B");
+        var caseId1 = await CreateClientCaseAsync(db, clientId, "Legacy Case");
+        var caseId2 = await CreateClientCaseAsync(db, clientId, "Updated Case");
+        var actId1 = await CreateActAsync(db, clientId, "ACT-LEGACY-A");
+        var actId2 = await CreateActAsync(db, clientId, "ACT-LEGACY-B");
+        var responsibleId1 = await CreateUserAsync(db, "Legacy Responsible");
+        var responsibleId2 = await CreateUserAsync(db, "Updated Responsible");
+        var serviceId1 = await CreateServiceAsync(db, "Legacy Service");
+        var serviceId2 = await CreateServiceAsync(db, "Updated Service");
+        var paymentSourceId = await CreatePaymentSourceAsync(db, "Bank");
+
+        var invoice = new Invoice
+        {
+            Number = "INV-LEG-1",
+            Date = new DateTime(2026, 4, 10),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        var legacyRepresentative = new Payment
+        {
+            Invoice = invoice,
+            Account = "INV-LEG-1",
+            AccountDate = new DateTime(2026, 4, 10),
+            Date = new DateTime(2026, 4, 10),
+            PlannedDate = new DateTime(2026, 4, 15),
+            Amount = 5_000m,
+            PaidAmount = 5_000m,
+            PaidDate = new DateTime(2026, 4, 10),
+            LastPaymentDate = new DateTime(2026, 4, 10),
+            IsPaid = true,
+            Status = PaymentStatus.Completed,
+            Type = PaymentType.Income,
+            ClientId = clientId,
+            ContractId = contractId1,
+            ClientCaseId = caseId1,
+            Description = "Legacy advance",
+            DocumentKind = DocumentKind.Invoice,
+            PaymentSourceId = paymentSourceId,
+            ServiceId = serviceId1,
+            CreatedAt = DateTime.UtcNow,
+        };
+        legacyRepresentative.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
+        legacyRepresentative.InvoiceClientCases.Add(new InvoiceClientCase { ClientCaseId = caseId1 });
+        legacyRepresentative.InvoiceLineItems.Add(new InvoiceLineItem
+        {
+            ServiceId = serviceId1,
+            SortOrder = 0,
+            Name = "Legacy advance line",
+            Quantity = 1m,
+            Unit = "service",
+            Price = 5_000m,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        db.Payments.Add(legacyRepresentative);
+        await db.SaveChangesAsync();
+
+        db.Payments.Add(new Payment
+        {
+            InvoiceId = legacyRepresentative.InvoiceId,
+            Account = legacyRepresentative.Account,
+            AccountDate = legacyRepresentative.AccountDate,
+            Date = new DateTime(2026, 5, 15),
+            PlannedDate = new DateTime(2026, 5, 15),
+            Amount = 2_000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            ClientId = clientId,
+            ContractId = contractId1,
+            ClientCaseId = caseId1,
+            Description = "Linked legacy payment",
+            DocumentKind = DocumentKind.Payment,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        var legacyAct = await db.Acts.SingleAsync(act => act.Id == actId1);
+        legacyAct.InvoiceId = legacyRepresentative.Id;
+        legacyAct.InvoiceNumber = legacyRepresentative.Account;
+
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var updateRequest = CreateRequest("INV-LEG-1", clientId, new DateTime(2026, 4, 10), 25_000m);
+        updateRequest.ContractId = contractId2;
+        updateRequest.ClientCaseIds = [caseId2];
+        updateRequest.ActIds = [actId2];
+        updateRequest.ResponsibleIds = [responsibleId2];
+        updateRequest.Description = "Updated invoice total";
+        updateRequest.PaymentSourceId = paymentSourceId;
+        updateRequest.ServiceId = serviceId2;
+        updateRequest.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                ServiceId = serviceId2,
+                Name = "Updated invoice line",
+                Quantity = 1m,
+                Unit = "service",
+                Price = 25_000m,
+            },
+        ];
+
+        var updateAction = await controller.Update(legacyRepresentative.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.NotEqual(legacyRepresentative.Id, updatedDto.Id);
+
+        db.ChangeTracker.Clear();
+
+        var preservedAdvance = await db.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == legacyRepresentative.Id);
+        Assert.Equal(DocumentKind.Payment, preservedAdvance.DocumentKind);
+        Assert.Equal(5_000m, preservedAdvance.Amount);
+        Assert.Equal(5_000m, preservedAdvance.PaidAmount);
+        Assert.True(preservedAdvance.IsPaid);
+        Assert.Equal(PaymentStatus.Completed, preservedAdvance.Status);
+        Assert.Equal(new DateTime(2026, 4, 10), preservedAdvance.PaidDate);
+        Assert.Equal(contractId1, preservedAdvance.ContractId);
+        Assert.Equal(caseId1, preservedAdvance.ClientCaseId);
+        Assert.Equal("Legacy advance", preservedAdvance.Description);
+
+        var updatedRepresentative = await db.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == updatedDto.Id);
+        Assert.Equal(DocumentKind.Invoice, updatedRepresentative.DocumentKind);
+        Assert.Equal(25_000m, updatedRepresentative.Amount);
+        Assert.Equal(contractId2, updatedRepresentative.ContractId);
+        Assert.Equal(caseId2, updatedRepresentative.ClientCaseId);
+        Assert.Equal(serviceId2, updatedRepresentative.ServiceId);
+        Assert.Equal(paymentSourceId, updatedRepresentative.PaymentSourceId);
+        Assert.Equal("Updated invoice total", updatedRepresentative.Description);
+
+        var aggregatePayments = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == updatedRepresentative.InvoiceId)
+            .OrderBy(payment => payment.Id)
+            .ToListAsync();
+        Assert.Equal(3, aggregatePayments.Count);
+        Assert.Single(aggregatePayments, payment => payment.DocumentKind == DocumentKind.Invoice);
+        Assert.Contains(aggregatePayments, payment => payment.Id == legacyRepresentative.Id && payment.DocumentKind == DocumentKind.Payment);
+
+        var oldResponsibleIds = await db.Set<PaymentResponsible>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == legacyRepresentative.Id)
+            .Select(item => item.UserId)
+            .OrderBy(id => id)
+            .ToListAsync();
+        Assert.Equal(new[] { responsibleId1 }, oldResponsibleIds);
+
+        var newResponsibleIds = await db.Set<PaymentResponsible>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == updatedDto.Id)
+            .Select(item => item.UserId)
+            .OrderBy(id => id)
+            .ToListAsync();
+        Assert.Equal(new[] { responsibleId2 }, newResponsibleIds);
+
+        var oldCaseLinks = await db.Set<InvoiceClientCase>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == legacyRepresentative.Id)
+            .Select(item => item.ClientCaseId)
+            .ToListAsync();
+        Assert.Empty(oldCaseLinks);
+
+        var newCaseLinks = await db.Set<InvoiceClientCase>()
+            .AsNoTracking()
+            .Where(item => item.PaymentId == updatedDto.Id)
+            .Select(item => item.ClientCaseId)
+            .OrderBy(id => id)
+            .ToListAsync();
+        Assert.Equal(new[] { caseId2 }, newCaseLinks);
+
+        var oldLineItems = await db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == legacyRepresentative.Id)
+            .ToListAsync();
+        Assert.Empty(oldLineItems);
+
+        var newLineItems = await db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == updatedDto.Id)
+            .OrderBy(item => item.SortOrder)
+            .ToListAsync();
+        Assert.Single(newLineItems);
+        Assert.Equal(serviceId2, newLineItems[0].ServiceId);
+        Assert.Equal("Updated invoice line", newLineItems[0].Name);
+
+        var detachedLegacyAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == actId1);
+        Assert.Null(detachedLegacyAct.InvoiceId);
+        Assert.Null(detachedLegacyAct.InvoiceNumber);
+
+        var attachedUpdatedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == actId2);
+        Assert.Equal(updatedDto.Id, attachedUpdatedAct.InvoiceId);
+        Assert.Equal("INV-LEG-1", attachedUpdatedAct.InvoiceNumber);
+    }
+
+    [Fact]
     public async Task Update_ClearsClientCaseLinks_WhenCasesRemoved()
     {
         await using var db = await CreateContextAsync();

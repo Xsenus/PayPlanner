@@ -4,6 +4,7 @@ import {
   filterRelatedPaymentsForInvoice,
   filterRelatedPaymentsForInvoiceWithOptions,
   filterRepresentativeInvoiceWhenInstallmentsExist,
+  getStatusSourcePaymentsForInvoice,
   getInvoiceLegacyKey,
   INSTALLMENT_PAYMENT_MARKER,
   isInvoiceManagedPayment,
@@ -154,5 +155,94 @@ describe('invoicePayments utilities', () => {
     ]);
 
     expect(result.map((payment) => payment.id)).toEqual([548]);
+  });
+
+  it('hides the representative invoice row for a legacy broken installment aggregate', () => {
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 205_000,
+      date: '2026-08-25',
+      plannedDate: '2025-10-24',
+      accountDate: '2025-10-24',
+    });
+    const firstInstallment = createPayment({
+      id: 548,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 18_000,
+      plannedDate: '2025-11-27',
+      date: '2025-11-27',
+    });
+    const secondInstallment = createPayment({
+      id: 549,
+      documentKind: 'Payment',
+      invoiceId: 30,
+      amount: 18_000,
+      plannedDate: '2025-12-25',
+      date: '2025-12-25',
+    });
+
+    const result = filterRepresentativeInvoiceWhenInstallmentsExist([
+      representativeInvoice,
+      firstInstallment,
+      secondInstallment,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([548, 549]);
+  });
+
+  it('uses the full legacy broken installment aggregate as the status source', () => {
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 205_000,
+      date: '2026-08-25',
+      plannedDate: '2025-10-24',
+      accountDate: '2025-10-24',
+      status: 'Pending',
+    });
+    const firstInstallment = createPayment({
+      id: 548,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 18_000,
+      date: '2025-11-27',
+      plannedDate: '2025-11-27',
+      status: 'Completed',
+      paidAmount: 18_000,
+      paidDate: '2025-11-27',
+    });
+    const secondInstallment = createPayment({
+      id: 549,
+      documentKind: 'Payment',
+      invoiceId: 30,
+      amount: 18_000,
+      date: '2025-12-25',
+      plannedDate: '2025-12-25',
+      status: 'Completed',
+      paidAmount: 18_000,
+      paidDate: '2025-12-25',
+    });
+    const thirdInstallment = createPayment({
+      id: 550,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 18_000,
+      date: '2026-01-30',
+      plannedDate: '2026-01-30',
+      status: 'Pending',
+    });
+
+    const result = getStatusSourcePaymentsForInvoice([
+      representativeInvoice,
+      firstInstallment,
+      secondInstallment,
+      thirdInstallment,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([548, 549, 550]);
   });
 });
