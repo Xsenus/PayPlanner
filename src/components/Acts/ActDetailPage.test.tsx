@@ -126,8 +126,9 @@ describe('ActDetailPage', () => {
     });
 
     expect(screen.getByText('Тестовый клиент')).toBeTruthy();
-    expect(screen.getByText(/Юридическая услуга/)).toBeTruthy();
+    expect(screen.getByText((_, node) => node?.textContent === 'Позиции: 1')).toBeTruthy();
     expect(screen.queryByText(/ИНН/i)).toBeNull();
+    expect(screen.queryByText('Позиции акта')).toBeNull();
     await waitFor(() => {
       expect(downloadActDocumentMock).toHaveBeenCalledWith(30, 'html', { includeSignatureAndSeal: false });
     });

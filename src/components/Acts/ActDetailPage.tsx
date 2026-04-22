@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ChevronDown, Download, FileText, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -723,36 +723,6 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <p className="mt-2"><span className="text-slate-500">Телефон:</span> {selectedClient?.phone || '—'}</p>
                 <p><span className="text-slate-500">Email:</span> {selectedClient?.email || '—'}</p>
                 <p><span className="text-slate-500">Адрес:</span> {selectedClient?.address || '—'}</p>
-              </div>
-
-              <div className="rounded-lg border border-slate-300 bg-white p-3 text-sm">
-                <div className="mb-3 flex items-center gap-2 font-medium">
-                  <FileText className="h-4 w-4" />
-                  Позиции акта
-                </div>
-                {lineItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
-                    У акта пока нет отдельных строк.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {lineItems.map((item, index) => (
-                      <div
-                        key={item.id ?? item.sourceKey ?? index}
-                        className="rounded-lg border border-slate-200 px-3 py-2"
-                      >
-                        <div className="text-sm font-medium text-slate-900">
-                          {index + 1}. {item.name || 'Без названия'}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          {Number(item.quantity ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {item.unit || 'ед.'}
-                          {' • '}
-                          {formatMoney(item.price ?? 0)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               <ObjectAuditLauncher
