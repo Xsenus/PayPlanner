@@ -6,7 +6,7 @@ import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
 import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
-import type { Act, ActInput, Payment } from './types';
+import type { Act, ActInput, Invoice, Payment } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions } from './hooks/useRolePermissions';
@@ -381,6 +381,7 @@ function AppContent() {
   const [actReturnTab, setActReturnTab] = useState<ActListTab>(getInitialActReturnTab() ?? 'acts');
   const [actReturnContext, setActReturnContext] = useState<ActReturnContext>(() => ({ tab: getInitialActReturnTab() ?? 'acts' }));
   const [actCreateInitialValues, setActCreateInitialValues] = useState<(Partial<ActInput> & { amount?: number | null }) | null>(null);
+  const [actCreateInvoiceSeed, setActCreateInvoiceSeed] = useState<Invoice | null>(null);
   const [invoicePageReturnClientId, setInvoicePageReturnClientId] = useState<number | null>(null);
   const [contractReturnTab, setContractReturnTab] = useState<Tab | null>(getInitialContractReturnTab);
   const [clientReturnTab, setClientReturnTab] = useState<{
@@ -594,12 +595,14 @@ function AppContent() {
 
     setSelectedActId(actId);
     setActCreateInitialValues(null);
+    setActCreateInvoiceSeed(null);
     applyActReturnContext(context);
     setActiveTab('actDetail');
   }, [applyActReturnContext, permissions.acts.canView]);
 
   const openActCreate = useCallback((options?: {
     initialValues?: Partial<ActInput> & { amount?: number | null };
+    invoiceSeed?: Invoice | null;
     returnTo?: ActReturnContext;
   }) => {
     if (!permissions.acts.canCreate) {
@@ -608,12 +611,14 @@ function AppContent() {
 
     setSelectedActId(null);
     setActCreateInitialValues(options?.initialValues ?? null);
+    setActCreateInvoiceSeed(options?.invoiceSeed ?? null);
     applyActReturnContext(options?.returnTo ?? { tab: 'acts' });
     setActiveTab('actCreate');
   }, [applyActReturnContext, permissions.acts.canCreate]);
 
   const handleActBack = useCallback(() => {
     setActCreateInitialValues(null);
+    setActCreateInvoiceSeed(null);
     setSelectedActId(null);
 
     if (actReturnContext.tab === 'clientDetail') {
@@ -700,6 +705,7 @@ function AppContent() {
 
       if (tab !== 'actCreate') {
         setActCreateInitialValues(null);
+        setActCreateInvoiceSeed(null);
       }
 
       setActiveTab(tab);
@@ -1001,6 +1007,7 @@ function AppContent() {
                 onCreateActPage={(initialValues, options) =>
                   openActCreate({
                     initialValues,
+                    invoiceSeed: options?.invoiceSeed ?? null,
                     returnTo: { tab: 'accounts', invoiceId: options?.invoiceId ?? null },
                   })
                 }
@@ -1026,6 +1033,7 @@ function AppContent() {
                 onCreateActPage={(initialValues, options) =>
                   openActCreate({
                     initialValues,
+                    invoiceSeed: options?.invoiceSeed ?? null,
                     returnTo: { tab: 'accountsIncome', invoiceId: options?.invoiceId ?? null },
                   })
                 }
@@ -1051,6 +1059,7 @@ function AppContent() {
                 onCreateActPage={(initialValues, options) =>
                   openActCreate({
                     initialValues,
+                    invoiceSeed: options?.invoiceSeed ?? null,
                     returnTo: { tab: 'accountsExpense', invoiceId: options?.invoiceId ?? null },
                   })
                 }
@@ -1110,6 +1119,7 @@ function AppContent() {
                 onBack={handleActBack}
                 onCreated={handleActCreated}
                 initialValues={actCreateInitialValues ?? undefined}
+                invoiceSeed={actCreateInvoiceSeed ?? undefined}
                 defaultResponsibleId={user?.id}
                 onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
               />

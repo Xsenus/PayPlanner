@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiService } from '../../services/api';
-import type { Act, ActInput, ActResponsible, Client, PaymentKind } from '../../types';
+import type { Act, ActInput, ActResponsible, Client, Invoice, PaymentKind } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
 import { ActModal } from './ActModal';
@@ -9,6 +9,7 @@ interface ActCreatePageProps {
   onBack: () => void;
   onCreated: (act: Act) => void;
   initialValues?: Partial<ActInput> & { amount?: number | null };
+  invoiceSeed?: Invoice | null;
   defaultClientId?: number | null;
   defaultResponsibleId?: number | null;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
@@ -18,6 +19,7 @@ export function ActCreatePage({
   onBack,
   onCreated,
   initialValues,
+  invoiceSeed,
   defaultClientId,
   defaultResponsibleId,
   onOpenInvoice,
@@ -103,6 +105,7 @@ export function ActCreatePage({
       defaultClientId={defaultClientId}
       defaultResponsibleId={defaultResponsibleId}
       initialValues={initialValues}
+      invoiceSeed={invoiceSeed}
       presentation="page"
       onOpenInvoice={onOpenInvoice}
     />

@@ -71,7 +71,7 @@ interface AccountsProps {
   onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
   onCreateActPage?: (
     initialValues?: Partial<ActInput> & { amount?: number | null },
-    options?: { invoiceId?: number | null },
+    options?: { invoiceId?: number | null; invoiceSeed?: Invoice | null },
   ) => void;
 }
 
@@ -1457,6 +1457,7 @@ export function Accounts({
     if (onCreateActPage) {
       onCreateActPage(nextInitialValues, {
         invoiceId: row.invoice?.id ?? null,
+        invoiceSeed: row.invoice ?? null,
       });
       return;
     }
@@ -1691,8 +1692,9 @@ export function Accounts({
           onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
           onCreateActPage={
             onCreateActPage
-              ? (initialValues, invoiceId) => onCreateActPage(initialValues, {
-                invoiceId: invoiceId ?? currentPageInvoice.id,
+              ? (initialValues, options) => onCreateActPage(initialValues, {
+                invoiceId: options?.invoiceId ?? currentPageInvoice.id,
+                invoiceSeed: options?.invoiceSeed ?? currentPageInvoice,
               })
               : undefined
           }
@@ -2444,8 +2446,9 @@ export function Accounts({
           onRefreshRequested={refreshAccounts}
           onCreateActPage={
             onCreateActPage
-              ? (initialValues, invoiceId) => onCreateActPage(initialValues, {
-                invoiceId: invoiceId ?? selectedInvoice?.id ?? null,
+              ? (initialValues, options) => onCreateActPage(initialValues, {
+                invoiceId: options?.invoiceId ?? selectedInvoice?.id ?? null,
+                invoiceSeed: options?.invoiceSeed ?? selectedInvoice ?? null,
               })
               : undefined
           }
@@ -2466,6 +2469,7 @@ export function Accounts({
           defaultClientId={actModalInvoice?.invoice?.clientId ?? null}
           defaultResponsibleId={actModalInvoice?.invoice?.responsibleId ?? null}
           initialValues={actInitialValues ?? undefined}
+          invoiceSeed={actModalInvoice?.invoice ?? undefined}
         />
 
         {paymentModalElement}

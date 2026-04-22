@@ -1486,7 +1486,10 @@ describe('InvoiceModal integration', () => {
         clientId: 1,
         responsibleId: 9,
         status: 'Created',
-      }), 618);
+      }), expect.objectContaining({
+        invoiceId: 618,
+        invoiceSeed: expect.objectContaining({ id: 618, number: '36' }),
+      }));
     });
   
     it('creates and loads client cases for the expense client on expense invoices', async () => {

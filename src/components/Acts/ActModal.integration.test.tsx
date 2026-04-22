@@ -236,6 +236,57 @@ describe('ActModal integration', () => {
     expect(screen.getAllByText('Поставщик').length).toBeGreaterThan(0);
   });
 
+  it('uses invoice positions from the seed list when the detail response arrives without line items', async () => {
+    const invoiceFromList = {
+      id: 777,
+      number: 'INV-777',
+      date: '2026-04-12',
+      amount: 12000,
+      description: 'Услуги по договору',
+      type: 'Income',
+      clientId: 1,
+      clientName: 'Тестовый клиент',
+      lineItems: [
+        { id: 301, sourceKey: 'db:301', name: 'Подготовка документов', quantity: 2, unit: 'усл.', price: 6000, sortOrder: 0 },
+      ],
+      acts: [],
+    } as unknown as Invoice;
+    const invoiceWithoutLines = {
+      ...invoiceFromList,
+      lineItems: [],
+      acts: [],
+    } as unknown as Invoice;
+
+    getInvoicesMock.mockResolvedValue({ items: [invoiceFromList] });
+    getInvoiceMock.mockResolvedValue(invoiceWithoutLines);
+
+    render(
+      <ActModal
+        open
+        mode="create"
+        act={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createClient(1, 'Тестовый клиент')]}
+        responsibles={[createResponsible(5, 'Мария Менеджер')]}
+        lookupsLoading={false}
+        defaultResponsibleId={5}
+        initialValues={{ invoiceId: 777 }}
+        presentation="page"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getInvoicesMock).toHaveBeenCalledWith({ page: 1, pageSize: 200 });
+      expect(getInvoiceMock).toHaveBeenCalledWith(777);
+    });
+
+    expect(await screen.findByText('Доступно позиций: 1')).toBeTruthy();
+    expect(screen.getByText('Подготовка документов')).toBeTruthy();
+    expect(screen.queryByText('У этого счета пока нет строк, поэтому акт можно сохранить только как пустой.')).toBeNull();
+  });
+
   it('allows creating an empty manual act without inn and invoice id fields', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -286,5 +337,78 @@ describe('ActModal integration', () => {
       status: 'Created',
     });
     expect(payload.lineItems).toEqual([]);
+  });
+
+  it('allows adding manual act positions when the linked invoice has no positions', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoiceWithoutLines = {
+      id: 880,
+      number: 'INV-880',
+      date: '2026-04-15',
+      amount: 0,
+      description: 'Пустой счет',
+      type: 'Income',
+      clientId: 7,
+      clientName: 'Иван Иванов',
+      lineItems: [],
+      acts: [],
+    } as unknown as Invoice;
+
+    getInvoiceMock.mockResolvedValue(invoiceWithoutLines);
+
+    render(
+      <ActModal
+        open
+        mode="create"
+        act={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createClient(7, 'Иван Иванов')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        initialValues={{ invoiceId: 880 }}
+        presentation="page"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getInvoiceMock).toHaveBeenCalledWith(880);
+    });
+
+    expect(screen.getByText('Позиции акта')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-880' } });
+    fireEvent.change(screen.getByLabelText('Название позиции акта'), { target: { value: 'Консультация' } });
+    fireEvent.change(screen.getByLabelText('Количество позиции акта'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Единица измерения позиции акта'), { target: { value: 'час' } });
+    fireEvent.change(screen.getByLabelText('Цена позиции акта'), { target: { value: '1500' } });
+
+    expect(screen.getByDisplayValue('3000').hasAttribute('readonly')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload).toMatchObject({
+      number: 'ACT-880',
+      amount: 3000,
+      creationMode: 'Manual',
+      invoiceId: 880,
+      invoiceNumber: 'INV-880',
+      clientId: 7,
+      status: 'Created',
+    });
+    expect(payload.lineItems).toEqual([
+      expect.objectContaining({
+        name: 'Консультация',
+        quantity: 2,
+        unit: 'час',
+        price: 1500,
+      }),
+    ]);
   });
 });

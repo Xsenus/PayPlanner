@@ -214,7 +214,7 @@ interface InvoiceModalProps {
   onClientCaseCreated?: (clientCase: ClientCase) => void;
   onCreateActPage?: (
     initialValues?: Partial<ActInput> & { amount?: number | null },
-    invoiceId?: number | null,
+    options?: { invoiceId?: number | null; invoiceSeed?: Invoice | null },
   ) => void;
 }
 
@@ -2110,7 +2110,10 @@ export function InvoiceModal({
         status: 'Created',
         comment: draftAct.comment.trim() || undefined,
       },
-      linkedInvoiceId,
+      {
+        invoiceId: linkedInvoiceId,
+        invoiceSeed: invoice ?? null,
+      },
     );
 
     return true;

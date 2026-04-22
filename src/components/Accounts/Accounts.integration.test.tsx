@@ -494,9 +494,10 @@ describe('Accounts integration', () => {
       amount: 15000,
       clientId: 55,
       status: 'Created',
-    }), {
+    }), expect.objectContaining({
       invoiceId: 528,
-    });
+      invoiceSeed: expect.objectContaining({ id: 528, number: '24' }),
+    }));
   });
 
   it('opens an existing act as a dedicated page from the accounts registry', async () => {

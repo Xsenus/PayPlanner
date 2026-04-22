@@ -36,6 +36,7 @@ interface ActModalProps {
   defaultClientId?: number | null;
   defaultResponsibleId?: number | null;
   initialValues?: Partial<ActInput> & { amount?: number | null };
+  invoiceSeed?: Invoice | null;
   presentation?: 'modal' | 'page';
   onBack?: () => void;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
@@ -79,10 +80,24 @@ type InvoiceLookupRecord = Pick<
   | 'expenseClientId'
   | 'clientName'
   | 'expenseClientName'
+  | 'description'
+  | 'lineItems'
+  | 'acts'
 >;
+
+type ManualActLineItemRow = {
+  id: string;
+  sourceKey: string;
+  name: string;
+  quantity: string;
+  unit: string;
+  price: string;
+};
 
 const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 const QUANTITY_EPSILON = 0.0001;
+const DEFAULT_MANUAL_LINE_ITEM_UNIT = 'шт';
+const MANUAL_LINE_ITEM_UNIT_OPTIONS = ['шт', 'усл.', 'час'];
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
 const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
@@ -106,6 +121,13 @@ function formatDecimalInput(value: number): string {
   return String(rounded).replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
 }
 
+function calculateLineItemAmountValue(
+  quantity: string | number | null | undefined,
+  price: string | number | null | undefined,
+): string {
+  return formatDecimalInput((parseDecimalInput(String(quantity ?? '')) ?? 0) * (parseDecimalInput(String(price ?? '')) ?? 0));
+}
+
 function quantitiesEqual(left: number, right: number): boolean {
   return Math.abs(left - right) < QUANTITY_EPSILON;
 }
@@ -125,6 +147,28 @@ function buildInvoiceLineSourceKey(item: InvoiceLineItem, index: number): string
   }
 
   return `legacy:auto-${index}`;
+}
+
+function createManualActLineItemRow(seed?: Partial<ActLineItem> | null, index = 0): ManualActLineItemRow {
+  const fallbackKey = `manual:${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
+    sourceKey: seed?.sourceKey?.trim() || fallbackKey,
+    name: seed?.name ?? '',
+    quantity:
+      seed?.quantity !== undefined && seed.quantity !== null
+        ? formatDecimalInput(Number(seed.quantity))
+        : '',
+    unit: seed?.unit ?? DEFAULT_MANUAL_LINE_ITEM_UNIT,
+    price:
+      seed?.price !== undefined && seed.price !== null
+        ? formatDecimalInput(Number(seed.price))
+        : '',
+  };
+}
+
+function normalizeManualActLineItems(lineItems?: ActLineItem[] | null): ManualActLineItemRow[] {
+  return (lineItems ?? []).map((item, index) => createManualActLineItemRow(item, index));
 }
 
 function sumLineItemQuantities(lineItems?: ActLineItem[] | null): Map<string, number> {
@@ -189,18 +233,6 @@ function resolveInvoiceLookupCounterpartyClientId(invoice: InvoiceLookupRecord |
   return invoice.clientId ?? invoice.expenseClientId ?? null;
 }
 
-function resolveInvoiceLookupCounterpartyName(invoice: InvoiceLookupRecord | null): string {
-  if (!invoice) {
-    return '';
-  }
-
-  if (invoice.type === 'Expense') {
-    return invoice.expenseClientName?.trim() || invoice.clientName?.trim() || '';
-  }
-
-  return invoice.clientName?.trim() || invoice.expenseClientName?.trim() || '';
-}
-
 function formatInvoiceLookupDate(value?: string | null): string {
   return toDateInputValue(value ?? '') || value || '';
 }
@@ -218,6 +250,58 @@ function buildInvoiceLookupDescription(invoice: InvoiceLookupRecord): string {
     : invoice.clientName?.trim() || invoice.expenseClientName?.trim() || 'Без контрагента';
   const typeLabel = invoice.type === 'Expense' ? 'Расходный счет' : 'Доходный счет';
   return `${typeLabel} • ${counterpartyName} • ${formatCurrencySmart(invoice.amount ?? 0).full}`;
+}
+
+function toInvoiceLookupRecord(invoice?: Invoice | null): InvoiceLookupRecord | null {
+  if (!invoice || typeof invoice.id !== 'number' || invoice.id <= 0) {
+    return null;
+  }
+
+  return {
+    id: invoice.id,
+    number: invoice.number ?? '',
+    date: invoice.date ?? '',
+    amount: Number(invoice.amount ?? 0),
+    type: invoice.type ?? 'Income',
+    clientId: invoice.clientId ?? null,
+    expenseClientId: invoice.expenseClientId ?? null,
+    clientName: invoice.clientName ?? null,
+    expenseClientName: invoice.expenseClientName ?? null,
+    description: invoice.description ?? null,
+    lineItems: invoice.lineItems ?? [],
+    acts: invoice.acts ?? [],
+  };
+}
+
+function mergeInvoiceDetails(
+  primary: Invoice | null,
+  ...fallbacks: Array<InvoiceLookupRecord | null>
+): Invoice | null {
+  const fallback = fallbacks.reduce<Partial<Invoice>>((accumulator, item) => {
+    if (!item) {
+      return accumulator;
+    }
+
+    return {
+      ...accumulator,
+      ...item,
+      description: item.description?.trim() ? item.description : accumulator.description,
+      lineItems: item.lineItems?.length ? item.lineItems : accumulator.lineItems,
+      acts: item.acts?.length ? item.acts : accumulator.acts,
+    };
+  }, {});
+
+  if (!primary) {
+    return Object.keys(fallback).length > 0 ? (fallback as Invoice) : null;
+  }
+
+  return {
+    ...(fallback as Invoice),
+    ...primary,
+    description: primary.description?.trim() ? primary.description : fallback.description,
+    lineItems: primary.lineItems?.length ? primary.lineItems : fallback.lineItems,
+    acts: primary.acts?.length ? primary.acts : fallback.acts,
+  };
 }
 
 function normalizeActToForm(
@@ -292,6 +376,7 @@ export function ActModal({
   defaultClientId,
   defaultResponsibleId,
   initialValues,
+  invoiceSeed,
   presentation = 'modal',
   onBack,
   onOpenInvoice,
@@ -313,6 +398,8 @@ export function ActModal({
   const [actDetailsError, setActDetailsError] = useState<string | null>(null);
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
   const selectionSeedRef = useRef<string | null>(null);
+  const [manualLineItems, setManualLineItems] = useState<ManualActLineItemRow[]>([]);
+  const manualLineItemsSeedRef = useRef<string | null>(null);
   const [lineItemPickerOpen, setLineItemPickerOpen] = useState(false);
 
   const isEdit = mode === 'edit';
@@ -330,6 +417,8 @@ export function ActModal({
       setActDetailsError(null);
       setSelectedLineQuantities({});
       selectionSeedRef.current = null;
+      setManualLineItems([]);
+      manualLineItemsSeedRef.current = null;
       setLineItemPickerOpen(false);
     }
   }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
@@ -366,6 +455,9 @@ export function ActModal({
               expenseClientId: invoice.expenseClientId,
               clientName: invoice.clientName,
               expenseClientName: invoice.expenseClientName,
+              description: invoice.description,
+              lineItems: invoice.lineItems ?? [],
+              acts: invoice.acts ?? [],
             })),
         );
       })
@@ -473,18 +565,26 @@ export function ActModal({
     () => invoiceOptions.find((item) => String(item.id) === String(form.invoiceId)) ?? null,
     [form.invoiceId, invoiceOptions],
   );
+  const invoiceSeedRecord = useMemo(
+    () => (linkedInvoiceId && invoiceSeed?.id === linkedInvoiceId ? toInvoiceLookupRecord(invoiceSeed) : null),
+    [invoiceSeed, linkedInvoiceId],
+  );
+  const effectiveInvoiceDetails = useMemo(
+    () => mergeInvoiceDetails(invoiceDetails, invoiceSeedRecord, selectedInvoiceLookupRecord),
+    [invoiceDetails, invoiceSeedRecord, selectedInvoiceLookupRecord],
+  );
   const actType = useMemo<PaymentKind | null>(
-    () => invoiceDetails?.type ?? selectedInvoiceLookupRecord?.type ?? act?.type ?? null,
-    [act?.type, invoiceDetails?.type, selectedInvoiceLookupRecord?.type],
+    () => effectiveInvoiceDetails?.type ?? act?.type ?? null,
+    [act?.type, effectiveInvoiceDetails?.type],
   );
   const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(actType), [actType]);
   const linkedCounterpartyClientId = useMemo(
-    () => resolveCounterpartyClientId(invoiceDetails) ?? resolveInvoiceLookupCounterpartyClientId(selectedInvoiceLookupRecord),
-    [invoiceDetails, selectedInvoiceLookupRecord],
+    () => resolveCounterpartyClientId(effectiveInvoiceDetails),
+    [effectiveInvoiceDetails],
   );
   const linkedCounterpartyName = useMemo(
-    () => resolveCounterpartyName(invoiceDetails) || resolveInvoiceLookupCounterpartyName(selectedInvoiceLookupRecord),
-    [invoiceDetails, selectedInvoiceLookupRecord],
+    () => resolveCounterpartyName(effectiveInvoiceDetails),
+    [effectiveInvoiceDetails],
   );
   const selectedCounterpartyClientId = useMemo(
     () => (form.clientId ? Number(form.clientId) : null),
@@ -515,18 +615,21 @@ export function ActModal({
     if (
       linkedInvoiceId
       && !items.some((item) => item.id === linkedInvoiceId)
-      && (invoiceDetails || form.invoiceNumber.trim())
+      && (effectiveInvoiceDetails || form.invoiceNumber.trim())
     ) {
       items.unshift({
         id: linkedInvoiceId,
-        number: invoiceDetails?.number ?? (form.invoiceNumber.trim() || `#${linkedInvoiceId}`),
-        date: invoiceDetails?.date ?? '',
-        amount: invoiceDetails?.amount ?? 0,
-        type: invoiceDetails?.type ?? 'Income',
-        clientId: invoiceDetails?.clientId ?? null,
-        expenseClientId: invoiceDetails?.expenseClientId ?? null,
-        clientName: invoiceDetails?.clientName ?? null,
-        expenseClientName: invoiceDetails?.expenseClientName ?? null,
+        number: effectiveInvoiceDetails?.number ?? (form.invoiceNumber.trim() || `#${linkedInvoiceId}`),
+        date: effectiveInvoiceDetails?.date ?? '',
+        amount: effectiveInvoiceDetails?.amount ?? 0,
+        type: effectiveInvoiceDetails?.type ?? 'Income',
+        clientId: effectiveInvoiceDetails?.clientId ?? null,
+        expenseClientId: effectiveInvoiceDetails?.expenseClientId ?? null,
+        clientName: effectiveInvoiceDetails?.clientName ?? null,
+        expenseClientName: effectiveInvoiceDetails?.expenseClientName ?? null,
+        description: effectiveInvoiceDetails?.description ?? null,
+        lineItems: effectiveInvoiceDetails?.lineItems ?? [],
+        acts: effectiveInvoiceDetails?.acts ?? [],
       });
     }
 
@@ -545,10 +648,10 @@ export function ActModal({
         invoice.type === 'Expense' ? 'расход поставщик' : 'доход клиент',
       ],
     }));
-  }, [form.invoiceNumber, invoiceDetails, invoiceOptions, linkedInvoiceId, selectedCounterpartyClientId]);
+  }, [effectiveInvoiceDetails, form.invoiceNumber, invoiceOptions, linkedInvoiceId, selectedCounterpartyClientId]);
 
   useEffect(() => {
-    if (!open || !invoiceDetails) {
+    if (!open || !effectiveInvoiceDetails) {
       return;
     }
 
@@ -556,8 +659,8 @@ export function ActModal({
       let next = previous;
       let changed = false;
 
-      if (invoiceDetails.number?.trim() && previous.invoiceNumber !== invoiceDetails.number) {
-        next = { ...next, invoiceNumber: invoiceDetails.number };
+      if (effectiveInvoiceDetails.number?.trim() && previous.invoiceNumber !== effectiveInvoiceDetails.number) {
+        next = { ...next, invoiceNumber: effectiveInvoiceDetails.number };
         changed = true;
       }
 
@@ -566,22 +669,22 @@ export function ActModal({
         changed = true;
       }
 
-      if (!previous.number.trim() && invoiceDetails.number?.trim()) {
-        next = { ...next, number: invoiceDetails.number };
+      if (!previous.number.trim() && effectiveInvoiceDetails.number?.trim()) {
+        next = { ...next, number: effectiveInvoiceDetails.number };
         changed = true;
       }
 
-      if (!previous.title.trim() && invoiceDetails.description?.trim()) {
-        next = { ...next, title: invoiceDetails.description.trim() };
+      if (!previous.title.trim() && effectiveInvoiceDetails.description?.trim()) {
+        next = { ...next, title: effectiveInvoiceDetails.description.trim() };
         changed = true;
       }
 
       return changed ? next : previous;
     });
-  }, [linkedCounterpartyClientId, invoiceDetails, open]);
+  }, [effectiveInvoiceDetails, linkedCounterpartyClientId, open]);
 
   const invoiceLineAvailability = useMemo<InvoiceLineAvailabilityRow[]>(() => {
-    const sourceItems = invoiceDetails?.lineItems ?? [];
+    const sourceItems = effectiveInvoiceDetails?.lineItems ?? [];
     if (sourceItems.length === 0) {
       return [];
     }
@@ -589,7 +692,7 @@ export function ActModal({
     const currentActId = currentAct?.id ?? null;
     const usedByOtherActs = new Map<string, number>();
 
-    (invoiceDetails?.acts ?? []).forEach((invoiceAct) => {
+    (effectiveInvoiceDetails?.acts ?? []).forEach((invoiceAct) => {
       if (invoiceAct.status === 'Terminated') {
         return;
       }
@@ -628,7 +731,7 @@ export function ActModal({
         };
       })
       .sort((left, right) => left.sortOrder - right.sortOrder);
-  }, [currentAct?.id, invoiceDetails]);
+  }, [currentAct?.id, effectiveInvoiceDetails]);
 
   const currentActLineQuantities = useMemo(() => sumLineItemQuantities(currentAct?.lineItems), [currentAct?.lineItems]);
   const hasInvoiceLineItems = invoiceLineAvailability.length > 0;
@@ -662,10 +765,10 @@ export function ActModal({
       return;
     }
 
-    if (linkedInvoiceId && invoiceDetails && !invoiceLoading && !hasInvoiceLineItems && form.creationMode !== 'Manual') {
+    if (linkedInvoiceId && effectiveInvoiceDetails && !invoiceLoading && !hasInvoiceLineItems && form.creationMode !== 'Manual') {
       setForm((previous) => ({ ...previous, creationMode: 'Manual' }));
     }
-  }, [form.creationMode, hasInvoiceLineItems, invoiceDetails, invoiceLoading, linkedInvoiceId, open]);
+  }, [effectiveInvoiceDetails, form.creationMode, hasInvoiceLineItems, invoiceLoading, linkedInvoiceId, open]);
 
   const selectionSeedKey = useMemo(() => {
     const availabilityKey = invoiceLineAvailability
@@ -718,6 +821,45 @@ export function ActModal({
     setSelectedLineQuantities(next);
   }, [currentActLineQuantities, hasInvoiceLineItems, invoiceLineAvailability, open, selectionSeedKey]);
 
+  const manualLineItemsSeedKey = useMemo(() => {
+    const currentManualItemsKey = (currentAct?.lineItems ?? [])
+      .map((item) => [
+        item.sourceKey ?? '',
+        item.name ?? '',
+        item.quantity ?? '',
+        item.unit ?? '',
+        item.price ?? '',
+      ].join(':'))
+      .join('|');
+
+    return `${open ? 1 : 0}:${currentAct?.id ?? 0}:${currentAct?.creationMode ?? ''}:${currentManualItemsKey}`;
+  }, [currentAct?.creationMode, currentAct?.id, currentAct?.lineItems, open]);
+
+  useEffect(() => {
+    if (!open) {
+      manualLineItemsSeedRef.current = null;
+      return;
+    }
+
+    if (manualLineItemsSeedRef.current === manualLineItemsSeedKey) {
+      return;
+    }
+
+    manualLineItemsSeedRef.current = manualLineItemsSeedKey;
+
+    if (currentAct?.lineItems?.length && (!linkedInvoiceId || !hasInvoiceLineItems || currentAct.creationMode === 'Manual')) {
+      setManualLineItems(normalizeManualActLineItems(currentAct.lineItems));
+      return;
+    }
+
+    if (!isEdit) {
+      setManualLineItems([createManualActLineItemRow()]);
+      return;
+    }
+
+    setManualLineItems([]);
+  }, [currentAct, hasInvoiceLineItems, isEdit, linkedInvoiceId, manualLineItemsSeedKey, open]);
+
   const selectedClient = useMemo(
     () => clients.find((client) => String(client.id) === String(form.clientId)) ?? null,
     [clients, form.clientId],
@@ -769,10 +911,64 @@ export function ActModal({
     [selectedLineItems],
   );
 
+  const preparedManualLineItems = useMemo(
+    () =>
+      manualLineItems.map((item, index) => {
+        const normalizedName = item.name.trim();
+        const normalizedUnit = item.unit.trim() || DEFAULT_MANUAL_LINE_ITEM_UNIT;
+        const parsedQuantity = parseDecimalInput(item.quantity);
+        const parsedPrice = parseDecimalInput(item.price);
+        const hasContent = Boolean(
+          normalizedName
+          || item.quantity.trim()
+          || item.price.trim()
+          || (item.unit.trim() && item.unit.trim() !== DEFAULT_MANUAL_LINE_ITEM_UNIT),
+        );
+
+        return {
+          ...item,
+          sourceKey: item.sourceKey.trim() || `manual:${index + 1}`,
+          normalizedName,
+          normalizedUnit,
+          parsedQuantity,
+          parsedPrice,
+          hasContent,
+          isValid: Boolean(normalizedName && parsedQuantity !== null && parsedQuantity > 0 && parsedPrice !== null && parsedPrice >= 0),
+          lineAmount: (parsedQuantity ?? 0) * (parsedPrice ?? 0),
+        };
+      }),
+    [manualLineItems],
+  );
+  const manualLineItemsWithContent = useMemo(
+    () => preparedManualLineItems.filter((item) => item.hasContent),
+    [preparedManualLineItems],
+  );
+  const validManualLineItems = useMemo(
+    () => preparedManualLineItems.filter((item) => item.isValid),
+    [preparedManualLineItems],
+  );
+  const manualLineItemsAmount = useMemo(
+    () => preparedManualLineItems.reduce((sum, item) => sum + item.lineAmount, 0),
+    [preparedManualLineItems],
+  );
+  const canEditManualLineItems = linkedInvoiceId === null || !hasInvoiceLineItems;
+  const isUsingManualLineItems = canEditManualLineItems && form.creationMode === 'Manual' && manualLineItemsWithContent.length > 0;
+
+  useEffect(() => {
+    if (!open || !isUsingManualLineItems) {
+      return;
+    }
+
+    const nextAmount = formatDecimalInput(manualLineItemsAmount);
+    setForm((previous) => (previous.amount === nextAmount ? previous : { ...previous, amount: nextAmount }));
+  }, [isUsingManualLineItems, manualLineItemsAmount, open]);
+
   const effectiveAmount = isUsingInvoiceItems
     ? computedAmount
+    : isUsingManualLineItems
+      ? manualLineItemsAmount
     : parseDecimalInput(form.amount) ?? 0;
-  const amountReadonly = isUsingInvoiceItems;
+  const amountReadonly = isUsingInvoiceItems || isUsingManualLineItems;
   const availableLinesCount = useMemo(
     () => invoiceLineAvailability.filter((item) => item.availableQuantity > 0).length,
     [invoiceLineAvailability],
@@ -799,6 +995,18 @@ export function ActModal({
   ) => {
     const value = event.target.value;
     setForm((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const updateManualLineItem = (id: string, patch: Partial<ManualActLineItemRow>) => {
+    setManualLineItems((previous) => previous.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const addManualLineItem = () => {
+    setManualLineItems((previous) => [...previous, createManualActLineItemRow(null, previous.length)]);
+  };
+
+  const removeManualLineItem = (id: string) => {
+    setManualLineItems((previous) => previous.filter((item) => item.id !== id));
   };
 
   const handleCounterpartySelect = (value: string) => {
@@ -939,7 +1147,7 @@ export function ActModal({
     const linkedToInvoice = Boolean(linkedInvoiceId);
     let amount = 0;
     let creationMode: ActCreationMode = form.creationMode;
-    let lineItems: Pick<ActLineItem, 'sourceKey' | 'quantity'>[] = [];
+    let lineItems: NonNullable<ActInput['lineItems']> = [];
 
     if (linkedToInvoice && hasInvoiceLineItems && form.creationMode !== 'Manual') {
       lineItems = selectedLineItems.map((item) => ({
@@ -956,13 +1164,71 @@ export function ActModal({
       amount = computedAmount;
     } else {
       creationMode = 'Manual';
-      const parsedAmount = parseDecimalInput(form.amount);
-      if (parsedAmount === null) {
-        setLocalError('Введите корректную сумму');
+      const manualPayload = preparedManualLineItems.reduce<{
+        error: string | null;
+        items: NonNullable<ActInput['lineItems']>;
+      }>((accumulator, item, index) => {
+        if (accumulator.error || !item.hasContent) {
+          return accumulator;
+        }
+
+        if (!item.normalizedName) {
+          return {
+            error: `Заполните название позиции акта в строке ${index + 1}`,
+            items: accumulator.items,
+          };
+        }
+
+        if (item.parsedQuantity === null || item.parsedQuantity <= 0) {
+          return {
+            error: `Укажите корректное количество для позиции "${item.normalizedName}"`,
+            items: accumulator.items,
+          };
+        }
+
+        if (item.parsedPrice === null || item.parsedPrice < 0) {
+          return {
+            error: `Укажите корректную цену для позиции "${item.normalizedName}"`,
+            items: accumulator.items,
+          };
+        }
+
+        return {
+          error: null,
+          items: [
+            ...accumulator.items,
+            {
+              sourceKey: item.sourceKey,
+              name: item.normalizedName,
+              quantity: item.parsedQuantity,
+              unit: item.normalizedUnit,
+              price: item.parsedPrice,
+            },
+          ],
+        };
+      }, { error: null, items: [] });
+
+      if (manualPayload.error) {
+        setLocalError(manualPayload.error);
         return;
       }
 
-      amount = parsedAmount;
+      lineItems = manualPayload.items;
+
+      if (lineItems.length > 0) {
+        amount = lineItems.reduce(
+          (sum, item) => sum + Number(item.quantity ?? 0) * Number(item.price ?? 0),
+          0,
+        );
+      } else {
+        const parsedAmount = parseDecimalInput(form.amount);
+        if (parsedAmount === null) {
+          setLocalError('Введите корректную сумму');
+          return;
+        }
+
+        amount = parsedAmount;
+      }
     }
 
     const payload: ActInput = {
@@ -1108,7 +1374,11 @@ export function ActModal({
                     placeholder="0.00"
                   />
                   {amountReadonly ? (
-                    <span className="text-xs text-slate-500">Сумма считается по выбранным позициям счета.</span>
+                    <span className="text-xs text-slate-500">
+                      {isUsingInvoiceItems
+                        ? 'Сумма считается по выбранным позициям счета.'
+                        : 'Сумма считается по позициям акта.'}
+                    </span>
                   ) : null}
                 </label>
 
@@ -1157,7 +1427,7 @@ export function ActModal({
                           : 'text-slate-600 hover:bg-white'
                       }`}
                     >
-                      Пустой акт
+                      Ручной акт
                     </button>
                   </div>
                 ) : null}
@@ -1265,7 +1535,7 @@ export function ActModal({
                             <Loader2 className="h-4 w-4 animate-spin" />
                             Загружаю связанный счет...
                           </div>
-                        ) : invoiceDetails ? (
+                        ) : effectiveInvoiceDetails ? (
                           onOpenInvoice ? (
                             <button
                               type="button"
@@ -1273,11 +1543,11 @@ export function ActModal({
                               className="mt-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-50"
                             >
                               <Link2 className="h-4 w-4" />
-                              Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                              Счет №{effectiveInvoiceDetails.number} от {toDateInputValue(effectiveInvoiceDetails.date) || effectiveInvoiceDetails.date}
                             </button>
                           ) : (
                             <div className="mt-2 text-sm font-medium text-slate-900">
-                              Счет №{invoiceDetails.number} от {toDateInputValue(invoiceDetails.date) || invoiceDetails.date}
+                              Счет №{effectiveInvoiceDetails.number} от {toDateInputValue(effectiveInvoiceDetails.date) || effectiveInvoiceDetails.date}
                             </div>
                           )
                         ) : (
@@ -1297,7 +1567,7 @@ export function ActModal({
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Режим</div>
                         <div className="mt-2 text-sm text-slate-700">
                           {form.creationMode === 'Manual'
-                            ? 'Пустой акт'
+                            ? 'Ручной акт'
                             : allAvailableSelected
                               ? 'По счету целиком'
                               : 'По счету с выбором позиций'}
@@ -1342,7 +1612,144 @@ export function ActModal({
               </label>
             </section>
 
-            {hasInvoiceLineItems ? (
+            {canEditManualLineItems ? (
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Позиции акта</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {linkedInvoiceId
+                        ? 'У выбранного счета нет позиций, поэтому строки акта можно заполнить вручную.'
+                        : 'Добавьте позиции акта, чтобы сумма считалась автоматически. Если строки не нужны, сумму можно оставить ручной.'}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addManualLineItem}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    + Добавить позицию
+                  </button>
+                </div>
+
+                {manualLineItems.length === 0 ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                    <div className="font-medium text-slate-900">В акте пока нет ни одной позиции.</div>
+                    <p className="mt-2 text-slate-500">
+                      Добавьте строки как в счете или оставьте сумму акта вручную.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="-mx-1 mt-4 overflow-x-auto px-1">
+                      <div className={`space-y-3 ${LINE_ITEM_GRID_MIN_WIDTH_CLASS}`}>
+                        <div className={`hidden items-center gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid ${LINE_ITEM_GRID_TEMPLATE}`}>
+                          <span>Наименование</span>
+                          <span className="text-center">Кол-во</span>
+                          <span>Ед.</span>
+                          <span className="text-right">Цена</span>
+                          <span className="text-right">Сумма</span>
+                          <span className="sr-only">Действия</span>
+                        </div>
+
+                        {preparedManualLineItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 ${LINE_ITEM_GRID_TEMPLATE}`}
+                          >
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Услуга</span>
+                              <input
+                                type="text"
+                                value={item.name}
+                                onChange={(event) => updateManualLineItem(item.id, { name: event.target.value })}
+                                placeholder="Название позиции"
+                                aria-label="Название позиции акта"
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              />
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Кол-во</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={item.quantity}
+                                onChange={(event) => updateManualLineItem(item.id, { quantity: event.target.value })}
+                                placeholder="Кол-во"
+                                aria-label="Количество позиции акта"
+                                className="w-full rounded-lg border border-slate-300 px-2 py-2 text-center text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              />
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Ед.</span>
+                              <input
+                                type="text"
+                                list="act-line-item-units"
+                                value={item.unit}
+                                onChange={(event) => updateManualLineItem(item.id, { unit: event.target.value })}
+                                placeholder="Ед."
+                                aria-label="Единица измерения позиции акта"
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              />
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Цена</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={item.price}
+                                onChange={(event) => updateManualLineItem(item.id, { price: event.target.value })}
+                                placeholder="0.00"
+                                aria-label="Цена позиции акта"
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              />
+                            </label>
+
+                            <div className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Сумма</span>
+                              <output className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+                                {calculateLineItemAmountValue(item.quantity, item.price)}
+                              </output>
+                            </div>
+
+                            <div className="flex items-end justify-end md:justify-start">
+                              <button
+                                type="button"
+                                onClick={() => removeManualLineItem(item.id)}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                                aria-label="Удалить позицию акта"
+                                title="Удалить позицию акта"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <datalist id="act-line-item-units">
+                      {MANUAL_LINE_ITEM_UNIT_OPTIONS.map((unit) => (
+                        <option key={unit} value={unit} />
+                      ))}
+                    </datalist>
+
+                    <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-slate-500">
+                        Позиций в акте: <span className="font-medium text-slate-900">{validManualLineItems.length}</span>
+                      </div>
+                      <div className="text-base font-semibold text-slate-900">
+                        Итого по акту: {formatCurrencySmart(effectiveAmount).full}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            ) : hasInvoiceLineItems ? (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -1411,7 +1818,7 @@ export function ActModal({
 
                 {form.creationMode === 'Manual' ? (
                   <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                    Позиции счета сейчас не используются, потому что выбран режим пустого акта. Сумму можно указать вручную.
+                    Позиции счета сейчас не используются, потому что выбран ручной режим акта. Сумму можно указать вручную.
                     <button
                       type="button"
                       onClick={handleEnableInvoiceMode}
@@ -1547,6 +1954,8 @@ export function ActModal({
                 <div className="mt-2 text-sm text-slate-500">
                   {isUsingInvoiceItems
                     ? `Позиции в акте: ${selectedLineItems.length}`
+                    : isUsingManualLineItems
+                      ? `Позиции в акте: ${validManualLineItems.length}`
                     : 'Сумма указана вручную'}
                 </div>
               </div>

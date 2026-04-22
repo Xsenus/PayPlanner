@@ -653,7 +653,7 @@ export interface ActInput {
   clientId?: number | null;
   responsibleId?: number | null;
   comment?: string | null;
-  lineItems?: Pick<ActLineItem, 'sourceKey' | 'quantity'>[];
+  lineItems?: Array<Pick<ActLineItem, 'sourceKey' | 'quantity'> & Partial<Pick<ActLineItem, 'name' | 'unit' | 'price'>>>;
 }
 
 export interface ActSummaryBucket {
