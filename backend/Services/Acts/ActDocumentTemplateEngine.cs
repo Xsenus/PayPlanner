@@ -456,13 +456,14 @@ public static class ActDocumentTemplateEngine
 
     private static BuyerInfo BuildBuyer(Act act)
     {
-        var buyerClient = act.Client
-            ?? act.Invoice?.Client
-            ?? act.Invoice?.ExpenseClient;
+        var buyerClients = EnumerateBuyerClients(act).ToList();
+        var buyerClient = buyerClients.FirstOrDefault();
 
         var displayName = FirstNotEmpty(
             buyerClient?.Name,
             act.Client?.Name,
+            act.Invoice?.Client?.Name,
+            act.Invoice?.ExpenseClient?.Name,
             act.Invoice?.CounterpartyName,
             "Заказчик");
 
@@ -474,13 +475,19 @@ public static class ActDocumentTemplateEngine
             requisites.Add(buyerClient.Company);
         }
 
-        var address = ResolveAddress(buyerClient);
+        var address = buyerClients
+            .Select(ResolveAddress)
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(address))
         {
             requisites.Add(address);
         }
 
-        var passport = BuildPassport(buyerClient);
+        var passport = buyerClients
+            .Select(BuildPassport)
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(passport))
         {
             requisites.Add(passport);
@@ -492,19 +499,60 @@ public static class ActDocumentTemplateEngine
 
     private static string BuildBasis(Act act)
     {
-        var invoiceNumber = FirstNotEmpty(act.InvoiceNumber, act.Invoice?.Account);
+        var invoiceNumber = FirstNotEmpty(
+            act.Invoice?.Invoice?.Number,
+            act.InvoiceNumber,
+            act.Invoice?.Account);
         if (string.IsNullOrWhiteSpace(invoiceNumber))
         {
             return "—";
         }
 
-        var invoiceDate = act.Invoice is { Date: var date } && date != default
-            ? date.ToString("dd.MM.yyyy", RuCulture)
-            : null;
+        var invoiceDateValue = act.Invoice?.Invoice?.Date
+            ?? act.Invoice?.AccountDate
+            ?? (act.Invoice is { Date: var paymentDate } && paymentDate != default ? paymentDate : null);
+        var invoiceDate = invoiceDateValue?.ToString("dd.MM.yyyy", RuCulture);
 
         return string.IsNullOrWhiteSpace(invoiceDate)
             ? $"Счет № {invoiceNumber}"
-            : $"Счет-договор № {invoiceNumber} от {invoiceDate}";
+            : $"Счет № {invoiceNumber} от {invoiceDate}";
+    }
+
+    private static IEnumerable<Client> EnumerateBuyerClients(Act act)
+    {
+        var invoiceBuyer = act.Invoice?.Type == PaymentType.Expense
+            ? act.Invoice?.ExpenseClient ?? act.Invoice?.Client
+            : act.Invoice?.Client ?? act.Invoice?.ExpenseClient;
+        var seenClientIds = new HashSet<int>();
+        var seenTransientClients = new HashSet<Client>();
+
+        foreach (var client in new[]
+                 {
+                     invoiceBuyer,
+                     act.Client,
+                     act.Invoice?.Client,
+                     act.Invoice?.ExpenseClient,
+                 })
+        {
+            if (client is null)
+            {
+                continue;
+            }
+
+            if (client.Id > 0)
+            {
+                if (!seenClientIds.Add(client.Id))
+                {
+                    continue;
+                }
+            }
+            else if (!seenTransientClients.Add(client))
+            {
+                continue;
+            }
+
+            yield return client;
+        }
     }
 
     private static string ResolveAddress(Client? client)
@@ -525,7 +573,8 @@ public static class ActDocumentTemplateEngine
     private static string BuildPassport(Client? client)
     {
         var passport = client?.Passports
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .OrderByDescending(item => item.IsPrimary)
+            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .FirstOrDefault(item =>
                 !string.IsNullOrWhiteSpace(item.Series)
                 || !string.IsNullOrWhiteSpace(item.Number)

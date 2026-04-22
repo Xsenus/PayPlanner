@@ -449,12 +449,93 @@ public class ActsControllerTests
         Assert.Contains("doc-main-title", normalizedHtml);
         Assert.Contains("counterparty-table", normalizedHtml);
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
-        Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
+        Assert.Contains("Счет № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);
         Assert.Contains("Паспорт серия 36 07 № 763332", normalizedHtml);
         Assert.Contains("Всего оказано услуг 2", normalizedHtml);
         Assert.Contains("20 000,00", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
+    }
+
+    [Fact]
+    public void ActDocumentTemplateEngine_UsesInvoiceDateAndInvoiceClientPassport()
+    {
+        var actClient = new Client
+        {
+            Id = 100,
+            Name = "Сорокина Светлана Геннадьевна",
+            Address = "446103, Россия, Самарская обл, г Чапаевск, ул Достоевского, д 8",
+        };
+
+        var invoiceClient = new Client
+        {
+            Id = 101,
+            Name = "Сорокина Светлана Геннадьевна",
+            Passports =
+            [
+                new ClientPassport
+                {
+                    Series = "9999",
+                    Number = "000001",
+                    IssuedBy = "Тестовый паспорт",
+                    UpdatedAt = new DateTime(2026, 4, 20),
+                },
+                new ClientPassport
+                {
+                    Series = "8113",
+                    Number = "527051",
+                    IssuedBy = "ТП УФМС России по республике Бурятия",
+                    IssuedAt = new DateTime(2013, 10, 9),
+                    DepartmentCode = "030-035",
+                    IsPrimary = true,
+                    UpdatedAt = new DateTime(2026, 4, 15),
+                },
+            ],
+        };
+
+        var act = new Act
+        {
+            Number = "34",
+            Date = new DateTime(2026, 4, 24),
+            Amount = 17_500m,
+            Client = actClient,
+            Invoice = new Payment
+            {
+                Type = PaymentType.Income,
+                Account = "34",
+                AccountDate = new DateTime(2026, 4, 15),
+                Date = new DateTime(2026, 4, 27),
+                Client = invoiceClient,
+                Invoice = new Invoice
+                {
+                    Number = "34",
+                    Date = new DateTime(2026, 4, 15),
+                },
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 17_500m,
+                    SortOrder = 0,
+                },
+            ],
+            mainCompany: null,
+            includeSignatureAndSeal: false);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+
+        Assert.Contains("Счет № 34 от 15.04.2026", normalizedHtml);
+        Assert.DoesNotContain("Счет-договор № 34", normalizedHtml);
+        Assert.DoesNotContain("Счет № 34 от 27.04.2026", normalizedHtml);
+        Assert.Contains("Паспорт серия 8113 № 527051", normalizedHtml);
+        Assert.DoesNotContain("9999", normalizedHtml);
     }
 
     [Fact]
