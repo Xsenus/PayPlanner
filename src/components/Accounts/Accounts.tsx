@@ -1672,6 +1672,7 @@ export function Accounts({
           onBack={() => closeEditPage({ restoreClientContext: true })}
           onOpenClient={openClientFromEditor}
           onOpenContract={onOpenContract}
+          onOpenActPage={onOpenActPage}
           onOpenPayment={onOpenPayment}
           onSubmit={submitInvoice}
           submitting={submitting}
@@ -2432,6 +2433,7 @@ export function Accounts({
           resumeDraft={resumeInvoiceDraft}
           onClose={closeModal}
           onOpenClient={openClientFromEditor}
+          onOpenActPage={onOpenActPage}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}

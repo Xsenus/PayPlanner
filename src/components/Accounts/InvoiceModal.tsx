@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
@@ -192,6 +192,7 @@ interface InvoiceModalProps {
   onBack?: () => void;
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
+  onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
   onOpenPayment?: (payment: Payment) => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
@@ -656,6 +657,7 @@ export function InvoiceModal({
   onBack,
   onOpenClient,
   onOpenContract,
+  onOpenActPage,
   onOpenPayment,
   onSubmit,
   submitting,
@@ -2142,6 +2144,17 @@ export function InvoiceModal({
     onOpenClient?.(clientId);
   };
 
+  const handleOpenActPage = useCallback((act: ActOption) => {
+    if (!onOpenActPage || !(act.id > 0)) {
+      return;
+    }
+
+    storeInvoiceEditorDraft(buildInvoiceEditorDraft());
+    onOpenActPage(act.id, {
+      invoiceId: invoice?.id ?? null,
+    });
+  }, [buildInvoiceEditorDraft, invoice?.id, onOpenActPage]);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLocalError(null);
@@ -3239,7 +3252,28 @@ export function InvoiceModal({
                 )}
                 <p><span className="text-slate-500">{t('cases') ?? 'Дела'}:</span> {selectedClientCasesSummary || '—'}</p>
                 <p><span className="text-slate-500">Комментарий по делу:</span> {form.clientCaseReference || '—'}</p>
-                <p><span className="text-slate-500">{t('acts') ?? 'Акты'}:</span> {selectedActsSummary || '—'}</p>
+                <p>
+                  <span className="text-slate-500">{t('acts') ?? 'Акты'}:</span>{' '}
+                  {selectedActs.length === 0 ? '—' : onOpenActPage ? (
+                    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 align-middle">
+                      {selectedActs.map((act, index) => (
+                        <Fragment key={act.id}>
+                          {index > 0 ? <span className="text-slate-400">,</span> : null}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenActPage(act)}
+                            data-testid={`invoice-related-act-link-${act.id}`}
+                            className="text-blue-600 underline hover:text-blue-700"
+                          >
+                            {actLabel(act) || `Акт #${act.id}`}
+                          </button>
+                        </Fragment>
+                      ))}
+                    </span>
+                  ) : (
+                    selectedActsSummary || '—'
+                  )}
+                </p>
                 <p><span className="text-slate-500">{t('invoiceManualActLabel') ?? 'Комментарий по акту'}:</span> {form.actReference || '—'}</p>
                 <p><span className="text-slate-500">Дата выставления:</span> {formatDate(form.date) || '—'}</p>
                 <p><span className="text-slate-500">Срок оплаты:</span> {formatDate(form.dueDate) || '—'}</p>

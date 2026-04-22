@@ -1360,6 +1360,55 @@ describe('InvoiceModal integration', () => {
     expect(onOpenContract).toHaveBeenCalledWith(77);
   });
 
+  it('opens the linked act from the page sidebar', async () => {
+    const onOpenActPage = vi.fn();
+    const invoice = {
+      id: 562,
+      invoiceEntityId: 562,
+      number: '562',
+      date: '2026-04-12',
+      dueDate: '2026-05-12',
+      amount: 17500,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      acts: [
+        {
+          id: 34,
+          number: '34',
+          title: null,
+          date: '2026-04-24',
+          amount: 17500,
+          status: 'Created',
+          clientId: 1,
+          clientName: 'Тестовый клиент',
+        },
+      ],
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 17500 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onOpenActPage={onOpenActPage}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('invoice-related-act-link-34'));
+
+    expect(onOpenActPage).toHaveBeenCalledWith(34, { invoiceId: 562 });
+  });
+
   it('creates a linked act from a saved invoice and reuses its line items', async () => {
     const createActLabel = '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0430\u043a\u0442';
     const actNumberLabel = '\u041d\u043e\u043c\u0435\u0440 \u0430\u043a\u0442\u0430';
