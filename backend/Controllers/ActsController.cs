@@ -462,18 +462,33 @@ public class ActsController : ControllerBase
 
         if (invoice is null)
         {
-            if (request.LineItems.Count > 0)
+            var manualLineItems = ResolveManualActLineItems(request.LineItems);
+            if (manualLineItems.Error is not null)
             {
-                return (BadRequest("Строки акта можно выбрать только для акта, привязанного к счету."), ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
+                return (manualLineItems.Error, ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
             }
 
-            return (null, ActCreationMode.Manual, request.Amount, new List<ActLineItemDraft>());
+            var manualAmount = manualLineItems.LineItems.Count > 0
+                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                : request.Amount;
+
+            return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
         }
 
         var sourceItems = await LoadInvoiceSourceLineItemsAsync(invoice.Id, invoice.SystemNotes, ct);
         if (sourceItems.Count == 0)
         {
-            return (null, ActCreationMode.Manual, request.Amount, new List<ActLineItemDraft>());
+            var manualLineItems = ResolveManualActLineItems(request.LineItems);
+            if (manualLineItems.Error is not null)
+            {
+                return (manualLineItems.Error, ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
+            }
+
+            var manualAmount = manualLineItems.LineItems.Count > 0
+                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                : request.Amount;
+
+            return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
         }
 
         var creationMode = ActCreationMode.Normalize(request.CreationMode);
@@ -595,6 +610,55 @@ public class ActsController : ControllerBase
 
         var amount = resolved.Sum(item => item.Quantity * item.Price);
         return (null, creationMode, amount, resolved);
+    }
+
+    private (ActionResult? Error, List<ActLineItemDraft> LineItems) ResolveManualActLineItems(
+        IReadOnlyList<ActLineItemRequest>? requestLineItems)
+    {
+        if (requestLineItems is null || requestLineItems.Count == 0)
+        {
+            return (null, new List<ActLineItemDraft>());
+        }
+
+        var resolved = new List<ActLineItemDraft>(requestLineItems.Count);
+        for (var index = 0; index < requestLineItems.Count; index++)
+        {
+            var item = requestLineItems[index];
+            var sourceKey = Normalize(item.SourceKey);
+            var name = Normalize(item.Name);
+            var unit = Normalize(item.Unit) ?? "шт";
+
+            if (string.IsNullOrWhiteSpace(sourceKey))
+            {
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}].{nameof(ActLineItemRequest.SourceKey)}", "Укажите внутренний ключ позиции акта."), new List<ActLineItemDraft>());
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}].{nameof(ActLineItemRequest.Name)}", "Укажите наименование позиции акта."), new List<ActLineItemDraft>());
+            }
+
+            if (item.Quantity <= 0)
+            {
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}].{nameof(ActLineItemRequest.Quantity)}", "Количество позиции акта должно быть больше нуля."), new List<ActLineItemDraft>());
+            }
+
+            if (item.Price < 0)
+            {
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}].{nameof(ActLineItemRequest.Price)}", "Цена позиции акта не может быть отрицательной."), new List<ActLineItemDraft>());
+            }
+
+            resolved.Add(new ActLineItemDraft(
+                null,
+                sourceKey,
+                index,
+                name,
+                item.Quantity,
+                unit,
+                item.Price));
+        }
+
+        return (null, resolved);
     }
 
     private async Task<List<InvoiceLineItemDto>> LoadInvoiceSourceLineItemsAsync(int invoicePaymentId, string? invoiceSystemNotes, CancellationToken ct)

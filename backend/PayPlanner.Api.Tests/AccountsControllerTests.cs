@@ -184,6 +184,107 @@ public class AccountsControllerTests
         Assert.Equal(new[] { "2", "10" }, payload.Items.Select(item => item.AccountNumber).ToArray());
     }
 
+    [Fact]
+    public async Task GetRegistry_IncludesInvoiceAndActLineItemsInInvoiceSnapshot()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client
+        {
+            Name = "Line Item Client",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "50",
+            Date = new DateTime(2026, 4, 10),
+        };
+
+        db.AddRange(client, invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = CreatePayment(invoice.Date, 12_000m, "Representative payment for invoice 50");
+        representativePayment.DocumentKind = DocumentKind.Invoice;
+        representativePayment.InvoiceId = invoice.Id;
+        representativePayment.Account = invoice.Number;
+        representativePayment.AccountDate = invoice.Date;
+        representativePayment.Client = client;
+        representativePayment.CounterpartyName = client.Name;
+        representativePayment.InvoiceLineItems.Add(new InvoiceLineItem
+        {
+            Name = "Document preparation",
+            Quantity = 2m,
+            Unit = "service",
+            Price = 6_000m,
+            SortOrder = 0,
+        });
+
+        db.Payments.Add(representativePayment);
+        await db.SaveChangesAsync();
+
+        var storedInvoiceLineItemId = await db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => item.PaymentId == representativePayment.Id)
+            .Select(item => item.Id)
+            .SingleAsync();
+
+        db.Acts.Add(new Act
+        {
+            Number = "ACT-50",
+            Date = new DateTime(2026, 4, 11),
+            Amount = 6_000m,
+            CreationMode = ActCreationMode.Partial,
+            InvoiceId = representativePayment.Id,
+            InvoiceNumber = invoice.Number,
+            ClientId = client.Id,
+            Status = ActStatus.Created,
+            LineItems =
+            {
+                new ActLineItem
+                {
+                    SortOrder = 0,
+                    InvoiceLineItemId = storedInvoiceLineItemId,
+                    SourceKey = $"db:{storedInvoiceLineItemId}",
+                    SourceSortOrder = 0,
+                    Name = "Document preparation",
+                    Quantity = 1m,
+                    Unit = "service",
+                    Price = 6_000m,
+                },
+            },
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+        var invoiceSnapshot = Assert.IsType<InvoiceDto>(row.Invoice);
+        var invoiceLineItem = Assert.Single(invoiceSnapshot.LineItems);
+        var linkedAct = Assert.Single(invoiceSnapshot.Acts);
+        var actLineItem = Assert.Single(linkedAct.LineItems);
+
+        Assert.Equal("Document preparation", invoiceLineItem.Name);
+        Assert.Equal(2m, invoiceLineItem.Quantity);
+        Assert.Equal($"db:{storedInvoiceLineItemId}", invoiceLineItem.SourceKey);
+        Assert.Equal("ACT-50", linkedAct.Number);
+        Assert.Equal($"db:{storedInvoiceLineItemId}", actLineItem.SourceKey);
+        Assert.Equal(1m, actLineItem.Quantity);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

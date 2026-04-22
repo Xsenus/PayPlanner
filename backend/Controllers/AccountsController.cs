@@ -289,6 +289,7 @@ public class AccountsController : ControllerBase
         var relatedPaymentsById = relatedPayments.ToDictionary(payment => payment.Id);
         var responsiblesMap = await LoadResponsiblesMapAsync(representativeIds, ct);
         var clientCasesMap = await LoadClientCasesMapAsync(representativeIds, ct);
+        var invoiceLineItemsMap = await LoadInvoiceLineItemsMapAsync(representativeIds, ct);
 
         var candidateIdsForActs = pagedGroups
             .SelectMany(group => group.InvoicePaymentIds)
@@ -317,6 +318,7 @@ public class AccountsController : ControllerBase
                     Title = act.Title,
                     Date = act.Date,
                     Amount = act.Amount,
+                    CreationMode = act.CreationMode,
                     InvoiceNumber = act.InvoiceNumber,
                     InvoiceId = act.InvoiceId,
                     ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
@@ -329,6 +331,21 @@ public class AccountsController : ControllerBase
                         ? (string.IsNullOrWhiteSpace(act.Responsible.FullName) ? act.Responsible.Email : act.Responsible.FullName)
                         : null,
                     Comment = act.Comment,
+                    LineItems = act.LineItems
+                        .OrderBy(item => item.SortOrder)
+                        .ThenBy(item => item.Id)
+                        .Select(item => new ActLineItemDto
+                        {
+                            Id = item.Id,
+                            InvoiceLineItemId = item.InvoiceLineItemId,
+                            SourceKey = item.SourceKey,
+                            SourceSortOrder = item.SourceSortOrder,
+                            Name = item.Name,
+                            Quantity = item.Quantity,
+                            Unit = item.Unit,
+                            Price = item.Price,
+                        })
+                        .ToList(),
                     CreatedAt = act.CreatedAt,
                     UpdatedAt = act.UpdatedAt,
                 })
@@ -348,6 +365,7 @@ public class AccountsController : ControllerBase
                 group,
                 responsiblesMap.GetValueOrDefault(group.EditorPaymentId),
                 clientCasesMap.GetValueOrDefault(group.EditorPaymentId),
+                invoiceLineItemsMap.GetValueOrDefault(group.EditorPaymentId),
                 groupActs);
 
             var payments = group.RelatedPaymentIds
@@ -694,6 +712,7 @@ public class AccountsController : ControllerBase
         WorkingAccountGroup group,
         IReadOnlyList<InvoiceResponsibleDto>? responsibles,
         IReadOnlyList<InvoiceClientCaseDto>? clientCases,
+        IReadOnlyList<InvoiceLineItemDto>? lineItems,
         IReadOnlyList<ActDto> acts)
     {
         var representative = group.Representative;
@@ -735,6 +754,7 @@ public class AccountsController : ControllerBase
             DocumentKind = representative.DocumentKind,
             Responsibles = responsibles?.ToList() ?? new List<InvoiceResponsibleDto>(),
             ClientCases = clientCases?.ToList() ?? new List<InvoiceClientCaseDto>(),
+            LineItems = lineItems?.ToList() ?? new List<InvoiceLineItemDto>(),
             Acts = acts.Select(act => new InvoiceActDto
             {
                 Id = act.Id,
@@ -742,12 +762,14 @@ public class AccountsController : ControllerBase
                 Title = act.Title,
                 Date = act.Date,
                 Amount = act.Amount,
+                CreationMode = act.CreationMode ?? ActCreationMode.Manual,
                 Status = act.Status,
                 ClientId = act.ClientId,
                 ClientName = act.ClientName,
                 ResponsibleId = act.ResponsibleId,
                 ResponsibleName = act.ResponsibleName,
                 Comment = act.Comment,
+                LineItems = act.LineItems ?? Array.Empty<ActLineItemDto>(),
             }).ToList(),
         };
 
@@ -906,6 +928,46 @@ public class AccountsController : ControllerBase
         }
 
         return result;
+    }
+
+    private async Task<Dictionary<int, List<InvoiceLineItemDto>>> LoadInvoiceLineItemsMapAsync(
+        IEnumerable<int> paymentIds,
+        CancellationToken ct)
+    {
+        var ids = paymentIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, List<InvoiceLineItemDto>>();
+        }
+
+        var rows = await _db.InvoiceLineItems
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.PaymentId))
+            .OrderBy(item => item.PaymentId)
+            .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.PaymentId,
+                LineItem = new InvoiceLineItemDto
+                {
+                    Id = item.Id,
+                    SortOrder = item.SortOrder,
+                    SourceKey = $"db:{item.Id}",
+                    ServiceId = item.ServiceId,
+                    Name = item.Name,
+                    Quantity = item.Quantity,
+                    Unit = item.Unit,
+                    Price = item.Price,
+                },
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(row => row.PaymentId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(row => row.LineItem).ToList());
     }
 
     private static StatusSourcePayment CreateStatusSourcePayment(AccountInvoiceCandidate payment)

@@ -1242,7 +1242,84 @@ public class ActsControllerTests
             },
             CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(action.Result);
+        var result = Assert.IsType<ObjectResult>(action.Result);
+        var problem = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.Contains("LineItems[0].Name", problem.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task Create_ManualAct_WithManualLineItems_CalculatesAmountAndPersistsRows()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-315-MANUAL",
+                Date = new DateTime(2026, 4, 22),
+                Amount = 1m,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+                CreationMode = ActCreationMode.Manual,
+                LineItems =
+                [
+                    new ActLineItemRequest
+                    {
+                        SourceKey = "manual:1",
+                        Name = "Подготовка документов",
+                        Quantity = 2m,
+                        Unit = "усл.",
+                        Price = 3_500m,
+                    },
+                    new ActLineItemRequest
+                    {
+                        SourceKey = "manual:2",
+                        Name = "Выезд в суд",
+                        Quantity = 1m,
+                        Unit = "усл.",
+                        Price = 8_000m,
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(15_000m, dto.Amount);
+        Assert.Equal(ActCreationMode.Manual, dto.CreationMode);
+        Assert.Equal(2, dto.LineItems.Count);
+        Assert.Collection(
+            dto.LineItems.OrderBy(item => item.SourceSortOrder),
+            first =>
+            {
+                Assert.Equal("manual:1", first.SourceKey);
+                Assert.Equal("Подготовка документов", first.Name);
+                Assert.Equal(2m, first.Quantity);
+                Assert.Equal("усл.", first.Unit);
+                Assert.Equal(3_500m, first.Price);
+            },
+            second =>
+            {
+                Assert.Equal("manual:2", second.SourceKey);
+                Assert.Equal("Выезд в суд", second.Name);
+                Assert.Equal(1m, second.Quantity);
+                Assert.Equal("усл.", second.Unit);
+                Assert.Equal(8_000m, second.Price);
+            });
+
+        var stored = await db.Set<ActLineItem>()
+            .AsNoTracking()
+            .Where(item => item.ActId == dto.Id)
+            .OrderBy(item => item.SortOrder)
+            .ToListAsync();
+
+        Assert.Equal(2, stored.Count);
+        Assert.Equal("manual:1", stored[0].SourceKey);
+        Assert.Equal("Подготовка документов", stored[0].Name);
+        Assert.Equal("manual:2", stored[1].SourceKey);
+        Assert.Equal("Выезд в суд", stored[1].Name);
     }
 
     [Fact]
@@ -1299,6 +1376,79 @@ public class ActsControllerTests
         Assert.Equal(4_321m, dto.Amount);
         Assert.Equal(ActCreationMode.Manual, dto.CreationMode);
         Assert.Empty(dto.LineItems);
+    }
+
+    [Fact]
+    public async Task Create_InvoiceWithoutStoredLineItems_AllowsManualLineItems()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var invoice = new Invoice
+        {
+            Number = "INV-316-MANUAL",
+            Date = new DateTime(2026, 4, 22),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = new Payment
+        {
+            Amount = 0m,
+            CounterpartyName = "Client",
+            Date = invoice.Date,
+            PlannedDate = invoice.Date,
+            Description = "Счет без строк",
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceId = invoice.Id,
+            ClientId = client.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+        };
+        db.Payments.Add(invoicePayment);
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-316-MANUAL",
+                Date = new DateTime(2026, 4, 23),
+                Amount = 0m,
+                InvoiceId = invoicePayment.Id,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+                CreationMode = ActCreationMode.Manual,
+                LineItems =
+                [
+                    new ActLineItemRequest
+                    {
+                        SourceKey = "manual:invoice-1",
+                        Name = "Дополнительная консультация",
+                        Quantity = 3m,
+                        Unit = "час",
+                        Price = 2_000m,
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(ActCreationMode.Manual, dto.CreationMode);
+        Assert.Equal(invoicePayment.Id, dto.InvoiceId);
+        Assert.Equal(6_000m, dto.Amount);
+        var lineItem = Assert.Single(dto.LineItems);
+        Assert.Equal("manual:invoice-1", lineItem.SourceKey);
+        Assert.Equal("Дополнительная консультация", lineItem.Name);
+        Assert.Equal(3m, lineItem.Quantity);
+        Assert.Equal("час", lineItem.Unit);
+        Assert.Equal(2_000m, lineItem.Price);
     }
 
     [Fact]
