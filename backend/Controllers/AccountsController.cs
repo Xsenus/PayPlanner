@@ -713,6 +713,7 @@ public class AccountsController : ControllerBase
         IReadOnlyList<ActDto> acts)
     {
         var representative = group.Representative;
+        var effectiveInvoiceStatus = MapAccountStatusToInvoiceStatus(group.Status, representative.Status);
         var invoice = new InvoiceDto
         {
             Id = group.EditorPaymentId,
@@ -722,8 +723,8 @@ public class AccountsController : ControllerBase
             DueDate = group.DueDate ?? representative.DueDate,
             Amount = representative.Amount,
             Type = representative.Type,
-            Status = representative.Status,
-            IsPaid = representative.IsPaid,
+            Status = effectiveInvoiceStatus,
+            IsPaid = effectiveInvoiceStatus == PaymentStatus.Completed,
             PaidDate = group.PaidDate ?? representative.PaidDate,
             ClientId = representative.ClientId,
             ClientName = representative.ClientName,
@@ -794,6 +795,19 @@ public class AccountsController : ControllerBase
         }
 
         return invoice;
+    }
+
+    private static PaymentStatus MapAccountStatusToInvoiceStatus(string status, PaymentStatus fallbackStatus)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "paid" => PaymentStatus.Completed,
+            "partial" => PaymentStatus.Processing,
+            "overdue" => PaymentStatus.Overdue,
+            "cancelled" => PaymentStatus.Cancelled,
+            "created" => PaymentStatus.Pending,
+            _ => fallbackStatus,
+        };
     }
 
     private async Task<Dictionary<int, List<InvoiceResponsibleDto>>> LoadResponsiblesMapAsync(

@@ -77,23 +77,40 @@ public class InvoicesController : ControllerBase
             return Unauthorized();
         }
 
-        var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, contractId, caseId, effectiveResponsibleId, search, type, ParseIntList(clientIds));
-        query = ApplySort(query, sortBy, sortDir);
+        var items = await QueryInvoiceDtosAsync(
+            from,
+            to,
+            clientId,
+            ParseIntList(clientIds),
+            contractId,
+            caseId,
+            effectiveResponsibleId,
+            search,
+            type,
+            includeMetadata: true,
+            ct);
 
-        var total = await query.CountAsync(ct);
-        var skip = (page - 1) * pageSize;
+        if (status.HasValue)
+        {
+            items = items
+                .Where(item => item.Status == status.Value)
+                .ToList();
+        }
 
-        var rawItems = await query
-            .Skip(skip)
+        var orderedItems = ApplyInvoiceSort(items, sortBy, sortDir).ToList();
+        var total = orderedItems.Count;
+        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+        if (page > totalPages)
+        {
+            page = totalPages;
+        }
+
+        var pageItems = orderedItems
+            .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(ProjectionRaw)
-            .ToListAsync(ct);
+            .ToList();
 
-        var items = rawItems.Select(MapFromRaw).ToList();
-        await EnrichInvoiceDtosAsync(items, ct);
-
-        return Ok(new { items, total, page, pageSize });
+        return Ok(new { items = pageItems, total, page, pageSize });
     }
 
     [HttpGet("summary")]
@@ -114,19 +131,26 @@ public class InvoicesController : ControllerBase
             return Unauthorized();
         }
 
-        var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, status, clientId, null, caseId, effectiveResponsibleId, search, type);
-
         var today = DateTime.UtcNow.Date;
+        var items = await QueryInvoiceDtosAsync(
+            from,
+            to,
+            clientId,
+            clientIds: null,
+            contractId: null,
+            caseId,
+            effectiveResponsibleId,
+            search,
+            type,
+            includeMetadata: false,
+            ct);
 
-        var overdueAgingRows = await query
-            .Where(x => x.Payment.Status == PaymentStatus.Overdue)
-            .Select(x => new
-            {
-                Amount = x.Payment.Amount,
-                DueDate = x.Payment.Date,
-            })
-            .ToListAsync(ct);
+        if (status.HasValue)
+        {
+            items = items
+                .Where(item => item.Status == status.Value)
+                .ToList();
+        }
 
         decimal overdue0To10 = 0m;
         decimal overdue11To30 = 0m;
@@ -134,9 +158,9 @@ public class InvoicesController : ControllerBase
         decimal overdue61To90 = 0m;
         decimal overdue91Plus = 0m;
 
-        foreach (var row in overdueAgingRows)
+        foreach (var row in items.Where(item => item.Status == PaymentStatus.Overdue && item.DueDate.HasValue))
         {
-            var daysOverdue = Math.Max(0, (today - row.DueDate.Date).Days);
+            var daysOverdue = Math.Max(0, (today - row.DueDate!.Value.Date).Days);
             if (daysOverdue <= 10)
             {
                 overdue0To10 += row.Amount;
@@ -164,42 +188,32 @@ public class InvoicesController : ControllerBase
             overdue91Plus += row.Amount;
         }
 
-        var grouped = await query
-            .GroupBy(x => x.Payment.Status)
-            .Select(g => new
-            {
-                Status = g.Key,
-                Amount = g.Sum(x => x.Payment.Amount),
-                Count = g.Count(),
-            })
-            .ToListAsync(ct);
-
         var includeCancelledInTotal = status == PaymentStatus.Cancelled;
-        var totalGroups = grouped.Where(x => includeCancelledInTotal || x.Status != PaymentStatus.Cancelled);
-        decimal totalAmount = totalGroups.Sum(x => x.Amount);
-        int totalCount = totalGroups.Sum(x => x.Count);
+        var totalItems = items.Where(item => includeCancelledInTotal || item.Status != PaymentStatus.Cancelled).ToList();
+        decimal totalAmount = totalItems.Sum(item => item.Amount);
+        int totalCount = totalItems.Count;
 
-        var pending = grouped.FirstOrDefault(x => x.Status == PaymentStatus.Pending);
-        var paid = grouped.FirstOrDefault(x => x.Status == PaymentStatus.Completed);
-        var overdue = grouped.FirstOrDefault(x => x.Status == PaymentStatus.Overdue);
+        var pendingItems = items.Where(item => item.Status == PaymentStatus.Pending).ToList();
+        var paidItems = items.Where(item => item.Status == PaymentStatus.Completed).ToList();
+        var overdueItems = items.Where(item => item.Status == PaymentStatus.Overdue).ToList();
 
         var summary = new InvoiceSummaryDto
         {
             Total = new InvoiceSummaryBucketDto { Amount = totalAmount, Count = totalCount },
             Pending = new InvoiceSummaryBucketDto
             {
-                Amount = pending?.Amount ?? 0m,
-                Count = pending?.Count ?? 0,
+                Amount = pendingItems.Sum(item => item.Amount),
+                Count = pendingItems.Count,
             },
             Paid = new InvoiceSummaryBucketDto
             {
-                Amount = paid?.Amount ?? 0m,
-                Count = paid?.Count ?? 0,
+                Amount = paidItems.Sum(item => item.Amount),
+                Count = paidItems.Count,
             },
             Overdue = new InvoiceSummaryBucketDto
             {
-                Amount = overdue?.Amount ?? 0m,
-                Count = overdue?.Count ?? 0,
+                Amount = overdueItems.Sum(item => item.Amount),
+                Count = overdueItems.Count,
             },
             OverdueAging = new InvoiceOverdueAgingDto
             {
@@ -1891,6 +1905,41 @@ public class InvoicesController : ControllerBase
         };
     }
 
+    private static IEnumerable<InvoiceDto> ApplyInvoiceSort(
+        IEnumerable<InvoiceDto> items,
+        string? sortBy,
+        string? sortDir)
+    {
+        var desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        return (sortBy?.ToLowerInvariant()) switch
+        {
+            "number" => desc
+                ? items.OrderByDescending(x => x.Number, StringComparer.OrdinalIgnoreCase)
+                : items.OrderBy(x => x.Number, StringComparer.OrdinalIgnoreCase),
+            "amount" => desc
+                ? items.OrderByDescending(x => x.Amount)
+                : items.OrderBy(x => x.Amount),
+            "status" => desc
+                ? items.OrderByDescending(x => x.Status)
+                : items.OrderBy(x => x.Status),
+            "client" => desc
+                ? items.OrderByDescending(x => x.ClientName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                : items.OrderBy(x => x.ClientName ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+            "responsible" => desc
+                ? items.OrderByDescending(x => x.ResponsibleName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                : items.OrderBy(x => x.ResponsibleName ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+            "duedate" => desc
+                ? items.OrderByDescending(x => x.DueDate ?? DateTime.MinValue)
+                : items.OrderBy(x => x.DueDate ?? DateTime.MaxValue),
+            "createdat" => desc
+                ? items.OrderByDescending(x => x.CreatedAt)
+                : items.OrderBy(x => x.CreatedAt),
+            _ => desc
+                ? items.OrderByDescending(x => x.Date)
+                : items.OrderBy(x => x.Date),
+        };
+    }
+
     private static void ApplyPaidFlags(Payment payment, DateTime? paidDate)
     {
         var effectiveDate = (paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
@@ -1929,6 +1978,140 @@ public class InvoicesController : ControllerBase
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? BuildLegacyGroupKey(
+        string? accountNumber,
+        DateTime accountDate,
+        int? clientId,
+        int? clientCaseId,
+        PaymentType type)
+    {
+        var normalizedAccount = Normalize(accountNumber);
+        if (normalizedAccount is null || !clientId.HasValue || clientId.Value <= 0)
+        {
+            return null;
+        }
+
+        return $"{normalizedAccount}::{accountDate.Year}::client:{clientId.Value}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
+    }
+
+    private static List<Payment> SelectStatusSourcePayments(
+        IReadOnlyCollection<Payment> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        if (payments.Count == 0)
+        {
+            return new List<Payment>();
+        }
+
+        var ordered = payments
+            .OrderBy(EffectivePlannedDate)
+            .ThenBy(payment => payment.Id)
+            .ToList();
+
+        if (ShouldHideRepresentativeInvoice(ordered, representativePaymentId, representativeAmount))
+        {
+            return ordered
+                .Where(payment => payment.Id != representativePaymentId)
+                .ToList();
+        }
+
+        var linkedPayments = ordered
+            .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
+            .ToList();
+
+        return linkedPayments.Count > 0 ? linkedPayments : ordered;
+    }
+
+    private static bool ShouldHideRepresentativeInvoice(
+        IReadOnlyCollection<Payment> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        return payments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment)
+            || IsLegacyBrokenInstallmentAggregate(payments, representativePaymentId, representativeAmount);
+    }
+
+    private static bool IsLegacyBrokenInstallmentAggregate(
+        IReadOnlyCollection<Payment> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        if (payments.Count < 3 || payments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment))
+        {
+            return false;
+        }
+
+        var invoiceRows = payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
+            .ToList();
+        if (invoiceRows.Count < 2)
+        {
+            return false;
+        }
+
+        var nonInvoiceCount = payments.Count - invoiceRows.Count;
+        if (nonInvoiceCount > 1)
+        {
+            return false;
+        }
+
+        var maxSiblingAmount = payments
+            .Where(payment => payment.Id != representativePaymentId)
+            .Select(payment => payment.Amount)
+            .DefaultIfEmpty(0m)
+            .Max();
+
+        return representativeAmount > maxSiblingAmount;
+    }
+
+    private static PaymentStatus DeriveInvoiceStatus(
+        IReadOnlyCollection<Payment> payments,
+        PaymentStatus fallbackStatus,
+        DateTime? fallbackDueDate)
+    {
+        if (payments.Count == 0)
+        {
+            return fallbackStatus switch
+            {
+                PaymentStatus.Completed => PaymentStatus.Completed,
+                PaymentStatus.Cancelled => PaymentStatus.Cancelled,
+                PaymentStatus.Processing => PaymentStatus.Processing,
+                PaymentStatus.Overdue => PaymentStatus.Overdue,
+                _ when fallbackDueDate.HasValue && fallbackDueDate.Value.Date < DateTime.UtcNow.Date => PaymentStatus.Overdue,
+                _ => PaymentStatus.Pending,
+            };
+        }
+
+        if (payments.All(payment => payment.Status == PaymentStatus.Cancelled))
+        {
+            return PaymentStatus.Cancelled;
+        }
+
+        if (payments.All(payment => payment.Status == PaymentStatus.Completed))
+        {
+            return PaymentStatus.Completed;
+        }
+
+        if (payments.Any(payment => payment.Status == PaymentStatus.Overdue))
+        {
+            return PaymentStatus.Overdue;
+        }
+
+        if (payments.Any(payment =>
+                payment.Status == PaymentStatus.Completed
+                || payment.Status == PaymentStatus.Processing
+                || payment.PaidAmount > 0m))
+        {
+            return PaymentStatus.Processing;
+        }
+
+        return PaymentStatus.Pending;
+    }
+
+    private static DateTime EffectivePlannedDate(Payment payment)
+        => payment.PlannedDate == default ? payment.Date : payment.PlannedDate;
 
     private static string BuildInvoiceMigrationKey(string number, int year, int clientId, int? clientCaseId, PaymentType type)
         => $"{number.Trim().ToLowerInvariant()}::{year}::client:{clientId}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
@@ -2337,6 +2520,39 @@ public class InvoicesController : ControllerBase
         return dto;
     }
 
+    private async Task<List<InvoiceDto>> QueryInvoiceDtosAsync(
+        DateTime? from,
+        DateTime? to,
+        int? clientId,
+        IReadOnlySet<int>? clientIds,
+        int? contractId,
+        int? caseId,
+        int? responsibleId,
+        string? search,
+        PaymentType? type,
+        bool includeMetadata,
+        CancellationToken ct)
+    {
+        var query = BuildInvoiceQuery();
+        query = ApplyFilters(query, from, to, null, clientId, contractId, caseId, responsibleId, search, type, clientIds);
+
+        var rawItems = await query
+            .Select(ProjectionRaw)
+            .ToListAsync(ct);
+
+        var items = rawItems.Select(MapFromRaw).ToList();
+        if (includeMetadata)
+        {
+            await EnrichInvoiceDtosAsync(items, ct);
+        }
+        else
+        {
+            await ApplyEffectiveInvoiceStateAsync(items, ct);
+        }
+
+        return items;
+    }
+
     private async Task EnrichInvoiceDtosAsync(List<InvoiceDto> items, CancellationToken ct)
     {
         if (items.Count == 0)
@@ -2383,6 +2599,108 @@ public class InvoicesController : ControllerBase
             {
                 item.LineItems = storedLineItems;
             }
+        }
+
+        await ApplyEffectiveInvoiceStateAsync(items, ct);
+    }
+
+    private async Task ApplyEffectiveInvoiceStateAsync(List<InvoiceDto> items, CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var invoiceEntityIds = items
+            .Where(item => item.InvoiceEntityId.HasValue && item.InvoiceEntityId.Value > 0)
+            .Select(item => item.InvoiceEntityId!.Value)
+            .Distinct()
+            .ToList();
+
+        var legacyGroupKeys = items
+            .Select(item => BuildLegacyGroupKey(item.Number, item.Date, item.ClientId, item.ClientCaseId, item.Type))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (invoiceEntityIds.Count == 0 && legacyGroupKeys.Count == 0)
+        {
+            return;
+        }
+
+        var candidatePayments = await _db.Payments
+            .AsNoTracking()
+            .Where(payment =>
+                (payment.InvoiceId.HasValue && invoiceEntityIds.Contains(payment.InvoiceId.Value))
+                || (!payment.InvoiceId.HasValue && payment.Account != null && payment.Account != string.Empty))
+            .ToListAsync(ct);
+
+        var linkedPaymentsByInvoiceId = candidatePayments
+            .Where(payment => payment.InvoiceId.HasValue && invoiceEntityIds.Contains(payment.InvoiceId.Value))
+            .GroupBy(payment => payment.InvoiceId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var legacyPaymentsByGroupKey = candidatePayments
+            .Where(payment => !payment.InvoiceId.HasValue)
+            .Select(payment => new
+            {
+                Payment = payment,
+                LegacyKey = BuildLegacyGroupKey(payment.Account, payment.AccountDate ?? payment.Date, payment.ClientId, payment.ClientCaseId, payment.Type),
+            })
+            .Where(entry => entry.LegacyKey is not null && legacyGroupKeys.Contains(entry.LegacyKey))
+            .GroupBy(entry => entry.LegacyKey!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(entry => entry.Payment).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            var relatedPayments = new List<Payment>();
+
+            if (item.InvoiceEntityId.HasValue
+                && linkedPaymentsByInvoiceId.TryGetValue(item.InvoiceEntityId.Value, out var linkedPayments))
+            {
+                relatedPayments.AddRange(linkedPayments);
+            }
+
+            var legacyGroupKey = BuildLegacyGroupKey(item.Number, item.Date, item.ClientId, item.ClientCaseId, item.Type);
+            if (!string.IsNullOrWhiteSpace(legacyGroupKey)
+                && legacyPaymentsByGroupKey.TryGetValue(legacyGroupKey, out var legacyPayments))
+            {
+                relatedPayments.AddRange(legacyPayments);
+            }
+
+            if (relatedPayments.Count == 0)
+            {
+                continue;
+            }
+
+            relatedPayments = relatedPayments
+                .GroupBy(payment => payment.Id)
+                .Select(group => group.First())
+                .ToList();
+
+            var statusSourcePayments = SelectStatusSourcePayments(relatedPayments, item.Id, item.Amount);
+            if (statusSourcePayments.Count > 0)
+            {
+                item.DueDate = statusSourcePayments
+                    .Select(EffectivePlannedDate)
+                    .Max();
+
+                var paidDates = statusSourcePayments
+                    .Where(payment => payment.PaidDate.HasValue)
+                    .Select(payment => payment.PaidDate!.Value)
+                    .ToList();
+                if (paidDates.Count > 0)
+                {
+                    item.PaidDate = paidDates.Max();
+                }
+            }
+
+            item.Status = DeriveInvoiceStatus(statusSourcePayments, item.Status, item.DueDate);
+            item.IsPaid = item.Status == PaymentStatus.Completed;
         }
     }
 

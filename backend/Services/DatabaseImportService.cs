@@ -378,14 +378,14 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 x =>
                 {
                     var contractId = MapId(maps.Contracts, x.ContractId);
-                    var invoiceId = MapId(maps.Invoices, x.InvoiceId);
+                    var invoiceId = MapId(maps.Payments, x.InvoiceId);
                     return contractId.HasValue && invoiceId.HasValue ? Key(contractId.Value, invoiceId.Value) : string.Empty;
                 },
                 x => Key(x.ContractId, x.InvoiceId),
                 x => new ContractInvoice
                 {
                     ContractId = MapRequired(maps.Contracts, x.ContractId),
-                    InvoiceId = MapRequired(maps.Invoices, x.InvoiceId)
+                    InvoiceId = MapRequired(maps.Payments, x.InvoiceId)
                 },
                 cancellationToken));
 
@@ -707,6 +707,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             .ToDictionary(g => g.Key, g => g.First().Item, StringComparer.Ordinal);
 
         var inserted = new List<(int OldId, T Entity)>();
+        var deferredMappings = new List<(int OldId, T Entity)>();
 
         foreach (var sourceItem in sourceItems.OrderBy(sourceIdSelector))
         {
@@ -720,7 +721,16 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             if (existingByKey.TryGetValue(key, out var existing))
             {
                 copyAction(sourceItem, existing);
-                importedIdMap[sourceIdSelector(sourceItem)] = targetIdSelector(existing);
+                var targetId = targetIdSelector(existing);
+                if (targetId > 0)
+                {
+                    importedIdMap[sourceIdSelector(sourceItem)] = targetId;
+                }
+                else
+                {
+                    deferredMappings.Add((sourceIdSelector(sourceItem), existing));
+                }
+
                 table.Updated += 1;
                 continue;
             }
@@ -739,6 +749,11 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         }
 
         foreach (var item in inserted)
+        {
+            importedIdMap[item.OldId] = targetIdSelector(item.Entity);
+        }
+
+        foreach (var item in deferredMappings)
         {
             importedIdMap[item.OldId] = targetIdSelector(item.Entity);
         }
