@@ -200,19 +200,21 @@ public class ClientsController : ControllerBase
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var totalIncome = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.PaidAmount);
-        var totalExpenses = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.PaidAmount);
-        var outstandingIncome = payments.Where(p => p.Type == PaymentType.Income).Sum(p => p.OutstandingAmount);
-        var outstandingExpenses = payments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.OutstandingAmount);
-        var paidPayments = payments.Count(p => p.Status == PaymentStatus.Completed);
-        var pendingPayments = payments.Count(p => p.Status != PaymentStatus.Completed && p.OutstandingAmount > 0m);
-        var overduePayments = payments.Count(p => p.Status == PaymentStatus.Overdue && p.OutstandingAmount > 0m);
-        var lastPaymentDate = payments
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments).ToList();
+
+        var totalIncome = visiblePayments.Where(p => p.Type == PaymentType.Income).Sum(p => p.PaidAmount);
+        var totalExpenses = visiblePayments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.PaidAmount);
+        var outstandingIncome = visiblePayments.Where(p => p.Type == PaymentType.Income).Sum(p => p.OutstandingAmount);
+        var outstandingExpenses = visiblePayments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.OutstandingAmount);
+        var paidPayments = visiblePayments.Count(p => p.Status == PaymentStatus.Completed);
+        var pendingPayments = visiblePayments.Count(p => p.Status != PaymentStatus.Completed && p.OutstandingAmount > 0m);
+        var overduePayments = visiblePayments.Count(p => p.Status == PaymentStatus.Overdue && p.OutstandingAmount > 0m);
+        var lastPaymentDate = visiblePayments
             .Where(p => p.LastPaymentDate.HasValue)
             .OrderByDescending(p => p.LastPaymentDate)
             .Select(p => p.LastPaymentDate)
             .FirstOrDefault()
-            ?? payments.OrderByDescending(p => p.Date).Select(p => (DateTime?)p.Date).FirstOrDefault();
+            ?? visiblePayments.OrderByDescending(p => p.Date).Select(p => (DateTime?)p.Date).FirstOrDefault();
 
         var stats = new ClientStats
         {
@@ -222,12 +224,12 @@ public class ClientsController : ControllerBase
             TotalExpenses = totalExpenses,
             OutstandingIncome = outstandingIncome,
             OutstandingExpenses = outstandingExpenses,
-            TotalPayments = payments.Count,
+            TotalPayments = visiblePayments.Count,
             PaidPayments = paidPayments,
             PendingPayments = pendingPayments,
             OverduePayments = overduePayments,
             LastPaymentDate = lastPaymentDate,
-            RecentPayments = payments.ToList()
+            RecentPayments = visiblePayments
         };
         stats.NetAmount = stats.TotalIncome - stats.TotalExpenses;
         return Ok(stats);
@@ -278,7 +280,9 @@ public class ClientsController : ControllerBase
                 p.InvoiceClientCases.Any(link => caseIds.Contains(link.ClientCaseId)))
             .ToListAsync(ct);
 
-        foreach (var payment in payments)
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments);
+
+        foreach (var payment in visiblePayments)
         {
             var linkedCaseIds = payment.InvoiceClientCases
                 .Select(link => link.ClientCaseId)

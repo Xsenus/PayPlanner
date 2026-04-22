@@ -168,6 +168,114 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetStats_HidesRepresentativeInvoice_WhenInstallmentsExist()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var client = new Client
+        {
+            Name = "Клиент с рассрочкой",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело по рассрочке",
+            Status = ClientCaseStatus.Open,
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "155",
+            Date = new DateTime(2025, 10, 24),
+        };
+
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Amount = 205_000m,
+                PaidAmount = 0m,
+                CounterpartyName = client.Name,
+                Date = new DateTime(2026, 8, 25),
+                PlannedDate = new DateTime(2026, 8, 25),
+                Description = "Представительский счёт",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Pending,
+                IsPaid = false,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = invoice.Id,
+                Account = invoice.Number,
+                AccountDate = invoice.Date,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            },
+            new Payment
+            {
+                Amount = 115_000m,
+                PaidAmount = 115_000m,
+                CounterpartyName = client.Name,
+                Date = new DateTime(2026, 3, 25),
+                PlannedDate = new DateTime(2026, 3, 25),
+                Description = "Первый платёж по рассрочке",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Completed,
+                IsPaid = true,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = invoice.Id,
+                Account = invoice.Number,
+                AccountDate = invoice.Date,
+                Notes = string.Empty,
+                SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+            },
+            new Payment
+            {
+                Amount = 90_000m,
+                PaidAmount = 0m,
+                CounterpartyName = client.Name,
+                Date = new DateTime(2026, 4, 25),
+                PlannedDate = new DateTime(2026, 4, 25),
+                Description = "Остаток по рассрочке",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Pending,
+                IsPaid = false,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = invoice.Id,
+                Account = invoice.Number,
+                AccountDate = invoice.Date,
+                Notes = string.Empty,
+                SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+            });
+        await db.SaveChangesAsync();
+
+        var action = await controller.GetStats(client.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var stats = Assert.IsType<ClientStats>(ok.Value);
+
+        Assert.Equal(115_000m, stats.TotalIncome);
+        Assert.Equal(90_000m, stats.OutstandingIncome);
+        Assert.Equal(2, stats.TotalPayments);
+        Assert.Equal(1, stats.PaidPayments);
+        Assert.Equal(1, stats.PendingPayments);
+        Assert.DoesNotContain(stats.RecentPayments, payment => payment.DocumentKind == DocumentKind.Invoice);
+    }
+
+    [Fact]
     public async Task GetCaseFinanceSummaries_AggregatesPaymentsLinkedThroughInvoiceCases()
     {
         await using var db = await CreateContextAsync();

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
@@ -6,8 +6,8 @@ namespace PayPlanner.Api.Services
 {
     /// <summary>
     /// Сервис расчёта сводной статистики по платежам.
-    /// Выполняет агрегирование на стороне БД и возвращает раздельные корзины
-    /// для доходов и расходов (Completed/Pending/Overdue/Total) за выбранный период.
+    /// Выполняет агрегирование по платежам за выбранный период, предварительно
+    /// убирая представительские счета, которые дублируют график рассрочки.
     /// </summary>
     public class StatsSummaryService
     {
@@ -21,25 +21,7 @@ namespace PayPlanner.Api.Services
 
         /// <summary>
         /// Рассчитать сводную статистику по платежам с фильтрами.
-        ///
-        /// Приоритет периода:
-        /// 1) Если заданы обе границы <paramref name="from"/> и <paramref name="to"/> — используются они (включительно).
-        /// 2) Иначе применяется пресет <paramref name="period"/> (по умолчанию this-month внутри <c>PeriodHelper</c>).
-        ///
-        /// Агрегирование выполняется по комбинации Type+Status:
-        /// для каждого типа (Доход/Расход) считаются суммы и количества по статусам (Completed, Pending, Overdue),
-        /// а также Total (сумма по всем статусам).
         /// </summary>
-        /// <param name="clientId">Фильтр по клиенту (опционально). Если не указан — учитываются все клиенты.</param>
-        /// <param name="caseId">Фильтр по делу клиента (опционально). Если не указан — учитываются все дела.</param>
-        /// <param name="from">Дата начала периода (включительно).</param>
-        /// <param name="to">Дата окончания периода (включительно).</param>
-        /// <param name="period">Ключ пресета периода (today, last-7d, this-week, this-month, last-quarter, ytd и т.п.).</param>
-        /// <param name="type">Опциональный срез по типу платежей: Income / Expense.</param>
-        /// <param name="status">Опционально: фильтр по статусу (Completed / Pending / Overdue).</param>
-        /// <param name="q">Опционально: поисковая строка (description, notes, client/deal/income/paymentSource names).</param>
-        /// <param name="ct">Токен отмены.</param>
-        /// <returns>Объект <see cref="StatsSummary"/> с заполненными корзинами <see cref="StatsSummary.Income"/> и <see cref="StatsSummary.Expense"/>.</returns>
         public async Task<StatsSummary> GetAsync(int? clientId, int? caseId, DateTime? from, DateTime? to,
             string? period, PaymentType? type, PaymentStatus? status, string? q, CancellationToken ct)
         {
@@ -60,15 +42,16 @@ namespace PayPlanner.Api.Services
             }
 
             if (caseId.HasValue)
+            {
                 qry = qry.Where(x =>
                     x.ClientCaseId == caseId.Value ||
                     x.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+            }
 
             if (type.HasValue)
+            {
                 qry = qry.Where(x => x.Type == type.Value);
-
-            if (status.HasValue)
-                qry = qry.Where(x => x.Status == status.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(q))
             {
@@ -84,51 +67,55 @@ namespace PayPlanner.Api.Services
                 );
             }
 
-            var grouped = await qry
-                .Select(x => new
+            var payments = await qry
+                .Select(x => new Payment
                 {
-                    x.Type,
-                    x.Status,
-                    x.Amount,
-                    x.PaidAmount,
-                    Outstanding = x.Amount - x.PaidAmount
-                })
-                .GroupBy(x => new { x.Type, x.Status })
-                .Select(g => new
-                {
-                    g.Key.Type,
-                    g.Key.Status,
-                    PaidAmount = g.Sum(v => (decimal?)v.PaidAmount) ?? 0m,
-                    OutstandingAmount = g.Sum(v => (decimal?)((v.Outstanding > 0m) ? v.Outstanding : 0m)) ?? 0m,
-                    OriginalAmount = g.Sum(v => (decimal?)v.Amount) ?? 0m,
-                    Count = g.Count()
+                    Id = x.Id,
+                    InvoiceId = x.InvoiceId,
+                    Account = x.Account,
+                    AccountDate = x.AccountDate,
+                    LegacyAccountNumber = x.LegacyAccountNumber,
+                    LegacyAccountDate = x.LegacyAccountDate,
+                    Amount = x.Amount,
+                    PaidAmount = x.PaidAmount,
+                    Date = x.Date,
+                    ClientId = x.ClientId,
+                    ExpenseClientId = x.ExpenseClientId,
+                    ClientCaseId = x.ClientCaseId,
+                    Type = x.Type,
+                    Status = x.Status,
+                    DocumentKind = x.DocumentKind,
+                    SystemNotes = x.SystemNotes,
                 })
                 .ToListAsync(ct);
 
-            StatsBucket MakeBucket(PaymentType tpe)
+            var visiblePayments = InvoiceManagedPaymentRules
+                .FilterVisiblePayments(payments)
+                .Where(payment => !status.HasValue || payment.Status == status.Value)
+                .ToList();
+
+            StatsBucket MakeBucket(PaymentType paymentType)
             {
-                var byType = grouped.Where(x => x.Type == tpe && x.Status != PaymentStatus.Cancelled).ToList();
-                var completed = byType.Where(x => x.Status == PaymentStatus.Completed);
-                var pending = byType.Where(x => x.Status == PaymentStatus.Pending || x.Status == PaymentStatus.Processing);
-                var overdue = byType.Where(x => x.Status == PaymentStatus.Overdue);
+                var byType = visiblePayments
+                    .Where(payment => payment.Type == paymentType && payment.Status != PaymentStatus.Cancelled)
+                    .ToList();
 
-                var b = new StatsBucket
+                var completed = byType.Where(payment => payment.Status == PaymentStatus.Completed).ToList();
+                var pending = byType.Where(payment => payment.Status == PaymentStatus.Pending || payment.Status == PaymentStatus.Processing).ToList();
+                var overdue = byType.Where(payment => payment.Status == PaymentStatus.Overdue).ToList();
+
+                return new StatsBucket
                 {
-                    CompletedAmount = completed.Sum(x => x.PaidAmount),
-                    CompletedCount = completed.Sum(x => x.Count),
-
-                    PendingAmount = pending.Sum(x => x.OutstandingAmount),
-                    PendingCount = pending.Sum(x => x.Count),
-
-                    OverdueAmount = overdue.Sum(x => x.OutstandingAmount),
-                    OverdueCount = overdue.Sum(x => x.Count),
-                    CollectedAmount = byType.Sum(x => x.PaidAmount),
+                    CompletedAmount = completed.Sum(payment => payment.PaidAmount),
+                    CompletedCount = completed.Count,
+                    PendingAmount = pending.Sum(payment => payment.OutstandingAmount),
+                    PendingCount = pending.Count,
+                    OverdueAmount = overdue.Sum(payment => payment.OutstandingAmount),
+                    OverdueCount = overdue.Count,
+                    CollectedAmount = byType.Sum(payment => payment.PaidAmount),
+                    TotalAmount = byType.Sum(payment => payment.Amount),
+                    TotalCount = byType.Count,
                 };
-
-                b.TotalAmount = byType.Sum(x => x.OriginalAmount);
-                b.TotalCount = byType.Sum(x => x.Count);
-
-                return b;
             }
 
             var income = (!type.HasValue || type == PaymentType.Income) ? MakeBucket(PaymentType.Income) : new StatsBucket();
