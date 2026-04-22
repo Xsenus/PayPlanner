@@ -1,3 +1,4 @@
+using System.Data;
 using System.Linq.Expressions;
 using System.Globalization;
 using System.Text;
@@ -356,8 +357,16 @@ public class InvoicesController : ControllerBase
 
         ApplyPaidFlags(payment, request.PaidDate);
 
+        await using var createTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
+
+        var createdInvoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (createdInvoiceEntityId.HasValue && createdInvoiceEntityId.Value > 0)
+        {
+            await LockInvoiceAggregateAsync(createdInvoiceEntityId.Value, ct);
+        }
 
         await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
@@ -368,6 +377,7 @@ public class InvoicesController : ControllerBase
             return installmentSyncError;
         }
         await _db.SaveChangesAsync(ct);
+        await createTransaction.CommitAsync(ct);
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
 
@@ -453,7 +463,7 @@ public class InvoicesController : ControllerBase
             return actValidation.Error;
         }
 
-        await using var updateTransaction = await _db.Database.BeginTransactionAsync(ct);
+        await using var updateTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
 
         var resolvedDueDate = ResolveInvoiceDueDate(request);
         var resolvedExpenseClientId = ResolveInvoiceExpenseClientId(request);
@@ -472,6 +482,12 @@ public class InvoicesController : ControllerBase
                 ct))
         {
             payment = await ForkProtectedRepresentativeInvoicePaymentAsync(payment, ct);
+        }
+
+        var invoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+        {
+            await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
         }
 
         var previousInvoiceNumber = payment.Account;
@@ -2450,7 +2466,9 @@ public class InvoicesController : ControllerBase
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId.Value
                 && payment.Id != invoicePayment.Id
-                && payment.DocumentKind != DocumentKind.Invoice)
+                && (payment.DocumentKind != DocumentKind.Invoice
+                    || (payment.SystemNotes != null
+                        && payment.SystemNotes.Contains(InstallmentPaymentMarker))))
             .ToListAsync(ct);
 
         var existingInstallmentPayments = existingGeneratedPayments
@@ -2582,6 +2600,18 @@ public class InvoicesController : ControllerBase
     private static bool ShouldReplaceInstallmentPlan(UpsertInvoiceRequest request)
     {
         return request.ReplaceInstallmentPlan || request.InstallmentPlan is not null;
+    }
+
+    private async Task LockInvoiceAggregateAsync(int invoiceEntityId, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql())
+        {
+            return;
+        }
+
+        await _db.Database
+            .SqlQuery<int>($"SELECT 1 FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceEntityId} FOR UPDATE")
+            .ToListAsync(ct);
     }
 
     private static DateTime ResolveInvoiceDueDate(UpsertInvoiceRequest request)

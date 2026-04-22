@@ -821,6 +821,78 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_NormalizesInstallmentRowsThatStillUseInvoiceDocumentKind()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Legacy Marker");
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var createRequest = CreateRequest("INV-FIX-30", clientId, new DateTime(2026, 4, 8), 18_000m);
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 18_000m,
+            startDate: new DateTime(2026, 4, 8),
+            new DateTime(2026, 4, 8),
+            new DateTime(2026, 4, 30),
+            new DateTime(2026, 5, 7));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        db.ChangeTracker.Clear();
+
+        var parent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var installments = await LoadInstallmentPaymentsAsync(db, parent.InvoiceId!.Value, createdDto.Id);
+        Assert.Equal(3, installments.Count);
+
+        var brokenFirstInstallment = await db.Payments.SingleAsync(payment => payment.Id == installments[0].Id);
+        brokenFirstInstallment.DocumentKind = DocumentKind.Invoice;
+        brokenFirstInstallment.Amount = 18_000m;
+        brokenFirstInstallment.Date = new DateTime(2026, 4, 9);
+        brokenFirstInstallment.PlannedDate = new DateTime(2026, 4, 9);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var updateRequest = CreateRequest("INV-FIX-30", clientId, new DateTime(2026, 4, 8), 18_000m);
+        updateRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 18_000m,
+            startDate: new DateTime(2026, 4, 9),
+            new DateTime(2026, 4, 9),
+            new DateTime(2026, 4, 30),
+            new DateTime(2026, 5, 7));
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        _ = Assert.IsType<InvoiceDto>(ok.Value);
+
+        db.ChangeTracker.Clear();
+
+        var aggregatePayments = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == parent.InvoiceId)
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .ToListAsync();
+
+        Assert.Single(aggregatePayments, payment => payment.DocumentKind == DocumentKind.Invoice);
+
+        var normalizedInstallments = aggregatePayments
+            .Where(payment => payment.DocumentKind == DocumentKind.Payment)
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .ToList();
+
+        Assert.Equal(3, normalizedInstallments.Count);
+        Assert.Equal(brokenFirstInstallment.Id, normalizedInstallments[0].Id);
+        Assert.Equal(6_000m, normalizedInstallments[0].Amount);
+        Assert.Equal(new DateTime(2026, 4, 9), normalizedInstallments[0].Date);
+        Assert.Contains(InstallmentPaymentMarker, normalizedInstallments[0].SystemNotes, StringComparison.Ordinal);
+        Assert.All(normalizedInstallments, payment => Assert.Equal(DocumentKind.Payment, payment.DocumentKind));
+    }
+
+    [Fact]
     public async Task BulkDelete_RemovesSelectedInvoiceAggregates_AndDetachesActs()
     {
         await using var db = await CreateContextAsync();
