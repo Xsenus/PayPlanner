@@ -143,8 +143,80 @@ function isLegacyInstallmentChildrenSet(payments: Payment[]): boolean {
   return nonInvoiceCount <= 1;
 }
 
+function areAmountsEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 0.01;
+}
+
+function readNumberProperty(value: unknown, propertyName: string): number | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const entry = Object.entries(value as Record<string, unknown>).find(
+    ([key]) => key.toLowerCase() === propertyName.toLowerCase(),
+  );
+  const rawValue = entry?.[1];
+  return typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null;
+}
+
+function parseInstallmentToPay(systemNotes?: string | null): number | null {
+  const markerLine = (systemNotes ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(INSTALLMENT_PAYMENT_MARKER));
+  if (!markerLine) {
+    return null;
+  }
+
+  const rawJson = markerLine.slice(INSTALLMENT_PAYMENT_MARKER.length).trim();
+  if (!rawJson.startsWith('{')) {
+    return null;
+  }
+
+  try {
+    return readNumberProperty(JSON.parse(rawJson), 'toPay');
+  } catch {
+    return null;
+  }
+}
+
+function hasConsistentInstallmentToPay(payments: Payment[], expectedTotal: number): boolean {
+  return payments.some((payment) => {
+    const toPay = parseInstallmentToPay(payment.systemNotes);
+    return toPay !== null && areAmountsEqual(toPay, expectedTotal);
+  });
+}
+
+function isConvertedLegacyInstallmentAggregate(payments: Payment[]): boolean {
+  if (payments.length < 3) {
+    return false;
+  }
+
+  const representativeInvoice = getRepresentativeInvoicePayment(payments);
+  if (!representativeInvoice || (representativeInvoice.amount ?? 0) <= 0) {
+    return false;
+  }
+
+  const generatedInstallments = payments.filter(
+    (payment) => payment.id !== representativeInvoice.id && isGeneratedInstallmentPayment(payment),
+  );
+  const generatedInstallmentTotal = generatedInstallments.reduce(
+    (sum, payment) => sum + (payment.amount ?? 0),
+    0,
+  );
+
+  return (
+    generatedInstallmentTotal > (representativeInvoice.amount ?? 0)
+    && !hasConsistentInstallmentToPay(generatedInstallments, generatedInstallmentTotal)
+  );
+}
+
 export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[] {
   const representativeInvoice = getRepresentativeInvoicePayment(payments);
+  if (representativeInvoice && isConvertedLegacyInstallmentAggregate(payments)) {
+    return payments;
+  }
+
   if (representativeInvoice && isLegacyBrokenInstallmentAggregate(payments)) {
     return payments.filter((payment) => payment.id !== representativeInvoice.id);
   }
@@ -160,6 +232,10 @@ export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[
 export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {
   const representativeInvoice = getRepresentativeInvoicePayment(payments);
   if (!representativeInvoice) {
+    return payments;
+  }
+
+  if (isConvertedLegacyInstallmentAggregate(payments)) {
     return payments;
   }
 

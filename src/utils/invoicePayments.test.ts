@@ -157,6 +157,58 @@ describe('invoicePayments utilities', () => {
     expect(result.map((payment) => payment.id)).toEqual([548]);
   });
 
+  it('keeps the representative row when converted legacy installments exceed it', () => {
+    const firstInstallment = createPayment({
+      id: 548,
+      invoiceId: 30,
+      amount: 50_000,
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1}`,
+    });
+    const secondInstallment = createPayment({
+      id: 549,
+      invoiceId: 30,
+      amount: 50_000,
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":2}`,
+    });
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 62_500,
+    });
+
+    const payments = [firstInstallment, secondInstallment, representativeInvoice];
+
+    expect(filterRepresentativeInvoiceWhenInstallmentsExist(payments).map((payment) => payment.id)).toEqual([548, 549, 547]);
+    expect(getStatusSourcePaymentsForInvoice(payments).map((payment) => payment.id)).toEqual([548, 549, 547]);
+  });
+
+  it('hides the representative row for a normal installment plan with overpay metadata', () => {
+    const firstInstallment = createPayment({
+      id: 548,
+      invoiceId: 30,
+      amount: 5_600,
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"Sequence":1,"ToPay":11200}`,
+    });
+    const secondInstallment = createPayment({
+      id: 549,
+      invoiceId: 30,
+      amount: 5_600,
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"Sequence":2,"ToPay":11200}`,
+    });
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 10_000,
+    });
+
+    const payments = [firstInstallment, secondInstallment, representativeInvoice];
+
+    expect(filterRepresentativeInvoiceWhenInstallmentsExist(payments).map((payment) => payment.id)).toEqual([548, 549]);
+    expect(getStatusSourcePaymentsForInvoice(payments).map((payment) => payment.id)).toEqual([548, 549]);
+  });
+
   it('hides the representative invoice row for a legacy broken installment aggregate', () => {
     const representativeInvoice = createPayment({
       id: 547,

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services;
@@ -48,6 +49,11 @@ public static class InvoiceManagedPaymentRules
             .ToList();
 
         if (snapshot.Count == 0)
+        {
+            return false;
+        }
+
+        if (IsConvertedLegacyInstallmentAggregate(snapshot))
         {
             return false;
         }
@@ -113,6 +119,95 @@ public static class InvoiceManagedPaymentRules
 
         return representativeInvoice.Amount > maxSiblingAmount;
     }
+
+    private static bool IsConvertedLegacyInstallmentAggregate(IReadOnlyCollection<Payment> payments)
+    {
+        if (payments.Count < 3)
+        {
+            return false;
+        }
+
+        var representativeInvoice = SelectRepresentativeInvoice(payments);
+        if (representativeInvoice is null || representativeInvoice.Amount <= 0m)
+        {
+            return false;
+        }
+
+        var generatedInstallments = payments
+            .Where(payment => payment.Id != representativeInvoice.Id && IsGeneratedInstallmentPayment(payment))
+            .ToList();
+        var generatedInstallmentTotal = generatedInstallments.Sum(payment => payment.Amount);
+
+        // During legacy repair some installment rows were converted to generated
+        // payments, while the selected representative stayed as another
+        // installment. Normal installment plans can also exceed the invoice
+        // amount because of overpay, so treat the aggregate as converted only
+        // when marker metadata does not describe the generated total.
+        return generatedInstallmentTotal > representativeInvoice.Amount
+               && !HasConsistentInstallmentToPay(generatedInstallments, generatedInstallmentTotal);
+    }
+
+    private static bool HasConsistentInstallmentToPay(IEnumerable<Payment> payments, decimal expectedTotal)
+        => payments.Any(payment => TryReadInstallmentToPay(payment.SystemNotes, out var toPay)
+                                   && AreAmountsEqual(toPay, expectedTotal));
+
+    private static bool TryReadInstallmentToPay(string? systemNotes, out decimal toPay)
+    {
+        toPay = 0m;
+        if (string.IsNullOrWhiteSpace(systemNotes))
+        {
+            return false;
+        }
+
+        var markerLine = systemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith(InstallmentPaymentMarker, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(markerLine))
+        {
+            return false;
+        }
+
+        var json = markerLine[InstallmentPaymentMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json) || json[0] != '{')
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return TryGetDecimalProperty(document.RootElement, "ToPay", out toPay);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetDecimalProperty(JsonElement element, string name, out decimal value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.Number
+                && property.Value.TryGetDecimal(out value))
+            {
+                return true;
+            }
+
+            break;
+        }
+
+        value = 0m;
+        return false;
+    }
+
+    private static bool AreAmountsEqual(decimal left, decimal right)
+        => Math.Abs(left - right) <= 0.01m;
 
     private static Payment? SelectRepresentativeInvoice(IEnumerable<Payment> payments)
     {

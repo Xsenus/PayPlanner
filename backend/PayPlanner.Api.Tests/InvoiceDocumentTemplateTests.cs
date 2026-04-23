@@ -238,6 +238,21 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_IncludesConvertedLegacyRepresentative_InScheduleAndTotal()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateConvertedLegacyInstallmentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Matches(new Regex("212(?:[\\s\\u00A0\\u202F]|&#160;)500,00", RegexOptions.Singleline), content.Content);
+        Assert.Matches(new Regex("07\\.10\\.2025\\s*-\\s*62(?:[\\s\\u00A0\\u202F]|&#160;)500", RegexOptions.Singleline), content.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_UpgradesLegacyManagedStandardTemplateLayout_WhenStoredTemplateMatchesBrokenDefault()
     {
         await using var db = await CreateContextAsync();
@@ -1046,6 +1061,79 @@ public class InvoiceDocumentTemplateTests
         await db.SaveChangesAsync();
         return payment.Id;
     }
+
+    private static async Task<int> CreateConvertedLegacyInstallmentFixtureAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Converted Legacy Client",
+        };
+        db.Clients.Add(client);
+
+        var invoice = new Invoice
+        {
+            Number = "122",
+            Date = new DateTime(2025, 7, 3),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representative = new Payment
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            InvoiceId = invoice.Id,
+            ClientId = client.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Date = new DateTime(2025, 10, 7),
+            PlannedDate = new DateTime(2025, 10, 7),
+            Amount = 62_500m,
+            PaidAmount = 62_500m,
+            PaidDate = new DateTime(2025, 10, 7),
+            LastPaymentDate = new DateTime(2025, 10, 7),
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Description = "Invoice 122 final legacy installment",
+        };
+        db.Payments.Add(representative);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            CreateConvertedLegacyInstallment(invoice, client, 1, new DateTime(2025, 7, 8), 50_000m),
+            CreateConvertedLegacyInstallment(invoice, client, 2, new DateTime(2025, 8, 8), 50_000m),
+            CreateConvertedLegacyInstallment(invoice, client, 3, new DateTime(2025, 9, 9), 50_000m));
+        await db.SaveChangesAsync();
+
+        return representative.Id;
+    }
+
+    private static Payment CreateConvertedLegacyInstallment(
+        Invoice invoice,
+        Client client,
+        int sequence,
+        DateTime date,
+        decimal amount)
+        => new()
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            InvoiceId = invoice.Id,
+            ClientId = client.Id,
+            DocumentKind = DocumentKind.Payment,
+            Date = date,
+            PlannedDate = date,
+            Amount = amount,
+            PaidAmount = amount,
+            PaidDate = date,
+            LastPaymentDate = date,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Description = $"Installment {sequence}",
+            SystemNotes = FormattableString.Invariant(
+                $"[pp:installment-payment] {{\"Sequence\":{sequence},\"Total\":62500,\"DownPayment\":0,\"AnnualRate\":0,\"Months\":3,\"StartDate\":\"2025-07-08T00:00:00\",\"RoundingMode\":0,\"RoundingStep\":null,\"ToPay\":62500,\"Overpay\":0,\"LoanAmount\":62500,\"BaseMonthlyPayment\":20833.33,\"RoundedMonthlyPayment\":null,\"Item\":{{\"Sequence\":{sequence},\"Date\":\"{date:yyyy-MM-dd}T00:00:00\",\"Principal\":{amount},\"Interest\":0,\"Payment\":{amount},\"Balance\":0}}}}"),
+        };
 
     private static async Task CreateInstallmentScheduleFixtureAsync(PaymentContext db, int parentPaymentId)
     {

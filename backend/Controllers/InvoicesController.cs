@@ -38,6 +38,10 @@ public class InvoicesController : ControllerBase
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+    private static readonly JsonSerializerOptions InstallmentMetadataJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     public InvoicesController(
         PaymentContext db,
@@ -394,6 +398,7 @@ public class InvoicesController : ControllerBase
         await createTransaction.CommitAsync(ct);
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
+        ApplyPersistedPaymentState(dto, payment);
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -592,6 +597,7 @@ public class InvoicesController : ControllerBase
         await updateTransaction.CommitAsync(ct);
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
+        ApplyPersistedPaymentState(dto, payment);
 
         return Ok(dto);
     }
@@ -1581,18 +1587,18 @@ public class InvoicesController : ControllerBase
 
         var normalizedFormat = NormalizeDocumentFormat(format);
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
+        var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
-        var installmentScheduleHtml = await BuildInstallmentScheduleHtmlAsync(payment, ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
-            lineItems,
+            installmentDocumentContext.LineItems,
             mainCompany,
             shouldIncludeSignatureAndSeal,
-            installmentScheduleHtml);
+            installmentDocumentContext.ScheduleHtml);
 
         if (normalizedFormat == "html")
         {
@@ -1650,17 +1656,17 @@ public class InvoicesController : ControllerBase
         }
 
         var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
+        var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, null);
         var mainCompany = await LoadMainCompanyAsync(ct);
-        var installmentScheduleHtml = await BuildInstallmentScheduleHtmlAsync(payment, ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
-            lineItems,
+            installmentDocumentContext.LineItems,
             mainCompany,
             documentSettings.PrintWithSignatureAndSealByDefault,
-            installmentScheduleHtml);
+            installmentDocumentContext.ScheduleHtml);
         byte[] bytes;
         string fileName;
         string contentType;
@@ -2520,6 +2526,13 @@ public class InvoicesController : ControllerBase
         return dto;
     }
 
+    private static void ApplyPersistedPaymentState(InvoiceDto dto, Payment payment)
+    {
+        dto.Status = payment.Status;
+        dto.IsPaid = payment.IsPaid;
+        dto.PaidDate = payment.PaidDate;
+    }
+
     private async Task<List<InvoiceDto>> QueryInvoiceDtosAsync(
         DateTime? from,
         DateTime? to,
@@ -3130,7 +3143,7 @@ public class InvoicesController : ControllerBase
 
         try
         {
-            return JsonSerializer.Deserialize<InstallmentPaymentMetadataDto>(json);
+            return JsonSerializer.Deserialize<InstallmentPaymentMetadataDto>(json, InstallmentMetadataJsonOptions);
         }
         catch
         {
@@ -4029,28 +4042,67 @@ public class InvoicesController : ControllerBase
 
     private async Task<string> BuildInstallmentScheduleHtmlAsync(Payment payment, CancellationToken ct)
     {
+        var scheduleContext = await LoadInstallmentScheduleContextAsync(payment, ct);
+        return RenderInstallmentScheduleHtml(scheduleContext.Items);
+    }
+
+    private async Task<InvoiceDocumentInstallmentContext> BuildInstallmentDocumentContextAsync(
+        Payment payment,
+        List<InvoiceLineItemDto> lineItems,
+        CancellationToken ct)
+    {
+        var scheduleContext = await LoadInstallmentScheduleContextAsync(payment, ct);
+        var effectiveLineItems = lineItems;
+
+        if (effectiveLineItems.Count == 0
+            && scheduleContext.InferredTotal.HasValue
+            && scheduleContext.InferredTotal.Value > payment.Amount)
+        {
+            effectiveLineItems = new List<InvoiceLineItemDto>
+            {
+                new()
+                {
+                    SourceKey = "legacy-installment-total",
+                    SortOrder = 0,
+                    Name = string.IsNullOrWhiteSpace(payment.Description)
+                        ? "Услуги по счету"
+                        : payment.Description,
+                    Quantity = 1m,
+                    Unit = "усл. ед.",
+                    Price = scheduleContext.InferredTotal.Value,
+                },
+            };
+        }
+
+        return new InvoiceDocumentInstallmentContext(
+            effectiveLineItems,
+            RenderInstallmentScheduleHtml(scheduleContext.Items));
+    }
+
+    private async Task<InstallmentScheduleContext> LoadInstallmentScheduleContextAsync(Payment payment, CancellationToken ct)
+    {
         var invoiceId = payment.InvoiceId ?? payment.Invoice?.Id;
         if (!invoiceId.HasValue)
         {
-            return string.Empty;
+            return new InstallmentScheduleContext(new List<InstallmentScheduleItem>(), null);
         }
 
-        var installments = await _db.Payments
+        var invoicePayments = await _db.Payments
             .AsNoTracking()
             .Where(p =>
-                p.InvoiceId == invoiceId.Value
-                && p.Id != payment.Id
-                && p.SystemNotes.Contains(InstallmentPaymentMarker))
-            .Select(p => new { p.Id, p.Date, p.Amount, p.SystemNotes })
+                p.InvoiceId == invoiceId.Value)
+            .Select(p => new { p.Id, p.Date, p.PlannedDate, p.Amount, p.DocumentKind, p.SystemNotes })
             .ToListAsync(ct);
 
-        if (installments.Count == 0)
-        {
-            return string.Empty;
-        }
+        var generatedInstallments = invoicePayments
+            .Where(item =>
+                item.Id != payment.Id
+                && !string.IsNullOrWhiteSpace(item.SystemNotes)
+                && item.SystemNotes.Contains(InstallmentPaymentMarker, StringComparison.Ordinal))
+            .ToList();
 
-        var items = new List<InstallmentScheduleItem>(installments.Count);
-        foreach (var installment in installments)
+        var items = new List<InstallmentScheduleItem>();
+        foreach (var installment in generatedInstallments)
         {
             var metadata = ExtractInstallmentPaymentMetadata(installment.SystemNotes);
             var metadataItem = metadata?.Item;
@@ -4058,6 +4110,56 @@ public class InvoicesController : ControllerBase
             var amount = metadataItem is not null && metadataItem.Payment > 0m ? metadataItem.Payment : installment.Amount;
             var sequence = metadataItem?.Sequence ?? 0;
             items.Add(new InstallmentScheduleItem(sequence, date, amount, installment.Id));
+        }
+
+        decimal? inferredTotal = null;
+        var generatedInstallmentTotal = items.Sum(item => item.Amount);
+        if (payment.DocumentKind == DocumentKind.Invoice
+            && payment.Amount > 0m
+            && IsConvertedLegacyInstallmentSchedule(
+                generatedInstallments.Select(item => item.SystemNotes),
+                generatedInstallmentTotal,
+                payment.Amount))
+        {
+            var currentDate = payment.PlannedDate == default ? payment.Date : payment.PlannedDate;
+            var nextSequence = items
+                .Select(item => item.Sequence)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            items.Add(new InstallmentScheduleItem(nextSequence, currentDate, payment.Amount, payment.Id));
+            inferredTotal = generatedInstallmentTotal + payment.Amount;
+        }
+
+        return new InstallmentScheduleContext(items, inferredTotal);
+    }
+
+    private static bool IsConvertedLegacyInstallmentSchedule(
+        IEnumerable<string?> generatedInstallmentNotes,
+        decimal generatedInstallmentTotal,
+        decimal representativeAmount)
+    {
+        var notes = generatedInstallmentNotes.ToList();
+        if (notes.Count < 2 || representativeAmount <= 0m || generatedInstallmentTotal <= representativeAmount)
+        {
+            return false;
+        }
+
+        return !HasConsistentInstallmentToPay(notes, generatedInstallmentTotal);
+    }
+
+    private static bool HasConsistentInstallmentToPay(IEnumerable<string?> systemNotes, decimal expectedTotal)
+        => systemNotes
+            .Select(ExtractInstallmentPaymentMetadata)
+            .Any(metadata => metadata is not null && AreAmountsEqual(metadata.ToPay, expectedTotal));
+
+    private static bool AreAmountsEqual(decimal left, decimal right)
+        => Math.Abs(left - right) <= 0.01m;
+
+    private static string RenderInstallmentScheduleHtml(IReadOnlyCollection<InstallmentScheduleItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return string.Empty;
         }
 
         var orderedItems = items
@@ -4223,6 +4325,10 @@ public class InvoicesController : ControllerBase
 
         return value.Trim();
     }
+
+    private sealed record InvoiceDocumentInstallmentContext(List<InvoiceLineItemDto> LineItems, string ScheduleHtml);
+
+    private sealed record InstallmentScheduleContext(List<InstallmentScheduleItem> Items, decimal? InferredTotal);
 
     private sealed class InstallmentPaymentMetadataDto
     {

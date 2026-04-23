@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -51,6 +52,7 @@ public class AccountsController : ControllerBase
                 Status = payment.Status,
                 IsPaid = payment.IsPaid,
                 PaidDate = payment.PaidDate,
+                SystemNotes = payment.SystemNotes,
                 HasInstallmentMarker = payment.SystemNotes != null
                     && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
@@ -182,6 +184,7 @@ public class AccountsController : ControllerBase
                 PaidAmount = payment.PaidAmount,
                 Status = payment.Status,
                 DocumentKind = payment.DocumentKind,
+                SystemNotes = payment.SystemNotes,
                 HasInstallmentMarker = payment.SystemNotes != null
                     && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
@@ -995,6 +998,7 @@ public class AccountsController : ControllerBase
             PaidAmount = payment.PaidAmount,
             Status = payment.Status,
             DocumentKind = payment.DocumentKind,
+            SystemNotes = payment.SystemNotes,
             HasInstallmentMarker = payment.HasInstallmentMarker,
             ClientId = payment.ClientId,
             ClientCaseId = payment.ClientCaseId,
@@ -1025,6 +1029,11 @@ public class AccountsController : ControllerBase
             .ThenBy(payment => payment.Id)
             .ToList();
 
+        if (IsConvertedLegacyInstallmentAggregate(ordered, representativePaymentId, representativeAmount))
+        {
+            return ordered;
+        }
+
         if (ShouldHideRepresentativeInvoice(ordered, representativePaymentId, representativeAmount))
         {
             return ordered
@@ -1044,9 +1053,95 @@ public class AccountsController : ControllerBase
         int representativePaymentId,
         decimal representativeAmount)
     {
+        if (IsConvertedLegacyInstallmentAggregate(payments, representativePaymentId, representativeAmount))
+        {
+            return false;
+        }
+
         return payments.Any(payment => payment.HasInstallmentMarker)
             || IsLegacyBrokenInstallmentAggregate(payments, representativePaymentId, representativeAmount);
     }
+
+    private static bool IsConvertedLegacyInstallmentAggregate(
+        IReadOnlyCollection<PaymentAggregateItem> payments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        if (payments.Count < 3 || representativeAmount <= 0m)
+        {
+            return false;
+        }
+
+        var generatedInstallments = payments
+            .Where(payment => payment.Id != representativePaymentId && payment.HasInstallmentMarker)
+            .ToList();
+        var generatedInstallmentTotal = generatedInstallments.Sum(payment => payment.Amount);
+
+        return generatedInstallmentTotal > representativeAmount
+               && !HasConsistentInstallmentToPay(generatedInstallments, generatedInstallmentTotal);
+    }
+
+    private static bool HasConsistentInstallmentToPay(IEnumerable<PaymentAggregateItem> payments, decimal expectedTotal)
+        => payments.Any(payment => TryReadInstallmentToPay(payment.SystemNotes, out var toPay)
+                                   && AreAmountsEqual(toPay, expectedTotal));
+
+    private static bool TryReadInstallmentToPay(string? systemNotes, out decimal toPay)
+    {
+        toPay = 0m;
+        if (string.IsNullOrWhiteSpace(systemNotes))
+        {
+            return false;
+        }
+
+        var markerLine = systemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith(InvoiceManagedPaymentRules.InstallmentPaymentMarker, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(markerLine))
+        {
+            return false;
+        }
+
+        var json = markerLine[InvoiceManagedPaymentRules.InstallmentPaymentMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json) || json[0] != '{')
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return TryGetDecimalProperty(document.RootElement, "ToPay", out toPay);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetDecimalProperty(JsonElement element, string name, out decimal value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.Number
+                && property.Value.TryGetDecimal(out value))
+            {
+                return true;
+            }
+
+            break;
+        }
+
+        value = 0m;
+        return false;
+    }
+
+    private static bool AreAmountsEqual(decimal left, decimal right)
+        => Math.Abs(left - right) <= 0.01m;
 
     private static bool IsLegacyBrokenInstallmentAggregate(
         IReadOnlyCollection<PaymentAggregateItem> payments,
@@ -1202,6 +1297,7 @@ public class AccountsController : ControllerBase
         public PaymentStatus Status { get; init; }
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
+        public string? SystemNotes { get; init; }
         public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
         public string? ClientName { get; init; }
@@ -1242,6 +1338,7 @@ public class AccountsController : ControllerBase
         public decimal PaidAmount { get; init; }
         public PaymentStatus Status { get; init; }
         public DocumentKind DocumentKind { get; init; }
+        public string? SystemNotes { get; init; }
         public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
         public int? ClientCaseId { get; init; }

@@ -101,6 +101,38 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_KeepsConvertedLegacyRepresentative_WhenGeneratedInstallmentsExceedIt()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateConvertedLegacyInstallmentAggregateAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("122", row.AccountNumber);
+        Assert.Equal("paid", row.Status);
+        Assert.Equal(212_500m, row.TotalAmount);
+        Assert.Equal(new DateTime(2025, 10, 7), row.DueDate);
+        Assert.Equal(4, row.Payments.Count);
+        Assert.Contains(row.Payments, payment => payment.DocumentKind == DocumentKind.Invoice && payment.Amount == 62_500m);
+    }
+
+    [Fact]
     public async Task GetRegistry_KeepsLegacySiblingPayment_WhenPaymentHasNoInvoiceId_ButSharesAccountAndDate()
     {
         await using var db = await CreateContextAsync();
@@ -400,6 +432,54 @@ public class AccountsControllerTests
         sixth.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 6";
 
         db.Payments.AddRange(invoicePayment, firstPaid, secondPaid, overdue, fourth, fifth, sixth);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateConvertedLegacyInstallmentAggregateAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Converted Legacy Client",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "122",
+            Date = new DateTime(2025, 7, 3),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = CreatePayment(new DateTime(2025, 10, 7), 62_500m, "Invoice 122 final legacy installment");
+        representativePayment.DocumentKind = DocumentKind.Invoice;
+        representativePayment.InvoiceId = invoice.Id;
+        representativePayment.Account = invoice.Number;
+        representativePayment.AccountDate = invoice.Date;
+        representativePayment.Client = client;
+        representativePayment.CounterpartyName = client.Name;
+        representativePayment.Status = PaymentStatus.Completed;
+        representativePayment.PaidAmount = representativePayment.Amount;
+        representativePayment.PaidDate = representativePayment.Date;
+        representativePayment.LastPaymentDate = representativePayment.Date;
+        representativePayment.IsPaid = true;
+
+        var firstInstallment = CreateLinkedPayment(invoice, new DateTime(2025, 7, 8), 50_000m, PaymentStatus.Completed);
+        var secondInstallment = CreateLinkedPayment(invoice, new DateTime(2025, 8, 8), 50_000m, PaymentStatus.Completed);
+        var thirdInstallment = CreateLinkedPayment(invoice, new DateTime(2025, 9, 9), 50_000m, PaymentStatus.Completed);
+
+        foreach (var installment in new[] { firstInstallment, secondInstallment, thirdInstallment })
+        {
+            installment.Client = client;
+            installment.CounterpartyName = client.Name;
+            installment.PaidAmount = installment.Amount;
+            installment.PaidDate = installment.Date;
+            installment.LastPaymentDate = installment.Date;
+            installment.IsPaid = true;
+            installment.SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} {{\"sequence\":1}}";
+        }
+
+        db.Payments.AddRange(representativePayment, firstInstallment, secondInstallment, thirdInstallment);
         await db.SaveChangesAsync();
     }
 
