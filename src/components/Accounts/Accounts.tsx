@@ -47,7 +47,8 @@ import {
   peekInvoiceEditorDraft,
   type InvoiceEditorDraftState,
 } from '../../utils/invoiceEditorBridge';
-import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { INSTALLMENT_PAYMENT_MARKER, isGeneratedInstallmentPayment, isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
@@ -139,6 +140,65 @@ function resolvePaymentOperationDate(payment: Payment): string | null {
   }
 
   return payment.plannedDate ?? payment.date ?? null;
+}
+
+function resolveInstallmentPaymentBadge(payment: Payment): string | null {
+  if (!isGeneratedInstallmentPayment(payment)) {
+    return null;
+  }
+
+  const metadata = parseInstallmentPaymentMetadata(payment.systemNotes);
+  const fallbackMetadata = extractInstallmentMetadataFallback(payment.systemNotes);
+  const sequence = metadata?.sequence ?? fallbackMetadata.sequence ?? extractLegacyInstallmentSequence(payment.systemNotes);
+  const months = metadata?.months ?? fallbackMetadata.months ?? 0;
+
+  if (sequence > 0 && months > 0) {
+    return `Рассрочка ${sequence}/${months}`;
+  }
+
+  if (sequence > 0) {
+    return `Рассрочка ${sequence}`;
+  }
+
+  return 'Рассрочка';
+}
+
+function extractInstallmentMetadataFallback(systemNotes?: string | null): { sequence?: number; months?: number } {
+  const markerPayload = extractInstallmentMarkerPayload(systemNotes);
+  if (!markerPayload?.startsWith('{')) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(markerPayload) as Record<string, unknown>;
+    return {
+      sequence: readNumberProperty(parsed, 'sequence'),
+      months: readNumberProperty(parsed, 'months'),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function extractLegacyInstallmentSequence(systemNotes?: string | null): number {
+  const markerPayload = extractInstallmentMarkerPayload(systemNotes);
+  const match = markerPayload?.match(/^(\d+)/);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+function extractInstallmentMarkerPayload(systemNotes?: string | null): string | null {
+  const markerIndex = systemNotes?.indexOf(INSTALLMENT_PAYMENT_MARKER) ?? -1;
+  if (!systemNotes || markerIndex < 0) {
+    return null;
+  }
+
+  return systemNotes.slice(markerIndex + INSTALLMENT_PAYMENT_MARKER.length).trim();
+}
+
+function readNumberProperty(value: Record<string, unknown>, propertyName: string): number | undefined {
+  const entry = Object.entries(value).find(([key]) => key.toLowerCase() === propertyName.toLowerCase());
+  const rawValue = entry?.[1];
+  return typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : undefined;
 }
 
 function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
@@ -2319,7 +2379,19 @@ export function Accounts({
                                               {accountStatusLabels[deriveStatusFromPayments([payment], invoice)]}
                                             </span>
                                           </td>
-                                          <td className="px-4 py-2 text-gray-600">{payment.description || '—'}</td>
+                                          <td className="px-4 py-2 text-gray-600">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              {resolveInstallmentPaymentBadge(payment) ? (
+                                                <span
+                                                  className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700"
+                                                  title="Платеж по графику рассрочки"
+                                                >
+                                                  {resolveInstallmentPaymentBadge(payment)}
+                                                </span>
+                                              ) : null}
+                                              <span>{payment.description || '—'}</span>
+                                            </div>
+                                          </td>
                                           {(canEdit || canDelete) && (
                                             <td className="px-4 py-2">
                                               <div className="flex items-center justify-end gap-2">

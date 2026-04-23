@@ -709,6 +709,45 @@ describe('Accounts integration', () => {
     expect(within(unpaidOperationRow as HTMLTableRowElement).getByText('27.04.2026')).toBeTruthy();
   });
 
+  it('marks installment payments in the expanded operations panel', async () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          payments: [
+            createSiblingPayment({
+              id: 542,
+              description: 'Installment operation with marker',
+              systemNotes: '[pp:installment-payment] {"Sequence":2,"Months":11}',
+            }),
+            createSiblingPayment({
+              id: 543,
+              description: 'Regular operation without marker',
+              systemNotes: '',
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+
+    const installmentRow = (await screen.findByText('Installment operation with marker')).closest('tr');
+    expect(installmentRow).toBeTruthy();
+    expect(within(installmentRow as HTMLTableRowElement).getByText('Рассрочка 2/11')).toBeTruthy();
+
+    const regularRow = (await screen.findByText('Regular operation without marker')).closest('tr');
+    expect(regularRow).toBeTruthy();
+    expect(within(regularRow as HTMLTableRowElement).queryByText(/Рассрочка/)).toBeNull();
+  });
+
   it('opens the payment modal for invoice-managed payments in the expanded operations panel', async () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [
