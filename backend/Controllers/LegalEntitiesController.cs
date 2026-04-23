@@ -755,6 +755,26 @@ public class LegalEntitiesController : ControllerBase
     }
 
 
+    private static string? ResolveLegacyAddressValue(List<LegalEntityAddressRequest>? addresses, string? legacyAddress)
+    {
+        if (addresses is null)
+        {
+            return NormalizeOptional(legacyAddress);
+        }
+
+        var normalizedAddresses = addresses
+            .Where(address => !string.IsNullOrWhiteSpace(address.Value))
+            .Select(address => new AddressRecord
+            {
+                Type = Enum.IsDefined(typeof(AddressType), address.Type) ? (AddressType)address.Type : AddressType.Other,
+                Value = address.Value!.Trim(),
+                UnrestrictedValue = NormalizeOptional(address.UnrestrictedValue),
+                IsPrimary = address.IsPrimary,
+            });
+
+        return NormalizeOptional(LegalEntityAddressResolver.ResolvePreferredAddress(normalizedAddresses, legacyAddress));
+    }
+
     private async Task ApplyLegalEntityAddressesAsync(LegalEntity entity, List<LegalEntityAddressRequest>? addresses, CancellationToken ct)
     {
         if (addresses is null) return;
@@ -879,7 +899,7 @@ public class LegalEntitiesController : ControllerBase
             Inn = NormalizeOptional(request.Inn),
             Kpp = NormalizeOptional(request.Kpp),
             Ogrn = NormalizeOptional(request.Ogrn),
-            Address = NormalizeOptional(request.Address),
+            Address = ResolveLegacyAddressValue(request.Addresses, request.Address),
             Phone = NormalizeOptional(request.Phone),
             Email = NormalizeOptional(request.Email),
             Director = NormalizeOptional(request.Director),
@@ -1333,7 +1353,7 @@ public class LegalEntitiesController : ControllerBase
         entity.Inn = NormalizeOptional(request.Inn);
         entity.Kpp = NormalizeOptional(request.Kpp);
         entity.Ogrn = NormalizeOptional(request.Ogrn);
-        entity.Address = NormalizeOptional(request.Address);
+        entity.Address = ResolveLegacyAddressValue(request.Addresses, request.Address);
         entity.Phone = NormalizeOptional(request.Phone);
         entity.Email = NormalizeOptional(request.Email);
         entity.Director = NormalizeOptional(request.Director);

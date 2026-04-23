@@ -1299,6 +1299,45 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task GetDocument_PrefersPrimaryMainCompanyAddressRecord_OverLegacyAddress()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-314-ADDR", 11_000m, ActStatus.Created);
+
+        var company = new LegalEntity
+        {
+            ShortName = "ИП Тестов",
+            FullName = "Индивидуальный предприниматель Тестов Тест",
+            Inn = "123456789012",
+            Address = "Старый адрес компании",
+        };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Add(new AddressRecord
+        {
+            LegalEntityId = company.Id,
+            Type = AddressType.Legal,
+            Value = "г. Москва, ул. Ильинка, д. 9",
+            UnrestrictedValue = "109012, Россия, г. Москва, ул. Ильинка, д. 9",
+            IsPrimary = true,
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = company.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+        var content = Assert.IsType<ContentResult>(await controller.GetDocument(act.Id, "html", false, CancellationToken.None));
+
+        Assert.Contains("109012, Россия, г. Москва, ул. Ильинка, д. 9", content.Content);
+        Assert.DoesNotContain("Старый адрес компании", content.Content);
+    }
+
+    [Fact]
     public async Task Create_RejectsSelectingLineItemsWithoutInvoice()
     {
         await using var db = await CreateContextAsync();

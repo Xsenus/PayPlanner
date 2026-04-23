@@ -140,6 +140,7 @@ public class LegalEntitiesControllerTests
         var request = BuildRequest();
         request.ClientIds.Add(firstClientId);
         request.ClientIds.Add(secondClientId);
+        var expectedAddress = Assert.Single(request.Addresses!, address => address.IsPrimary).UnrestrictedValue!;
 
         var action = await controller.Create(request, CancellationToken.None);
 
@@ -153,6 +154,7 @@ public class LegalEntitiesControllerTests
         Assert.Equal(request.DocumentDirectorJson, dto.DocumentDirectorJson);
         Assert.Equal(request.ChiefAccountantJson, dto.ChiefAccountantJson);
         Assert.Equal(2, dto.Clients.Count);
+        Assert.Equal(expectedAddress, dto.Address);
 
         var primaryAddress = Assert.Single(dto.Addresses, address => address.IsPrimary);
         Assert.Equal(1, primaryAddress.Type);
@@ -181,6 +183,7 @@ public class LegalEntitiesControllerTests
         Assert.Equal(request.DocumentDirectorJson, stored.DocumentDirectorJson);
         Assert.Equal(request.ChiefAccountantJson, stored.ChiefAccountantJson);
         Assert.Equal(2, stored.Clients.Count);
+        Assert.Equal(expectedAddress, stored.Address);
 
         var auditEvent = await db.ObjectAuditEvents
             .AsNoTracking()
@@ -261,6 +264,8 @@ public class LegalEntitiesControllerTests
         var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
         var types = dto.Addresses.Select(address => address.Type).OrderBy(type => type).ToArray();
         Assert.Equal(new[] { 1, 2, 3, 9 }, types);
+        var expectedAddress = request.Addresses![0].UnrestrictedValue!;
+        Assert.Equal(expectedAddress, dto.Address);
 
         var storedAddresses = await db.AddressRecords
             .AsNoTracking()
@@ -285,6 +290,11 @@ public class LegalEntitiesControllerTests
         Assert.Equal("г Самара", storedAddresses[1].CityWithType);
         Assert.Equal("г Тольятти", storedAddresses[2].CityWithType);
         Assert.Equal("г Чапаевск", storedAddresses[3].CityWithType);
+
+        var storedEntity = await db.LegalEntities
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == entity.Id);
+        Assert.Equal(expectedAddress, storedEntity.Address);
 
         var auditEvent = await db.ObjectAuditEvents
             .AsNoTracking()

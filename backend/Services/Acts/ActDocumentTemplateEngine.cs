@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Acts;
 
@@ -408,6 +409,7 @@ public static class ActDocumentTemplateEngine
         var signatoryShortName = BuildPersonShortName(
             ParsePerson(mainCompany?.DocumentDirectorJson),
             mainCompany?.Director ?? mainCompany?.ShortName);
+        var address = LegalEntityAddressResolver.ResolvePreferredAddress(mainCompany);
 
         var requisites = new List<string> { fullName };
 
@@ -421,9 +423,9 @@ public static class ActDocumentTemplateEngine
             requisites.Add($"КПП {mainCompany.Kpp}");
         }
 
-        if (!string.IsNullOrWhiteSpace(mainCompany?.Address))
+        if (!string.IsNullOrWhiteSpace(address))
         {
-            requisites.Add(mainCompany.Address);
+            requisites.Add(address);
         }
 
         var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);

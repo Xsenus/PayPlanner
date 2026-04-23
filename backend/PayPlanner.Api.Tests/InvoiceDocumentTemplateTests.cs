@@ -324,6 +324,16 @@ public class InvoiceDocumentTemplateTests
         db.LegalEntities.Add(company);
         await db.SaveChangesAsync();
 
+        db.AddressRecords.Add(new AddressRecord
+        {
+            LegalEntityId = company.Id,
+            Type = AddressType.Legal,
+            Value = "г. Москва, ул. Ильинка, д. 9",
+            UnrestrictedValue = "109012, Россия, г. Москва, ул. Ильинка, д. 9",
+            IsPrimary = true,
+        });
+        await db.SaveChangesAsync();
+
         db.SystemSettings.Add(new SystemSetting
         {
             Key = "legalEntities.mainCompanyIds",
@@ -343,6 +353,8 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("data:image/png;base64,new-seal", content.Content);
         Assert.Contains("data:image/png;base64,new-signature", content.Content);
+        Assert.Contains("109012, Россия, г. Москва, ул. Ильинка, д. 9", content.Content);
+        Assert.DoesNotContain("Москва, тестовый адрес", content.Content);
     }
 
     [Fact]

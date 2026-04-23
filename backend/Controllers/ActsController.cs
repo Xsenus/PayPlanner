@@ -772,6 +772,7 @@ public class ActsController : ControllerBase
 
         return await _db.LegalEntities
             .AsNoTracking()
+            .Include(entity => entity.Addresses)
             .FirstOrDefaultAsync(entity => entity.Id == companyId.Value, ct);
     }
 

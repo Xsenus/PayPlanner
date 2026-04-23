@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Invoices;
 
@@ -325,6 +326,7 @@ public static class InvoiceDocumentTemplateEngine
 
         var fullName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Организация не выбрана");
         var shortName = FirstNotEmpty(mainCompany?.ShortName, mainCompany?.FullName, "Организация");
+        var address = LegalEntityAddressResolver.ResolvePreferredAddress(mainCompany);
         var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
         var bik = FirstNotEmpty(bankAccount.Bik, mainCompany?.TreasuryBankBik);
         var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);
@@ -345,9 +347,9 @@ public static class InvoiceDocumentTemplateEngine
             requisitesParts.Add($"КПП {mainCompany.Kpp}");
         }
 
-        if (!string.IsNullOrWhiteSpace(mainCompany?.Address))
+        if (!string.IsNullOrWhiteSpace(address))
         {
-            requisitesParts.Add(mainCompany.Address);
+            requisitesParts.Add(address);
         }
 
         if (!string.IsNullOrWhiteSpace(accountNumber))
@@ -371,7 +373,7 @@ public static class InvoiceDocumentTemplateEngine
             FullName = fullName,
             Inn = mainCompany?.Inn ?? string.Empty,
             Kpp = mainCompany?.Kpp ?? string.Empty,
-            Address = mainCompany?.Address ?? string.Empty,
+            Address = address,
             BankName = bankName,
             Bik = bik,
             AccountNumber = accountNumber,
