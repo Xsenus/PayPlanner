@@ -10,6 +10,8 @@ namespace PayPlanner.Api.Services.Acts;
 public static class ActDocumentTemplateEngine
 {
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+    private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
+    private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
 
     public static string RenderHtml(
         Act act,
@@ -206,59 +208,60 @@ public static class ActDocumentTemplateEngine
       margin-top: 10px;
       line-height: 1.35;
     }
+    .signature-area {
+      margin-top: 18px;
+    }
     .signature-table {
       margin-top: 16px;
     }
-    .signature-area {
-      min-height: 150px;
-    }
     .signature-table td {
       border: 0;
-    }
-    .signature-caption-head {
-      width: 49%;
-      padding-bottom: 6px;
-      font-size: 12px !important;
-      font-weight: 700;
-      text-transform: uppercase;
+      vertical-align: top;
     }
     .signature-gap {
-      width: 2%;
+      width: 4%;
     }
     .signature-role {
-      width: 49%;
       padding-bottom: 6px;
       font-size: 12px !important;
       font-weight: 700;
       text-transform: uppercase;
     }
-    .signature-party-name {
-      padding-bottom: 26px;
+    .signature-party {
+      min-height: 34px;
+      padding-bottom: 12px;
       font-size: 12px !important;
     }
-    .signature-party {
-      padding-bottom: 26px;
-      font-size: 12px !important;
+    .signature-lines-table td {
+      border: 0;
+      vertical-align: bottom;
     }
     .signature-line-cell {
       position: relative;
-      height: 54px;
+      width: 45%;
+      height: 56px;
       padding: 0 6px 4px 6px;
       border-bottom: 1px solid #000000;
-      text-align: right;
+      text-align: center;
       vertical-align: bottom;
       overflow: visible;
     }
-    .signature-line-text {
-      position: relative;
-      z-index: 3;
-      display: inline-block;
-      background: #ffffff;
-      padding-left: 6px;
+    .signature-decode-cell {
+      width: 55%;
+      height: 56px;
+      padding: 0 6px 4px 6px;
+      border-bottom: 1px solid #000000;
+      text-align: center;
+      vertical-align: bottom;
+    }
+    .signature-caption {
+      padding-top: 4px !important;
+      font-size: 11px !important;
+      text-align: center;
     }
     .signature {
       position: absolute;
-      left: 0;
+      left: 6px;
       bottom: 8px;
       z-index: 3;
       max-width: 145px;
@@ -267,7 +270,7 @@ public static class ActDocumentTemplateEngine
     }
     .seal {
       position: absolute;
-      left: 84px;
+      left: 72px;
       bottom: -20px;
       z-index: 2;
       max-width: 112px;
@@ -342,24 +345,41 @@ public static class ActDocumentTemplateEngine
           <table class="signature-table">
             <tbody>
               <tr>
-                <td class="signature-role">ИСПОЛНИТЕЛЬ</td>
-                <td class="signature-gap"></td>
-                <td class="signature-role">ЗАКАЗЧИК</td>
-              </tr>
-              <tr>
-                <td class="signature-party">{{Encode(seller.SignaturePartyName)}}</td>
-                <td class="signature-gap"></td>
-                <td class="signature-party">{{Encode(buyer.SignaturePartyName)}}</td>
-              </tr>
-              <tr>
-                <td class="signature-line-cell">
-                  {{signatureHtml}}
-                  {{sealHtml}}
-                  <span class="signature-line-text">/ {{Encode(seller.SignatoryShortName)}} /</span>
+                <td>
+                  <div class="signature-role">ИСПОЛНИТЕЛЬ</div>
+                  <div class="signature-party">{{Encode(seller.SignaturePartyName)}}</div>
+                  <table class="signature-lines-table">
+                    <tbody>
+                      <tr>
+                        <td class="signature-line-cell">
+                          {{signatureHtml}}
+                          {{sealHtml}}
+                        </td>
+                        <td class="signature-decode-cell">{{Encode(seller.SignatoryShortName)}}</td>
+                      </tr>
+                      <tr>
+                        <td class="signature-caption">подпись</td>
+                        <td class="signature-caption">расшифровка подписи</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </td>
                 <td class="signature-gap"></td>
-                <td class="signature-line-cell">
-                  <span class="signature-line-text">/ {{Encode(buyer.SignatoryShortName)}} /</span>
+                <td>
+                  <div class="signature-role">ЗАКАЗЧИК</div>
+                  <div class="signature-party">{{Encode(buyer.SignaturePartyName)}}</div>
+                  <table class="signature-lines-table">
+                    <tbody>
+                      <tr>
+                        <td class="signature-line-cell"></td>
+                        <td class="signature-decode-cell">{{Encode(buyer.SignatoryShortName)}}</td>
+                      </tr>
+                      <tr>
+                        <td class="signature-caption">подпись</td>
+                        <td class="signature-caption">расшифровка подписи</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </td>
               </tr>
             </tbody>
@@ -460,6 +480,9 @@ public static class ActDocumentTemplateEngine
     {
         var buyerClients = EnumerateBuyerClients(act).ToList();
         var buyerClient = buyerClients.FirstOrDefault();
+        var buyerProfiles = buyerClients
+            .Select(client => new BuyerClientData(client, ParseBuyerProfile(client.Notes)))
+            .ToList();
 
         var displayName = FirstNotEmpty(
             buyerClient?.Name,
@@ -469,34 +492,141 @@ public static class ActDocumentTemplateEngine
             act.Invoice?.CounterpartyName,
             "Заказчик");
 
-        var requisites = new List<string> { displayName };
-
-        if (!string.IsNullOrWhiteSpace(buyerClient?.Company)
-            && !string.Equals(buyerClient.Company, displayName, StringComparison.OrdinalIgnoreCase))
-        {
-            requisites.Add(buyerClient.Company);
-        }
+        var company = buyerClients
+            .Select(client => client.Company?.Trim())
+            .FirstOrDefault(companyName =>
+                !string.IsNullOrWhiteSpace(companyName)
+                && !string.Equals(companyName, displayName, StringComparison.OrdinalIgnoreCase))
+            ?? string.Empty;
 
         var address = buyerClients
             .Select(ResolveAddress)
             .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(address))
-        {
-            requisites.Add(address);
-        }
 
-        var passport = buyerClients
-            .Select(BuildPassport)
+        var passport = buyerProfiles
+            .Select(item => BuildPassport(item.Client))
             .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(passport))
+        if (string.IsNullOrWhiteSpace(passport))
         {
-            requisites.Add(passport);
+            passport = buyerProfiles
+                .Select(item => BuildPassport(ResolvePrimaryPassport(item.Profile)))
+                .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+                ?? string.Empty;
         }
 
-        var requisitesText = string.Join(", ", requisites.Where(static value => !string.IsNullOrWhiteSpace(value)));
-        return new BuyerInfo(Encode(requisitesText), displayName, BuildShortName(displayName));
+        var inn = buyerProfiles
+            .Select(item => item.Profile?.Inn?.Trim())
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
+        var snils = buyerProfiles
+            .Select(item => item.Profile?.Snils?.Trim())
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
+
+        var headlineParts = new List<string> { displayName };
+        if (!string.IsNullOrWhiteSpace(inn))
+        {
+            headlineParts.Add($"ИНН {inn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(snils))
+        {
+            headlineParts.Add($"СНИЛС {snils}");
+        }
+
+        var requisitesLines = new List<string>
+        {
+            string.Join(", ", headlineParts.Where(static value => !string.IsNullOrWhiteSpace(value))),
+        };
+
+        if (!string.IsNullOrWhiteSpace(company))
+        {
+            requisitesLines.Add(company);
+        }
+
+        if (!string.IsNullOrWhiteSpace(passport))
+        {
+            requisitesLines.Add(passport);
+        }
+
+        if (!string.IsNullOrWhiteSpace(address))
+        {
+            requisitesLines.Add(address);
+        }
+
+        var requisitesText = string.Join(", ", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)));
+        return new BuyerInfo(
+            Encode(requisitesText),
+            string.Join("<br/>", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)).Select(Encode)),
+            displayName,
+            BuildShortName(displayName));
+    }
+
+    private static BuyerProfileInfo? ParseBuyerProfile(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return null;
+        }
+
+        var raw = notes.Trim();
+        if (!raw.StartsWith(ClientProfileNotesPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var payload = raw[ClientProfileNotesPrefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<BuyerProfileInfo>(payload, ClientProfileJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ClientPassportProfileInfo? ResolvePrimaryPassport(BuyerProfileInfo? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        if (profile.PassportEntries is { Count: > 0 })
+        {
+            return profile.PassportEntries.FirstOrDefault(passport =>
+                !string.IsNullOrWhiteSpace(passport.Series)
+                || !string.IsNullOrWhiteSpace(passport.Number)
+                || !string.IsNullOrWhiteSpace(passport.IssuedBy)
+                || passport.IssueDate.HasValue
+                || !string.IsNullOrWhiteSpace(passport.DepartmentCode));
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.PassportSeries)
+            && string.IsNullOrWhiteSpace(profile.PassportNumber)
+            && string.IsNullOrWhiteSpace(profile.PassportIssuedBy)
+            && !profile.PassportIssueDate.HasValue
+            && string.IsNullOrWhiteSpace(profile.PassportDepartmentCode))
+        {
+            return null;
+        }
+
+        return new ClientPassportProfileInfo
+        {
+            Series = profile.PassportSeries,
+            Number = profile.PassportNumber,
+            IssuedBy = profile.PassportIssuedBy,
+            IssueDate = profile.PassportIssueDate,
+            DepartmentCode = profile.PassportDepartmentCode,
+        };
     }
 
     private static string BuildBasis(Act act)
@@ -566,6 +696,7 @@ public static class ActDocumentTemplateEngine
 
         var normalizedAddress = client.Addresses
             .OrderByDescending(address => address.IsPrimary)
+            .ThenBy(address => address.Type == AddressType.Registration ? 0 : address.Type == AddressType.Actual ? 1 : 2)
             .Select(address => FirstNotEmpty(address.UnrestrictedValue, address.Value))
             .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
 
@@ -587,45 +718,72 @@ public static class ActDocumentTemplateEngine
             return string.Empty;
         }
 
-        var parts = new List<string>();
+        return BuildPassportValue(
+            passport.Series,
+            passport.Number,
+            passport.IssuedAt,
+            passport.IssuedBy,
+            passport.DepartmentCode);
+    }
 
-        var series = passport.Series?.Trim();
-        var number = passport.Number?.Trim();
+    private static string BuildPassport(ClientPassportProfileInfo? passport)
+    {
+        if (passport is null)
+        {
+            return string.Empty;
+        }
+
+        return BuildPassportValue(
+            passport.Series,
+            passport.Number,
+            passport.IssueDate,
+            passport.IssuedBy,
+            passport.DepartmentCode);
+    }
+
+    private static string BuildPassportValue(
+        string? series,
+        string? number,
+        DateTime? issueDate,
+        string? issuedBy,
+        string? departmentCode)
+    {
+        var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(series) || !string.IsNullOrWhiteSpace(number))
         {
-            var passportTitle = new StringBuilder("Паспорт");
-            if (!string.IsNullOrWhiteSpace(series))
+            var passportIdentity = string.Empty;
+            if (!string.IsNullOrWhiteSpace(series) && !string.IsNullOrWhiteSpace(number))
             {
-                passportTitle.Append(" серия ");
-                passportTitle.Append(series);
+                passportIdentity = $"Паспорт {series.Trim()} № {number.Trim()}";
+            }
+            else if (!string.IsNullOrWhiteSpace(series))
+            {
+                passportIdentity = $"Паспорт {series.Trim()}";
+            }
+            else if (!string.IsNullOrWhiteSpace(number))
+            {
+                passportIdentity = $"Паспорт № {number.Trim()}";
             }
 
-            if (!string.IsNullOrWhiteSpace(number))
+            if (!string.IsNullOrWhiteSpace(passportIdentity))
             {
-                passportTitle.Append(" № ");
-                passportTitle.Append(number);
+                parts.Add(passportIdentity);
             }
-
-            parts.Add(passportTitle.ToString());
-        }
-        else
-        {
-            parts.Add("Паспорт");
         }
 
-        if (!string.IsNullOrWhiteSpace(passport.IssuedBy))
+        if (issueDate.HasValue)
         {
-            parts.Add(passport.IssuedBy.Trim());
+            parts.Add($"выдан {issueDate.Value:dd.MM.yyyy}");
         }
 
-        if (passport.IssuedAt.HasValue)
+        if (!string.IsNullOrWhiteSpace(issuedBy))
         {
-            parts.Add($"от {passport.IssuedAt.Value:dd.MM.yyyy}");
+            parts.Add(issuedBy.Trim());
         }
 
-        if (!string.IsNullOrWhiteSpace(passport.DepartmentCode))
+        if (!string.IsNullOrWhiteSpace(departmentCode))
         {
-            parts.Add($"код подразделения {passport.DepartmentCode.Trim()}");
+            parts.Add($"код подразделения {departmentCode.Trim()}");
         }
 
         return string.Join(", ", parts.Where(static value => !string.IsNullOrWhiteSpace(value)));
@@ -854,9 +1012,33 @@ public static class ActDocumentTemplateEngine
         string SignatoryShortName);
 
     private sealed record BuyerInfo(
+        string RequisitesText,
         string RequisitesHtml,
         string SignaturePartyName,
         string SignatoryShortName);
+
+    private sealed record BuyerClientData(Client Client, BuyerProfileInfo? Profile);
+
+    private sealed class BuyerProfileInfo
+    {
+        public string? Inn { get; init; }
+        public string? Snils { get; init; }
+        public string? PassportSeries { get; init; }
+        public string? PassportNumber { get; init; }
+        public string? PassportIssuedBy { get; init; }
+        public DateTime? PassportIssueDate { get; init; }
+        public string? PassportDepartmentCode { get; init; }
+        public List<ClientPassportProfileInfo>? PassportEntries { get; init; }
+    }
+
+    private sealed class ClientPassportProfileInfo
+    {
+        public string? Series { get; init; }
+        public string? Number { get; init; }
+        public string? IssuedBy { get; init; }
+        public DateTime? IssueDate { get; init; }
+        public string? DepartmentCode { get; init; }
+    }
 
     private sealed class BankAccountInfo
     {

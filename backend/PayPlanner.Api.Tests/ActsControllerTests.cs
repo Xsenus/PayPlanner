@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -451,7 +452,7 @@ public class ActsControllerTests
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
         Assert.Contains("Счет № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);
-        Assert.Contains("Паспорт серия 36 07 № 763332", normalizedHtml);
+        Assert.Contains("Паспорт 36 07 № 763332", normalizedHtml);
         Assert.Contains("Всего оказано услуг 2", normalizedHtml);
         Assert.Contains("20 000,00", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
@@ -534,8 +535,128 @@ public class ActsControllerTests
         Assert.Contains("Счет № 34 от 15.04.2026", normalizedHtml);
         Assert.DoesNotContain("Счет-договор № 34", normalizedHtml);
         Assert.DoesNotContain("Счет № 34 от 27.04.2026", normalizedHtml);
-        Assert.Contains("Паспорт серия 8113 № 527051", normalizedHtml);
+        Assert.Contains("Паспорт 8113 № 527051", normalizedHtml);
         Assert.DoesNotContain("9999", normalizedHtml);
+    }
+
+    [Fact]
+    public void ActDocumentTemplateEngine_RendersExtendedBuyerBlock_LikeInvoice()
+    {
+        var invoiceClient = new Client
+        {
+            Id = 101,
+            Name = "Тестовый клиент",
+            Notes = """__PP_CLIENT_PROFILE_V2__:{"inn":"123456789012","snils":"123-456-789 00","passportSeries":"1234","passportNumber":"567890","passportIssuedBy":"ОВД Тестового района","passportIssueDate":"2020-01-12T00:00:00","passportDepartmentCode":"123-456","passportEntries":[{"series":"1234","number":"567890","issuedBy":"ОВД Тестового района","issueDate":"2020-01-12T00:00:00","departmentCode":"123-456"}]}""",
+            Addresses =
+            [
+                new AddressRecord
+                {
+                    Type = AddressType.Registration,
+                    Value = "Самара, ул. Тестовая, д. 1",
+                    IsPrimary = true,
+                },
+            ],
+        };
+
+        var act = new Act
+        {
+            Number = "35",
+            Date = new DateTime(2026, 4, 24),
+            Amount = 17_500m,
+            Invoice = new Payment
+            {
+                Type = PaymentType.Income,
+                Account = "35",
+                AccountDate = new DateTime(2026, 4, 15),
+                Client = invoiceClient,
+                Invoice = new Invoice
+                {
+                    Number = "35",
+                    Date = new DateTime(2026, 4, 15),
+                },
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 17_500m,
+                    SortOrder = 0,
+                },
+            ],
+            mainCompany: null,
+            includeSignatureAndSeal: false);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+
+        Assert.Contains("Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00", normalizedHtml);
+        Assert.Contains("Паспорт 1234 № 567890", normalizedHtml);
+        Assert.Contains("Самара, ул. Тестовая, д. 1", normalizedHtml);
+
+        var buyerNameIndex = normalizedHtml.IndexOf("Тестовый клиент", StringComparison.Ordinal);
+        var innIndex = normalizedHtml.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
+        var snilsIndex = normalizedHtml.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
+        var passportIndex = normalizedHtml.IndexOf("Паспорт 1234 № 567890", StringComparison.Ordinal);
+        var addressIndex = normalizedHtml.IndexOf("Самара, ул. Тестовая, д. 1", StringComparison.Ordinal);
+        Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered act.");
+        Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
+        Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
+        Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
+        Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+    }
+
+    [Fact]
+    public void ActDocumentTemplateEngine_RendersSignatureLinesAndCaptionsForBothParties()
+    {
+        var act = new Act
+        {
+            Number = "36",
+            Date = new DateTime(2026, 4, 24),
+            Amount = 10_000m,
+            Client = new Client
+            {
+                Name = "Губанова Оксана Ивановна",
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 10_000m,
+                    SortOrder = 0,
+                },
+            ],
+            new LegalEntity
+            {
+                ShortName = "ИП Кожеваткин Андрей Владимирович",
+                FullName = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+                Director = "Кожеваткин Андрей Владимирович",
+                DirectorSignatureDataUrl = "data:image/png;base64,signature-demo",
+                SealDataUrl = "data:image/png;base64,seal-demo",
+            },
+            includeSignatureAndSeal: true);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+
+        Assert.Contains("signature-lines-table", normalizedHtml);
+        Assert.Equal(2, Regex.Matches(normalizedHtml, "расшифровка подписи", RegexOptions.CultureInvariant).Count);
+        Assert.Equal(2, Regex.Matches(normalizedHtml, ">подпись<", RegexOptions.CultureInvariant).Count);
+        Assert.Contains("data:image/png;base64,signature-demo", normalizedHtml);
+        Assert.Contains("data:image/png;base64,seal-demo", normalizedHtml);
+        Assert.Contains("Кожеваткин А. В.", normalizedHtml);
+        Assert.Contains("Губанова О. И.", normalizedHtml);
+        Assert.DoesNotContain("/ Кожеваткин А. В. /", normalizedHtml);
+        Assert.DoesNotContain("/ Губанова О. И. /", normalizedHtml);
     }
 
     [Fact]
