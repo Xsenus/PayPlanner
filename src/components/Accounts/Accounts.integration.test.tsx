@@ -656,6 +656,59 @@ describe('Accounts integration', () => {
     expect(screen.getByText('payment-description:Sibling payment for invoice 24')).toBeTruthy();
   });
 
+  it('shows actual dates for paid operations and planned dates for unpaid operations', async () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          status: 'partial',
+          payments: [
+            createSiblingPayment({
+              id: 540,
+              description: 'Paid operation with fact date',
+              plannedDate: '2025-10-27',
+              date: '2025-10-24',
+              paidDate: '2025-10-24',
+              lastPaymentDate: '2025-10-24',
+              status: 'Completed',
+              isPaid: true,
+              paidAmount: 25_000,
+            }),
+            createSiblingPayment({
+              id: 541,
+              description: 'Pending operation with planned date',
+              plannedDate: '2026-04-27',
+              date: '2026-04-27',
+              paidDate: null,
+              lastPaymentDate: null,
+              status: 'Pending',
+              isPaid: false,
+              paidAmount: 0,
+            }),
+          ],
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '24' }));
+
+    const paidOperationRow = (await screen.findByText('Paid operation with fact date')).closest('tr');
+    expect(paidOperationRow).toBeTruthy();
+    expect(within(paidOperationRow as HTMLTableRowElement).getByText('24.10.2025')).toBeTruthy();
+    expect(within(paidOperationRow as HTMLTableRowElement).queryByText('27.10.2025')).toBeNull();
+
+    const unpaidOperationRow = (await screen.findByText('Pending operation with planned date')).closest('tr');
+    expect(unpaidOperationRow).toBeTruthy();
+    expect(within(unpaidOperationRow as HTMLTableRowElement).getByText('27.04.2026')).toBeTruthy();
+  });
+
   it('opens the payment modal for invoice-managed payments in the expanded operations panel', async () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [

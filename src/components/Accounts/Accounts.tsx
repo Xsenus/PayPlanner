@@ -127,6 +127,20 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+function resolvePaymentOperationDate(payment: Payment): string | null {
+  const hasActualPayment =
+    payment.status === 'Completed'
+    || payment.isPaid
+    || payment.hasPartialPayment
+    || (payment.paidAmount ?? 0) > 0;
+
+  if (hasActualPayment) {
+    return payment.paidDate ?? payment.lastPaymentDate ?? payment.date ?? payment.plannedDate ?? null;
+  }
+
+  return payment.plannedDate ?? payment.date ?? null;
+}
+
 function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
   if (!invoice) return [];
   if (invoice.clientCases?.length) {
@@ -2296,7 +2310,7 @@ export function Accounts({
                                           className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
                                           onClick={canEdit ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
                                         >
-                                          <td className="px-4 py-2">{formatDate(payment.plannedDate)}</td>
+                                          <td className="px-4 py-2">{formatDate(resolvePaymentOperationDate(payment))}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
                                             {formatCurrencySmart(payment.amount).full}
                                           </td>
