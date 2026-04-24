@@ -29,6 +29,7 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] bool excludeInstallmentParents = true,
         [FromQuery] bool excludeInvoiceDocuments = false,
         [FromQuery] string? clientIds = null,
+        [FromQuery] string? clientRole = null,
         [FromQuery] string? categoryTokens = null,
         [FromQuery] PaymentType? type = null,
         [FromQuery] PaymentStatus? status = null,
@@ -47,7 +48,7 @@ public class PaymentsV2Controller : ControllerBase
         var query = _db.Payments.AsQueryable()
             .WithPaymentIncludes()
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, search);
+            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole);
 
         if (contractId.HasValue)
         {
@@ -64,9 +65,15 @@ public class PaymentsV2Controller : ControllerBase
         var clientIdList = ParseIntList(clientIds);
         if (clientIdList.Count > 0)
         {
-            query = query.Where(payment =>
-                (payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value))
-                || (payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value)));
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value)),
+                "expenseClient" => query.Where(payment => payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value)),
+                _ => query.Where(payment =>
+                    (payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value))
+                    || (payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value))),
+            };
         }
 
         if (type.HasValue)

@@ -69,6 +69,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] PaymentType? type,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] string? clientRole = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
@@ -91,6 +92,7 @@ public class InvoicesController : ControllerBase
             effectiveResponsibleId,
             search,
             type,
+            clientRole,
             includeMetadata: true,
             ct);
 
@@ -127,6 +129,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         [FromQuery] PaymentType? type,
+        [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
     {
         var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
@@ -146,6 +149,7 @@ public class InvoicesController : ControllerBase
             effectiveResponsibleId,
             search,
             type,
+            clientRole,
             includeMetadata: false,
             ct);
 
@@ -1795,6 +1799,7 @@ public class InvoicesController : ControllerBase
         int? responsibleId,
         string? search,
         PaymentType? type,
+        string? clientRole,
         IReadOnlySet<int>? clientIds = null)
     {
         if (type.HasValue)
@@ -1821,13 +1826,25 @@ public class InvoicesController : ControllerBase
 
         if (clientId.HasValue)
         {
-            query = query.Where(x => x.Payment.ClientId == clientId.Value || x.Payment.ExpenseClientId == clientId.Value);
+            var normalizedClientRole = NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(x => x.Payment.ClientId == clientId.Value),
+                "expenseClient" => query.Where(x => x.Payment.ExpenseClientId == clientId.Value),
+                _ => query.Where(x => x.Payment.ClientId == clientId.Value || x.Payment.ExpenseClientId == clientId.Value),
+            };
         }
         else if (clientIds is { Count: > 0 })
         {
-            query = query.Where(x =>
-                (x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value))
-                || (x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value)));
+            var normalizedClientRole = NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(x => x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value)),
+                "expenseClient" => query.Where(x => x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value)),
+                _ => query.Where(x =>
+                    (x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value))
+                    || (x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value))),
+            };
         }
 
         if (contractId.HasValue)
@@ -1881,6 +1898,22 @@ public class InvoicesController : ControllerBase
         return query;
     }
 
+    private static string? NormalizeClientRole(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "counterparty" or "client" or "supplier" => "counterparty",
+            "expenseclient" or "expense-client" or "expense_client" => "expenseClient",
+            _ => null,
+        };
+    }
+
     private static HashSet<int> ParseIntList(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -1912,7 +1945,7 @@ public class InvoicesController : ControllerBase
             "status" => desc
                 ? query.OrderByDescending(x => x.Payment.Status)
                 : query.OrderBy(x => x.Payment.Status),
-            "client" => desc
+            "client" or "counterparty" => desc
                 ? query.OrderByDescending(x => x.Payment.Client != null ? x.Payment.Client.Name : string.Empty)
                 : query.OrderBy(x => x.Payment.Client != null ? x.Payment.Client.Name : string.Empty),
             "responsible" => desc
@@ -1951,7 +1984,7 @@ public class InvoicesController : ControllerBase
             "status" => desc
                 ? items.OrderByDescending(x => x.Status)
                 : items.OrderBy(x => x.Status),
-            "client" => desc
+            "client" or "counterparty" => desc
                 ? items.OrderByDescending(x => x.ClientName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 : items.OrderBy(x => x.ClientName ?? string.Empty, StringComparer.OrdinalIgnoreCase),
             "responsible" => desc
@@ -2429,6 +2462,7 @@ public class InvoicesController : ControllerBase
                 ColorHex = x.Payment.Client.ClientStatus.ColorHex,
                 IsActive = x.Payment.Client.ClientStatus.IsActive,
                 CreatedAt = x.Payment.Client.ClientStatus.CreatedAt,
+                SystemKey = x.Payment.Client.ClientStatus.SystemKey,
             }
             : null,
         ExpenseClientName = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.Name : null,
@@ -2443,6 +2477,7 @@ public class InvoicesController : ControllerBase
                 ColorHex = x.Payment.ExpenseClient.ClientStatus.ColorHex,
                 IsActive = x.Payment.ExpenseClient.ClientStatus.IsActive,
                 CreatedAt = x.Payment.ExpenseClient.ClientStatus.CreatedAt,
+                SystemKey = x.Payment.ExpenseClient.ClientStatus.SystemKey,
             }
             : null,
         ClientCaseId = x.Payment.ClientCaseId,
@@ -2566,11 +2601,12 @@ public class InvoicesController : ControllerBase
         int? responsibleId,
         string? search,
         PaymentType? type,
+        string? clientRole,
         bool includeMetadata,
         CancellationToken ct)
     {
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, null, clientId, contractId, caseId, responsibleId, search, type, clientIds);
+        query = ApplyFilters(query, from, to, null, clientId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
 
         var rawItems = await query
             .Select(ProjectionRaw)

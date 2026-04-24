@@ -39,6 +39,11 @@ public class ClientStatusEntity
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
+    /// Stable system key for status behavior.
+    /// </summary>
+    public string? SystemKey { get; set; }
+
+    /// <summary>
     /// Клиенты, у которых установлен данный статус.
     /// </summary>
     public ICollection<Client> Clients { get; set; } = new List<Client>();

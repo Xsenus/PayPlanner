@@ -331,6 +331,68 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetStats_FiltersPaymentsByClientRole()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var client = new Client { Name = "Matter Client", ResponsibleUserId = userId, IsActive = true };
+        var supplier = new Client { Name = "Supplier", ResponsibleUserId = userId, IsActive = true };
+        db.Clients.AddRange(client, supplier);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Amount = 10_000m,
+                PaidAmount = 10_000m,
+                CounterpartyName = client.Name,
+                Date = new DateTime(2026, 4, 10),
+                PlannedDate = new DateTime(2026, 4, 10),
+                Description = "Client income",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Completed,
+                IsPaid = true,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            },
+            new Payment
+            {
+                Amount = 4_000m,
+                PaidAmount = 1_000m,
+                CounterpartyName = supplier.Name,
+                Date = new DateTime(2026, 4, 11),
+                PlannedDate = new DateTime(2026, 4, 11),
+                Description = "Supplier expense for client",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Expense,
+                ClientId = supplier.Id,
+                ExpenseClientId = client.Id,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            });
+        await db.SaveChangesAsync();
+
+        var action = await controller.GetStats(
+            client.Id,
+            caseId: null,
+            ct: CancellationToken.None,
+            clientRole: "expenseClient");
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var stats = Assert.IsType<ClientStats>(ok.Value);
+
+        Assert.Equal(0m, stats.TotalIncome);
+        Assert.Equal(1_000m, stats.TotalExpenses);
+        Assert.Equal(3_000m, stats.OutstandingExpenses);
+        Assert.Single(stats.RecentPayments);
+    }
+
+    [Fact]
     public async Task GetCaseFinanceSummaries_AggregatesPaymentsLinkedThroughInvoiceCases()
     {
         await using var db = await CreateContextAsync();
@@ -436,6 +498,167 @@ public class ClientsControllerTests
         Assert.Equal(4_500m, secondarySummary.ExpensePaid);
         Assert.Equal(0m, secondarySummary.ExpenseOutstanding);
         Assert.Equal(1, secondarySummary.ExpenseCount);
+    }
+
+    [Fact]
+    public async Task GetCaseFinanceSummaries_ReturnsSupplierCaseGroups()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var supplier = new Client { Name = "Geo Supplier", ResponsibleUserId = userId, IsActive = true };
+        var client = new Client { Name = "Matter Client", ResponsibleUserId = userId, IsActive = true };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Cadastral matter",
+            Status = ClientCaseStatus.Open,
+        };
+
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        db.Payments.Add(new Payment
+        {
+            Amount = 5_000m,
+            PaidAmount = 2_000m,
+            CounterpartyName = supplier.Name,
+            Date = new DateTime(2026, 4, 12),
+            PlannedDate = new DateTime(2026, 4, 12),
+            Description = "Geodesic survey",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Expense,
+            ClientId = supplier.Id,
+            ExpenseClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        });
+        await db.SaveChangesAsync();
+
+        var action = await controller.GetCaseFinanceSummaries(
+            supplier.Id,
+            CancellationToken.None,
+            clientRole: "counterparty");
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var summaries = Assert.IsAssignableFrom<List<ClientCaseFinanceSummaryDto>>(ok.Value);
+        var summary = Assert.Single(summaries);
+
+        Assert.Equal(clientCase.Id, summary.CaseId);
+        Assert.Equal(client.Id, summary.ClientId);
+        Assert.Equal(client.Name, summary.ClientName);
+        Assert.Equal(clientCase.Title, summary.CaseTitle);
+        Assert.Equal(5_000m, summary.ExpenseTotal);
+        Assert.Equal(2_000m, summary.ExpensePaid);
+        Assert.Equal(3_000m, summary.ExpenseOutstanding);
+        Assert.Equal(1, summary.ExpenseCount);
+    }
+
+    [Fact]
+    public async Task GetCaseExpenseDetails_ReturnsInvoiceLineBreakdown_ForClientCase()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var supplier = new Client { Name = "Geo Supplier", ResponsibleUserId = userId, IsActive = true };
+        var client = new Client { Name = "Matter Client", ResponsibleUserId = userId, IsActive = true };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Cadastral matter",
+            Status = ClientCaseStatus.Open,
+        };
+        var invoice = new Invoice
+        {
+            Number = "EXP-77",
+            Date = new DateTime(2026, 4, 20),
+        };
+
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Amount = 5_000m,
+            PaidAmount = 2_000m,
+            CounterpartyName = supplier.Name,
+            Date = new DateTime(2026, 4, 22),
+            PlannedDate = new DateTime(2026, 4, 25),
+            Description = "Geodesic survey",
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Expense,
+            ClientId = supplier.Id,
+            ExpenseClientId = client.Id,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            PaymentOrderNumber = "PP-100",
+            PaymentDocumentDate = new DateTime(2026, 4, 23),
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        };
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = payment.Id,
+            ClientCaseId = clientCase.Id,
+        });
+        db.InvoiceLineItems.AddRange(
+            new InvoiceLineItem
+            {
+                PaymentId = payment.Id,
+                SortOrder = 1,
+                Name = "Survey",
+                Quantity = 1m,
+                Unit = "шт",
+                Price = 3_000m,
+            },
+            new InvoiceLineItem
+            {
+                PaymentId = payment.Id,
+                SortOrder = 2,
+                Name = "Report",
+                Quantity = 1m,
+                Unit = "шт",
+                Price = 2_000m,
+            });
+        await db.SaveChangesAsync();
+
+        var action = await controller.GetCaseExpenseDetails(
+            client.Id,
+            caseId: clientCase.Id,
+            clientRole: "expenseClient",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var rows = Assert.IsAssignableFrom<List<ClientCaseExpenseDetailDto>>(ok.Value);
+
+        Assert.Equal(2, rows.Count);
+        var survey = Assert.Single(rows, row => row.LineItemName == "Survey");
+
+        Assert.Equal(payment.Id, survey.PaymentId);
+        Assert.Equal(invoice.Id, survey.InvoiceId);
+        Assert.Equal("EXP-77", survey.InvoiceNumber);
+        Assert.Equal(supplier.Id, survey.SupplierId);
+        Assert.Equal(supplier.Name, survey.SupplierName);
+        Assert.Equal(client.Id, survey.ExpenseClientId);
+        Assert.Equal(clientCase.Id, survey.CaseId);
+        Assert.Equal(3_000m, survey.Amount);
+        Assert.Equal(1_200m, survey.PaidAmount);
+        Assert.Equal(1_800m, survey.OutstandingAmount);
+        Assert.Equal("PP-100", survey.PaymentOrderNumber);
+        Assert.Equal(new DateTime(2026, 4, 23), survey.PaymentDocumentDate);
     }
 
     [Fact]

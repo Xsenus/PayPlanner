@@ -4,6 +4,16 @@ public class ClientCaseFinanceSummaryDto
 {
     public int CaseId { get; set; }
 
+    public int? ClientId { get; set; }
+
+    public string? ClientName { get; set; }
+
+    public string? CaseTitle { get; set; }
+
+    public string? CaseStatus { get; set; }
+
+    public DateTime? CaseCreatedAt { get; set; }
+
     public decimal IncomeTotal { get; set; }
 
     public decimal IncomePaid { get; set; }

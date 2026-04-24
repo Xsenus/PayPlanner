@@ -170,9 +170,9 @@ namespace PayPlanner.Api.Services
             {
                 var clientStatuses = new[]
                 {
-                    new ClientStatusEntity { Name = "Клиент", Description = "Основной заказчик", ColorHex = "#2563EB" },
-                    new ClientStatusEntity { Name = "Поставщик", Description = "Поставщик услуг или товаров", ColorHex = "#7C3AED" },
-                    new ClientStatusEntity { Name = "Кредитор", Description = "Контрагент с кредитными обязательствами", ColorHex = "#DC2626" }
+                    new ClientStatusEntity { Name = "Клиент", Description = "Основной заказчик", ColorHex = "#2563EB", SystemKey = ClientStatusSystemKeys.Client },
+                    new ClientStatusEntity { Name = "Поставщик", Description = "Поставщик услуг или товаров", ColorHex = "#7C3AED", SystemKey = ClientStatusSystemKeys.Supplier },
+                    new ClientStatusEntity { Name = "Кредитор", Description = "Контрагент с кредитными обязательствами", ColorHex = "#DC2626", SystemKey = ClientStatusSystemKeys.Creditor }
                 };
                 context.ClientStatuses.AddRange(clientStatuses);
                 await context.SaveChangesAsync();

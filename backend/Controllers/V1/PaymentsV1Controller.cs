@@ -22,6 +22,7 @@ public class PaymentsV1Controller : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
         [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] string? clientRole = null,
         [FromQuery] string? search = null,
         [FromQuery] string? sortBy = null,
         [FromQuery] string? sortDir = null,
@@ -29,7 +30,7 @@ public class PaymentsV1Controller : ControllerBase
     {
         var q = _db.Payments.AsQueryable().WithPaymentIncludes()
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, search)
+            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole)
             .ApplyPaymentSort(sortBy, sortDir);
 
         return Ok(await q.AsNoTracking().ToListAsync(ct));

@@ -33,9 +33,10 @@ public class StatsV2Controller : ControllerBase
         [FromQuery] PaymentType? type,
         [FromQuery] PaymentStatus? status,
         [FromQuery] string? q,
+        [FromQuery] string? clientRole,
         CancellationToken ct)
     {
-        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, ct);
+        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, clientRole, ct);
         return Ok(res);
     }
 

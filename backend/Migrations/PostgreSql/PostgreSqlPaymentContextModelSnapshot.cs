@@ -816,6 +816,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("SystemKey")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsActive")
@@ -823,6 +827,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Name")
                         .HasDatabaseName("IX_ClientStatuses_Name");
+
+                    b.HasIndex("SystemKey")
+                        .HasDatabaseName("IX_ClientStatuses_SystemKey");
 
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_ClientStatuses_IsActive_Name");

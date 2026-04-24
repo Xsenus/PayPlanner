@@ -105,6 +105,7 @@ public class StatsSummaryServiceTests
             PaymentType.Income,
             null,
             null,
+            null,
             CancellationToken.None);
 
         Assert.Equal(115_000m, summary.Income.CompletedAmount);
@@ -112,6 +113,82 @@ public class StatsSummaryServiceTests
         Assert.Equal(205_000m, summary.Income.TotalAmount);
         Assert.Equal(2, summary.Income.TotalCount);
         Assert.Equal(90_000m, summary.Income.RemainingAmount);
+    }
+
+    [Fact]
+    public async Task GetAsync_FiltersExpenseStatsByClientRole()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new Client { Name = "Supplier", CreatedAt = DateTime.UtcNow, IsActive = true };
+        var expenseClient = new Client { Name = "Expense Client", CreatedAt = DateTime.UtcNow, IsActive = true };
+        var unrelated = new Client { Name = "Unrelated", CreatedAt = DateTime.UtcNow, IsActive = true };
+        db.Clients.AddRange(supplier, expenseClient, unrelated);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Amount = 5_000m,
+                PaidAmount = 1_000m,
+                Date = new DateTime(2026, 4, 12),
+                PlannedDate = new DateTime(2026, 4, 12),
+                Description = "Supplier expense",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Expense,
+                ClientId = supplier.Id,
+                ExpenseClientId = expenseClient.Id,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            },
+            new Payment
+            {
+                Amount = 7_000m,
+                PaidAmount = 2_000m,
+                Date = new DateTime(2026, 4, 13),
+                PlannedDate = new DateTime(2026, 4, 13),
+                Description = "Expense client expense",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Pending,
+                Type = PaymentType.Expense,
+                ClientId = unrelated.Id,
+                ExpenseClientId = supplier.Id,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            });
+        await db.SaveChangesAsync();
+
+        var service = new StatsSummaryService(db);
+
+        var supplierSummary = await service.GetAsync(
+            supplier.Id,
+            null,
+            new DateTime(2026, 4, 1),
+            new DateTime(2026, 4, 30),
+            null,
+            PaymentType.Expense,
+            null,
+            null,
+            "counterparty",
+            CancellationToken.None);
+
+        var expenseClientSummary = await service.GetAsync(
+            supplier.Id,
+            null,
+            new DateTime(2026, 4, 1),
+            new DateTime(2026, 4, 30),
+            null,
+            PaymentType.Expense,
+            null,
+            null,
+            "expenseClient",
+            CancellationToken.None);
+
+        Assert.Equal(5_000m, supplierSummary.Expense.TotalAmount);
+        Assert.Equal(4_000m, supplierSummary.Expense.PendingAmount);
+        Assert.Equal(7_000m, expenseClientSummary.Expense.TotalAmount);
+        Assert.Equal(5_000m, expenseClientSummary.Expense.PendingAmount);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

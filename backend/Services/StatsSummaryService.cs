@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services
@@ -23,7 +24,7 @@ namespace PayPlanner.Api.Services
         /// Рассчитать сводную статистику по платежам с фильтрами.
         /// </summary>
         public async Task<StatsSummary> GetAsync(int? clientId, int? caseId, DateTime? from, DateTime? to,
-            string? period, PaymentType? type, PaymentStatus? status, string? q, CancellationToken ct)
+            string? period, PaymentType? type, PaymentStatus? status, string? q, string? clientRole, CancellationToken ct)
         {
             var (f, t) = PeriodHelper.Resolve(from, to, period);
 
@@ -34,11 +35,17 @@ namespace PayPlanner.Api.Services
             if (clientId.HasValue)
             {
                 var selectedClientId = clientId.Value;
-                qry = qry.Where(x =>
-                    (x.Type == PaymentType.Income && x.ClientId == selectedClientId) ||
-                    (x.Type == PaymentType.Expense &&
-                        (x.ExpenseClientId == selectedClientId ||
-                         (x.ExpenseClientId == null && x.ClientId == selectedClientId))));
+                var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+                qry = normalizedClientRole switch
+                {
+                    "counterparty" => qry.Where(x => x.ClientId == selectedClientId),
+                    "expenseClient" => qry.Where(x => x.ExpenseClientId == selectedClientId),
+                    _ => qry.Where(x =>
+                        (x.Type == PaymentType.Income && x.ClientId == selectedClientId) ||
+                        (x.Type == PaymentType.Expense &&
+                            (x.ExpenseClientId == selectedClientId ||
+                             (x.ExpenseClientId == null && x.ClientId == selectedClientId)))),
+                };
             }
 
             if (caseId.HasValue)

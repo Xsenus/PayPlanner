@@ -123,6 +123,70 @@ public class InvoicesControllerListTests
         Assert.DoesNotContain(items, item => item.Id == outsideInvoice.Id);
     }
 
+    [Fact]
+    public async Task Get_FiltersExpenseInvoicesByClientRole()
+    {
+        await using var db = await CreateContextAsync();
+        var supplier = await CreateClientAsync(db, "Supplier");
+        var expenseClient = await CreateClientAsync(db, "Expense Client");
+        var unrelated = await CreateClientAsync(db, "Unrelated");
+
+        var supplierInvoice = await CreateInvoiceDocumentAsync(db, "EXP-SUP", new DateTime(2026, 4, 11), 5_000m);
+        supplierInvoice.Type = PaymentType.Expense;
+        supplierInvoice.ClientId = supplier.Id;
+        supplierInvoice.ExpenseClientId = expenseClient.Id;
+
+        var clientExpenseInvoice = await CreateInvoiceDocumentAsync(db, "EXP-CLIENT", new DateTime(2026, 4, 12), 7_000m);
+        clientExpenseInvoice.Type = PaymentType.Expense;
+        clientExpenseInvoice.ClientId = unrelated.Id;
+        clientExpenseInvoice.ExpenseClientId = supplier.Id;
+
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var supplierResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: supplier.Id,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Expense,
+            sortBy: "number",
+            sortDir: "asc",
+            clientRole: "counterparty",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var supplierItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(supplierResult));
+        Assert.Collection(supplierItems, item => Assert.Equal("EXP-SUP", item.Number));
+
+        var expenseClientResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: supplier.Id,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Expense,
+            sortBy: "number",
+            sortDir: "asc",
+            clientRole: "expenseClient",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var expenseClientItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(expenseClientResult));
+        Assert.Collection(expenseClientItems, item => Assert.Equal("EXP-CLIENT", item.Number));
+    }
+
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
     {
         var itemsProperty = ok.Value?.GetType().GetProperty("items");
@@ -208,6 +272,20 @@ public class InvoicesControllerListTests
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
         return contract;
+    }
+
+    private static async Task<Client> CreateClientAsync(PaymentContext db, string name)
+    {
+        var client = new Client
+        {
+            Name = name,
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true,
+        };
+
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        return client;
     }
 
     private static async Task<int> CreateLegacyInvoiceAggregateWithoutInvoiceDocumentAsync(PaymentContext db)

@@ -10,4 +10,5 @@ public class ClientStatusDto
     public string ColorHex { get; set; } = "#2563EB";
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+    public string? SystemKey { get; set; }
 }

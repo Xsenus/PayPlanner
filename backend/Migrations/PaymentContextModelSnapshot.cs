@@ -793,6 +793,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SystemKey")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsActive")
@@ -800,6 +804,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Name")
                         .HasDatabaseName("IX_ClientStatuses_Name");
+
+                    b.HasIndex("SystemKey")
+                        .HasDatabaseName("IX_ClientStatuses_SystemKey");
 
                     b.HasIndex("IsActive", "Name")
                         .HasDatabaseName("IX_ClientStatuses_IsActive_Name");

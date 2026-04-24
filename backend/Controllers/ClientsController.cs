@@ -186,7 +186,11 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}/stats")]
-    public async Task<IActionResult> GetStats(int id, [FromQuery] int? caseId, CancellationToken ct)
+    public async Task<IActionResult> GetStats(
+        int id,
+        [FromQuery] int? caseId,
+        CancellationToken ct,
+        [FromQuery] string? clientRole = null)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (!access.IsAdmin && !access.UserId.HasValue)
@@ -199,10 +203,16 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
-        var q = _db.Payments.Where(p =>
+        var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+        var q = (normalizedClientRole switch
+        {
+            "counterparty" => _db.Payments.Where(p => p.ClientId == id),
+            "expenseClient" => _db.Payments.Where(p => p.ExpenseClientId == id),
+            _ => _db.Payments.Where(p =>
                 (p.Type == PaymentType.Income && p.ClientId == id) ||
                 (p.Type == PaymentType.Expense &&
-                    (p.ExpenseClientId == id || (p.ExpenseClientId == null && p.ClientId == id))))
+                    (p.ExpenseClientId == id || (p.ExpenseClientId == null && p.ClientId == id)))),
+        })
             .Include(p => p.DealType).Include(p => p.IncomeType)
             .Include(p => p.PaymentSource).Include(p => p.PaymentStatusEntity).AsQueryable();
 
@@ -254,7 +264,10 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id:int}/case-finance-summaries")]
-    public async Task<IActionResult> GetCaseFinanceSummaries(int id, CancellationToken ct)
+    public async Task<IActionResult> GetCaseFinanceSummaries(
+        int id,
+        CancellationToken ct,
+        [FromQuery] string? clientRole = null)
     {
         var access = await GetCurrentAccessAsync(ct);
         if (!access.IsAdmin && !access.UserId.HasValue)
@@ -267,6 +280,11 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
+        if (QueryExtensions.NormalizeClientRole(clientRole) == "counterparty")
+        {
+            return Ok(await BuildSupplierCaseFinanceSummariesAsync(id, ct));
+        }
+
         var caseIds = await _db.ClientCases
             .AsNoTracking()
             .Where(c => c.ClientId == id)
@@ -274,9 +292,35 @@ public class ClientsController : ControllerBase
             .Select(c => c.Id)
             .ToListAsync(ct);
 
+        var caseMetadata = await _db.ClientCases
+            .AsNoTracking()
+            .Where(c => caseIds.Contains(c.Id))
+            .Select(c => new
+            {
+                c.Id,
+                c.ClientId,
+                ClientName = c.Client != null ? c.Client.Name : null,
+                c.Title,
+                c.Status,
+                c.CreatedAt,
+            })
+            .ToDictionaryAsync(c => c.Id, ct);
+
         var summaries = caseIds.ToDictionary(
             caseId => caseId,
-            caseId => new ClientCaseFinanceSummaryDto { CaseId = caseId });
+            caseId =>
+            {
+                var meta = caseMetadata[caseId];
+                return new ClientCaseFinanceSummaryDto
+                {
+                    CaseId = caseId,
+                    ClientId = meta.ClientId,
+                    ClientName = meta.ClientName,
+                    CaseTitle = meta.Title,
+                    CaseStatus = meta.Status.ToString(),
+                    CaseCreatedAt = meta.CreatedAt,
+                };
+            });
 
         if (caseIds.Count == 0)
         {
@@ -334,6 +378,256 @@ public class ClientsController : ControllerBase
 
         return Ok(caseIds.Select(caseId => summaries[caseId]).ToList());
     }
+
+    [HttpGet("{id:int}/case-expense-details")]
+    public async Task<IActionResult> GetCaseExpenseDetails(
+        int id,
+        [FromQuery] int? caseId,
+        [FromQuery] string? clientRole = null,
+        CancellationToken ct = default)
+    {
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.IsAdmin && !access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var client = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is null) return NotFound();
+
+        var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+        var query = _db.Payments
+            .AsNoTracking()
+            .Include(payment => payment.Client)
+            .Include(payment => payment.ExpenseClient)
+            .Include(payment => payment.Invoice)
+            .Include(payment => payment.Service)
+            .Include(payment => payment.ClientCase)
+                .ThenInclude(clientCase => clientCase!.Client)
+            .Include(payment => payment.InvoiceClientCases)
+                .ThenInclude(link => link.ClientCase)
+                    .ThenInclude(clientCase => clientCase.Client)
+            .Include(payment => payment.InvoiceLineItems)
+                .ThenInclude(item => item.Service)
+            .Where(payment => payment.Type == PaymentType.Expense)
+            .Where(payment => payment.Status != PaymentStatus.Cancelled);
+
+        query = normalizedClientRole switch
+        {
+            "counterparty" => query.Where(payment => payment.ClientId == id),
+            "expenseClient" => query.Where(payment => payment.ExpenseClientId == id),
+            _ => query.Where(payment =>
+                payment.ExpenseClientId == id ||
+                (payment.ExpenseClientId == null && payment.ClientId == id)),
+        };
+
+        if (caseId.HasValue)
+        {
+            query = query.Where(payment =>
+                payment.ClientCaseId == caseId.Value ||
+                payment.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+        }
+        else if (normalizedClientRole != "counterparty")
+        {
+            var visibleCaseIds = await _db.ClientCases
+                .AsNoTracking()
+                .Where(clientCase => clientCase.ClientId == id)
+                .Select(clientCase => clientCase.Id)
+                .ToListAsync(ct);
+
+            query = query.Where(payment =>
+                (payment.ClientCaseId.HasValue && visibleCaseIds.Contains(payment.ClientCaseId.Value)) ||
+                payment.InvoiceClientCases.Any(link => visibleCaseIds.Contains(link.ClientCaseId)));
+        }
+
+        var payments = await query
+            .OrderByDescending(payment => payment.PlannedDate)
+            .ThenByDescending(payment => payment.Date)
+            .ThenByDescending(payment => payment.Id)
+            .ToListAsync(ct);
+
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments);
+        var rows = new List<ClientCaseExpenseDetailDto>();
+
+        foreach (var payment in visiblePayments)
+        {
+            var linkedCases = ResolveLinkedCases(payment, caseId).ToList();
+            if (linkedCases.Count == 0)
+            {
+                continue;
+            }
+
+            var lineItems = payment.InvoiceLineItems
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .ToList();
+
+            foreach (var linkedCase in linkedCases)
+            {
+                if (lineItems.Count == 0)
+                {
+                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, null));
+                    continue;
+                }
+
+                foreach (var lineItem in lineItems)
+                {
+                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, lineItem));
+                }
+            }
+        }
+
+        return Ok(rows
+            .OrderByDescending(row => row.PlannedDate)
+            .ThenByDescending(row => row.PaymentDate)
+            .ThenBy(row => row.InvoiceNumber)
+            .ThenBy(row => row.LineItemName)
+            .ToList());
+    }
+
+    private async Task<List<ClientCaseFinanceSummaryDto>> BuildSupplierCaseFinanceSummariesAsync(
+        int supplierId,
+        CancellationToken ct)
+    {
+        var payments = await _db.Payments
+            .AsNoTracking()
+            .Include(p => p.ClientCase)
+                .ThenInclude(c => c!.Client)
+            .Include(p => p.InvoiceClientCases)
+                .ThenInclude(link => link.ClientCase)
+                    .ThenInclude(c => c.Client)
+            .Where(p => p.Status != PaymentStatus.Cancelled)
+            .Where(p => p.Type == PaymentType.Expense && p.ClientId == supplierId)
+            .Where(p =>
+                p.ClientCaseId.HasValue ||
+                p.InvoiceClientCases.Any())
+            .ToListAsync(ct);
+
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments);
+        var summaries = new Dictionary<int, ClientCaseFinanceSummaryDto>();
+
+        foreach (var payment in visiblePayments)
+        {
+            var linkedCases = payment.InvoiceClientCases
+                .Select(link => link.ClientCase)
+                .Concat(payment.ClientCase is not null ? new[] { payment.ClientCase } : Array.Empty<ClientCase>())
+                .Where(clientCase => clientCase is not null)
+                .Cast<ClientCase>()
+                .GroupBy(clientCase => clientCase.Id)
+                .Select(group => group.First());
+
+            foreach (var clientCase in linkedCases)
+            {
+                if (!summaries.TryGetValue(clientCase.Id, out var summary))
+                {
+                    summary = new ClientCaseFinanceSummaryDto
+                    {
+                        CaseId = clientCase.Id,
+                        ClientId = clientCase.ClientId,
+                        ClientName = clientCase.Client?.Name,
+                        CaseTitle = clientCase.Title,
+                        CaseStatus = clientCase.Status.ToString(),
+                        CaseCreatedAt = clientCase.CreatedAt,
+                    };
+                    summaries[clientCase.Id] = summary;
+                }
+
+                var outstanding = payment.Amount > payment.PaidAmount
+                    ? Math.Round(payment.Amount - payment.PaidAmount, 2)
+                    : 0m;
+
+                summary.ExpenseTotal += payment.Amount;
+                summary.ExpensePaid += payment.PaidAmount;
+                summary.ExpenseOutstanding += outstanding;
+                summary.ExpenseCount += 1;
+            }
+        }
+
+        return summaries.Values
+            .OrderByDescending(summary => summary.CaseCreatedAt ?? DateTime.MinValue)
+            .ThenByDescending(summary => summary.CaseId)
+            .ToList();
+    }
+
+    private static IEnumerable<ClientCase> ResolveLinkedCases(Payment payment, int? selectedCaseId)
+    {
+        var linkedCases = payment.InvoiceClientCases
+            .Select(link => link.ClientCase)
+            .Concat(payment.ClientCase is not null ? new[] { payment.ClientCase } : Array.Empty<ClientCase>())
+            .Where(clientCase => clientCase is not null)
+            .Cast<ClientCase>()
+            .GroupBy(clientCase => clientCase.Id)
+            .Select(group => group.First());
+
+        return selectedCaseId.HasValue
+            ? linkedCases.Where(clientCase => clientCase.Id == selectedCaseId.Value)
+            : linkedCases;
+    }
+
+    private static ClientCaseExpenseDetailDto BuildExpenseDetailRow(
+        Payment payment,
+        ClientCase clientCase,
+        InvoiceLineItem? lineItem)
+    {
+        var rowAmount = lineItem is null
+            ? payment.Amount
+            : Math.Round(lineItem.Quantity * lineItem.Price, 2);
+        var paidAmount = CalculateAllocatedPaidAmount(payment, rowAmount);
+        var outstandingAmount = rowAmount > paidAmount
+            ? Math.Round(rowAmount - paidAmount, 2)
+            : 0m;
+
+        return new ClientCaseExpenseDetailDto
+        {
+            PaymentId = payment.Id,
+            InvoiceId = payment.InvoiceId ?? (payment.DocumentKind == DocumentKind.Invoice ? payment.Id : null),
+            InvoiceNumber = payment.Invoice?.Number ?? payment.Account,
+            InvoiceDate = payment.Invoice?.Date ?? payment.AccountDate,
+            PaymentDate = payment.Date,
+            PlannedDate = payment.PlannedDate == default ? payment.Date : payment.PlannedDate,
+            SupplierId = payment.ClientId,
+            SupplierName = payment.Client?.Name ?? payment.CounterpartyName,
+            ExpenseClientId = payment.ExpenseClientId,
+            ExpenseClientName = payment.ExpenseClient?.Name,
+            CaseId = clientCase.Id,
+            CaseTitle = clientCase.Title,
+            LineItemId = lineItem?.Id,
+            LineItemName = lineItem?.Name ?? payment.Description,
+            ServiceId = lineItem?.ServiceId ?? payment.ServiceId,
+            ServiceName = lineItem?.Service?.Name ?? payment.Service?.Name,
+            Quantity = lineItem?.Quantity,
+            Unit = lineItem?.Unit,
+            Price = lineItem?.Price,
+            Amount = rowAmount,
+            PaidAmount = paidAmount,
+            OutstandingAmount = outstandingAmount,
+            Status = payment.Status,
+            PaymentOrderNumber = payment.PaymentOrderNumber,
+            PaymentDocumentDate = payment.PaymentDocumentDate,
+            Description = payment.Description,
+        };
+    }
+
+    private static decimal CalculateAllocatedPaidAmount(Payment payment, decimal rowAmount)
+    {
+        if (rowAmount <= 0m || payment.PaidAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        if (payment.Amount <= 0m || AreAmountsEqual(rowAmount, payment.Amount))
+        {
+            return Math.Min(rowAmount, payment.PaidAmount);
+        }
+
+        var allocated = Math.Round(payment.PaidAmount * rowAmount / payment.Amount, 2);
+        return Math.Min(rowAmount, allocated);
+    }
+
+    private static bool AreAmountsEqual(decimal left, decimal right)
+        => Math.Abs(left - right) <= 0.01m;
 
 
     [HttpPost("dadata/clean-address")]

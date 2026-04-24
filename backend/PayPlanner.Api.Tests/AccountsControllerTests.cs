@@ -351,6 +351,161 @@ public class AccountsControllerTests
         Assert.Equal(1m, actLineItem.Quantity);
     }
 
+    [Fact]
+    public async Task GetRegistry_FiltersExpenseInvoicesByClientRole()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new Client { Name = "Supplier" };
+        var firstClient = new Client { Name = "First Client" };
+        var secondClient = new Client { Name = "Second Client" };
+        db.Clients.AddRange(supplier, firstClient, secondClient);
+        await db.SaveChangesAsync();
+
+        await CreateExpenseInvoiceAsync(db, "EXP-1", supplier, firstClient, 5_000m);
+        await CreateExpenseInvoiceAsync(db, "EXP-2", supplier, secondClient, 7_000m);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: PaymentType.Expense,
+            sortBy: null,
+            sortDir: null,
+            clientId: firstClient.Id,
+            clientRole: "expenseClient",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("EXP-1", row.AccountNumber);
+        Assert.Equal(firstClient.Id, row.Invoice?.ExpenseClientId);
+        Assert.Equal(supplier.Id, row.Invoice?.ClientId);
+    }
+
+    [Fact]
+    public async Task GetRegistry_PayablesOnlyReturnsOpenExpenseInvoices()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new Client { Name = "Supplier" };
+        db.Clients.Add(supplier);
+        await db.SaveChangesAsync();
+
+        await CreateExpenseInvoiceAsync(db, "OPEN", supplier, null, 5_000m, PaymentStatus.Pending);
+        await CreateExpenseInvoiceAsync(db, "PAID", supplier, null, 7_000m, PaymentStatus.Completed, paidAmount: 7_000m);
+        await CreateInvoiceDocumentAsync(db, "INCOME", new DateTime(2026, 4, 8), 9_000m);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            payablesOnly: true,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("OPEN", row.AccountNumber);
+        Assert.Equal(PaymentType.Expense, row.Type);
+        Assert.NotEqual("paid", row.Status);
+    }
+
+    [Fact]
+    public async Task GetPayablesDashboard_GroupsOpenExpenseDebtBySupplierAndDueBucket()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var supplier = new Client { Name = "Geo Supplier" };
+        var utilitySupplier = new Client { Name = "Utility Supplier" };
+        var client = new Client { Name = "Matter Client" };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Matter case",
+            Status = ClientCaseStatus.Open,
+        };
+
+        db.Clients.AddRange(supplier, utilitySupplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var overdue = CreatePayment(today.AddDays(-1), 5_000m, "Overdue supplier debt");
+        overdue.Type = PaymentType.Expense;
+        overdue.Status = PaymentStatus.Overdue;
+        overdue.PaidAmount = 1_000m;
+        overdue.ClientId = supplier.Id;
+        overdue.ExpenseClientId = client.Id;
+        overdue.ClientCaseId = clientCase.Id;
+        overdue.CounterpartyName = supplier.Name;
+
+        var upcoming = CreatePayment(today.AddDays(5), 3_000m, "Upcoming utility debt");
+        upcoming.Type = PaymentType.Expense;
+        upcoming.Status = PaymentStatus.Pending;
+        upcoming.ClientId = utilitySupplier.Id;
+        upcoming.CounterpartyName = utilitySupplier.Name;
+
+        var paid = CreatePayment(today, 2_000m, "Paid expense");
+        paid.Type = PaymentType.Expense;
+        paid.Status = PaymentStatus.Completed;
+        paid.PaidAmount = 2_000m;
+        paid.ClientId = supplier.Id;
+        paid.CounterpartyName = supplier.Name;
+
+        db.Payments.AddRange(overdue, upcoming, paid);
+        await db.SaveChangesAsync();
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetPayablesDashboard(
+            from: null,
+            to: null,
+            search: null,
+            clientId: null,
+            clientIds: null,
+            clientRole: null,
+            ct: CancellationToken.None);
+
+        var response = Assert.IsType<OkObjectResult>(result.Result);
+        var dashboard = Assert.IsType<PayablesDashboardDto>(response.Value);
+
+        Assert.Equal(7_000m, dashboard.TotalOutstanding);
+        Assert.Equal(4_000m, dashboard.OverdueOutstanding);
+        Assert.Equal(3_000m, dashboard.UpcomingOutstanding);
+        Assert.Equal(2, dashboard.PaymentCount);
+        Assert.Equal(2, dashboard.SupplierCount);
+
+        var overdueBucket = Assert.Single(dashboard.DueBuckets, bucket => bucket.Key == "overdue");
+        Assert.Equal(4_000m, overdueBucket.Amount);
+        Assert.Equal(1, overdueBucket.Count);
+
+        var weekBucket = Assert.Single(dashboard.DueBuckets, bucket => bucket.Key == "week");
+        Assert.Equal(3_000m, weekBucket.Amount);
+        Assert.Equal(1, weekBucket.Count);
+
+        var supplierGroup = Assert.Single(dashboard.Suppliers, group => group.SupplierId == supplier.Id);
+        Assert.Equal(4_000m, supplierGroup.TotalOutstanding);
+        Assert.Equal(4_000m, supplierGroup.OverdueOutstanding);
+        Assert.Equal(1, supplierGroup.CaseCount);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -616,6 +771,46 @@ public class AccountsControllerTests
         payment.Account = invoice.Number;
         payment.AccountDate = invoice.Date;
         payment.Status = PaymentStatus.Pending;
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateExpenseInvoiceAsync(
+        PaymentContext db,
+        string number,
+        Client supplier,
+        Client? expenseClient,
+        decimal amount,
+        PaymentStatus status = PaymentStatus.Pending,
+        decimal paidAmount = 0m)
+    {
+        var invoice = new Invoice
+        {
+            Number = number,
+            Date = new DateTime(2026, 4, 8),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(invoice.Date, amount, $"Expense invoice {number}");
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date;
+        payment.Type = PaymentType.Expense;
+        payment.Status = status;
+        payment.PaidAmount = paidAmount;
+        payment.IsPaid = status == PaymentStatus.Completed;
+        payment.PaidDate = status == PaymentStatus.Completed ? invoice.Date : null;
+        payment.LastPaymentDate = payment.PaidDate;
+        payment.Client = supplier;
+        payment.CounterpartyName = supplier.Name;
+        if (expenseClient is not null)
+        {
+            payment.ExpenseClient = expenseClient;
+        }
 
         db.Payments.Add(payment);
         await db.SaveChangesAsync();

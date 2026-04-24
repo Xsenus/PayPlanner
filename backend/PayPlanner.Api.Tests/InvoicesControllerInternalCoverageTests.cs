@@ -2201,13 +2201,14 @@ public class InvoicesControllerInternalCoverageTests
         int? responsibleId,
         string? search,
         PaymentType? type,
-        IReadOnlySet<int>? clientIds)
+        IReadOnlySet<int>? clientIds,
+        string? clientRole = null)
     {
         var db = await CreateContextAsync();
         var controller = CreateController(db, isAdmin: true, userId: null);
         var method = typeof(InvoicesController).GetMethod("ApplyFilters", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(method);
-        return method!.Invoke(controller, [query, from, to, status, clientId, contractId, caseId, responsibleId, search, type, clientIds])!;
+        return method!.Invoke(controller, [query, from, to, status, clientId, contractId, caseId, responsibleId, search, type, clientRole, clientIds])!;
     }
 
     private static string[] ExtractSortedAccounts(object query)

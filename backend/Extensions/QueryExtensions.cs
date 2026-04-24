@@ -86,7 +86,7 @@ namespace PayPlanner.Api.Extensions
 
         public static IQueryable<Payment> ApplyPaymentFilters(
             this IQueryable<Payment> q,
-            DateTime? from, DateTime? to, int? clientId, int? caseId, string? search)
+            DateTime? from, DateTime? to, int? clientId, int? caseId, string? search, string? clientRole = null)
         {
             if (from.HasValue)
             {
@@ -102,9 +102,15 @@ namespace PayPlanner.Api.Extensions
 
             if (clientId.HasValue)
             {
-                q = q.Where(p =>
-                    p.ClientId == clientId.Value ||
-                    p.ExpenseClientId == clientId.Value);
+                var normalizedClientRole = NormalizeClientRole(clientRole);
+                q = normalizedClientRole switch
+                {
+                    "counterparty" => q.Where(p => p.ClientId == clientId.Value),
+                    "expenseClient" => q.Where(p => p.ExpenseClientId == clientId.Value),
+                    _ => q.Where(p =>
+                        p.ClientId == clientId.Value ||
+                        p.ExpenseClientId == clientId.Value),
+                };
             }
 
             if (caseId.HasValue)
@@ -134,6 +140,22 @@ namespace PayPlanner.Api.Extensions
                     (p.PaymentSource != null && p.PaymentSource.Name != null && p.PaymentSource.Name.ToLower().Contains(search)));
             }
             return q;
+        }
+
+        public static string? NormalizeClientRole(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var normalized = value.Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "counterparty" or "client" or "supplier" => "counterparty",
+                "expenseclient" or "expense-client" or "expense_client" => "expenseClient",
+                _ => null,
+            };
         }
 
         public static IQueryable<Payment> ExcludeInstallmentParentInvoices(

@@ -29,6 +29,10 @@ public class AccountsController : ControllerBase
         [FromQuery] PaymentType? type,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] int? clientId = null,
+        [FromQuery] string? clientIds = null,
+        [FromQuery] string? clientRole = null,
+        [FromQuery] bool payablesOnly = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
@@ -36,7 +40,20 @@ public class AccountsController : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
-        var candidateQuery = ApplyRegistryFilters(BuildInvoiceCandidateQuery(), from, to, search, type);
+        if (payablesOnly)
+        {
+            type = PaymentType.Expense;
+        }
+
+        var candidateQuery = ApplyRegistryFilters(
+            BuildInvoiceCandidateQuery(),
+            from,
+            to,
+            search,
+            type,
+            clientId,
+            clientIds,
+            clientRole);
         var candidateItems = await candidateQuery
             .Select(payment => new AccountInvoiceCandidate
             {
@@ -68,6 +85,7 @@ public class AccountsController : ControllerBase
                         ColorHex = payment.Client.ClientStatus.ColorHex,
                         IsActive = payment.Client.ClientStatus.IsActive,
                         CreatedAt = payment.Client.ClientStatus.CreatedAt,
+                        SystemKey = payment.Client.ClientStatus.SystemKey,
                     }
                     : null,
                 ExpenseClientId = payment.ExpenseClientId,
@@ -83,6 +101,7 @@ public class AccountsController : ControllerBase
                         ColorHex = payment.ExpenseClient.ClientStatus.ColorHex,
                         IsActive = payment.ExpenseClient.ClientStatus.IsActive,
                         CreatedAt = payment.ExpenseClient.ClientStatus.CreatedAt,
+                        SystemKey = payment.ExpenseClient.ClientStatus.SystemKey,
                     }
                     : null,
                 ClientCaseId = payment.ClientCaseId,
@@ -252,6 +271,7 @@ public class AccountsController : ControllerBase
         var normalizedStatus = NormalizeAccountStatus(status);
         var filteredGroups = groups
             .Where(group => normalizedStatus is null || string.Equals(group.Status, normalizedStatus, StringComparison.OrdinalIgnoreCase))
+            .Where(group => !payablesOnly || (group.Type == PaymentType.Expense && group.Status is not "paid" and not "cancelled"))
             .ToList();
 
         var summary = BuildSummary(filteredGroups);
@@ -406,10 +426,133 @@ public class AccountsController : ControllerBase
         });
     }
 
+    [HttpGet("payables-dashboard")]
+    public async Task<ActionResult<PayablesDashboardDto>> GetPayablesDashboard(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? search,
+        [FromQuery] int? clientId = null,
+        [FromQuery] string? clientIds = null,
+        [FromQuery] string? clientRole = null,
+        CancellationToken ct = default)
+    {
+        var query = _db.Payments
+            .AsNoTracking()
+            .WithPaymentIncludes()
+            .Include(payment => payment.InvoiceClientCases)
+            .Where(payment => payment.Type == PaymentType.Expense)
+            .Where(payment => payment.Status != PaymentStatus.Completed && payment.Status != PaymentStatus.Cancelled)
+            .Where(payment => payment.Amount > payment.PaidAmount)
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents: true);
+
+        var parsedClientIds = ParseClientIds(clientIds);
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            parsedClientIds.Add(clientId.Value);
+        }
+
+        if (parsedClientIds.Count > 0)
+        {
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.ClientId.HasValue && parsedClientIds.Contains(payment.ClientId.Value)),
+                "expenseClient" => query.Where(payment => payment.ExpenseClientId.HasValue && parsedClientIds.Contains(payment.ExpenseClientId.Value)),
+                _ => query.Where(payment =>
+                    (payment.ClientId.HasValue && parsedClientIds.Contains(payment.ClientId.Value)) ||
+                    (payment.ExpenseClientId.HasValue && parsedClientIds.Contains(payment.ExpenseClientId.Value))),
+            };
+        }
+
+        if (from.HasValue)
+        {
+            var fromDate = from.Value.Date;
+            query = query.Where(payment => (payment.PlannedDate == default ? payment.Date : payment.PlannedDate) >= fromDate);
+        }
+
+        if (to.HasValue)
+        {
+            var toDate = to.Value.Date;
+            query = query.Where(payment => (payment.PlannedDate == default ? payment.Date : payment.PlannedDate) <= toDate);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(payment =>
+                (payment.Account != null && payment.Account.ToLower().Contains(term)) ||
+                (payment.Description != null && payment.Description.ToLower().Contains(term)) ||
+                (payment.Notes != null && payment.Notes.ToLower().Contains(term)) ||
+                (payment.CounterpartyName != null && payment.CounterpartyName.ToLower().Contains(term)) ||
+                (payment.Client != null && payment.Client.Name != null && payment.Client.Name.ToLower().Contains(term)) ||
+                (payment.Client != null && payment.Client.Company != null && payment.Client.Company.ToLower().Contains(term)) ||
+                (payment.ExpenseClient != null && payment.ExpenseClient.Name != null && payment.ExpenseClient.Name.ToLower().Contains(term)) ||
+                (payment.ExpenseClient != null && payment.ExpenseClient.Company != null && payment.ExpenseClient.Company.ToLower().Contains(term)) ||
+                (payment.ClientCase != null && payment.ClientCase.Title != null && payment.ClientCase.Title.ToLower().Contains(term)));
+        }
+
+        var payments = await query.ToListAsync(ct);
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments)
+            .Where(payment => payment.Amount > payment.PaidAmount)
+            .Where(payment => payment.Status is not PaymentStatus.Completed and not PaymentStatus.Cancelled)
+            .ToList();
+
+        var today = DateTime.UtcNow.Date;
+        var upcomingLimit = today.AddDays(7);
+        var rows = visiblePayments
+            .Select(payment =>
+            {
+                var dueDate = (payment.PlannedDate == default ? payment.Date : payment.PlannedDate).Date;
+                var outstanding = Math.Round(payment.Amount - payment.PaidAmount, 2);
+                return new PayablesDashboardPaymentRow(
+                    payment.ClientId,
+                    payment.Client?.Name ?? payment.CounterpartyName ?? "Без поставщика",
+                    dueDate,
+                    outstanding,
+                    payment.ClientCaseId,
+                    payment.InvoiceClientCases.Select(link => link.ClientCaseId).ToList());
+            })
+            .Where(row => row.OutstandingAmount > 0m)
+            .ToList();
+
+        var response = new PayablesDashboardDto
+        {
+            TotalOutstanding = rows.Sum(row => row.OutstandingAmount),
+            OverdueOutstanding = rows.Where(row => row.DueDate < today).Sum(row => row.OutstandingAmount),
+            UpcomingOutstanding = rows.Where(row => row.DueDate >= today && row.DueDate <= upcomingLimit).Sum(row => row.OutstandingAmount),
+            SupplierCount = rows.Select(row => row.SupplierId).Distinct().Count(),
+            PaymentCount = rows.Count,
+            DueBuckets = BuildPayablesDueBuckets(rows, today),
+            Suppliers = rows
+                .GroupBy(row => new { row.SupplierId, row.SupplierName })
+                .Select(group => new PayablesSupplierGroupDto
+                {
+                    SupplierId = group.Key.SupplierId,
+                    SupplierName = group.Key.SupplierName,
+                    TotalOutstanding = group.Sum(row => row.OutstandingAmount),
+                    OverdueOutstanding = group.Where(row => row.DueDate < today).Sum(row => row.OutstandingAmount),
+                    NearestDueDate = group.Min(row => row.DueDate),
+                    PaymentCount = group.Count(),
+                    CaseCount = group
+                        .SelectMany(row => row.LinkedCaseIds)
+                        .Where(caseId => caseId > 0)
+                        .Distinct()
+                        .Count(),
+                })
+                .OrderByDescending(group => group.OverdueOutstanding > 0m)
+                .ThenBy(group => group.NearestDueDate ?? DateTime.MaxValue)
+                .ThenByDescending(group => group.TotalOutstanding)
+                .ToList(),
+        };
+
+        return Ok(response);
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
+        [FromQuery] string? clientRole,
         [FromQuery] string? q,
         [FromQuery] bool withDate = false,
         [FromQuery] bool dedupe = false,
@@ -421,7 +564,13 @@ public class AccountsController : ControllerBase
 
         if (clientId.HasValue)
         {
-            query = query.Where(payment => payment.ClientId == clientId.Value || payment.ExpenseClientId == clientId.Value);
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.ClientId == clientId.Value),
+                "expenseClient" => query.Where(payment => payment.ExpenseClientId == clientId.Value),
+                _ => query.Where(payment => payment.ClientId == clientId.Value || payment.ExpenseClientId == clientId.Value),
+            };
         }
 
         if (caseId.HasValue)
@@ -486,11 +635,33 @@ public class AccountsController : ControllerBase
         DateTime? from,
         DateTime? to,
         string? search,
-        PaymentType? type)
+        PaymentType? type,
+        int? clientId,
+        string? clientIds,
+        string? clientRole)
     {
         if (type.HasValue)
         {
             query = query.Where(payment => payment.Type == type.Value);
+        }
+
+        var parsedClientIds = ParseClientIds(clientIds);
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            parsedClientIds.Add(clientId.Value);
+        }
+
+        if (parsedClientIds.Count > 0)
+        {
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.ClientId.HasValue && parsedClientIds.Contains(payment.ClientId.Value)),
+                "expenseClient" => query.Where(payment => payment.ExpenseClientId.HasValue && parsedClientIds.Contains(payment.ExpenseClientId.Value)),
+                _ => query.Where(payment =>
+                    (payment.ClientId.HasValue && parsedClientIds.Contains(payment.ClientId.Value)) ||
+                    (payment.ExpenseClientId.HasValue && parsedClientIds.Contains(payment.ExpenseClientId.Value))),
+            };
         }
 
         if (from.HasValue)
@@ -529,6 +700,20 @@ public class AccountsController : ControllerBase
         }
 
         return query;
+    }
+
+    private static HashSet<int> ParseClientIds(string? clientIds)
+    {
+        if (string.IsNullOrWhiteSpace(clientIds))
+        {
+            return new HashSet<int>();
+        }
+
+        return clientIds
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => int.TryParse(value, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
     }
 
     private static IEnumerable<WorkingAccountGroup> ApplyRegistrySort(
@@ -706,6 +891,33 @@ public class AccountsController : ControllerBase
             Overdue = summary.Overdue.ToDto(),
             Cancelled = summary.Cancelled.ToDto(),
         };
+    }
+
+    private static List<PayablesDueBucketDto> BuildPayablesDueBuckets(
+        IReadOnlyCollection<PayablesDashboardPaymentRow> rows,
+        DateTime today)
+    {
+        var buckets = new[]
+        {
+            new { Key = "overdue", Label = "Просрочено", Predicate = (Func<PayablesDashboardPaymentRow, bool>)(row => row.DueDate < today) },
+            new { Key = "today", Label = "Сегодня", Predicate = (Func<PayablesDashboardPaymentRow, bool>)(row => row.DueDate == today) },
+            new { Key = "week", Label = "7 дней", Predicate = (Func<PayablesDashboardPaymentRow, bool>)(row => row.DueDate > today && row.DueDate <= today.AddDays(7)) },
+            new { Key = "later", Label = "Позже", Predicate = (Func<PayablesDashboardPaymentRow, bool>)(row => row.DueDate > today.AddDays(7)) },
+        };
+
+        return buckets
+            .Select(bucket =>
+            {
+                var bucketRows = rows.Where(bucket.Predicate).ToList();
+                return new PayablesDueBucketDto
+                {
+                    Key = bucket.Key,
+                    Label = bucket.Label,
+                    Amount = bucketRows.Sum(row => row.OutstandingAmount),
+                    Count = bucketRows.Count,
+                };
+            })
+            .ToList();
     }
 
     private static InvoiceDto BuildInvoiceDto(
@@ -1351,6 +1563,18 @@ public class AccountsController : ControllerBase
         public decimal Amount { get; init; }
         public decimal PaidAmount { get; init; }
         public PaymentStatus Status { get; init; }
+    }
+
+    private sealed record PayablesDashboardPaymentRow(
+        int? SupplierId,
+        string SupplierName,
+        DateTime DueDate,
+        decimal OutstandingAmount,
+        int? LegacyCaseId,
+        IReadOnlyCollection<int> InvoiceCaseIds)
+    {
+        public IEnumerable<int> LinkedCaseIds =>
+            InvoiceCaseIds.Concat(LegacyCaseId.HasValue ? new[] { LegacyCaseId.Value } : Array.Empty<int>());
     }
 
     private sealed class WorkingAccountGroup

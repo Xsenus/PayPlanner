@@ -29,30 +29,14 @@ public class PaymentsController : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
         [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
     {
         var q = _db.Payments
             .AsQueryable()
-            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents);
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
+            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole);
 
-        if (from.HasValue)
-        {
-            var fromDate = from.Value.Date;
-            q = q.Where(p => p.Date >= fromDate);
-        }
-
-        if (to.HasValue)
-        {
-            var toDate = to.Value.Date;
-            q = q.Where(p => p.Date <= toDate);
-        }
-        if (clientId.HasValue) q = q.Where(p => p.ClientId == clientId.Value || p.ExpenseClientId == clientId.Value);
-        if (caseId.HasValue)
-        {
-            q = q.Where(p =>
-                p.ClientCaseId == caseId.Value ||
-                p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
-        }
         var list = await ProjectPaymentsForRead(q)
             .OrderBy(p => p.Date)
             .ToListAsync(ct);
@@ -860,6 +844,7 @@ public class PaymentsController : ControllerBase
                                 ColorHex = payment.Client.ClientStatus.ColorHex,
                                 IsActive = payment.Client.ClientStatus.IsActive,
                                 CreatedAt = payment.Client.ClientStatus.CreatedAt,
+                                SystemKey = payment.Client.ClientStatus.SystemKey,
                             },
                     },
                 ClientCase = payment.ClientCase == null
@@ -899,6 +884,7 @@ public class PaymentsController : ControllerBase
                                 ColorHex = payment.ExpenseClient.ClientStatus.ColorHex,
                                 IsActive = payment.ExpenseClient.ClientStatus.IsActive,
                                 CreatedAt = payment.ExpenseClient.ClientStatus.CreatedAt,
+                                SystemKey = payment.ExpenseClient.ClientStatus.SystemKey,
                             },
                     },
                 DealType = payment.DealType == null

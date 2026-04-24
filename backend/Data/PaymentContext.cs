@@ -899,7 +899,6 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
-
             // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_PaymentSources_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_PaymentSources_Name");
@@ -941,10 +940,12 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
+            entity.Property(e => e.SystemKey).HasMaxLength(50);
 
             // ---- Индексы ----
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ClientStatuses_IsActive");
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_ClientStatuses_Name");
+            entity.HasIndex(e => e.SystemKey).HasDatabaseName("IX_ClientStatuses_SystemKey");
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_ClientStatuses_IsActive_Name");
         });
 
