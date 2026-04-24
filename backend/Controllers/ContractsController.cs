@@ -685,11 +685,36 @@ public class ContractsController : ControllerBase
         if (clientId.HasValue) query = query.Where(c => c.ClientContracts.Any(link => link.ClientId == clientId.Value));
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim().ToLower();
+            var rawTerm = search.Trim();
+            var term = rawTerm.ToLower(CultureInfo.InvariantCulture);
+            var upperTerm = rawTerm.ToUpper(CultureInfo.InvariantCulture);
+            var titleTerm = CultureInfo.GetCultureInfo("ru-RU").TextInfo.ToTitleCase(term);
             query = query.Where(c =>
                 c.Number.ToLower().Contains(term) ||
-                (c.Title != null && c.Title.ToLower().Contains(term)) ||
-                (c.Description != null && c.Description.ToLower().Contains(term)));
+                c.Number.Contains(rawTerm) ||
+                c.Number.Contains(upperTerm) ||
+                c.Number.Contains(titleTerm) ||
+                (c.Title != null &&
+                    (c.Title.ToLower().Contains(term) ||
+                     c.Title.Contains(rawTerm) ||
+                     c.Title.Contains(upperTerm) ||
+                     c.Title.Contains(titleTerm))) ||
+                (c.Description != null &&
+                    (c.Description.ToLower().Contains(term) ||
+                     c.Description.Contains(rawTerm) ||
+                     c.Description.Contains(upperTerm) ||
+                     c.Description.Contains(titleTerm))) ||
+                c.ClientContracts.Any(link =>
+                    link.Client != null &&
+                    (link.Client.Name.ToLower().Contains(term) ||
+                     link.Client.Name.Contains(rawTerm) ||
+                     link.Client.Name.Contains(upperTerm) ||
+                     link.Client.Name.Contains(titleTerm) ||
+                     (link.Client.Company != null &&
+                        (link.Client.Company.ToLower().Contains(term) ||
+                         link.Client.Company.Contains(rawTerm) ||
+                         link.Client.Company.Contains(upperTerm) ||
+                         link.Client.Company.Contains(titleTerm))))));
         }
         return query;
     }

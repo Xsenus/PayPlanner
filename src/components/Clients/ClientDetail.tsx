@@ -188,6 +188,7 @@ type ActTableColumnKey =
 
 type ContractTableColumnKey =
   | "number"
+  | "title"
   | "date"
   | "clients"
   | "amount"
@@ -306,6 +307,7 @@ const CONTRACT_TABLE_COLUMNS: Array<{
   defaultWidth: number;
 }> = [
   { key: "number", label: "Номер договора", defaultWidth: 180 },
+  { key: "title", label: "Название договора", defaultWidth: 240 },
   { key: "date", label: "Дата договора", defaultWidth: 150 },
   { key: "clients", label: "Клиенты", defaultWidth: 260 },
   { key: "amount", label: "Сумма договора", defaultWidth: 170 },
@@ -8268,7 +8270,7 @@ export function ClientDetail({
                         }
                         placeholder={
                           t("contractsSearchPlaceholder") ??
-                          "Поиск по номеру, названию или описанию договора"
+                          "Поиск по номеру, названию, описанию или клиенту"
                         }
                         className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       />
@@ -8413,7 +8415,8 @@ export function ClientDetail({
                               {visibleContractTableColumns.map((column) => {
                                 const sortKey =
                                   column.key === "clients" ||
-                                  column.key === "validUntil"
+                                  column.key === "validUntil" ||
+                                  column.key === "title"
                                     ? null
                                     : (column.key as ContractsSortKey);
                                 const isActive = sortKey
@@ -8531,6 +8534,15 @@ export function ClientDetail({
                                     {column.key === "number" ? (
                                       <span className="font-medium text-gray-900">
                                         №{contract.number}
+                                      </span>
+                                    ) : column.key === "title" ? (
+                                      <span
+                                        className="block truncate text-gray-900"
+                                        title={
+                                          contract.title?.trim() || undefined
+                                        }
+                                      >
+                                        {contract.title?.trim() || "—"}
                                       </span>
                                     ) : column.key === "date" ? (
                                       <span className="text-gray-900">

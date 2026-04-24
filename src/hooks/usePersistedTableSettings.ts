@@ -113,7 +113,7 @@ export function usePersistedTableSettings<K extends string>({
           [],
         );
 
-        const visibleColumns = Array.isArray(legacyParsed?.visibleColumns)
+        const persistedVisibleColumns = Array.isArray(legacyParsed?.visibleColumns)
           ? legacyParsed.visibleColumns.filter((value): value is K => allKeys.includes(value as K))
           : legacyVisibleColumns;
         const rawOrder = Array.isArray(legacyParsed?.columnOrder)
@@ -121,6 +121,12 @@ export function usePersistedTableSettings<K extends string>({
           : Array.isArray(legacyParsed?.order)
             ? legacyParsed.order.filter((value): value is K => allKeys.includes(value as K))
             : [];
+        const newDefaultVisibleColumns = rawOrder.length
+          ? defaultVisibleColumns.filter((value) => !rawOrder.includes(value))
+          : [];
+        const visibleColumns = persistedVisibleColumns.length
+          ? Array.from(new Set([...persistedVisibleColumns, ...newDefaultVisibleColumns]))
+          : defaultVisibleColumns;
         const columnOrder = rawOrder.length
           ? [...rawOrder, ...allKeys.filter((value) => !rawOrder.includes(value))]
           : allKeys;
@@ -135,7 +141,7 @@ export function usePersistedTableSettings<K extends string>({
         );
 
         return {
-          visibleColumns: visibleColumns.length ? visibleColumns : defaultVisibleColumns,
+          visibleColumns,
           columnOrder,
           columnWidths,
           pageSize:

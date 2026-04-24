@@ -233,7 +233,7 @@ export const ru = {
   contractsClientFilter: 'Клиент',
   contractsSortHint: 'Сортировка',
   contractsSortDescription: 'Используйте заголовки таблицы, чтобы отсортировать список.',
-  contractsSearchPlaceholder: 'Поиск по номеру, названию или описанию договора',
+  contractsSearchPlaceholder: 'Поиск по номеру, названию, описанию или клиенту',
   contractsClientsLoadError: 'Не удалось загрузить список клиентов',
   contractsLoadError: 'Не удалось загрузить договоры',
   contractsEmptyTitle: 'Договоры отсутствуют',

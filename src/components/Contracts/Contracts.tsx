@@ -39,6 +39,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const CONTRACT_COLUMNS = [
   { key: 'number', label: 'Номер договора', defaultVisible: true, defaultWidth: 180, sortKey: 'number' as const },
+  { key: 'title', label: 'Название договора', defaultVisible: true, defaultWidth: 240 },
   { key: 'date', label: 'Дата договора', defaultVisible: true, defaultWidth: 150, sortKey: 'date' as const },
   { key: 'startDate', label: 'Начало действия', defaultVisible: true, defaultWidth: 170 },
   { key: 'validUntil', label: 'Окончание действия', defaultVisible: true, defaultWidth: 180 },
@@ -237,6 +238,14 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             {contract.number}
           </button>
         );
+      case 'title':
+        return contract.title?.trim() ? (
+          <div className="truncate text-slate-700" title={contract.title}>
+            {contract.title}
+          </div>
+        ) : (
+          '—'
+        );
       case 'date':
         return formatDate(contract.date);
       case 'startDate':
@@ -382,7 +391,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  placeholder={t('contractsSearchPlaceholder') ?? 'Поиск по номеру, названию или описанию договора'}
+                  placeholder={t('contractsSearchPlaceholder') ?? 'Поиск по номеру, названию, описанию или клиенту'}
                 />
               </div>
             </label>

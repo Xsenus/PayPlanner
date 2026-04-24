@@ -451,6 +451,79 @@ public class ContractsControllerTests
         Assert.Equal([payment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
     }
 
+    [Theory]
+    [InlineData("иванов")]
+    [InlineData("ИВАНОВ")]
+    [InlineData("иВаНоВ")]
+    public async Task Get_SearchesByLinkedClientName_IgnoringCase(string searchTerm)
+    {
+        await using var db = await CreateContextAsync();
+        var matchingClient = new Client
+        {
+            Name = "Иванов Иван Иванович",
+            Company = "ООО Ромашка",
+        };
+        var otherClient = new Client
+        {
+            Name = "Петров Петр Петрович",
+            Company = "ООО Василек",
+        };
+        db.Clients.AddRange(matchingClient, otherClient);
+        await db.SaveChangesAsync();
+
+        db.Contracts.AddRange(
+            new Contract
+            {
+                Number = "CT-CLIENT-MATCH",
+                Date = new DateTime(2026, 4, 14),
+                BillingMode = ContractBillingMode.Actual,
+                IsOpenEnded = true,
+                ClientContracts =
+                {
+                    new ClientContract
+                    {
+                        ClientId = matchingClient.Id,
+                    },
+                },
+            },
+            new Contract
+            {
+                Number = "CT-CLIENT-OTHER",
+                Date = new DateTime(2026, 4, 15),
+                BillingMode = ContractBillingMode.Actual,
+                IsOpenEnded = true,
+                ClientContracts =
+                {
+                    new ClientContract
+                    {
+                        ClientId = otherClient.Id,
+                    },
+                },
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: searchTerm,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var items = GetAnonymousProperty<IEnumerable<ContractDto>>(ok.Value!, "items").ToList();
+        var total = GetAnonymousProperty<int>(ok.Value!, "total");
+
+        Assert.Equal(1, total);
+        var item = Assert.Single(items);
+        Assert.Equal("CT-CLIENT-MATCH", item.Number);
+        Assert.Equal("Иванов Иван Иванович", Assert.Single(item.Clients).Name);
+    }
+
     [Fact]
     public async Task Update_ClearsCanonicalContractId_WhenInvoiceIsRemovedFromContract()
     {
@@ -661,6 +734,13 @@ public class ContractsControllerTests
         db.Acts.Add(act);
         await db.SaveChangesAsync();
         return act;
+    }
+
+    private static T GetAnonymousProperty<T>(object value, string propertyName)
+    {
+        var property = value.GetType().GetProperty(propertyName);
+        Assert.NotNull(property);
+        return Assert.IsAssignableFrom<T>(property.GetValue(value));
     }
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService
