@@ -6723,6 +6723,21 @@ export function ClientDetail({
                                               Счёт: {payment.account}
                                             </div>
                                           ) : null}
+                                          {payment.paymentOrderNumber ? (
+                                            <div className="text-xs text-slate-500">
+                                              Документ: {payment.paymentOrderNumber}
+                                              {payment.paymentDocumentDate
+                                                ? ` от ${toRuDate(payment.paymentDocumentDate)}`
+                                                : ""}
+                                            </div>
+                                          ) : null}
+                                          {!payment.paymentOrderNumber &&
+                                          payment.paymentDocumentDate ? (
+                                            <div className="text-xs text-slate-500">
+                                              Дата документа:{" "}
+                                              {toRuDate(payment.paymentDocumentDate)}
+                                            </div>
+                                          ) : null}
                                           {payment.accountDate ? (
                                             <div className="text-xs text-slate-400">
                                               Дата счёта:{" "}
@@ -6743,7 +6758,16 @@ export function ClientDetail({
                                           )}
                                           {payment.client?.name ? (
                                             <div className="mt-1 text-xs text-slate-500">
-                                              {payment.client.name}
+                                              {payment.type === "Expense"
+                                                ? `Поставщик: ${payment.client.name}`
+                                                : payment.client.name}
+                                            </div>
+                                          ) : null}
+                                          {payment.type === "Expense" &&
+                                          payment.expenseClient?.name ? (
+                                            <div className="mt-1 text-xs text-slate-500">
+                                              Клиент расхода:{" "}
+                                              {payment.expenseClient.name}
                                             </div>
                                           ) : null}
                                           {payment.clientCase?.status ? (
@@ -6765,6 +6789,13 @@ export function ClientDetail({
                                               Без описания
                                             </div>
                                           )}
+                                          {payment.invoiceId || payment.account ? (
+                                            <div className="mt-2 text-xs text-slate-500">
+                                              Счёт:{" "}
+                                              {payment.account?.trim() ||
+                                                `ID ${payment.invoiceId}`}
+                                            </div>
+                                          ) : null}
                                           {visibleNotes ? (
                                             <div
                                               className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600"

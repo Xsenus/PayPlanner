@@ -116,6 +116,7 @@ type PaymentModalInvoiceContext = {
   number: string;
   date: string;
   clientId?: number | null;
+  expenseClientId?: number | null;
   clientCaseId?: number | null;
   type?: PaymentKind;
 };
@@ -1408,6 +1409,7 @@ export function Accounts({
         number: invoice.number,
         date: invoice.date,
         clientId: invoice.clientId ?? null,
+        expenseClientId: invoice.expenseClientId ?? null,
         clientCaseId: invoice.clientCaseId ?? null,
         type: invoice.type ?? 'Income',
       };
@@ -1425,21 +1427,6 @@ export function Accounts({
     setEditingPayment(null);
     setPaymentModalInvoiceContext(context);
     setPaymentModalType(context.type ?? 'Income');
-    setPaymentModalOpen(true);
-  };
-
-  const openPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
-    if (isInvoiceManagedPayment(payment)) {
-      if (invoice?.id) {
-        openEditPage(invoice.id);
-        return;
-      }
-      toast.error('Счет и график рассрочки редактируются через раздел "Счета".', 'Платежи счета');
-      return;
-    }
-    setEditingPayment(payment);
-    setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
-    setPaymentModalType(payment.type ?? 'Income');
     setPaymentModalOpen(true);
   };
 

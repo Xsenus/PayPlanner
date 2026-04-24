@@ -1358,13 +1358,25 @@ export function Payments({
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 px-4 py-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Клиент</div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {routePaymentPreview.type === 'Expense' ? 'Поставщик' : 'Клиент'}
+                      </div>
                       <div className="mt-2 text-sm font-medium text-slate-900">
                         {routePaymentPreview.client?.name || '—'}
                       </div>
                     </div>
+                    {routePaymentPreview.type === 'Expense' ? (
+                      <div className="rounded-xl border border-slate-200 px-4 py-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Клиент расхода</div>
+                        <div className="mt-2 text-sm font-medium text-slate-900">
+                          {routePaymentPreview.expenseClient?.name || '—'}
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="rounded-xl border border-slate-200 px-4 py-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дело</div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {routePaymentPreview.type === 'Expense' ? 'Дело расхода' : 'Дело'}
+                      </div>
                       <div className="mt-2 text-sm font-medium text-slate-900">
                         {routePaymentPreview.clientCase?.title || '—'}
                       </div>
@@ -1376,6 +1388,18 @@ export function Payments({
                           || routePaymentPreview.incomeType?.name
                           || routePaymentPreview.paymentSource?.name
                           || '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Платежный документ</div>
+                      <div className="mt-2 text-sm font-medium text-slate-900">
+                        {routePaymentPreview.paymentOrderNumber?.trim()
+                          ? routePaymentPreview.paymentDocumentDate
+                            ? `${routePaymentPreview.paymentOrderNumber} от ${formatDate(routePaymentPreview.paymentDocumentDate)}`
+                            : routePaymentPreview.paymentOrderNumber
+                          : routePaymentPreview.paymentDocumentDate
+                          ? formatDate(routePaymentPreview.paymentDocumentDate)
+                          : '—'}
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 px-4 py-3">

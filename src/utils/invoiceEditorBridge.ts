@@ -14,6 +14,7 @@ export interface InvoiceEditorFormDraft {
   type: PaymentKind;
   status: PaymentStatus;
   clientId: string;
+  expenseClientId: string;
   contractId: string;
   clientCaseReference: string;
   description: string;
@@ -177,15 +178,16 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     pageViewMode: typeof raw.pageViewMode === 'boolean' ? raw.pageViewMode : true,
     form: {
       number: readString(form.number),
-      date: readString(form.date),
-      dueDate: readString(form.dueDate),
-      amount: readString(form.amount),
-      type,
-      status,
-      clientId: readString(form.clientId),
-      contractId: readString(form.contractId),
-      clientCaseReference: readString(form.clientCaseReference),
-      description: readString(form.description),
+    date: readString(form.date),
+    dueDate: readString(form.dueDate),
+    amount: readString(form.amount),
+    type,
+    status,
+    clientId: readString(form.clientId),
+    expenseClientId: readString(form.expenseClientId),
+    contractId: readString(form.contractId),
+    clientCaseReference: readString(form.clientCaseReference),
+    description: readString(form.description),
       isNotForAccounting: readBoolean(form.isNotForAccounting),
       actReference: readString(form.actReference),
       paidDate: readString(form.paidDate),

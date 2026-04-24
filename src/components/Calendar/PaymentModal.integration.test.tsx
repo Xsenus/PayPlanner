@@ -29,7 +29,11 @@ const {
 
 vi.mock('../../hooks/useClients', () => ({
   useClients: () => ({
-    clients: [{ id: 69, name: 'Test Client' }],
+    clients: [
+      { id: 69, name: 'Test Client' },
+      { id: 77, name: 'Supplier Client' },
+      { id: 88, name: 'Expense Client' },
+    ],
     loading: false,
   }),
 }));
@@ -38,7 +42,10 @@ vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
     dealTypes: [],
     incomeTypes: [],
-    paymentSources: [],
+    paymentSources: [
+      { id: 5, name: 'Банковский перевод', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+      { id: 6, name: 'Наличные', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+    ],
   }),
 }));
 
@@ -331,5 +338,75 @@ describe('PaymentModal integration', () => {
     const submitPayload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
     expect(submitPayload.account).toBeUndefined();
     expect(submitPayload.accountDate).toBeUndefined();
+  });
+
+  it('submits expense attribution and payment document details for expense payments', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 991,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 7_500,
+          paidAmount: 0,
+          status: 'Pending',
+          description: 'Оплата подрядчику',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 77,
+          expenseClientId: 88,
+          clientCaseId: 501,
+          paymentSourceId: 5,
+          type: 'Expense',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Expense Case 501',
+            status: 'Open',
+            clientId: 88,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const orderInput = document.body.querySelector(
+      'input[name="paymentOrderNumber"]',
+    ) as HTMLInputElement | null;
+    const dateInput = document.body.querySelector(
+      'input[name="paymentDocumentDate"]',
+    ) as HTMLInputElement | null;
+    expect(orderInput).not.toBeNull();
+    expect(dateInput).not.toBeNull();
+
+    fireEvent.change(orderInput!, { target: { value: 'ПП-778' } });
+    fireEvent.change(dateInput!, { target: { value: '2026-04-09' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 991,
+        clientId: 77,
+        expenseClientId: 88,
+        clientCaseId: 501,
+        paymentOrderNumber: 'ПП-778',
+        paymentDocumentDate: '2026-04-09',
+        type: 'Expense',
+      }),
+    );
   });
 });

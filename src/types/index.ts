@@ -768,12 +768,15 @@ export interface Payment {
   expenseClientId?: number | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
+  paymentOrderNumber?: string | null;
+  paymentDocumentDate?: string | null;
   clientCaseId?: number | null;
   dealTypeId?: number | null;
   incomeTypeId?: number | null;
   paymentSourceId?: number | null;
   paymentStatusId?: number | null;
   client?: Client | null;
+  expenseClient?: Client | null;
   clientCase?: ClientCase | null;
   dealType?: DealType | null;
   incomeType?: IncomeType | null;
@@ -798,6 +801,7 @@ export type PaymentPayload = Omit<
   | 'auditDeletedByUserId'
   | 'auditDeletedByUserName'
   | 'client'
+  | 'expenseClient'
   | 'clientCase'
   | 'dealType'
   | 'incomeType'

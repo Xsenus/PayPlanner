@@ -25,6 +25,7 @@ type LinkedInvoiceContext = {
   number: string;
   date: string;
   clientId?: number | null;
+  expenseClientId?: number | null;
   clientCaseId?: number | null;
   type?: PaymentKind;
 };
@@ -108,6 +109,7 @@ export function PaymentModal({
     lastPaymentDate: '',
     notes: '',
     clientId: '',
+    expenseClientId: '',
     clientCaseId: '',
     dealTypeId: '',
     incomeTypeId: '',
@@ -116,6 +118,8 @@ export function PaymentModal({
     invoiceId: '',
     contractId: '',
     type: (type ?? 'Income') as PaymentKind,
+    paymentOrderNumber: '',
+    paymentDocumentDate: '',
     account: '',
     accountDate: '',
     systemNotes: '',
@@ -132,7 +136,12 @@ export function PaymentModal({
     () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
     [clients, formData.clientId],
   );
+  const selectedExpenseClient = useMemo(
+    () => clients.find((c) => String(c.id) === formData.expenseClientId) ?? null,
+    [clients, formData.expenseClientId],
+  );
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientPickerMode, setClientPickerMode] = useState<'client' | 'expense'>('client');
   const [clientPickerSearch, setClientPickerSearch] = useState('');
   const filteredClients = useMemo(() => {
     const query = clientPickerSearch.trim().toLowerCase();
@@ -166,6 +175,18 @@ export function PaymentModal({
   const [showProcessHelp, setShowProcessHelp] = useState(false);
   const [detailsTab, setDetailsTab] = useState<'details' | 'system'>('details');
   const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
+  const caseOwnerClientId = formData.type === 'Expense'
+    ? formData.expenseClientId
+    : formData.clientId;
+  const selectedPaymentSource = useMemo(
+    () => paymentSources.find((source) => String(source.id) === formData.paymentSourceId) ?? null,
+    [formData.paymentSourceId, paymentSources],
+  );
+  const showPaymentDocumentFields = Boolean(
+    formData.paymentOrderNumber
+    || formData.paymentDocumentDate
+    || (selectedPaymentSource && !/налич/i.test(selectedPaymentSource.name)),
+  );
   const selectedInvoiceSummary = useMemo(() => {
     if (!formData.invoiceId) return null;
 
@@ -209,6 +230,7 @@ export function PaymentModal({
         type: formData.type,
         status: formData.status,
         clientId,
+        expenseClientId: formData.type === 'Expense' ? formData.expenseClientId : '',
         contractId: formData.contractId || invoiceCreateSeedContractId,
         clientCaseReference: '',
         description,
@@ -228,7 +250,7 @@ export function PaymentModal({
       selectedActs: [],
       selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
     };
-  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
+  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
   useEffect(() => {
     if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
@@ -366,6 +388,7 @@ export function PaymentModal({
           lastPaymentDate: toDateInputValue(p.lastPaymentDate) || '',
           notes: p.notes || '',
           clientId: (linkedInvoice?.clientId ?? p.clientId ?? defaultClientId)?.toString() || '',
+          expenseClientId: (linkedInvoice?.expenseClientId ?? p.expenseClientId)?.toString() || '',
           clientCaseId:
             (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
@@ -375,6 +398,8 @@ export function PaymentModal({
           invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
           contractId: p.contractId?.toString() || '',
           type: (p.type as PaymentKind) ?? linkedInvoice?.type ?? type ?? 'Income',
+          paymentOrderNumber: p.paymentOrderNumber ?? '',
+          paymentDocumentDate: toDateInputValue(p.paymentDocumentDate) || '',
           account: linkedInvoice?.number ?? p.account ?? '',
           accountDate: toDateInputValue(linkedInvoice?.date) || toDateInputValue(p.accountDate) || '',
           systemNotes: p.systemNotes ?? '',
@@ -399,6 +424,7 @@ export function PaymentModal({
           lastPaymentDate: '',
           notes: '',
           clientId: (linkedInvoice?.clientId ?? defaultClientId)?.toString() || '',
+          expenseClientId: linkedInvoice?.expenseClientId?.toString() || '',
           clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
@@ -407,6 +433,8 @@ export function PaymentModal({
           invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
           contractId: '',
           type: (linkedInvoice?.type ?? type ?? 'Income') as PaymentKind,
+          paymentOrderNumber: '',
+          paymentDocumentDate: '',
           account: linkedInvoice?.number ?? '',
           accountDate: toDateInputValue(linkedInvoice?.date) || '',
           systemNotes: '',
@@ -492,7 +520,8 @@ export function PaymentModal({
 
     let cancelled = false;
 
-    const currentClientId = formData.clientId || (defaultClientId ? String(defaultClientId) : '');
+    const currentClientId = caseOwnerClientId
+      || (formData.type === 'Expense' ? '' : (defaultClientId ? String(defaultClientId) : ''));
     const initialCaseId =
       formData.clientCaseId || (defaultClientCaseId ? String(defaultClientCaseId) : '');
     const cidNum = Number(currentClientId);
@@ -564,7 +593,8 @@ export function PaymentModal({
     };
   }, [
     isOpen,
-    formData.clientId,
+    caseOwnerClientId,
+    formData.type,
     casesPrefetch,
     formData.clientCaseId,
     defaultClientId,
@@ -781,6 +811,10 @@ export function PaymentModal({
           .join('\n'),
         rescheduleCount: formData.rescheduleCount ?? 0,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
+        expenseClientId:
+          formData.type === 'Expense' && formData.expenseClientId
+            ? parseInt(formData.expenseClientId, 10)
+            : undefined,
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
         dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
         incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,
@@ -789,6 +823,10 @@ export function PaymentModal({
           : undefined,
         paymentStatusId: formData.paymentStatusId
           ? parseInt(formData.paymentStatusId, 10)
+          : undefined,
+        paymentOrderNumber: formData.paymentOrderNumber.trim() || undefined,
+        paymentDocumentDate: formData.paymentDocumentDate
+          ? fromInputToApiDate(formData.paymentDocumentDate)
           : undefined,
         invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
         account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
@@ -834,25 +872,39 @@ export function PaymentModal({
     }
   };
 
-  const openClientPicker = () => {
+  const openClientPicker = (mode: 'client' | 'expense' = 'client') => {
     if (hasLockedInvoice) {
       return;
     }
 
+    setClientPickerMode(mode);
     setClientPickerSearch('');
     setClientPickerOpen(true);
   };
 
   const handleClientPick = (client: Client) => {
-    setFormData((prev) => ({
-      ...prev,
-      clientId: String(client.id),
-      clientCaseId: '',
-      contractId: hasLockedInvoice ? prev.contractId : '',
-      invoiceId: hasLockedInvoice ? prev.invoiceId : '',
-      account: hasLockedInvoice ? prev.account : '',
-      accountDate: hasLockedInvoice ? prev.accountDate : '',
-    }));
+    setFormData((prev) => {
+      if (clientPickerMode === 'expense') {
+        return {
+          ...prev,
+          expenseClientId: String(client.id),
+          clientCaseId: '',
+          invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+          account: hasLockedInvoice ? prev.account : '',
+          accountDate: hasLockedInvoice ? prev.accountDate : '',
+        };
+      }
+
+      return {
+        ...prev,
+        clientId: String(client.id),
+        clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
+        contractId: hasLockedInvoice ? prev.contractId : '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      };
+    });
     setClientPickerOpen(false);
     setInvoicePickerOpen(false);
     setInvoiceSearch('');
@@ -887,6 +939,9 @@ export function PaymentModal({
       contractId: invoice.contractId ? String(invoice.contractId) : prev.contractId,
       type: invoice.type ?? prev.type,
       clientId: invoice.clientId ? String(invoice.clientId) : prev.clientId,
+      expenseClientId: invoice.expenseClientId
+        ? String(invoice.expenseClientId)
+        : prev.expenseClientId,
       clientCaseId: invoice.clientCaseId ? String(invoice.clientCaseId) : prev.clientCaseId,
     }));
     setInvoicePickerOpen(false);
@@ -1011,6 +1066,23 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         clientId: value,
+        clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
+        contractId: hasLockedInvoice ? prev.contractId : '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      }));
+      setClientPickerOpen(false);
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
+      return;
+    }
+
+    if (name === 'expenseClientId') {
+      setFormData((prev) => ({
+        ...prev,
+        expenseClientId: value,
         clientCaseId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
         account: hasLockedInvoice ? prev.account : '',
@@ -1027,6 +1099,8 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         type: value as PaymentKind,
+        expenseClientId: value === 'Expense' ? prev.expenseClientId : '',
+        clientCaseId: '',
         incomeTypeId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
         account: hasLockedInvoice ? prev.account : '',
@@ -1447,7 +1521,7 @@ export function PaymentModal({
               <div className="space-y-4 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
                   <span className="h-6 w-6 rounded-full bg-indigo-50 text-indigo-600 grid place-items-center text-xs font-bold">2</span>
-                  <span>{t('client')}</span>
+                  <span>{formData.type === 'Expense' ? 'Контрагент и привязка расхода' : t('client')}</span>
                 </div>
                 <div className="space-y-4">
                   {hasLockedInvoice && (
@@ -1458,7 +1532,9 @@ export function PaymentModal({
                   )}
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <label className="block text-sm font-medium text-gray-700">{t('client')} {isRequired('ClientId') ? '*' : ''}</label>
+                      <label className="block text-sm font-medium text-gray-700">
+                        {formData.type === 'Expense' ? 'Поставщик / контрагент' : t('client')} {isRequired('ClientId') ? '*' : ''}
+                      </label>
                       {selectedClient?.clientStatus ? (
                         <ClientStatusBadge status={selectedClient.clientStatus} className="shrink-0" />
                       ) : null}
@@ -1468,12 +1544,12 @@ export function PaymentModal({
                         type="text"
                         value={selectedClient?.name ?? ''}
                         readOnly
-                        placeholder={t('selectClient')}
+                        placeholder={formData.type === 'Expense' ? 'Выберите поставщика' : (t('selectClient') ?? '')}
                         className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
                       />
                       <button
                         type="button"
-                        onClick={openClientPicker}
+                        onClick={() => openClientPicker('client')}
                         disabled={hasLockedInvoice || clientsLoading}
                         className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                         aria-label={t('selectClient') ?? 'Выбрать клиента'}>
@@ -1511,17 +1587,76 @@ export function PaymentModal({
                     </select>
                   </div>
 
+                  {formData.type === 'Expense' && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <label className="block text-sm font-medium text-gray-700">Клиент расхода</label>
+                        {selectedExpenseClient?.clientStatus ? (
+                          <ClientStatusBadge status={selectedExpenseClient.clientStatus} className="shrink-0" />
+                        ) : null}
+                      </div>
+                      <div className="mb-2 flex gap-2">
+                        <input
+                          type="text"
+                          value={selectedExpenseClient?.name ?? ''}
+                          readOnly
+                          placeholder="Выберите клиента, на которого ложится расход"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => openClientPicker('expense')}
+                          disabled={hasLockedInvoice || clientsLoading}
+                          className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label="Выбрать клиента расхода">
+                          <UserRoundSearch className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {(selectedExpenseClient?.company || selectedExpenseClient?.responsibleUserName) ? (
+                        <div className="mb-2 space-y-1 rounded-xl border border-amber-100 bg-amber-50/60 p-2">
+                          {selectedExpenseClient?.company ? (
+                            <div className="text-xs text-gray-600">{selectedExpenseClient.company}</div>
+                          ) : null}
+                          {selectedExpenseClient?.responsibleUserName ? (
+                            <div className="text-xs text-gray-500">Ответственный: {selectedExpenseClient.responsibleUserName}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {!formData.expenseClientId ? (
+                        <div className="text-xs text-amber-700">
+                          Для привязки расхода к делу клиента выберите клиента расхода и затем дело.
+                        </div>
+                      ) : null}
+                      <select
+                        name="expenseClientId"
+                        value={formData.expenseClientId}
+                        onChange={handleChange}
+                        disabled={hasLockedInvoice}
+                        aria-hidden="true"
+                        tabIndex={-1}
+                        className="hidden">
+                        <option value="">Без привязки к клиенту</option>
+                        {clients.map((client) => (
+                          <option key={client.id} value={client.id}>
+                            {client.name}
+                            {client.company ? ` — ${client.company}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {t('case') ?? 'Дело'}
+                        {formData.type === 'Expense' ? 'Дело клиента расхода' : (t('case') ?? 'Дело')}
                       </label>
                       <select
-                        key={(formData.clientId || 'no-client') + ':' + cases.length}
+                        key={(caseOwnerClientId || 'no-client') + ':' + cases.length}
                         name="clientCaseId"
                         value={formData.clientCaseId}
                         onChange={handleChange}
-                        disabled={!formData.clientId}
+                        disabled={!caseOwnerClientId}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         <option value="">{t('selectCase') ?? 'Без дела'}</option>
 
@@ -1574,6 +1709,37 @@ export function PaymentModal({
                       })()}
                     </div>
                   </div>
+
+                  {showPaymentDocumentFields && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          № документа
+                        </label>
+                        <input
+                          type="text"
+                          name="paymentOrderNumber"
+                          value={formData.paymentOrderNumber}
+                          onChange={handleChange}
+                          maxLength={100}
+                          placeholder="Например: п/п 458 или ордер 17"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Дата документа
+                        </label>
+                        <input
+                          type="date"
+                          name="paymentDocumentDate"
+                          value={formData.paymentDocumentDate}
+                          onChange={handleChange}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid gap-3 sm:grid-cols-[2fr,1fr] sm:items-end">
                     <div>
@@ -1780,7 +1946,9 @@ export function PaymentModal({
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
               <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <h3 className="text-base font-semibold text-slate-900">Выбор клиента</h3>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {clientPickerMode === 'expense' ? 'Выбор клиента расхода' : 'Выбор клиента'}
+                  </h3>
                   <button
                     type="button"
                     onClick={() => setClientPickerOpen(false)}
@@ -1795,7 +1963,9 @@ export function PaymentModal({
                     type="text"
                     value={clientPickerSearch}
                     onChange={(event) => setClientPickerSearch(event.target.value)}
-                    placeholder={t('search') ?? 'Поиск'}
+                    placeholder={clientPickerMode === 'expense'
+                      ? 'Поиск клиента расхода'
+                      : (t('search') ?? 'Поиск')}
                     className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   />
                 </div>

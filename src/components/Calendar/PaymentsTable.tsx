@@ -156,6 +156,16 @@ export function PaymentsTable({
       const category =
         payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
       const statusLabel = statusLabels[payment.status] ?? payment.status;
+      const paymentDocumentLabel = payment.paymentOrderNumber
+        ? `Документ: ${payment.paymentOrderNumber}${payment.paymentDocumentDate ? ` от ${formatDate(payment.paymentDocumentDate)}` : ''}`
+        : payment.paymentDocumentDate
+        ? `Дата документа: ${formatDate(payment.paymentDocumentDate)}`
+        : null;
+      const linkedInvoiceLabel = payment.account
+        ? `Счет: ${payment.account}${payment.accountDate ? ` от ${formatDate(payment.accountDate)}` : ''}`
+        : payment.invoiceId
+        ? `Счет ID ${payment.invoiceId}`
+        : null;
 
       switch (columnKey) {
         case 'date':
@@ -164,21 +174,32 @@ export function PaymentsTable({
           return payment.plannedDate ? formatDate(payment.plannedDate) : '—';
         case 'client':
           return payment.client ? (
-            <button
-              type="button"
-              className="block w-full text-left leading-tight text-blue-600 hover:underline"
-              onClick={() => {
-                if (payment.clientId) {
-                  onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
-                }
-              }}>
-              <span className="block font-medium">{payment.client.name}</span>
-              {payment.clientCase?.title ? (
+            <div className="leading-tight">
+              <button
+                type="button"
+                className="block w-full text-left text-blue-600 hover:underline"
+                onClick={() => {
+                  if (payment.clientId) {
+                    onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
+                  }
+                }}>
+                <span className="block font-medium">
+                  {payment.type === 'Expense' ? `Поставщик: ${payment.client.name}` : payment.client.name}
+                </span>
+              </button>
+              {payment.type === 'Expense' && payment.expenseClient?.name ? (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
-                  {payment.clientCase.title}
+                  {`Клиент расхода: ${payment.expenseClient.name}`}
                 </span>
               ) : null}
-            </button>
+              {payment.clientCase?.title ? (
+                <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
+                  {payment.type === 'Expense'
+                    ? `Дело расхода: ${payment.clientCase.title}`
+                    : payment.clientCase.title}
+                </span>
+              ) : null}
+            </div>
           ) : (
             <span className="text-gray-400">—</span>
           );
@@ -188,6 +209,16 @@ export function PaymentsTable({
               <div className="truncate" title={payment.description || undefined}>
                 {payment.description || t('noDescription') || 'Без описания'}
               </div>
+              {paymentDocumentLabel ? (
+                <div className="truncate text-xs text-gray-500" title={paymentDocumentLabel}>
+                  {paymentDocumentLabel}
+                </div>
+              ) : null}
+              {linkedInvoiceLabel ? (
+                <div className="truncate text-xs text-gray-500" title={linkedInvoiceLabel}>
+                  {linkedInvoiceLabel}
+                </div>
+              ) : null}
               {visibleNotes ? (
                 <div className="truncate text-xs text-gray-500" title={visibleNotes}>
                   {visibleNotes}

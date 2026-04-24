@@ -307,6 +307,7 @@ vi.mock('../Calendar/PaymentModal', () => ({
       number: string;
       date: string;
       clientId?: number | null;
+      expenseClientId?: number | null;
       clientCaseId?: number | null;
       type?: 'Income' | 'Expense';
     } | null;
