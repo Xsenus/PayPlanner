@@ -2,15 +2,18 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   getInitialActReturnTab,
   getInitialActId,
+  getInitialClientId,
   getInitialContractId,
   getInitialContractReturnTab,
   getInitialPaymentId,
   getInitialTab,
   getPathActId,
+  getPathClientId,
   getPathContractId,
   getPathPaymentId,
   isActCreatePath,
   isActsListPath,
+  isClientsListPath,
   isContractsListPath,
   isPaymentsListPath,
 } from './App';
@@ -80,6 +83,35 @@ describe('App contract routing helpers', () => {
     window.history.replaceState({}, '', '/contracts/77?ppReturnTab=profile');
 
     expect(getInitialContractReturnTab()).toBe(null);
+  });
+});
+
+describe('App client routing helpers', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.clear();
+  });
+
+  it('parses a client id from the pathname', () => {
+    window.history.replaceState({}, '', '/clients/42');
+
+    expect(getPathClientId()).toBe(42);
+    expect(getInitialClientId()).toBe(42);
+    expect(getInitialTab()).toBe('clientDetail');
+  });
+
+  it('detects the clients list pathname', () => {
+    window.history.replaceState({}, '', '/clients');
+
+    expect(isClientsListPath()).toBe(true);
+    expect(getInitialTab()).toBe('clients');
+  });
+
+  it('does not restore clientDetail from storage without a client id', () => {
+    window.localStorage.setItem('pp.last_active_tab', 'clientDetail');
+    window.history.replaceState({}, '', '/');
+
+    expect(getInitialTab()).toBe('clients');
   });
 });
 

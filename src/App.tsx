@@ -141,6 +141,28 @@ export function isPaymentsListPath(): boolean {
   return /^\/payments\/?$/i.test(window.location.pathname);
 }
 
+export function getPathClientId(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const match = window.location.pathname.match(/^\/clients\/(\d+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function isClientsListPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/clients\/?$/i.test(window.location.pathname);
+}
+
 export function getPathContractId(): number | null {
   if (typeof window === 'undefined') {
     return null;
@@ -221,6 +243,14 @@ export function getInitialTab(): Tab {
   const params = new URLSearchParams(window.location.search);
   const urlTab = params.get('ppTab');
 
+  if (getPathClientId()) {
+    return 'clientDetail';
+  }
+
+  if (isClientsListPath()) {
+    return 'clients';
+  }
+
   if (getPathInvoiceId() || isInvoicesListPath()) {
     return 'accounts';
   }
@@ -250,12 +280,20 @@ export function getInitialTab(): Tab {
   }
 
   if (isValidTab(urlTab)) {
+    if (urlTab === 'clientDetail') {
+      return 'clients';
+    }
+
     return urlTab;
   }
 
   try {
     const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY);
     if (isValidTab(stored)) {
+      if (stored === 'clientDetail') {
+        return 'clients';
+      }
+
       return stored;
     }
   } catch {
@@ -286,6 +324,10 @@ export function getInitialInvoiceId(): number | null {
 
 export function getInitialPaymentId(): number | null {
   return getPathPaymentId();
+}
+
+export function getInitialClientId(): number | null {
+  return getPathClientId();
 }
 
 export function getInitialContractId(): number | null {
@@ -369,7 +411,7 @@ function AppContent() {
   );
 
   const [activeTab, setActiveTab] = useState<Tab>(getInitialTab);
-  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<number | null>(getInitialClientId);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
@@ -719,7 +761,11 @@ function AppContent() {
     }
 
     const url = new URL(window.location.href);
-    if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
+    if (activeTab === 'clients') {
+      url.pathname = '/clients';
+    } else if (activeTab === 'clientDetail') {
+      url.pathname = selectedClientId ? `/clients/${selectedClientId}` : '/clients';
+    } else if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
       url.pathname = selectedInvoiceId ? `/invoices/${selectedInvoiceId}` : '/invoices';
     } else if (activeTab === 'payments' || activeTab === 'paymentsIncome' || activeTab === 'paymentsExpense') {
       url.pathname = selectedPaymentId ? `/payments/${selectedPaymentId}` : '/payments';
@@ -733,6 +779,8 @@ function AppContent() {
       url.pathname = '/contracts';
     } else if (activeTab === 'contractDetail') {
       url.pathname = selectedContractId ? `/contracts/${selectedContractId}` : '/contracts';
+    } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
     } else if (/^\/invoices(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/payments(?:\/\d+)?\/?$/i.test(url.pathname)) {
@@ -771,7 +819,17 @@ function AppContent() {
     }
 
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-  }, [activeTab, actReturnTab, contractReturnTab, selectedActId, selectedContractId, selectedInvoiceId, selectedPaymentId, selectedUserId]);
+  }, [
+    activeTab,
+    actReturnTab,
+    contractReturnTab,
+    selectedActId,
+    selectedClientId,
+    selectedContractId,
+    selectedInvoiceId,
+    selectedPaymentId,
+    selectedUserId,
+  ]);
 
   useEffect(() => {
     try {
@@ -788,6 +846,11 @@ function AppContent() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab === 'clientDetail' && !selectedClientId) {
+      setActiveTab('clients');
+      return;
+    }
+
     if (canViewTab(activeTab)) {
       return;
     }
@@ -802,7 +865,7 @@ function AppContent() {
 
     const fallback = accessibleMenuTabs[0] ?? 'profile';
     setActiveTab(fallback);
-  }, [activeTab, accessibleMenuTabs, canViewTab]);
+  }, [activeTab, accessibleMenuTabs, canViewTab, selectedClientId]);
 
   useEffect(() => {
     if (!user) {
@@ -939,8 +1002,12 @@ function AppContent() {
       }
 
       case 'clientDetail':
-        if (!permissions.clients.canView || !selectedClientId) {
+        if (!permissions.clients.canView) {
           return renderNoAccess('Просмотр карточки клиента недоступен для вашей роли.');
+        }
+
+        if (!selectedClientId) {
+          return <Clients />;
         }
 
         return (
