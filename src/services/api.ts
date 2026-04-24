@@ -1334,6 +1334,19 @@ export class ApiService {
     );
   }
 
+  async sendActByEmail(
+    id: number,
+    payload?: { email?: string; subject?: string; message?: string; format?: 'word' | 'pdf' },
+  ) {
+    return this.request<{ sent: boolean; recipient: string; fileName: string; format: string }>(
+      `/acts/${id}/send-email`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  }
+
   // ===== Role permissions =====
   async getRolePermissions(roleId: number) {
     return this.request<RolePermissions>(`/role-permissions/${roleId}`);

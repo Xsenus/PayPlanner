@@ -455,8 +455,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
     const accepted = await confirm({
       title: 'Отправить акт',
-      description: 'Открыть черновик письма со ссылкой на акт для отправки клиенту?',
-      confirmLabel: 'Открыть письмо',
+      description: 'Сформировать документ WORD и отправить на email клиента?',
+      confirmLabel: 'Отправить',
       cancelLabel: 'Отмена',
       variant: 'primary',
     });
@@ -464,34 +464,25 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
     setPageActionLoading('send');
     try {
-      const subject = encodeURIComponent(`Акт №${act.number || act.id} от ${formatDate(act.date)}`);
-      const body = encodeURIComponent(
-        `Добрый день!\n\nНаправляю акт №${act.number || act.id} от ${formatDate(act.date)}.\n${actLink}\n\nС уважением.`,
-      );
-
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && actLink) {
-        try {
-          await navigator.clipboard.writeText(actLink);
-        } catch {
-          // Clipboard is optional here.
-        }
-      }
-
-      if (typeof window !== 'undefined') {
-        window.location.href = `mailto:${selectedClient?.email ?? ''}?subject=${subject}&body=${body}`;
-      }
-
+      await apiService.sendActByEmail(act.id, {
+        format: 'word',
+        email: selectedClient?.email || undefined,
+      });
+      setError(null);
       toast.success(
         selectedClient?.email
-          ? `Открыт черновик письма для ${selectedClient.email}.`
-          : 'Открыт черновик письма со ссылкой на акт.',
+          ? `Документ WORD отправлен на ${selectedClient.email}.`
+          : 'Документ WORD отправлен клиенту по email.',
+        'Акт отправлен',
       );
     } catch (sendError) {
-      setError(extractDisplayErrorMessage(sendError, 'Не удалось подготовить отправку акта.'));
+      const message = extractDisplayErrorMessage(sendError, 'Не удалось выполнить отправку акта.');
+      setError(message);
+      toast.error(message);
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, actLink, confirm, selectedClient?.email, toast]);
+  }, [act, confirm, selectedClient?.email, toast]);
 
   const transferredDisabled = !canEdit || act?.status === 'Transferred' || act?.status === 'Signed' || act?.status === 'Terminated';
   const signedDisabled = !canEdit || act?.status === 'Signed' || act?.status === 'Terminated';

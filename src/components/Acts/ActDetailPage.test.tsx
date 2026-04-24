@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActDetailPage } from './ActDetailPage';
@@ -9,12 +9,14 @@ const {
   getClientsMock,
   getActResponsiblesMock,
   downloadActDocumentMock,
+  sendActByEmailMock,
 } = vi.hoisted(() => ({
   actModalSpy: vi.fn(),
   getActMock: vi.fn(),
   getClientsMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
   downloadActDocumentMock: vi.fn(),
+  sendActByEmailMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -57,6 +59,7 @@ vi.mock('../../services/api', () => ({
     updateAct: vi.fn(),
     deleteAct: vi.fn(),
     downloadActDocument: downloadActDocumentMock,
+    sendActByEmail: sendActByEmailMock,
   },
 }));
 
@@ -79,6 +82,12 @@ describe('ActDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     downloadActDocumentMock.mockResolvedValue(new Blob(['<html><body><div>Preview</div></body></html>'], { type: 'text/html' }));
+    sendActByEmailMock.mockResolvedValue({
+      sent: true,
+      recipient: 'client@example.com',
+      fileName: 'act-31.doc',
+      format: 'word',
+    });
   });
 
   it('renders act preview in page layout and keeps old act data stable', async () => {
@@ -179,5 +188,49 @@ describe('ActDetailPage', () => {
       mode: 'edit',
       presentation: 'page',
     }));
+  });
+
+  it('sends act document by email from the action bar', async () => {
+    getActMock.mockResolvedValue({
+      id: 32,
+      number: '32',
+      date: '2026-04-10',
+      amount: 24_000,
+      status: 'Created',
+      type: 'Income',
+      clientId: 7,
+      lineItems: [],
+    });
+    getClientsMock.mockResolvedValue({
+      items: [
+        {
+          id: 7,
+          name: 'Клиент для отправки',
+          email: 'client@example.com',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '2026-04-01T00:00:00Z',
+          isActive: true,
+        },
+      ],
+    });
+    getActResponsiblesMock.mockResolvedValue({ items: [] });
+
+    render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Клиент для отправки')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+
+    await waitFor(() => {
+      expect(sendActByEmailMock).toHaveBeenCalledWith(32, {
+        format: 'word',
+        email: 'client@example.com',
+      });
+    });
   });
 });

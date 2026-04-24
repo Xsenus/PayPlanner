@@ -1362,6 +1362,113 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task SendActEmail_ReturnsValidationProblem_WhenModelStateIsInvalid()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-MAIL-VAL", 10_000m, ActStatus.Created);
+        var controller = new ActsController(db, new NoopFormRequirementsService(), emailService: new RecordingEmailService());
+        controller.ModelState.AddModelError("Email", "Invalid");
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest { Email = "broken" },
+            CancellationToken.None);
+
+        var result = Assert.IsType<ObjectResult>(action);
+        var details = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.Contains("Email", details.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task SendActEmail_ReturnsNotFound_WhenActDoesNotExist()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new ActsController(db, new NoopFormRequirementsService(), emailService: new RecordingEmailService());
+
+        var action = await controller.SendActEmail(
+            999,
+            new SendInvoiceEmailRequest { Email = "mail@example.com" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+    }
+
+    [Fact]
+    public async Task SendActEmail_RequiresRecipient_WhenRequestAndClientEmailAreEmpty()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        client.Email = "   ";
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-MAIL-EMPTY", 10_000m, ActStatus.Created);
+        var controller = new ActsController(db, new NoopFormRequirementsService(), emailService: new RecordingEmailService());
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest(),
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Equal("Recipient email is required.", badRequest.Value);
+    }
+
+    [Fact]
+    public async Task SendActEmail_NormalizesHtmlFormatToWord_AndUsesCustomContent()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        client.Email = "client@example.com";
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-MAIL", 10_000m, ActStatus.Created);
+        var emailService = new RecordingEmailService();
+        var controller = new ActsController(db, new NoopFormRequirementsService(), emailService: emailService);
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest
+            {
+                Email = "custom@example.com",
+                Subject = "Custom subject",
+                Message = "Custom body",
+                Format = "html",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.NotNull(ok.Value);
+        Assert.Equal("word", ok.Value!.GetType().GetProperty("format")!.GetValue(ok.Value));
+        Assert.Equal("custom@example.com", emailService.ToEmail);
+        Assert.Equal("Custom subject", emailService.Subject);
+        Assert.Equal("Custom body", emailService.Body);
+        Assert.Equal("act-ACT-313-MAIL.doc", emailService.AttachmentFileName);
+        Assert.Equal("application/msword", emailService.AttachmentContentType);
+    }
+
+    [Fact]
+    public async Task SendActEmail_ReturnsProblem_WhenPdfServiceIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        client.Email = "client@example.com";
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-MAIL-PDF", 10_000m, ActStatus.Created);
+        var controller = new ActsController(db, new NoopFormRequirementsService(), emailService: new RecordingEmailService());
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest
+            {
+                Email = "pdf@example.com",
+                Format = "pdf",
+            },
+            CancellationToken.None);
+
+        var problem = Assert.IsType<ObjectResult>(action);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
+    }
+
+    [Fact]
     public async Task GetDocument_LoadsMainCompany_FromDefaultLegacyAndJsonSettings()
     {
         await using var db = await CreateContextAsync();
@@ -2066,5 +2173,44 @@ public class ActsControllerTests
 
         public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
             => Task.FromResult(_bytes);
+    }
+
+    private sealed class RecordingEmailService : IEmailService
+    {
+        public string? ToEmail { get; private set; }
+        public string? Subject { get; private set; }
+        public string? Body { get; private set; }
+        public string? AttachmentFileName { get; private set; }
+        public byte[]? AttachmentBytes { get; private set; }
+        public string? AttachmentContentType { get; private set; }
+
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
+            => Task.CompletedTask;
+
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+        {
+            ToEmail = toEmail;
+            Subject = subject;
+            Body = body;
+            AttachmentFileName = attachmentFileName;
+            AttachmentBytes = attachmentBytes;
+            AttachmentContentType = attachmentContentType;
+            return Task.CompletedTask;
+        }
     }
 }

@@ -32,15 +32,18 @@ public class ActsController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
+    private readonly IEmailService? _emailService;
 
     public ActsController(
         PaymentContext db,
         IFormRequirementsService formRequirements,
-        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null)
+        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
+        IEmailService? emailService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
+        _emailService = emailService;
     }
 
     [HttpGet]
@@ -375,6 +378,92 @@ public class ActsController : ControllerBase
         }
 
         return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
+    }
+
+    [HttpPost("{id:int}/send-email")]
+    public async Task<IActionResult> SendActEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        if (_emailService is null)
+        {
+            return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Email service is not registered on the server.");
+        }
+
+        var act = await LoadActDocumentAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var email = string.IsNullOrWhiteSpace(request.Email)
+            ? act.Client?.Email?.Trim()
+            : request.Email.Trim();
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return BadRequest("Recipient email is required.");
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(request.Format);
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            act.LineItems
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .ToList(),
+            mainCompany,
+            includeSignatureAndSeal: true);
+
+        byte[] bytes;
+        string fileName;
+        string contentType;
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderDocumentPdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+
+            fileName = $"act-{SanitizeFilePart(act.Number)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"act-{SanitizeFilePart(act.Number)}.doc";
+            contentType = "application/msword";
+        }
+
+        var subject = string.IsNullOrWhiteSpace(request.Subject)
+            ? $"Акт №{act.Number} от {act.Date.Date:dd.MM.yyyy}"
+            : request.Subject.Trim();
+        var body = string.IsNullOrWhiteSpace(request.Message)
+            ? "Во вложении акт."
+            : request.Message.Trim();
+
+        await _emailService.SendEmailWithAttachmentAsync(
+            email,
+            subject,
+            body,
+            fileName,
+            bytes,
+            contentType);
+
+        return Ok(new { sent = true, recipient = email, fileName, format = normalizedFormat });
     }
 
     private static readonly System.Linq.Expressions.Expression<Func<Act, ActDto>> MapToDtoExpression = act => new ActDto
