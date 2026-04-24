@@ -580,6 +580,7 @@ export interface ClientStatus {
   colorHex: string;
   isActive: boolean;
   createdAt: string;
+  systemKey?: 'client' | 'supplier' | 'creditor' | string | null;
 }
 
 export interface PaymentStatusEntity {
@@ -934,6 +935,9 @@ export interface InvoiceInput {
   installmentPlan?: InstallmentPlanInput | null;
 }
 
+export type ClientRole = 'counterparty' | 'expenseClient';
+export type InvoiceClientRole = ClientRole;
+
 export interface InvoiceSummaryBucket {
   amount: number;
   count: number;
@@ -965,6 +969,33 @@ export interface AccountsSummary {
   paid: AccountsSummaryBucket;
   overdue: AccountsSummaryBucket;
   cancelled: AccountsSummaryBucket;
+}
+
+export interface PayablesDueBucket {
+  key: string;
+  label: string;
+  amount: number;
+  count: number;
+}
+
+export interface PayablesSupplierGroup {
+  supplierId?: number | null;
+  supplierName: string;
+  totalOutstanding: number;
+  overdueOutstanding: number;
+  nearestDueDate?: string | null;
+  paymentCount: number;
+  caseCount: number;
+}
+
+export interface PayablesDashboard {
+  totalOutstanding: number;
+  overdueOutstanding: number;
+  upcomingOutstanding: number;
+  supplierCount: number;
+  paymentCount: number;
+  dueBuckets: PayablesDueBucket[];
+  suppliers: PayablesSupplierGroup[];
 }
 
 export interface AccountRegistryRow {
@@ -1005,6 +1036,11 @@ export interface ClientStats {
 
 export interface ClientCaseFinanceSummary {
   caseId: number;
+  clientId?: number | null;
+  clientName?: string | null;
+  caseTitle?: string | null;
+  caseStatus?: string | null;
+  caseCreatedAt?: string | null;
   incomeTotal: number;
   incomePaid: number;
   incomeOutstanding: number;
@@ -1016,6 +1052,35 @@ export interface ClientCaseFinanceSummary {
   plannedMargin: number;
   paidMargin: number;
   outstandingBalance: number;
+}
+
+export interface ClientCaseExpenseDetail {
+  paymentId: number;
+  invoiceId?: number | null;
+  invoiceNumber?: string | null;
+  invoiceDate?: string | null;
+  paymentDate: string;
+  plannedDate: string;
+  supplierId?: number | null;
+  supplierName?: string | null;
+  expenseClientId?: number | null;
+  expenseClientName?: string | null;
+  caseId: number;
+  caseTitle?: string | null;
+  lineItemId?: number | null;
+  lineItemName?: string | null;
+  serviceId?: number | null;
+  serviceName?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  price?: number | null;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: PaymentStatus;
+  paymentOrderNumber?: string | null;
+  paymentDocumentDate?: string | null;
+  description?: string | null;
 }
 
 export interface MonthlyStats {

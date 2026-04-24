@@ -9,11 +9,13 @@ const {
   createPaymentMock,
   getActResponsiblesMock,
   getAccountsRegistryResultMock,
+  getPayablesDashboardResultMock,
   getClientsMock,
   getInvoiceMock,
   invoiceModalPropsSpy,
   paymentModalPropsSpy,
   refreshAccountsMock,
+  refreshPayablesDashboardMock,
   toastErrorMock,
   updateInvoiceManagedPaymentMock,
   updatePaymentMock,
@@ -21,11 +23,13 @@ const {
   createPaymentMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
   getAccountsRegistryResultMock: vi.fn(),
+  getPayablesDashboardResultMock: vi.fn(),
   getClientsMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   paymentModalPropsSpy: vi.fn(),
   refreshAccountsMock: vi.fn(),
+  refreshPayablesDashboardMock: vi.fn(),
   toastErrorMock: vi.fn(),
   updateInvoiceManagedPaymentMock: vi.fn(),
   updatePaymentMock: vi.fn(),
@@ -225,8 +229,21 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
   }) => createPersistedTableSettings(columns, defaultPageSize),
 }));
 
+vi.mock('../../hooks/useClients', () => ({
+  useClients: () => ({
+    clients: [createClient()],
+    loading: false,
+    refreshing: false,
+    error: null,
+  }),
+}));
+
 vi.mock('../../hooks/useAccountsRegistry', () => ({
-  useAccountsRegistry: () => getAccountsRegistryResultMock(),
+  useAccountsRegistry: (params: unknown) => getAccountsRegistryResultMock(params),
+}));
+
+vi.mock('../../hooks/usePayablesDashboard', () => ({
+  usePayablesDashboard: (params: unknown) => getPayablesDashboardResultMock(params),
 }));
 
 vi.mock('../../hooks/useTableSelection', () => ({
@@ -407,11 +424,13 @@ describe('Accounts integration', () => {
   beforeEach(() => {
     getActResponsiblesMock.mockReset();
     getAccountsRegistryResultMock.mockReset();
+    getPayablesDashboardResultMock.mockReset();
     getClientsMock.mockReset();
     getInvoiceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
     refreshAccountsMock.mockReset();
+    refreshPayablesDashboardMock.mockReset();
     toastErrorMock.mockReset();
     updateInvoiceManagedPaymentMock.mockReset();
     updatePaymentMock.mockReset();
@@ -428,6 +447,33 @@ describe('Accounts integration', () => {
       refreshing: false,
       error: null,
       refresh: refreshAccountsMock,
+    });
+    getPayablesDashboardResultMock.mockReturnValue({
+      data: {
+        totalOutstanding: 8_000,
+        overdueOutstanding: 3_000,
+        upcomingOutstanding: 5_000,
+        supplierCount: 2,
+        paymentCount: 3,
+        dueBuckets: [
+          { key: 'overdue', label: 'Просрочено', amount: 3_000, count: 1 },
+          { key: 'week', label: '7 дней', amount: 5_000, count: 2 },
+        ],
+        suppliers: [
+          {
+            supplierId: 77,
+            supplierName: 'Geo Supplier',
+            totalOutstanding: 5_000,
+            overdueOutstanding: 0,
+            nearestDueDate: '2026-04-25',
+            paymentCount: 2,
+            caseCount: 1,
+          },
+        ],
+      },
+      loading: false,
+      error: null,
+      refresh: refreshPayablesDashboardMock,
     });
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
@@ -467,6 +513,49 @@ describe('Accounts integration', () => {
       expect(screen.queryByText('Применены фильтры:')).toBeNull();
     });
     expect(screen.getByRole('heading', { name: 'Все счета' })).toBeTruthy();
+  });
+
+  it('passes client role filters into the accounts registry query', async () => {
+    render(<Accounts />);
+
+    fireEvent.change(screen.getByLabelText('Клиент / поставщик'), {
+      target: { value: '55' },
+    });
+    fireEvent.change(screen.getByLabelText('Роль клиента'), {
+      target: { value: 'expenseClient' },
+    });
+
+    await waitFor(() => {
+      const lastCall = getAccountsRegistryResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toMatchObject({
+        clientId: 55,
+        clientRole: 'expenseClient',
+      });
+    });
+  });
+
+  it('passes the payables mode into the accounts registry query', async () => {
+    render(<Accounts />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Кредиторка' }));
+
+    await waitFor(() => {
+      const lastCall = getAccountsRegistryResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toMatchObject({
+        type: 'Expense',
+        payablesOnly: true,
+      });
+    });
+    expect(screen.getByRole('heading', { name: 'Доска кредиторки' })).toBeTruthy();
+    expect(screen.getByText('Geo Supplier')).toBeTruthy();
+
+    const dashboardCall = getPayablesDashboardResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(dashboardCall).toEqual(
+      expect.objectContaining({
+        enabled: true,
+      }),
+    );
+    expect(screen.getByRole('heading', { name: 'Кредиторка' })).toBeTruthy();
   });
 
   it('passes grouped invoice operations into the editor opened from the accounts registry', async () => {
@@ -694,6 +783,33 @@ describe('Accounts integration', () => {
       refreshing: false,
       error: null,
       refresh: refreshAccountsMock,
+    });
+    getPayablesDashboardResultMock.mockReturnValue({
+      data: {
+        totalOutstanding: 8_000,
+        overdueOutstanding: 3_000,
+        upcomingOutstanding: 5_000,
+        supplierCount: 2,
+        paymentCount: 3,
+        dueBuckets: [
+          { key: 'overdue', label: 'Просрочено', amount: 3_000, count: 1 },
+          { key: 'week', label: '7 дней', amount: 5_000, count: 2 },
+        ],
+        suppliers: [
+          {
+            supplierId: 77,
+            supplierName: 'Geo Supplier',
+            totalOutstanding: 5_000,
+            overdueOutstanding: 0,
+            nearestDueDate: '2026-04-25',
+            paymentCount: 2,
+            caseCount: 1,
+          },
+        ],
+      },
+      loading: false,
+      error: null,
+      refresh: refreshPayablesDashboardMock,
     });
 
     render(<Accounts />);

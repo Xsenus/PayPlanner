@@ -59,6 +59,7 @@ function normalizeMoneyInputValue(value: string): string {
 
 interface PaymentModalProps {
   defaultClientId?: number;
+  defaultExpenseClientId?: number;
   defaultClientCaseId?: number;
   casesPrefetch?: ClientCase[];
   type?: PaymentKind;
@@ -79,6 +80,7 @@ export function PaymentModal({
   onDelete,
   onCreateRemainder,
   defaultClientId,
+  defaultExpenseClientId,
   defaultClientCaseId,
   casesPrefetch,
   type,
@@ -388,7 +390,7 @@ export function PaymentModal({
           lastPaymentDate: toDateInputValue(p.lastPaymentDate) || '',
           notes: p.notes || '',
           clientId: (linkedInvoice?.clientId ?? p.clientId ?? defaultClientId)?.toString() || '',
-          expenseClientId: (linkedInvoice?.expenseClientId ?? p.expenseClientId)?.toString() || '',
+          expenseClientId: (linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId)?.toString() || '',
           clientCaseId:
             (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
@@ -424,7 +426,7 @@ export function PaymentModal({
           lastPaymentDate: '',
           notes: '',
           clientId: (linkedInvoice?.clientId ?? defaultClientId)?.toString() || '',
-          expenseClientId: linkedInvoice?.expenseClientId?.toString() || '',
+          expenseClientId: (linkedInvoice?.expenseClientId ?? defaultExpenseClientId)?.toString() || '',
           clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
@@ -455,7 +457,7 @@ export function PaymentModal({
 
       prevOpenRef.current = true;
     }
-  }, [defaultClientCaseId, defaultClientId, isOpen, linkedInvoice, type]);
+  }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, isOpen, linkedInvoice, type]);
 
   useEffect(() => {
     if (!isOpen) return;

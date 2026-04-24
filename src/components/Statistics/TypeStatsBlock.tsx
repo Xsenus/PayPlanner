@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { TrendingUp, TrendingDown, Clock, AlertTriangle, Wallet, Banknote } from 'lucide-react';
 import { StatsCards, type StatCardItem } from './StatCardItem';
 import { useSummaryStats } from '../../hooks/useSummaryStats';
-import type { PeriodKey, Payment, SummaryStatus } from '../../types';
+import type { ClientRole, PeriodKey, Payment, SummaryStatus } from '../../types';
 import { formatCurrencySmart } from '../../utils/formatters';
 
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
@@ -15,6 +15,7 @@ type Props = {
   to?: string;
   period?: PeriodKey;
   statusFilter?: StatusFilter;
+  clientRole?: ClientRole;
   search?: string;
   reloadToken?: number;
   rawPayments?: Payment[];
@@ -68,11 +69,21 @@ function matchesSearch(p: Payment, q: string): boolean {
 function aggregateFromPayments(
   payments: Payment[],
   kind: 'Income' | 'Expense',
-  opts: { clientId?: number; caseId?: number; statusFilter?: StatusFilter; search?: string },
+  opts: { clientId?: number; caseId?: number; clientRole?: ClientRole; statusFilter?: StatusFilter; search?: string },
 ) {
   const filtered = payments.filter((p) => {
     if (p.type !== kind) return false;
-    if (opts.clientId && p.clientId !== opts.clientId) return false;
+    if (opts.clientId) {
+      if (opts.clientRole === 'counterparty' && p.clientId !== opts.clientId) return false;
+      if (opts.clientRole === 'expenseClient' && p.expenseClientId !== opts.clientId) return false;
+      if (!opts.clientRole) {
+        const belongsToClient =
+          (p.type === 'Income' && p.clientId === opts.clientId) ||
+          (p.type === 'Expense' &&
+            (p.expenseClientId === opts.clientId || (!p.expenseClientId && p.clientId === opts.clientId)));
+        if (!belongsToClient) return false;
+      }
+    }
     if (opts.caseId && p.clientCaseId !== opts.caseId) return false;
     if (opts.statusFilter && opts.statusFilter !== 'All' && p.status !== opts.statusFilter)
       return false;
@@ -112,6 +123,7 @@ export function TypeStatsBlock({
   to,
   period,
   statusFilter,
+  clientRole,
   search,
   reloadToken,
   rawPayments,
@@ -129,6 +141,7 @@ export function TypeStatsBlock({
     period,
     type: kind,
     status: apiStatus,
+    clientRole,
     q: search && search.trim() ? search.trim() : undefined,
     reloadToken,
   });
@@ -139,10 +152,11 @@ export function TypeStatsBlock({
       aggregateFromPayments(rawPayments ?? [], kind, {
         clientId,
         caseId,
+        clientRole,
         statusFilter,
         search,
       }),
-    [rawPayments, kind, clientId, caseId, statusFilter, search],
+    [rawPayments, kind, clientId, caseId, clientRole, statusFilter, search],
   );
 
   const useFallback =

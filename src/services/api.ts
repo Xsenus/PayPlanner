@@ -637,6 +637,7 @@ type InvoicesSortKey =
   | 'dueDate'
   | 'status'
   | 'client'
+  | 'counterparty'
   | 'responsible'
   | 'createdAt';
 
@@ -1129,6 +1130,7 @@ export class ApiService {
     status?: PaymentStatus;
     clientId?: number;
     clientIds?: string;
+    clientRole?: InvoiceClientRole;
     contractId?: number;
     caseId?: number;
     responsibleId?: number;
@@ -1156,6 +1158,7 @@ export class ApiService {
     to?: string;
     status?: PaymentStatus;
     clientId?: number;
+    clientRole?: InvoiceClientRole;
     caseId?: number;
     responsibleId?: number;
     search?: string;
@@ -1262,6 +1265,10 @@ export class ApiService {
     status?: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
     search?: string;
     type?: 'Income' | 'Expense';
+    clientId?: number;
+    clientIds?: string;
+    clientRole?: ClientRole;
+    payablesOnly?: boolean;
     sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';
     sortDir?: SortDir;
     page?: number;
@@ -1273,6 +1280,18 @@ export class ApiService {
       pageSize: params?.pageSize ?? 20,
     });
     return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(`/accounts/registry${q}`);
+  }
+
+  async getPayablesDashboard(params?: {
+    from?: string;
+    to?: string;
+    search?: string;
+    clientId?: number;
+    clientIds?: string;
+    clientRole?: ClientRole;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PayablesDashboard>(`/accounts/payables-dashboard${q}`);
   }
 
   async downloadInvoiceDocument(
@@ -1373,10 +1392,11 @@ export class ApiService {
     to?: string;
     clientId?: number;
     caseId?: number;
+    clientRole?: ClientRole;
     excludeInstallmentParents?: boolean;
   }): Promise<Payment[]>;
   async getPayments(
-    a?: string | { from?: string; to?: string; clientId?: number; caseId?: number; excludeInstallmentParents?: boolean },
+    a?: string | { from?: string; to?: string; clientId?: number; caseId?: number; clientRole?: ClientRole; excludeInstallmentParents?: boolean },
     b?: string,
     c?: number,
   ): Promise<Payment[]> {
@@ -1387,6 +1407,7 @@ export class ApiService {
         to: a?.to,
         clientId: a?.clientId,
         caseId: a?.caseId,
+        clientRole: a?.clientRole,
         excludeInstallmentParents: a?.excludeInstallmentParents,
       });
     } else {
@@ -1428,6 +1449,7 @@ export class ApiService {
     to?: string;
     clientId?: number;
     caseId?: number;
+    clientRole?: ClientRole;
     search?: string;
     sortBy?: 'date' | 'amount' | 'createdAt';
     sortDir?: SortDir;
@@ -1444,6 +1466,7 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     clientIds?: string;
+    clientRole?: ClientRole;
     excludeInvoiceDocuments?: boolean;
     categoryTokens?: string;
     type?: PaymentKind;
@@ -1474,14 +1497,23 @@ export class ApiService {
   }
 
   async getClientStats(id: number): Promise<ClientStats>;
-  async getClientStats(id: number, params?: { caseId?: number }): Promise<ClientStats>;
-  async getClientStats(id: number, params?: { caseId?: number }) {
-    const q = buildQuery({ caseId: params?.caseId });
+  async getClientStats(id: number, params?: { caseId?: number; clientRole?: ClientRole }): Promise<ClientStats>;
+  async getClientStats(id: number, params?: { caseId?: number; clientRole?: ClientRole }) {
+    const q = buildQuery({ caseId: params?.caseId, clientRole: params?.clientRole });
     return this.request<ClientStats>(`/clients/${id}/stats${q}`);
   }
 
-  async getClientCaseFinanceSummaries(id: number) {
-    return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries`);
+  async getClientCaseFinanceSummaries(id: number, params?: { clientRole?: ClientRole }) {
+    const q = buildQuery(params ?? {});
+    return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries${q}`);
+  }
+
+  async getClientCaseExpenseDetails(
+    id: number,
+    params?: { caseId?: number; clientRole?: ClientRole },
+  ) {
+    const q = buildQuery(params ?? {});
+    return this.request<ClientCaseExpenseDetail[]>(`/clients/${id}/case-expense-details${q}`);
   }
 
   async createClient(client: ClientInput) {
@@ -2034,6 +2066,7 @@ export class ApiService {
     period?: PeriodKey;
     type?: 'Income' | 'Expense';
     status?: SummaryStatus;
+    clientRole?: ClientRole;
     q?: string;
     r?: number;
   }) {
@@ -2050,6 +2083,7 @@ export class ApiService {
       period?: PeriodKey;
       type?: 'Income' | 'Expense';
       status?: SummaryStatus;
+      clientRole?: ClientRole;
       q?: string;
     },
   ) {
@@ -2066,6 +2100,7 @@ export class ApiService {
       period?: PeriodKey;
       type?: 'Income' | 'Expense';
       status?: SummaryStatus;
+      clientRole?: ClientRole;
       q?: string;
     },
   ) {
@@ -2188,6 +2223,7 @@ export const apiService = new ApiService();
 import type {
   AccountRegistryRow,
   AccountsSummary,
+  PayablesDashboard,
   Act,
   ActInput,
   ActResponsible,
@@ -2195,16 +2231,19 @@ import type {
   ActsSummary,
   Contract,
   ContractInput,
+  ClientRole,
   Payment,
   PaymentKind,
   PaymentPayload,
   Invoice,
+  InvoiceClientRole,
   InvoiceInput,
   InvoiceSummary,
   PaymentStatus,
   Client,
   ClientInput,
   ClientCaseFinanceSummary,
+  ClientCaseExpenseDetail,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntityDadataDetails,

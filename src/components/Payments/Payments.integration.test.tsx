@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Payment } from '../../types';
 import { Payments } from './Payments';
 
+const { usePaymentsPagedMock } = vi.hoisted(() => ({
+  usePaymentsPagedMock: vi.fn(),
+}));
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -77,7 +81,7 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/usePaymentsPaged', () => ({
-  usePaymentsPaged: () => paymentsPagedResult,
+  usePaymentsPaged: (params: unknown) => usePaymentsPagedMock(params),
 }));
 
 vi.mock('../../hooks/useDebouncedValue', () => ({
@@ -154,6 +158,8 @@ import { apiService } from '../../services/api';
 describe('Payments integration', () => {
   beforeEach(() => {
     vi.mocked(apiService.getPayment).mockReset();
+    usePaymentsPagedMock.mockReset();
+    usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];
     paymentsPagedResult.total = 0;
   });
@@ -189,6 +195,20 @@ describe('Payments integration', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('payments-edit-modal').textContent).toContain('551');
+    });
+  });
+
+  it('passes the selected client role into the paged payments query', async () => {
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Показать фильтры/i }));
+    fireEvent.change(screen.getByLabelText('Роль клиента'), {
+      target: { value: 'expenseClient' },
+    });
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toMatchObject({ clientRole: 'expenseClient' });
     });
   });
 

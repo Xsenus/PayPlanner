@@ -4,6 +4,7 @@ import type {
   Client,
   ClientStats,
   ClientCase,
+  ClientRole,
   LegalEntitySummary,
   ClientInput,
   ClientStatus,
@@ -192,7 +193,7 @@ export function useClients(options?: ClientsListOptions) {
   };
 }
 
-export function useClientStats(clientId: number, caseId?: number) {
+export function useClientStats(clientId: number, caseId?: number, clientRole?: ClientRole) {
   const [stats, setStats] = useState<ClientStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +202,10 @@ export function useClientStats(clientId: number, caseId?: number) {
     const fetchStats = async () => {
       try {
         setLoading(true);
-        const data = await apiService.getClientStats(clientId, caseId ? { caseId } : undefined);
+        const data = await apiService.getClientStats(clientId, {
+          caseId,
+          clientRole,
+        });
         setStats(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch client statistics');
@@ -211,14 +215,17 @@ export function useClientStats(clientId: number, caseId?: number) {
     };
 
     if (clientId) void fetchStats();
-  }, [clientId, caseId]);
+  }, [clientId, caseId, clientRole]);
 
   return {
     stats,
     loading,
     error,
     refresh: async () => {
-      const data = await apiService.getClientStats(clientId, caseId ? { caseId } : undefined);
+      const data = await apiService.getClientStats(clientId, {
+        caseId,
+        clientRole,
+      });
       setStats(data);
     },
   };

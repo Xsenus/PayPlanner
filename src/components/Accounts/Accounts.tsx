@@ -23,7 +23,9 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useAccountsRegistry } from '../../hooks/useAccountsRegistry';
+import { usePayablesDashboard } from '../../hooks/usePayablesDashboard';
 import { useTableSelection } from '../../hooks/useTableSelection';
+import { useClients } from '../../hooks/useClients';
 import type {
   AccountRegistryRow,
   Act,
@@ -31,6 +33,7 @@ import type {
   ActInput,
   ActResponsible,
   Client,
+  ClientRole,
   Invoice,
   InvoiceInput,
   Payment,
@@ -78,6 +81,7 @@ interface AccountsProps {
 
 type FilterType = PaymentKind | 'All';
 type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+type ClientRoleFilter = ClientRole | 'all';
 type ColumnKey =
   | 'date'
   | 'number'
@@ -344,6 +348,7 @@ export function Accounts({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
+  const { clients: accountClients } = useClients();
 
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
@@ -356,6 +361,9 @@ export function Accounts({
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
+  const [payablesOnly, setPayablesOnly] = useState(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -391,6 +399,10 @@ export function Accounts({
   const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
   const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
+  const selectedClientIdNumber = useMemo(() => {
+    const value = Number(selectedClientId);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }, [selectedClientId]);
 
   const {
     columnOrder,
@@ -436,10 +448,27 @@ export function Accounts({
     status: statusFilter,
     search: debouncedSearch || undefined,
     type: typeFilter,
+    clientId: selectedClientIdNumber,
+    clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
+    payablesOnly,
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
     pageSize,
+  });
+
+  const {
+    data: payablesDashboard,
+    loading: payablesDashboardLoading,
+    error: payablesDashboardError,
+    refresh: refreshPayablesDashboard,
+  } = usePayablesDashboard({
+    from: periodRange.from || undefined,
+    to: periodRange.to || undefined,
+    search: debouncedSearch || undefined,
+    clientId: selectedClientIdNumber,
+    clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
+    enabled: payablesOnly,
   });
 
   const totalPages = useMemo(
@@ -449,7 +478,17 @@ export function Accounts({
 
   useEffect(() => {
     setPage(1);
-  }, [periodRange.from, periodRange.to, statusFilter, debouncedSearch, typeFilter, pageSize]);
+  }, [
+    periodRange.from,
+    periodRange.to,
+    statusFilter,
+    debouncedSearch,
+    typeFilter,
+    selectedClientIdNumber,
+    clientRoleFilter,
+    payablesOnly,
+    pageSize,
+  ]);
 
   useEffect(() => {
     setTypeFilter(baseTypeFilter);
@@ -533,14 +572,18 @@ export function Accounts({
   const canOpenClientFromAccounts = useMemo(() => typeof onOpenClient === 'function', [onOpenClient]);
 
   const headingTitle =
-    typeFilter === 'Expense'
+    payablesOnly
+      ? 'Кредиторка'
+      : typeFilter === 'Expense'
       ? t('invoiceExpenseTitle') ?? 'Расходные счета'
       : typeFilter === 'Income'
         ? t('invoiceIncomeTitle') ?? t('invoicesTitle') ?? 'Доходные счета'
         : t('invoiceAllTitle') ?? t('accounts') ?? 'Все счета';
 
   const headingDescription =
-    typeFilter === 'Expense'
+    payablesOnly
+      ? 'Расходные счета, которые еще нужно оплатить поставщикам.'
+      : typeFilter === 'Expense'
       ? t('invoiceSectionDescriptionExpense') ??
         'Учитывайте входящие счета от поставщиков и контролируйте их оплату.'
       : typeFilter === 'Income'
@@ -558,6 +601,8 @@ export function Accounts({
   const hasCustomStatusFilter = statusFilter !== 'all';
   const hasCustomSearch = search.trim().length > 0;
   const hasCustomTypeFilter = typeFilter !== baseTypeFilter;
+  const hasCustomClientFilter = Boolean(selectedClientIdNumber);
+  const hasCustomClientRoleFilter = clientRoleFilter !== 'all';
   const activeFilterBadges = useMemo(() => {
     const badges: string[] = [];
 
@@ -570,6 +615,18 @@ export function Accounts({
     if (hasCustomTypeFilter) {
       badges.push(`Тип: ${typeFilterLabels[typeFilter]}`);
     }
+    if (hasCustomClientFilter) {
+      const selectedClient = accountClients.find((client) => client.id === selectedClientIdNumber);
+      badges.push(`Клиент: ${selectedClient?.name ?? `#${selectedClientIdNumber}`}`);
+    }
+    if (hasCustomClientRoleFilter) {
+      badges.push(
+        `Роль: ${clientRoleFilter === 'counterparty' ? 'Контрагент / поставщик' : 'Клиент расхода'}`,
+      );
+    }
+    if (payablesOnly) {
+      badges.push('Кредиторка');
+    }
     if (hasCustomSearch) {
       badges.push(`Поиск: ${search.trim()}`);
     }
@@ -580,8 +637,14 @@ export function Accounts({
     hasCustomSearch,
     hasCustomStatusFilter,
     hasCustomTypeFilter,
+    hasCustomClientFilter,
+    hasCustomClientRoleFilter,
     period,
+    accountClients,
     accountStatusLabels,
+    clientRoleFilter,
+    payablesOnly,
+    selectedClientIdNumber,
     statusFilter,
     search,
     typeFilter,
@@ -1013,6 +1076,9 @@ export function Accounts({
     setPeriod(defaultPeriod);
     setStatusFilter('all');
     setTypeFilter(baseTypeFilter);
+    setSelectedClientId('');
+    setClientRoleFilter('all');
+    setPayablesOnly(false);
     setSearch('');
     setPage(1);
   };
@@ -1812,7 +1878,10 @@ export function Accounts({
                       <button
                         key={option}
                         type="button"
-                        onClick={() => setTypeFilter(option)}
+                        onClick={() => {
+                          setTypeFilter(option);
+                          setPayablesOnly(false);
+                        }}
                         className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
                           isActive ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-gray-600 hover:bg-gray-100'
                         }`}
@@ -1868,6 +1937,37 @@ export function Accounts({
                     <option value="cancelled">{accountStatusLabels.cancelled}</option>
                   </select>
                 </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-gray-700">Клиент / поставщик</span>
+                  <select
+                    value={selectedClientId}
+                    onChange={(event) => setSelectedClientId(event.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="">Все контрагенты</option>
+                    {accountClients
+                      .filter((client) => client.id && client.name)
+                      .slice()
+                      .sort((left, right) => (left.name ?? '').localeCompare(right.name ?? '', 'ru'))
+                      .map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-gray-700">Роль клиента</span>
+                  <select
+                    value={clientRoleFilter}
+                    onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="all">Любая связь</option>
+                    <option value="counterparty">Контрагент / поставщик</option>
+                    <option value="expenseClient">Клиент расхода</option>
+                  </select>
+                </label>
               </div>
 
               <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -1885,6 +1985,25 @@ export function Accounts({
                 <div className="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
                   <button
                     type="button"
+                    onClick={() => {
+                      const next = !payablesOnly;
+                      setPayablesOnly(next);
+                      if (next) {
+                        setTypeFilter('Expense');
+                        setStatusFilter('all');
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      payablesOnly
+                        ? 'border-rose-200 bg-rose-50 text-rose-700'
+                        : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <WalletCards className="h-4 w-4" />
+                    Кредиторка
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleResetFilters}
                     className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
                   >
@@ -1893,7 +2012,12 @@ export function Accounts({
                   </button>
                   <button
                     type="button"
-                    onClick={() => void refreshAccounts()}
+                    onClick={() => {
+                      void refreshAccounts();
+                      if (payablesOnly) {
+                        void refreshPayablesDashboard();
+                      }
+                    }}
                     className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
                   >
                     {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
@@ -1941,6 +2065,137 @@ export function Accounts({
             </div>
           </div>
         </div>
+
+        {payablesOnly ? (
+          <div className="mb-6 rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">
+                  Доска кредиторки
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Открытые расходные обязательства по поставщикам и срокам оплаты.
+                </p>
+              </div>
+              {payablesDashboardLoading ? (
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Загрузка
+                </span>
+              ) : null}
+            </div>
+
+            {payablesDashboardError ? (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {payablesDashboardError}
+              </div>
+            ) : (
+              <>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase text-slate-500">Всего к оплате</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {formatCurrencySmart(payablesDashboard?.totalOutstanding ?? 0).full}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {payablesDashboard?.paymentCount ?? 0} платежей
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
+                    <p className="text-xs uppercase text-rose-600">Просрочено</p>
+                    <p className="mt-1 text-lg font-semibold text-rose-700">
+                      {formatCurrencySmart(payablesDashboard?.overdueOutstanding ?? 0).full}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                    <p className="text-xs uppercase text-amber-700">Ближайшие 7 дней</p>
+                    <p className="mt-1 text-lg font-semibold text-amber-700">
+                      {formatCurrencySmart(payablesDashboard?.upcomingOutstanding ?? 0).full}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                    <p className="text-xs uppercase text-blue-700">Поставщики</p>
+                    <p className="mt-1 text-lg font-semibold text-blue-700">
+                      {payablesDashboard?.supplierCount ?? 0}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+                  <div className="rounded-xl border border-slate-200">
+                    <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+                      Сроки оплаты
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {(payablesDashboard?.dueBuckets ?? []).map((bucket) => (
+                        <div
+                          key={bucket.key}
+                          className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                        >
+                          <div>
+                            <p className="font-medium text-slate-800">{bucket.label}</p>
+                            <p className="text-xs text-slate-500">{bucket.count} платежей</p>
+                          </div>
+                          <p className="font-semibold text-slate-900">
+                            {formatCurrencySmart(bucket.amount).full}
+                          </p>
+                        </div>
+                      ))}
+                      {(payablesDashboard?.dueBuckets ?? []).length === 0 ? (
+                        <div className="px-4 py-6 text-center text-sm text-slate-500">
+                          Нет открытой кредиторки за выбранный период.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200">
+                    <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+                      Поставщики с долгом
+                    </div>
+                    <div className="max-h-80 divide-y divide-slate-100 overflow-auto">
+                      {(payablesDashboard?.suppliers ?? []).slice(0, 8).map((supplier) => (
+                        <div key={`${supplier.supplierId ?? 'none'}:${supplier.supplierName}`} className="px-4 py-3 text-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium text-slate-800">
+                                {supplier.supplierName}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {supplier.paymentCount} платежей
+                                {supplier.caseCount > 0 ? `, дел: ${supplier.caseCount}` : ''}
+                              </p>
+                              {supplier.nearestDueDate ? (
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Ближайший срок: {formatDate(supplier.nearestDueDate)}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-slate-900">
+                                {formatCurrencySmart(supplier.totalOutstanding).full}
+                              </p>
+                              {supplier.overdueOutstanding > 0 ? (
+                                <p className="mt-1 text-xs font-medium text-rose-700">
+                                  Просрочено {formatCurrencySmart(supplier.overdueOutstanding).full}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {(payablesDashboard?.suppliers ?? []).length === 0 ? (
+                        <div className="px-4 py-6 text-center text-sm text-slate-500">
+                          Поставщики с открытым долгом не найдены.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
 
         {columnsOpen ? (
           <div className="mb-6">

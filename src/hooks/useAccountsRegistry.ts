@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { AccountRegistryRow, AccountsSummary } from '../types';
+import type { AccountRegistryRow, AccountsSummary, ClientRole } from '../types';
 
 type AccountRegistryStatus = AccountRegistryRow['status'];
 type AccountRegistryType = AccountRegistryRow['type'];
@@ -12,6 +12,10 @@ type UseAccountsRegistryParams = {
   status?: AccountRegistryStatus | 'all';
   search?: string;
   type?: AccountRegistryType | 'All';
+  clientId?: number;
+  clientIds?: string;
+  clientRole?: ClientRole;
+  payablesOnly?: boolean;
   sortBy?: AccountRegistrySortBy;
   sortDir?: 'asc' | 'desc';
   page: number;
@@ -43,12 +47,30 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
       status: params.status && params.status !== 'all' ? params.status : undefined,
       search: params.search,
       type: params.type && params.type !== 'All' ? params.type : undefined,
+      clientId: params.clientId,
+      clientIds: params.clientIds,
+      clientRole: params.clientRole,
+      payablesOnly: params.payablesOnly || undefined,
       sortBy: params.sortBy,
       sortDir: params.sortDir,
       page: params.page,
       pageSize: params.pageSize,
     }),
-    [params.from, params.page, params.pageSize, params.search, params.sortBy, params.sortDir, params.status, params.to, params.type],
+    [
+      params.clientId,
+      params.clientIds,
+      params.clientRole,
+      params.from,
+      params.page,
+      params.pageSize,
+      params.payablesOnly,
+      params.search,
+      params.sortBy,
+      params.sortDir,
+      params.status,
+      params.to,
+      params.type,
+    ],
   );
 
   const fetchPage = useCallback(

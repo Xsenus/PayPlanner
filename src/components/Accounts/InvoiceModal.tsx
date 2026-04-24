@@ -206,6 +206,7 @@ interface InvoiceModalProps {
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
+  defaultExpenseClientId?: number;
   defaultResponsibleId?: number;
   defaultType?: PaymentKind;
   lockType?: boolean;
@@ -228,6 +229,7 @@ function normalizeInvoiceToForm(
   defaultClientId?: number,
   defaultResponsibleId?: number,
   defaultType?: PaymentKind,
+  defaultExpenseClientId?: number,
 ): FormState {
   const today = formatLocalYMD(new Date());
   const resolvedType: PaymentKind = defaultType ?? 'Income';
@@ -240,7 +242,7 @@ function normalizeInvoiceToForm(
       type: resolvedType,
       status: 'Pending',
       clientId: defaultClientId ? String(defaultClientId) : '',
-      expenseClientId: '',
+      expenseClientId: resolvedType === 'Expense' && defaultExpenseClientId ? String(defaultExpenseClientId) : '',
       contractId: '',
       clientCaseReference: '',
       description: '',
@@ -259,7 +261,11 @@ function normalizeInvoiceToForm(
     type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
-    expenseClientId: invoice.expenseClientId ? String(invoice.expenseClientId) : '',
+    expenseClientId: invoice.expenseClientId
+      ? String(invoice.expenseClientId)
+      : (invoice.type ?? resolvedType) === 'Expense' && defaultExpenseClientId
+        ? String(defaultExpenseClientId)
+        : '',
     contractId: invoice.contractId ? String(invoice.contractId) : '',
     clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
@@ -666,6 +672,7 @@ export function InvoiceModal({
   lookupsLoading,
   lookupsError,
   defaultClientId,
+  defaultExpenseClientId,
   defaultResponsibleId,
   defaultType,
   lockType = false,
@@ -689,7 +696,7 @@ export function InvoiceModal({
   };
   const isTypeLocked = lockType && mode === 'create';
   const [form, setForm] = useState<FormState>(() =>
-    normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType),
+    normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType, defaultExpenseClientId),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
@@ -1387,7 +1394,7 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (open) {
-      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType);
+      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType, defaultExpenseClientId);
       setForm(nextForm);
       setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
       setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
@@ -1410,7 +1417,7 @@ export function InvoiceModal({
       }
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
-  }, [defaultClientId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
+  }, [defaultClientId, defaultExpenseClientId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
 
   useEffect(() => {
     if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {

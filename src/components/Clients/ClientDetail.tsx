@@ -57,9 +57,11 @@ import type {
   ActStatus,
   Client,
   ClientCase,
+  ClientCaseExpenseDetail,
   ClientCaseFinanceSummary,
   ClientInput,
   ClientReferenceItem,
+  ClientRole,
   Contract,
   ContractClient,
   ContractInput,
@@ -146,6 +148,8 @@ type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 
 type NormalizedStatus = "completed" | "pending" | "overdue";
 type ClientCaseListStatus = "all" | "open" | "hold" | "closed";
+type InvoiceViewMode = "income" | "expenseClient" | "supplier";
+type PaymentViewMode = "default" | "expenseClient" | "supplier";
 
 type ClientDetailSection =
   | "profile"
@@ -167,6 +171,7 @@ type PaymentTableColumnKey =
 type InvoiceTableColumnKey =
   | "date"
   | "number"
+  | "counterparty"
   | "amount"
   | "status"
   | "dueDate"
@@ -238,11 +243,48 @@ const INVOICE_TABLE_COLUMNS: Array<{
 }> = [
   { key: "date", label: "Дата", defaultWidth: 140 },
   { key: "number", label: "Номер счета", defaultWidth: 240 },
+  { key: "counterparty", label: "Контрагент", defaultWidth: 260 },
   { key: "amount", label: "Сумма", defaultWidth: 160 },
   { key: "status", label: "Статус", defaultWidth: 170 },
   { key: "dueDate", label: "Срок оплаты", defaultWidth: 170 },
   { key: "responsible", label: "Ответственный", defaultWidth: 180 },
   { key: "createdAt", label: "Создан", defaultWidth: 150 },
+];
+
+const INVOICE_VIEW_OPTIONS: Array<{ key: InvoiceViewMode; label: string; description: string }> = [
+  {
+    key: "income",
+    label: "Доходные счета",
+    description: "Счета, выставленные этому клиенту",
+  },
+  {
+    key: "expenseClient",
+    label: "Расходы по делам",
+    description: "Счета поставщиков, отнесенные на дела этого клиента",
+  },
+  {
+    key: "supplier",
+    label: "Счета поставщика",
+    description: "Расходные счета, где эта карточка является поставщиком",
+  },
+];
+
+const PAYMENT_VIEW_OPTIONS: Array<{ key: PaymentViewMode; label: string; description: string }> = [
+  {
+    key: "default",
+    label: "Все связи",
+    description: "Доходы клиента и расходы, отнесенные на его дела",
+  },
+  {
+    key: "expenseClient",
+    label: "Расходы по делам",
+    description: "Расходные платежи, где эта карточка является клиентом расхода",
+  },
+  {
+    key: "supplier",
+    label: "Платежи поставщика",
+    description: "Расходные платежи, где эта карточка является поставщиком",
+  },
 ];
 
 const ACT_TABLE_COLUMNS: Array<{
@@ -1535,6 +1577,27 @@ export function ClientDetail({
     return extractDisplayErrorMessage(error, fallback, fieldLabels);
   };
 
+  const isSupplierCard = useMemo(() => {
+    const systemKey =
+      clientData?.clientStatus?.systemKey ??
+      clientStatuses.find((status) => status.id === clientData?.clientStatusId)?.systemKey ??
+      "";
+    if (["supplier", "creditor"].includes(systemKey.toLowerCase())) {
+      return true;
+    }
+
+    const statusName =
+      clientData?.clientStatus?.name ??
+      clientStatuses.find((status) => status.id === clientData?.clientStatusId)?.name ??
+      "";
+    return /поставщик|кредитор/i.test(statusName);
+  }, [
+    clientData?.clientStatus?.name,
+    clientData?.clientStatus?.systemKey,
+    clientData?.clientStatusId,
+    clientStatuses,
+  ]);
+
   const { cases: serverCases } = useClientCases(clientId);
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
@@ -1550,6 +1613,18 @@ export function ClientDetail({
   >({});
   const [caseFinanceLoading, setCaseFinanceLoading] = useState(false);
   const [caseFinanceError, setCaseFinanceError] = useState<string | null>(null);
+  const [expenseDetailsCase, setExpenseDetailsCase] = useState<{
+    id: number;
+    title: string;
+    clientName?: string | null;
+  } | null>(null);
+  const [expenseDetails, setExpenseDetails] = useState<
+    ClientCaseExpenseDetail[]
+  >([]);
+  const [expenseDetailsLoading, setExpenseDetailsLoading] = useState(false);
+  const [expenseDetailsError, setExpenseDetailsError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     void (async () => {
@@ -1570,9 +1645,21 @@ export function ClientDetail({
 
   const [monthFrom, setMonthFrom] = useState<string>("");
   const [monthTo, setMonthTo] = useState<string>("");
+  const defaultPaymentViewMode: PaymentViewMode = isSupplierCard
+    ? "supplier"
+    : "default";
+  const defaultInvoiceViewMode: InvoiceViewMode = isSupplierCard
+    ? "supplier"
+    : "income";
+  const [paymentViewMode, setPaymentViewMode] =
+    useState<PaymentViewMode>("default");
+  const [paymentViewModeTouched, setPaymentViewModeTouched] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | NormalizedStatus>(
     "all",
   );
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<
+    "all" | Payment["type"]
+  >("all");
   const [paymentSearch, setPaymentSearch] = useState("");
   const debouncedPaymentSearch = useDebouncedValue(paymentSearch.trim(), 400);
   const [paymentPage, setPaymentPage] = useState(1);
@@ -1668,6 +1755,9 @@ export function ClientDetail({
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<
     "all" | PaymentStatus
   >("all");
+  const [invoiceViewMode, setInvoiceViewMode] =
+    useState<InvoiceViewMode>("income");
+  const [invoiceViewModeTouched, setInvoiceViewModeTouched] = useState(false);
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
   const [invoiceSort, setInvoiceSort] = useState<{
@@ -1697,7 +1787,7 @@ export function ClientDetail({
     getColumnWidth: getInvoiceColumnWidth,
     resetTableSettings: resetInvoiceTableSettings,
   } = usePersistedTableSettings<InvoiceTableColumnKey>({
-    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? "guest"}.v1`,
+    storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? "guest"}.v2`,
     settingsKey: "client_detail_invoices_table",
     columns: INVOICE_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
@@ -1706,6 +1796,29 @@ export function ClientDetail({
     defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
     minColumnWidth: 120,
   });
+
+  useEffect(() => {
+    setPaymentViewMode(defaultPaymentViewMode);
+    setPaymentViewModeTouched(false);
+    setInvoiceViewMode(defaultInvoiceViewMode);
+    setInvoiceViewModeTouched(false);
+    setPaymentPage(1);
+    setInvoicePage(1);
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!paymentViewModeTouched) {
+      setPaymentViewMode(defaultPaymentViewMode);
+      setPaymentPage(1);
+    }
+  }, [defaultPaymentViewMode, paymentViewModeTouched]);
+
+  useEffect(() => {
+    if (!invoiceViewModeTouched) {
+      setInvoiceViewMode(defaultInvoiceViewMode);
+      setInvoicePage(1);
+    }
+  }, [defaultInvoiceViewMode, invoiceViewModeTouched]);
 
   const [contractPeriod, setContractPeriod] = useState<PeriodFilter>({
     mode: "preset",
@@ -1879,6 +1992,17 @@ export function ClientDetail({
     actPageSize,
   ]);
 
+  const invoiceViewConfig = useMemo(() => {
+    const type = invoiceViewMode === "income" ? "Income" : "Expense";
+    const clientRole =
+      invoiceViewMode === "expenseClient" ? "expenseClient" : "counterparty";
+    const selected =
+      INVOICE_VIEW_OPTIONS.find((option) => option.key === invoiceViewMode) ??
+      INVOICE_VIEW_OPTIONS[0];
+
+    return { ...selected, type, clientRole } as const;
+  }, [invoiceViewMode]);
+
   const {
     invoices: clientInvoices,
     loading: invoicesLoading,
@@ -1895,8 +2019,9 @@ export function ClientDetail({
     to: resolvedInvoicePeriod.to,
     status: invoiceStatusFilter === "all" ? undefined : invoiceStatusFilter,
     clientId,
+    clientRole: invoiceViewConfig.clientRole,
     search: debouncedInvoiceSearch || undefined,
-    type: "Income",
+    type: invoiceViewConfig.type,
     sortBy: invoiceSort.key,
     sortDir: invoiceSort.direction,
     page: invoicePage,
@@ -1907,6 +2032,7 @@ export function ClientDetail({
     setInvoicePage(1);
   }, [
     clientId,
+    invoiceViewMode,
     invoicePageSize,
     resolvedInvoicePeriod.from,
     resolvedInvoicePeriod.to,
@@ -2127,6 +2253,9 @@ export function ClientDetail({
     setMonthFrom("");
     setMonthTo("");
     setStatusFilter("all");
+    setPaymentTypeFilter("all");
+    setPaymentViewMode(defaultPaymentViewMode);
+    setPaymentViewModeTouched(false);
     setSelectedCaseId("all");
     setPaymentSearch("");
     setPaymentPage(1);
@@ -2135,6 +2264,8 @@ export function ClientDetail({
   const resetInvoiceFilters = () => {
     setInvoicePeriod({ mode: "custom" });
     setInvoiceStatusFilter("all");
+    setInvoiceViewMode(defaultInvoiceViewMode);
+    setInvoiceViewModeTouched(false);
     setInvoiceSearch("");
     setInvoicePage(1);
   };
@@ -2418,11 +2549,13 @@ export function ClientDetail({
   );
 
   useEffect(() => {
-    if (activeSection !== "cases") {
+    const needsSupplierCaseFilters =
+      isSupplierCard && activeSection === "payments";
+    if (activeSection !== "cases" && !needsSupplierCaseFilters) {
       return;
     }
 
-    if (!caseIdsKey) {
+    if (!caseIdsKey && !isSupplierCard) {
       setCaseFinanceSummaries({});
       setCaseFinanceError(null);
       return;
@@ -2433,7 +2566,10 @@ export function ClientDetail({
     setCaseFinanceError(null);
 
     apiService
-      .getClientCaseFinanceSummaries(clientId)
+      .getClientCaseFinanceSummaries(
+        clientId,
+        isSupplierCard ? { clientRole: "counterparty" } : undefined,
+      )
       .then((items) => {
         if (!alive) return;
         setCaseFinanceSummaries(
@@ -2457,7 +2593,7 @@ export function ClientDetail({
     return () => {
       alive = false;
     };
-  }, [activeSection, caseIdsKey, clientId, statsReloadToken]);
+  }, [activeSection, caseIdsKey, clientId, isSupplierCard, statsReloadToken]);
 
   const showPermissionWarning = useCallback(
     (message: string) => {
@@ -2627,6 +2763,72 @@ export function ClientDetail({
       return matchesSearch && matchesStatus;
     });
   }, [caseSearch, caseStatusFilter, cases]);
+  const supplierCaseSummaries = useMemo(
+    () =>
+      Object.values(caseFinanceSummaries)
+        .filter((item) => item.caseId > 0 && (item.expenseCount > 0 || item.expenseTotal > 0))
+        .sort((left, right) => {
+          const leftDate = left.caseCreatedAt ? new Date(left.caseCreatedAt).getTime() : 0;
+          const rightDate = right.caseCreatedAt ? new Date(right.caseCreatedAt).getTime() : 0;
+          return rightDate - leftDate || right.caseId - left.caseId;
+        }),
+    [caseFinanceSummaries],
+  );
+  const filteredSupplierCaseSummaries = useMemo(() => {
+    const query = caseSearch.trim().toLowerCase();
+    return supplierCaseSummaries.filter((item) => {
+      const matchesSearch =
+        query.length === 0 ||
+        item.caseTitle?.toLowerCase().includes(query) ||
+        item.clientName?.toLowerCase().includes(query);
+      const normalizedStatus = normalizeCaseStatusFilter(item.caseStatus ?? "");
+      const matchesStatus =
+        caseStatusFilter === "all" || normalizedStatus === caseStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [caseSearch, caseStatusFilter, supplierCaseSummaries]);
+  const selectedSupplierCaseForPayment = useMemo(
+    () =>
+      selectedCaseId === "all"
+        ? null
+        : supplierCaseSummaries.find((item) => item.caseId === selectedCaseId) ??
+          null,
+    [selectedCaseId, supplierCaseSummaries],
+  );
+  const supplierPaymentCasesPrefetch = useMemo<ClientCase[]>(() => {
+    if (!selectedSupplierCaseForPayment?.clientId) {
+      return cases;
+    }
+
+    return [
+      {
+        id: selectedSupplierCaseForPayment.caseId,
+        clientId: selectedSupplierCaseForPayment.clientId,
+        title:
+          selectedSupplierCaseForPayment.caseTitle ||
+          `Дело #${selectedSupplierCaseForPayment.caseId}`,
+        description: "",
+        status: selectedSupplierCaseForPayment.caseStatus || "Open",
+        createdAt:
+          selectedSupplierCaseForPayment.caseCreatedAt ||
+          new Date().toISOString(),
+      },
+    ];
+  }, [cases, selectedSupplierCaseForPayment]);
+  const paymentModalDefaultExpenseClientId =
+    paymentViewMode === "expenseClient"
+      ? clientId
+      : paymentViewMode === "supplier"
+        ? selectedSupplierCaseForPayment?.clientId
+        : undefined;
+  const paymentModalCasesPrefetch =
+    paymentViewMode === "supplier" ? supplierPaymentCasesPrefetch : cases;
+  const caseCardsAvailable = isSupplierCard
+    ? supplierCaseSummaries.length > 0
+    : cases.length > 0;
+  const caseCardsCount = isSupplierCard
+    ? supplierCaseSummaries.length
+    : cases.length;
 
   const { fromDateStr, toDateStr } = useMemo(() => {
     if (monthFrom && monthTo) {
@@ -2643,6 +2845,26 @@ export function ClientDetail({
     return { fromDateStr: MIN_DATE, toDateStr: MAX_DATE };
   }, [monthFrom, monthTo]);
 
+  const paymentViewConfig = useMemo(() => {
+    const selected =
+      PAYMENT_VIEW_OPTIONS.find((option) => option.key === paymentViewMode) ??
+      PAYMENT_VIEW_OPTIONS[0];
+    const clientRole: ClientRole | undefined =
+      paymentViewMode === "supplier"
+        ? "counterparty"
+        : paymentViewMode === "expenseClient"
+          ? "expenseClient"
+          : undefined;
+    const type =
+      paymentViewMode === "default"
+        ? paymentTypeFilter === "all"
+          ? undefined
+          : paymentTypeFilter
+        : "Expense";
+
+    return { ...selected, clientRole, type } as const;
+  }, [paymentTypeFilter, paymentViewMode]);
+
   const {
     payments,
     total: paymentsTotal,
@@ -2653,7 +2875,9 @@ export function ClientDetail({
     from: fromDateStr,
     to: toDateStr,
     clientId,
+    clientRole: paymentViewConfig.clientRole,
     caseId: caseIdForQuery,
+    type: paymentViewConfig.type,
     status: toPaymentStatusFilter(statusFilter),
     search: debouncedPaymentSearch || undefined,
     sortBy: "date",
@@ -2794,6 +3018,9 @@ export function ClientDetail({
 
   const paymentFilterBadges = useMemo(() => {
     const badges: string[] = [];
+    if (paymentViewMode !== defaultPaymentViewMode) {
+      badges.push(`Вид: ${paymentViewConfig.label}`);
+    }
     const monthLabel = formatMonthFilterLabel(monthFrom, monthTo);
     if (monthLabel) {
       badges.push(`Период: ${monthLabel}`);
@@ -2806,22 +3033,46 @@ export function ClientDetail({
       };
       badges.push(`Статус: ${statusLabels[statusFilter]}`);
     }
+    if (paymentViewMode === "default" && paymentTypeFilter !== "all") {
+      badges.push(
+        `Тип: ${paymentTypeFilter === "Income" ? "Доходы" : "Расходы"}`,
+      );
+    }
     if (selectedCaseId !== "all") {
       const selectedCase = cases.find(
         (caseItem) => caseItem.id === selectedCaseId,
       );
-      if (selectedCase?.title) {
-        badges.push(`Дело: ${selectedCase.title}`);
+      const selectedSupplierCase = supplierCaseSummaries.find(
+        (caseItem) => caseItem.caseId === selectedCaseId,
+      );
+      const caseTitle = selectedCase?.title ?? selectedSupplierCase?.caseTitle;
+      if (caseTitle) {
+        badges.push(`Дело: ${caseTitle}`);
       }
     }
     if (paymentSearch.trim()) {
       badges.push(`Поиск: ${paymentSearch.trim()}`);
     }
     return badges;
-  }, [cases, monthFrom, monthTo, paymentSearch, selectedCaseId, statusFilter]);
+  }, [
+    cases,
+    defaultPaymentViewMode,
+    monthFrom,
+    monthTo,
+    paymentSearch,
+    paymentTypeFilter,
+    paymentViewConfig.label,
+    paymentViewMode,
+    selectedCaseId,
+    statusFilter,
+    supplierCaseSummaries,
+  ]);
 
   const invoiceFilterBadges = useMemo(() => {
     const badges: string[] = [];
+    if (invoiceViewMode !== defaultInvoiceViewMode) {
+      badges.push(`Вид: ${invoiceViewConfig.label}`);
+    }
     const periodLabel = formatPeriodLabel(invoicePeriod, today, "");
     if (periodLabel) {
       badges.push(`Период: ${periodLabel}`);
@@ -2838,6 +3089,9 @@ export function ClientDetail({
     invoiceSearch,
     invoiceStatusFilter,
     invoiceStatusLabels,
+    invoiceViewConfig.label,
+    invoiceViewMode,
+    defaultInvoiceViewMode,
     today,
   ]);
 
@@ -2887,6 +3141,8 @@ export function ClientDetail({
     caseIdForQuery,
     fromDateStr,
     paymentPageSize,
+    paymentTypeFilter,
+    paymentViewMode,
     statusFilter,
     toDateStr,
     debouncedPaymentSearch,
@@ -3450,11 +3706,72 @@ export function ClientDetail({
     setCaseModalOpen(true);
   };
 
-  const openPaymentsForCase = (caseId: number) => {
+  const openPaymentsForCase = (caseId: number, type?: Payment["type"]) => {
     setSelectedCaseId(caseId);
+    setPaymentTypeFilter(type ?? "all");
+    setPaymentViewMode(type === "Expense" ? "expenseClient" : "default");
+    setPaymentViewModeTouched(true);
     setPaymentPage(1);
     setActiveSection("payments");
   };
+  const openSupplierPaymentsForCase = (caseId: number) => {
+    setSelectedCaseId(caseId);
+    setPaymentTypeFilter("Expense");
+    setPaymentViewMode("supplier");
+    setPaymentViewModeTouched(true);
+    setPaymentPage(1);
+    setActiveSection("payments");
+  };
+  const openExpenseDetailsForCase = useCallback(
+    async (caseId: number) => {
+      const supplierCase = supplierCaseSummaries.find(
+        (item) => item.caseId === caseId,
+      );
+      const clientCase = cases.find((item) => item.id === caseId);
+
+      setExpenseDetailsCase({
+        id: caseId,
+        title:
+          supplierCase?.caseTitle ||
+          clientCase?.title ||
+          `Дело #${caseId}`,
+        clientName: supplierCase?.clientName ?? clientData?.name ?? null,
+      });
+      setExpenseDetails([]);
+      setExpenseDetailsError(null);
+      setExpenseDetailsLoading(true);
+
+      try {
+        const rows = await apiService.getClientCaseExpenseDetails(clientId, {
+          caseId,
+          clientRole: isSupplierCard ? "counterparty" : "expenseClient",
+        });
+        setExpenseDetails(rows ?? []);
+      } catch (error) {
+        setExpenseDetailsError(
+          extractDisplayErrorMessage(
+            error,
+            "Не удалось загрузить расшифровку расходов по делу",
+          ),
+        );
+      } finally {
+        setExpenseDetailsLoading(false);
+      }
+    },
+    [cases, clientData?.name, clientId, isSupplierCard, supplierCaseSummaries],
+  );
+  const expenseDetailsTotals = useMemo(
+    () =>
+      expenseDetails.reduce(
+        (acc, item) => ({
+          amount: acc.amount + (item.amount ?? 0),
+          paid: acc.paid + (item.paidAmount ?? 0),
+          outstanding: acc.outstanding + (item.outstandingAmount ?? 0),
+        }),
+        { amount: 0, paid: 0, outstanding: 0 },
+      ),
+    [expenseDetails],
+  );
 
   const blankCaseDraft = useMemo<ClientCase>(
     () => ({
@@ -5780,6 +6097,7 @@ export function ClientDetail({
               from={fromDateStr}
               to={toDateStr}
               statusFilter={toStatsStatusFilter(statusFilter)}
+              clientRole={paymentViewConfig.clientRole}
               search={debouncedPaymentSearch || undefined}
               reloadToken={statsReloadToken}
               storageKey={`pp.client-detail.stats_panels.${user?.id ?? "guest"}`}
@@ -5803,6 +6121,25 @@ export function ClientDetail({
 
                 <div className="relative w-full sm:w-56">
                   <select
+                    aria-label="Вид платежей клиента"
+                    value={paymentViewMode}
+                    onChange={(event) => {
+                      setPaymentViewMode(event.target.value as PaymentViewMode);
+                      setPaymentViewModeTouched(true);
+                      setPaymentPage(1);
+                    }}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                    {PAYMENT_VIEW_OPTIONS.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="relative w-full sm:w-56">
+                  <select
                     aria-label="Статус платежей клиента"
                     value={statusFilter}
                     onChange={(e) =>
@@ -5816,6 +6153,24 @@ export function ClientDetail({
                     <option value="pending">Ожидается</option>
                     <option value="completed">Выполнено</option>
                     <option value="overdue">Просрочено</option>
+                  </select>
+                </div>
+
+                <div className="relative w-full sm:w-48">
+                  <select
+                    aria-label="Тип платежей клиента"
+                    value={paymentTypeFilter}
+                    onChange={(event) =>
+                      setPaymentTypeFilter(
+                        event.target.value as "all" | Payment["type"],
+                      )
+                    }
+                    disabled={paymentViewMode !== "default"}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                    <option value="all">Все типы</option>
+                    <option value="Income">Доходы</option>
+                    <option value="Expense">Расходы</option>
                   </select>
                 </div>
 
@@ -5846,9 +6201,29 @@ export function ClientDetail({
                     Все дела
                   </button>
 
-                  {cases.map((k) => {
-                    const active = selectedCaseId === k.id;
-                    const s = (k.status ?? "").toLowerCase();
+                  {(isSupplierCard ? supplierCaseSummaries : cases).map((k) => {
+                    if (isSupplierCard) {
+                      const item = k as ClientCaseFinanceSummary;
+                      const active = selectedCaseId === item.caseId;
+                      return (
+                        <button
+                          key={item.caseId}
+                          type="button"
+                          onClick={() => setSelectedCaseId(item.caseId)}
+                          title={item.clientName ?? undefined}
+                          className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                            active
+                              ? "bg-slate-800 text-white border-slate-800 shadow-sm"
+                              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {item.caseTitle || `Дело #${item.caseId}`}
+                        </button>
+                      );
+                    }
+                    const caseItem = k as ClientCase;
+                    const active = selectedCaseId === caseItem.id;
+                    const s = (caseItem.status ?? "").toLowerCase();
                     const statusClasses = s.includes("open")
                       ? "bg-green-50 text-green-700 border-green-200"
                       : s.includes("hold")
@@ -5858,17 +6233,17 @@ export function ClientDetail({
                           : "bg-slate-50 text-slate-700 border-slate-200";
                     return (
                       <button
-                        key={k.id}
+                        key={caseItem.id}
                         type="button"
-                        onClick={() => setSelectedCaseId(k.id)}
-                        title={caseStatusLabel(k.status)}
+                        onClick={() => setSelectedCaseId(caseItem.id)}
+                        title={caseStatusLabel(caseItem.status)}
                         className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
                           active
                             ? "bg-slate-800 text-white border-slate-800 shadow-sm"
                             : `${statusClasses} hover:opacity-90`
                         }`}
                       >
-                        {k.title}
+                        {caseItem.title}
                       </button>
                     );
                   })}
@@ -6027,6 +6402,30 @@ export function ClientDetail({
                 invoiceFilterBadges.length > 0 ? resetInvoiceFilters : undefined
               }
             >
+              <ClientSectionFilterField
+                label="Вид"
+                className="w-full min-w-[260px] sm:w-72"
+              >
+                <select
+                  aria-label="Вид счетов в карточке"
+                  value={invoiceViewMode}
+                  onChange={(event) => {
+                    setInvoiceViewMode(event.target.value as InvoiceViewMode);
+                    setInvoiceViewModeTouched(true);
+                    setInvoicePage(1);
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+                  {INVOICE_VIEW_OPTIONS.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  {invoiceViewConfig.description}
+                </p>
+              </ClientSectionFilterField>
               <DatePeriodPicker
                 label="Период"
                 value={invoicePeriod}
@@ -6139,17 +6538,20 @@ export function ClientDetail({
             <div className="p-6">
               {activeSection === "cases" ? (
                 <div className="space-y-4">
-                  {cases.length === 0 ? (
+                  {!caseCardsAvailable ? (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
                       <FileCheck2 className="mx-auto mb-3 h-10 w-10 text-slate-300" />
                       <h3 className="text-lg font-semibold text-slate-900">
-                        Дела пока не добавлены
+                        {isSupplierCard
+                          ? "Расходы по клиентским делам пока не привязаны"
+                          : "Дела пока не добавлены"}
                       </h3>
                       <p className="mt-2 text-sm text-slate-500">
-                        Создайте первое дело, чтобы связывать с ним платежи,
-                        счета, акты и договоры клиента.
+                        {isSupplierCard
+                          ? "Когда расходный счет или платеж поставщика будет связан с делом клиента, он появится здесь."
+                          : "Создайте первое дело, чтобы связывать с ним платежи, счета, акты и договоры клиента."}
                       </p>
-                      {clientPermissions.canCreate ? (
+                      {clientPermissions.canCreate && !isSupplierCard ? (
                         <button
                           type="button"
                           onClick={openAddCase}
@@ -6164,12 +6566,12 @@ export function ClientDetail({
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4">
                         <div>
                           <p className="text-sm font-semibold text-emerald-900">
-                            Всего дел: {cases.length}
+                            {isSupplierCard ? "Клиентских дел у поставщика" : "Всего дел"}: {caseCardsCount}
                           </p>
                           <p className="mt-1 text-sm text-emerald-700">
-                            Здесь собраны дела клиента. Финансовая сводка
-                            помогает видеть доходы, расходы и долги по каждому
-                            делу.
+                            {isSupplierCard
+                              ? "Здесь собраны клиентские дела, по которым есть расходы в пользу этого поставщика."
+                              : "Здесь собраны дела клиента. Финансовая сводка помогает видеть доходы, расходы и долги по каждому делу."}
                           </p>
                           {caseFinanceError ? (
                             <p className="mt-2 text-xs font-medium text-rose-700">
@@ -6228,7 +6630,85 @@ export function ClientDetail({
                       </ClientSectionFilterPanel>
 
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {filteredCases.map((caseItem) => {
+                        {isSupplierCard
+                          ? filteredSupplierCaseSummaries.map((finance) => {
+                              const statusClass = "bg-slate-50 text-slate-700 border-slate-200";
+                              return (
+                                <article
+                                  key={finance.caseId}
+                                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-colors hover:border-emerald-200 hover:shadow-md"
+                                >
+                                  <div className="flex h-full flex-col gap-4">
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <h3 className="truncate text-base font-semibold text-slate-900">
+                                          {finance.caseTitle || `Дело #${finance.caseId}`}
+                                        </h3>
+                                        <span
+                                          className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}
+                                        >
+                                          {caseStatusLabel(finance.caseStatus)}
+                                        </span>
+                                      </div>
+                                      <p className="mt-2 text-sm text-slate-500">
+                                        Клиент: {finance.clientName || (finance.clientId ? `#${finance.clientId}` : "не указан")}
+                                      </p>
+                                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                        <span>
+                                          Создано: {finance.caseCreatedAt ? toRuDate(finance.caseCreatedAt) : "—"}
+                                        </span>
+                                        <span>Расходов: {finance.expenseCount}</span>
+                                      </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                      <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div>
+                                          <p className="text-slate-500">Начислено</p>
+                                          <p className="mt-1 font-semibold text-rose-700">
+                                            {formatCurrencySmart(finance.expenseTotal).full}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-slate-500">Оплачено</p>
+                                          <p className="mt-1 font-semibold text-emerald-700">
+                                            {formatCurrencySmart(finance.expensePaid).full}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-slate-500">Остаток</p>
+                                          <p className="mt-1 font-semibold text-amber-700">
+                                            {formatCurrencySmart(finance.expenseOutstanding).full}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-slate-500">Платежей</p>
+                                          <p className="mt-1 font-semibold text-slate-700">
+                                            {finance.expenseCount}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="mt-auto flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => void openExpenseDetailsForCase(finance.caseId)}
+                                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-medium text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50"
+                                      >
+                                        <FileCheck2 size={16} /> Расшифровка
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openSupplierPaymentsForCase(finance.caseId)}
+                                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                                      >
+                                        <WalletCards size={16} /> Платежи поставщика
+                                      </button>
+                                    </div>
+                                  </div>
+                                </article>
+                              );
+                            })
+                          : filteredCases.map((caseItem) => {
                           const statusValue = (
                             caseItem.status ?? ""
                           ).toLowerCase();
@@ -6280,7 +6760,16 @@ export function ClientDetail({
                                 <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                                   {finance ? (
                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                      <div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          openPaymentsForCase(
+                                            caseItem.id,
+                                            "Income",
+                                          )
+                                        }
+                                        className="rounded-lg p-2 text-left transition hover:bg-white hover:shadow-sm"
+                                      >
                                         <p className="text-slate-500">Доходы</p>
                                         <p className="mt-1 font-semibold text-emerald-700">
                                           {
@@ -6289,8 +6778,16 @@ export function ClientDetail({
                                             ).full
                                           }
                                         </p>
-                                      </div>
-                                      <div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          void openExpenseDetailsForCase(
+                                            caseItem.id,
+                                          )
+                                        }
+                                        className="rounded-lg p-2 text-left transition hover:bg-white hover:shadow-sm"
+                                      >
                                         <p className="text-slate-500">
                                           Расходы
                                         </p>
@@ -6301,7 +6798,7 @@ export function ClientDetail({
                                             ).full
                                           }
                                         </p>
-                                      </div>
+                                      </button>
                                       <div>
                                         <p className="text-slate-500">Маржа</p>
                                         <p
@@ -7138,6 +7635,37 @@ export function ClientDetail({
                                             </div>
                                           ))}
                                         </>
+                                      );
+                                    })()
+                                  ) : column.key === "counterparty" ? (
+                                    (() => {
+                                      const supplierName =
+                                        invoice.clientName ||
+                                        invoice.clientCompany ||
+                                        "—";
+                                      const expenseClientName =
+                                        invoice.expenseClientName ||
+                                        invoice.expenseClientCompany ||
+                                        "";
+
+                                      return (
+                                        <div className="space-y-1">
+                                          <div className="font-medium text-gray-900">
+                                            {supplierName}
+                                          </div>
+                                          <div className="text-xs text-gray-500">
+                                            {invoice.type === "Expense"
+                                              ? "Поставщик"
+                                              : "Клиент"}
+                                          </div>
+                                          {invoice.type === "Expense" &&
+                                          expenseClientName ? (
+                                            <div className="text-xs text-gray-500">
+                                              Клиент расхода:{" "}
+                                              {expenseClientName}
+                                            </div>
+                                          ) : null}
+                                        </div>
                                       );
                                     })()
                                   ) : column.key === "amount" ? (
@@ -8128,6 +8656,165 @@ export function ClientDetail({
           </div>
         )}
 
+        {expenseDetailsCase ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="case-expense-details-title"
+              className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+                <div>
+                  <h2
+                    id="case-expense-details-title"
+                    className="text-lg font-semibold text-slate-900"
+                  >
+                    Расшифровка расходов: {expenseDetailsCase.title}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {expenseDetailsCase.clientName
+                      ? `Клиент: ${expenseDetailsCase.clientName}`
+                      : "Расходы по выбранному делу"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpenseDetailsCase(null);
+                    setExpenseDetails([]);
+                    setExpenseDetailsError(null);
+                  }}
+                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Закрыть
+                </button>
+              </div>
+
+              <div className="grid gap-3 border-b border-slate-100 bg-slate-50 px-5 py-4 sm:grid-cols-3">
+                <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs uppercase text-slate-500">Начислено</p>
+                  <p className="mt-1 text-base font-semibold text-rose-700">
+                    {formatCurrencySmart(expenseDetailsTotals.amount).full}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs uppercase text-slate-500">Оплачено</p>
+                  <p className="mt-1 text-base font-semibold text-emerald-700">
+                    {formatCurrencySmart(expenseDetailsTotals.paid).full}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs uppercase text-slate-500">Остаток</p>
+                  <p className="mt-1 text-base font-semibold text-amber-700">
+                    {formatCurrencySmart(expenseDetailsTotals.outstanding).full}
+                  </p>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {expenseDetailsLoading ? (
+                  <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Загрузка расходов...
+                  </div>
+                ) : expenseDetailsError ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {expenseDetailsError}
+                  </div>
+                ) : expenseDetails.length === 0 ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                    По этому делу пока нет расходных строк.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-3 py-3 text-left">Дата</th>
+                          <th className="px-3 py-3 text-left">Поставщик</th>
+                          <th className="px-3 py-3 text-left">Счет</th>
+                          <th className="px-3 py-3 text-left">Позиция</th>
+                          <th className="px-3 py-3 text-right">Сумма</th>
+                          <th className="px-3 py-3 text-right">Оплачено</th>
+                          <th className="px-3 py-3 text-right">Остаток</th>
+                          <th className="px-3 py-3 text-left">Статус</th>
+                          <th className="px-3 py-3 text-left">Документ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {expenseDetails.map((detail) => {
+                          const lineName =
+                            detail.lineItemName ||
+                            detail.serviceName ||
+                            detail.description ||
+                            "-";
+                          const documentMeta = [
+                            detail.paymentOrderNumber,
+                            detail.paymentDocumentDate
+                              ? toRuDate(detail.paymentDocumentDate)
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" от ");
+
+                          return (
+                            <tr
+                              key={`${detail.paymentId}:${detail.lineItemId ?? "payment"}`}
+                              className="align-top"
+                            >
+                              <td className="px-3 py-3 text-slate-600">
+                                {toRuDate(detail.plannedDate)}
+                              </td>
+                              <td className="px-3 py-3 font-medium text-slate-800">
+                                {detail.supplierName || "-"}
+                              </td>
+                              <td className="px-3 py-3 text-slate-600">
+                                <div className="font-medium text-slate-800">
+                                  {detail.invoiceNumber || "-"}
+                                </div>
+                                {detail.invoiceDate ? (
+                                  <div className="text-xs text-slate-500">
+                                    {toRuDate(detail.invoiceDate)}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                <div>{lineName}</div>
+                                {detail.quantity || detail.price ? (
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {detail.quantity ?? 1} {detail.unit ?? "шт."} x{" "}
+                                    {formatCurrencySmart(detail.price ?? detail.amount).short}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-rose-700">
+                                {formatCurrencySmart(detail.amount).full}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-emerald-700">
+                                {formatCurrencySmart(detail.paidAmount).full}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-amber-700">
+                                {formatCurrencySmart(detail.outstandingAmount).full}
+                              </td>
+                              <td className="px-3 py-3 text-slate-600">
+                                {invoiceStatusLabels[detail.status] ?? detail.status}
+                              </td>
+                              <td className="px-3 py-3 text-slate-600">
+                                {documentMeta || "-"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <InvoiceModal
           open={invoiceModalOpen}
           mode={invoiceModalMode}
@@ -8140,7 +8827,13 @@ export function ClientDetail({
           responsibles={actResponsibles}
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
-          defaultClientId={clientId}
+          defaultClientId={
+            invoiceViewMode === "expenseClient" ? undefined : clientId
+          }
+          defaultExpenseClientId={
+            invoiceViewMode === "expenseClient" ? clientId : undefined
+          }
+          defaultType={invoiceViewConfig.type}
           defaultResponsibleId={clientData?.responsibleUserId ?? user?.id}
           relatedPayments={invoiceModalRelatedPayments}
           paymentsLoading={invoiceModalPaymentsLoading}
@@ -8219,12 +8912,15 @@ export function ClientDetail({
                 }
               : undefined
           }
-          type={editingPayment?.type ?? "Income"}
-          defaultClientId={clientId}
+          type={editingPayment?.type ?? paymentViewConfig.type ?? "Income"}
+          defaultClientId={
+            paymentViewMode === "expenseClient" ? undefined : clientId
+          }
+          defaultExpenseClientId={paymentModalDefaultExpenseClientId}
           defaultClientCaseId={
             selectedCaseId === "all" ? undefined : Number(selectedCaseId)
           }
-          casesPrefetch={cases}
+          casesPrefetch={paymentModalCasesPrefetch}
         />
 
         {caseModalOpen && (

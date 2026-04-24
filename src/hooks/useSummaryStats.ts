@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiService } from '../services/api';
-import type { SummaryStats, PeriodKey, SummaryStatus } from '../types';
+import type { ClientRole, SummaryStats, PeriodKey, SummaryStatus } from '../types';
 
 export function useSummaryStats(params: {
   clientId?: number;
@@ -10,10 +10,11 @@ export function useSummaryStats(params: {
   period?: PeriodKey;
   type?: 'Income' | 'Expense';
   status?: SummaryStatus;
+  clientRole?: ClientRole;
   q?: string;
   reloadToken?: number;
 }) {
-  const { clientId, caseId, from, to, period, type, status, q, reloadToken } = params;
+  const { clientId, caseId, from, to, period, type, status, clientRole, q, reloadToken } = params;
 
   const [data, setData] = useState<SummaryStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,6 +32,7 @@ export function useSummaryStats(params: {
         period,
         type,
         status,
+        clientRole,
         q,
         r: typeof reloadToken === 'number' ? reloadToken : undefined, // ← cache-buster
       });
@@ -40,7 +42,7 @@ export function useSummaryStats(params: {
     } finally {
       setLoading(false);
     }
-  }, [clientId, caseId, from, to, period, type, status, q, reloadToken]);
+  }, [clientId, caseId, from, to, period, type, status, clientRole, q, reloadToken]);
 
   useEffect(() => {
     void fetch();

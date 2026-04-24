@@ -21,6 +21,7 @@ const {
   toastErrorMock,
   toastSuccessMock,
   toastWarningMock,
+  paymentModalPropsSpy,
   twoTypeStatsMock,
   useActsMock,
   useClientCasesMock,
@@ -83,6 +84,7 @@ const {
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   toastWarningMock: vi.fn(),
+  paymentModalPropsSpy: vi.fn(),
   twoTypeStatsMock: vi.fn(),
   useActsMock: vi.fn(),
   useClientCasesMock: vi.fn(),
@@ -275,6 +277,7 @@ vi.mock('../../services/api', () => ({
     deleteClient: vi.fn(),
     getClientPowersOfAttorney: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
+    getClientCaseExpenseDetails: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
     updateClientPowerOfAttorney: vi.fn(),
     deleteClientPowerOfAttorney: vi.fn(),
@@ -299,7 +302,10 @@ vi.mock('../../utils/clientInvoiceModalApi', () => ({
 }));
 
 vi.mock('../Calendar/PaymentModal', () => ({
-  PaymentModal: () => null,
+  PaymentModal: (props: unknown) => {
+    paymentModalPropsSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('../Acts/ActModal', () => ({
@@ -459,6 +465,7 @@ describe('ClientDetail integration', () => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     toastWarningMock.mockReset();
+    paymentModalPropsSpy.mockReset();
     twoTypeStatsMock.mockReset();
     useClientCasesMock.mockReset();
     useActsMock.mockReset();
@@ -476,6 +483,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.updateClient).mockResolvedValue(createClient());
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
+    vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([]);
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
@@ -772,6 +780,228 @@ describe('ClientDetail integration', () => {
           status: 'Overdue',
         }),
       );
+    });
+  });
+
+  it('passes payment client role to payments and stats hooks', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await user.selectOptions(await screen.findByLabelText('Вид платежей клиента'), 'expenseClient');
+
+    await waitFor(() => {
+      const lastQuery = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastQuery).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          clientRole: 'expenseClient',
+          type: 'Expense',
+        }),
+      );
+
+      const statsCall = twoTypeStatsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(statsCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          clientRole: 'expenseClient',
+        }),
+      );
+    });
+  });
+
+  it('defaults supplier cards to supplier payments and supplier invoices', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue({
+      ...createClient(),
+      clientStatusId: 8,
+      clientStatus: {
+        id: 8,
+        name: 'Поставщик',
+        description: '',
+        colorHex: '#7C3AED',
+        isActive: true,
+        systemKey: 'supplier',
+      },
+    } as Client);
+
+    const { unmount } = render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await waitFor(() => {
+      const lastPaymentQuery = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastPaymentQuery).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          clientRole: 'counterparty',
+          type: 'Expense',
+        }),
+      );
+
+      const statsCall = twoTypeStatsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(statsCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          clientRole: 'counterparty',
+        }),
+      );
+    });
+
+    unmount();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    await waitFor(() => {
+      const lastInvoiceQuery = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastInvoiceQuery).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          clientRole: 'counterparty',
+          type: 'Expense',
+        }),
+      );
+    });
+  });
+
+  it('opens a case expense breakdown from the client case card', async () => {
+    const user = userEvent.setup();
+
+    useClientCasesMock.mockReturnValue({
+      cases: [
+        {
+          id: 22,
+          clientId: 1,
+          title: 'Дело по взысканию',
+          description: '',
+          status: 'Open',
+          createdAt: '2026-04-10T10:00:00Z',
+        },
+      ],
+    });
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([
+      {
+        caseId: 22,
+        incomeTotal: 0,
+        incomePaid: 0,
+        incomeOutstanding: 0,
+        incomeCount: 0,
+        expenseTotal: 5_000,
+        expensePaid: 2_000,
+        expenseOutstanding: 3_000,
+        expenseCount: 1,
+        plannedMargin: -5_000,
+        paidMargin: -2_000,
+        outstandingBalance: 3_000,
+      },
+    ]);
+    vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([
+      {
+        paymentId: 101,
+        invoiceId: 44,
+        invoiceNumber: 'EXP-44',
+        invoiceDate: '2026-04-20',
+        paymentDate: '2026-04-21',
+        plannedDate: '2026-04-25',
+        supplierId: 7,
+        supplierName: 'Geo Supplier',
+        expenseClientId: 1,
+        expenseClientName: 'Matter Client',
+        caseId: 22,
+        caseTitle: 'Дело по взысканию',
+        lineItemId: 501,
+        lineItemName: 'Survey',
+        serviceId: null,
+        serviceName: null,
+        quantity: 1,
+        unit: 'шт',
+        price: 5_000,
+        amount: 5_000,
+        paidAmount: 2_000,
+        outstandingAmount: 3_000,
+        status: 'Pending',
+        paymentOrderNumber: 'PP-44',
+        paymentDocumentDate: '2026-04-22',
+        description: 'Survey',
+      },
+    ]);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+
+    const title = await screen.findByText('Дело по взысканию');
+    const card = title.closest('article') as HTMLElement;
+
+    await waitFor(() => {
+      expect(within(card).getByRole('button', { name: /Расходы/i })).toBeTruthy();
+    });
+
+    await user.click(within(card).getByRole('button', { name: /Расходы/i }));
+
+    await waitFor(() => {
+      expect(apiService.getClientCaseExpenseDetails).toHaveBeenCalledWith(1, {
+        caseId: 22,
+        clientRole: 'expenseClient',
+      });
+    });
+
+    expect(await screen.findByRole('dialog', { name: /Расшифровка расходов/i })).toBeTruthy();
+    expect(screen.getByText('Geo Supplier')).toBeTruthy();
+    expect(screen.getByText('EXP-44')).toBeTruthy();
+    expect(screen.getByText('Survey')).toBeTruthy();
+    expect(screen.getByText(/PP-44/)).toBeTruthy();
+  });
+
+  it('prefills expense client from selected supplier case when creating supplier payments', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(apiService.getClient).mockResolvedValue({
+      ...createClient(),
+      clientStatusId: 9,
+      clientStatus: {
+        id: 9,
+        name: 'External contractor',
+        description: '',
+        colorHex: '#7C3AED',
+        isActive: true,
+        systemKey: 'supplier',
+      },
+    } as Client);
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([
+      {
+        caseId: 22,
+        clientId: 55,
+        clientName: 'Matter Client',
+        caseTitle: 'Matter case',
+        caseStatus: 'Open',
+        caseCreatedAt: '2026-04-10T10:00:00Z',
+        incomeTotal: 0,
+        incomePaid: 0,
+        incomeOutstanding: 0,
+        incomeCount: 0,
+        expenseTotal: 5_000,
+        expensePaid: 2_000,
+        expenseOutstanding: 3_000,
+        expenseCount: 1,
+        plannedMargin: -5_000,
+        paidMargin: -2_000,
+        outstandingBalance: 3_000,
+      },
+    ]);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Matter case' }));
+
+    await waitFor(() => {
+      const props = paymentModalPropsSpy.mock.calls.at(-1)?.[0] as {
+        defaultClientId?: number;
+        defaultExpenseClientId?: number;
+        defaultClientCaseId?: number;
+        casesPrefetch?: Array<{ id: number; clientId: number }>;
+      };
+
+      expect(props.defaultClientId).toBe(1);
+      expect(props.defaultExpenseClientId).toBe(55);
+      expect(props.defaultClientCaseId).toBe(22);
+      expect(props.casesPrefetch).toEqual([
+        expect.objectContaining({ id: 22, clientId: 55 }),
+      ]);
     });
   });
 

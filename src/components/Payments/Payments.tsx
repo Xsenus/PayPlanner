@@ -9,7 +9,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { Payment, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientRole, Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -26,6 +26,7 @@ import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 type TypeFilter = 'all' | Payment['type'];
 
 type StatusFilter = 'all' | PaymentStatus;
+type ClientRoleFilter = 'all' | ClientRole;
 
 interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -226,6 +227,7 @@ export function Payments({
   const [fromDate, setFromDate] = useState(() => defaultFromDate());
   const [toDate, setToDate] = useState(() => defaultToDate());
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
@@ -299,6 +301,7 @@ export function Payments({
     from: fromInputToApiDate(fromDate),
     to: fromInputToApiDate(toDate),
     clientIds: selectedClients,
+    clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     categoryTokens: selectedCategories,
     type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
     status: statusFilter === 'all' ? undefined : statusFilter,
@@ -506,6 +509,7 @@ export function Payments({
         fromDate,
         toDate,
         selectedClients.join(','),
+        clientRoleFilter,
         selectedCategories.join(','),
         minAmount || '',
         maxAmount || '',
@@ -515,6 +519,7 @@ export function Payments({
       ].join('|'),
     [
       appliedTypeFilter,
+      clientRoleFilter,
       fromDate,
       maxAmount,
       minAmount,
@@ -602,6 +607,9 @@ export function Payments({
     if (selectedClients.length) {
       count += 1;
     }
+    if (clientRoleFilter !== 'all') {
+      count += 1;
+    }
     if (selectedCategories.length) {
       count += 1;
     }
@@ -622,6 +630,7 @@ export function Payments({
     }
     return count;
   }, [
+    clientRoleFilter,
     fromDate,
     lockType,
     maxAmount,
@@ -724,6 +733,7 @@ export function Payments({
     setFromDate(defaultFromDate());
     setToDate(defaultToDate());
     setSelectedClients([]);
+    setClientRoleFilter('all');
     setSelectedCategories([]);
     setMinAmount('');
     setMaxAmount('');
@@ -1066,6 +1076,22 @@ export function Payments({
                   onChange={(event) => handleToDateChange(event.target.value)}
                   className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
                 />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label htmlFor="payments-client-role-filter" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Роль клиента
+                </label>
+                <select
+                  id="payments-client-role-filter"
+                  value={clientRoleFilter}
+                  onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                >
+                  <option value="all">Любая связь</option>
+                  <option value="counterparty">Контрагент / поставщик</option>
+                  <option value="expenseClient">Клиент расхода</option>
+                </select>
               </div>
 
               <div className="flex flex-col gap-1 md:col-span-2">

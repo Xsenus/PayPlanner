@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Invoice, InvoiceInput, InvoiceSummary, PaymentKind, PaymentStatus } from '../types';
+import type { Invoice, InvoiceClientRole, InvoiceInput, InvoiceSummary, PaymentKind, PaymentStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type InvoicesSortKey =
@@ -10,6 +10,7 @@ export type InvoicesSortKey =
   | 'dueDate'
   | 'status'
   | 'client'
+  | 'counterparty'
   | 'responsible'
   | 'createdAt';
 
@@ -18,6 +19,7 @@ export interface InvoicesFilters {
   to?: string;
   status?: PaymentStatus;
   clientId?: number;
+  clientRole?: InvoiceClientRole;
   responsibleId?: number;
   search?: string;
   type?: PaymentKind;
@@ -53,6 +55,7 @@ function makeSummaryKey(filters: InvoicesFilters): string {
     to: filters.to ?? null,
     status: filters.status ?? null,
     clientId: filters.clientId ?? null,
+    clientRole: filters.clientRole ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
     type: filters.type ?? null,
@@ -93,6 +96,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           to: filters.to,
           status: filters.status,
           clientId: filters.clientId,
+          clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
           search: filters.search,
           type: filters.type,
@@ -128,6 +132,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.to,
       filters.status,
       filters.clientId,
+      filters.clientRole,
       filters.responsibleId,
       filters.search,
       filters.type,
@@ -150,6 +155,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           to: filters.to,
           status: filters.status,
           clientId: filters.clientId,
+          clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
           search: filters.search,
           type: filters.type,
@@ -171,6 +177,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.to,
       filters.status,
       filters.clientId,
+      filters.clientRole,
       filters.responsibleId,
       filters.search,
       filters.type,

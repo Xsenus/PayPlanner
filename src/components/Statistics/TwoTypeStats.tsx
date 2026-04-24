@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, TrendingDown, TrendingUp } from 'lucide-react';
-import type { PeriodKey, Payment } from '../../types';
+import type { ClientRole, PeriodKey, Payment } from '../../types';
 import { TypeStatsBlock } from './TypeStatsBlock';
 
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
@@ -14,6 +14,7 @@ type Props = {
   to?: string;
   period?: PeriodKey;
   statusFilter?: StatusFilter;
+  clientRole?: ClientRole;
   search?: string;
   reloadToken?: number;
   rawPayments?: Payment[];
@@ -104,6 +105,7 @@ export function TwoTypeStats({
   to,
   period,
   statusFilter,
+  clientRole,
   search,
   reloadToken,
   rawPayments,
@@ -189,6 +191,7 @@ export function TwoTypeStats({
               to={to}
               period={period}
               statusFilter={statusFilter}
+              clientRole={clientRole}
               search={search}
               reloadToken={reloadToken}
               rawPayments={rawPayments}
@@ -210,6 +213,7 @@ export function TwoTypeStats({
               to={to}
               period={period}
               statusFilter={statusFilter}
+              clientRole={clientRole}
               search={search}
               reloadToken={reloadToken}
               rawPayments={rawPayments}
@@ -234,6 +238,7 @@ export function TwoTypeStats({
             to={to}
             period={period}
             statusFilter={statusFilter}
+            clientRole={clientRole}
             search={search}
             reloadToken={reloadToken}
             rawPayments={rawPayments}
@@ -255,6 +260,7 @@ export function TwoTypeStats({
             to={to}
             period={period}
             statusFilter={statusFilter}
+            clientRole={clientRole}
             search={search}
             reloadToken={reloadToken}
             rawPayments={rawPayments}
