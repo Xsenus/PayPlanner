@@ -841,6 +841,8 @@ export interface Invoice {
   date: string;
   dueDate?: string | null;
   amount: number;
+  paidAmount?: number | null;
+  outstandingAmount?: number | null;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   isPaid: boolean;

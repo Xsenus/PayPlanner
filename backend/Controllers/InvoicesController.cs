@@ -169,31 +169,32 @@ public class InvoicesController : ControllerBase
         foreach (var row in items.Where(item => item.Status == PaymentStatus.Overdue && item.DueDate.HasValue))
         {
             var daysOverdue = Math.Max(0, (today - row.DueDate!.Value.Date).Days);
+            var outstandingAmount = ResolveOutstandingInvoiceSummaryAmount(row);
             if (daysOverdue <= 10)
             {
-                overdue0To10 += row.Amount;
+                overdue0To10 += outstandingAmount;
                 continue;
             }
 
             if (daysOverdue <= 30)
             {
-                overdue11To30 += row.Amount;
+                overdue11To30 += outstandingAmount;
                 continue;
             }
 
             if (daysOverdue <= 60)
             {
-                overdue31To60 += row.Amount;
+                overdue31To60 += outstandingAmount;
                 continue;
             }
 
             if (daysOverdue <= 90)
             {
-                overdue61To90 += row.Amount;
+                overdue61To90 += outstandingAmount;
                 continue;
             }
 
-            overdue91Plus += row.Amount;
+            overdue91Plus += outstandingAmount;
         }
 
         var includeCancelledInTotal = status == PaymentStatus.Cancelled;
@@ -201,7 +202,9 @@ public class InvoicesController : ControllerBase
         decimal totalAmount = totalItems.Sum(item => item.Amount);
         int totalCount = totalItems.Count;
 
-        var pendingItems = items.Where(item => item.Status == PaymentStatus.Pending).ToList();
+        var pendingItems = items
+            .Where(item => item.Status is PaymentStatus.Pending or PaymentStatus.Processing)
+            .ToList();
         var paidItems = items.Where(item => item.Status == PaymentStatus.Completed).ToList();
         var overdueItems = items.Where(item => item.Status == PaymentStatus.Overdue).ToList();
 
@@ -210,17 +213,17 @@ public class InvoicesController : ControllerBase
             Total = new InvoiceSummaryBucketDto { Amount = totalAmount, Count = totalCount },
             Pending = new InvoiceSummaryBucketDto
             {
-                Amount = pendingItems.Sum(item => item.Amount),
+                Amount = pendingItems.Sum(ResolveOutstandingInvoiceSummaryAmount),
                 Count = pendingItems.Count,
             },
             Paid = new InvoiceSummaryBucketDto
             {
-                Amount = paidItems.Sum(item => item.Amount),
+                Amount = paidItems.Sum(ResolvePaidInvoiceSummaryAmount),
                 Count = paidItems.Count,
             },
             Overdue = new InvoiceSummaryBucketDto
             {
-                Amount = overdueItems.Sum(item => item.Amount),
+                Amount = overdueItems.Sum(ResolveOutstandingInvoiceSummaryAmount),
                 Count = overdueItems.Count,
             },
             OverdueAging = new InvoiceOverdueAgingDto
@@ -2172,6 +2175,49 @@ public class InvoicesController : ControllerBase
         return PaymentStatus.Pending;
     }
 
+    private static decimal ResolvePaidAmount(Payment payment)
+        => ResolvePaidAmount(payment.Amount, payment.PaidAmount, payment.Status);
+
+    private static decimal ResolveOutstandingAmount(Payment payment)
+        => ResolveOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
+
+    private static decimal ResolvePaidAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+    {
+        var normalizedAmount = NormalizeMoneyAmount(amount);
+        var normalizedPaidAmount = Math.Min(NormalizeMoneyAmount(paidAmount), normalizedAmount);
+        if (normalizedPaidAmount > 0m)
+        {
+            return normalizedPaidAmount;
+        }
+
+        return status == PaymentStatus.Completed ? normalizedAmount : 0m;
+    }
+
+    private static decimal ResolveOutstandingAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+    {
+        if (status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return 0m;
+        }
+
+        var normalizedAmount = NormalizeMoneyAmount(amount);
+        var resolvedPaidAmount = ResolvePaidAmount(normalizedAmount, paidAmount, status);
+        return NormalizeMoneyAmount(Math.Max(normalizedAmount - resolvedPaidAmount, 0m));
+    }
+
+    private static decimal ResolveOutstandingInvoiceSummaryAmount(InvoiceDto invoice)
+        => invoice.OutstandingAmount > 0m
+            ? invoice.OutstandingAmount
+            : ResolveOutstandingAmount(invoice.Amount, invoice.PaidAmount, invoice.Status);
+
+    private static decimal ResolvePaidInvoiceSummaryAmount(InvoiceDto invoice)
+        => invoice.PaidAmount > 0m
+            ? invoice.PaidAmount
+            : ResolvePaidAmount(invoice.Amount, invoice.PaidAmount, invoice.Status);
+
+    private static decimal NormalizeMoneyAmount(decimal amount)
+        => Math.Round(Math.Max(amount, 0m), 2, MidpointRounding.AwayFromZero);
+
     private static DateTime EffectivePlannedDate(Payment payment)
         => payment.PlannedDate == default ? payment.Date : payment.PlannedDate;
 
@@ -2443,6 +2489,7 @@ public class InvoicesController : ControllerBase
         Date = x.Payment.Invoice != null ? x.Payment.Invoice.Date : (x.Payment.AccountDate ?? x.Payment.Date),
         DueDate = x.Payment.Date,
         Amount = x.Payment.Amount,
+        PaidAmount = x.Payment.PaidAmount,
         Type = x.Payment.Type,
         Status = x.Payment.Status,
         IsPaid = x.Payment.IsPaid,
@@ -2525,6 +2572,8 @@ public class InvoicesController : ControllerBase
             Date = raw.Date,
             DueDate = raw.DueDate,
             Amount = raw.Amount,
+            PaidAmount = ResolvePaidAmount(raw.Amount, raw.PaidAmount, raw.Status),
+            OutstandingAmount = ResolveOutstandingAmount(raw.Amount, raw.PaidAmount, raw.Status),
             Type = raw.Type,
             Status = raw.Status,
             IsPaid = raw.IsPaid,
@@ -2589,6 +2638,8 @@ public class InvoicesController : ControllerBase
         dto.Status = payment.Status;
         dto.IsPaid = payment.IsPaid;
         dto.PaidDate = payment.PaidDate;
+        dto.PaidAmount = ResolvePaidAmount(payment);
+        dto.OutstandingAmount = ResolveOutstandingAmount(payment);
     }
 
     private async Task<List<InvoiceDto>> QueryInvoiceDtosAsync(
@@ -2757,6 +2808,8 @@ public class InvoicesController : ControllerBase
             var statusSourcePayments = SelectStatusSourcePayments(relatedPayments, item.Id, item.Amount);
             if (statusSourcePayments.Count > 0)
             {
+                item.PaidAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolvePaidAmount));
+                item.OutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolveOutstandingAmount));
                 item.DueDate = statusSourcePayments
                     .Select(EffectivePlannedDate)
                     .Max();
@@ -4692,6 +4745,7 @@ public class InvoicesController : ControllerBase
         public DateTime Date { get; init; }
         public DateTime? DueDate { get; init; }
         public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
         public bool IsPaid { get; init; }

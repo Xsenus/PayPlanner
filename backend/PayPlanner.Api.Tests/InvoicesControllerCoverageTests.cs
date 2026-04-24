@@ -68,6 +68,89 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetSummary_IncludesProcessingInvoiceOutstandingAmountInPendingBucket()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Processing Summary Client");
+        var today = DateTime.UtcNow.Date;
+
+        await CreateInvoicePaymentAsync(
+            db,
+            "SUM-PROC-001",
+            clientId,
+            today.AddDays(5),
+            55_500m,
+            PaymentStatus.Processing,
+            PaymentType.Income,
+            paidAmount: 42_000m);
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var action = await controller.GetSummary(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Income,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceSummaryDto>(ok.Value);
+
+        Assert.Equal(1, summary.Total.Count);
+        Assert.Equal(55_500m, summary.Total.Amount);
+        Assert.Equal(1, summary.Pending.Count);
+        Assert.Equal(13_500m, summary.Pending.Amount);
+        Assert.Equal(0, summary.Paid.Count);
+        Assert.Equal(0, summary.Overdue.Count);
+    }
+
+    [Fact]
+    public async Task GetSummary_UsesOutstandingAmountForOverdueAging()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Overdue Outstanding Summary Client");
+        var today = DateTime.UtcNow.Date;
+
+        await CreateInvoicePaymentAsync(
+            db,
+            "SUM-OVD-001",
+            clientId,
+            today.AddDays(-20),
+            500m,
+            PaymentStatus.Overdue,
+            PaymentType.Income,
+            paidAmount: 200m);
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+
+        var action = await controller.GetSummary(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Income,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceSummaryDto>(ok.Value);
+
+        Assert.Equal(1, summary.Total.Count);
+        Assert.Equal(500m, summary.Total.Amount);
+        Assert.Equal(1, summary.Overdue.Count);
+        Assert.Equal(300m, summary.Overdue.Amount);
+        Assert.Equal(0m, summary.OverdueAging.Day0To10);
+        Assert.Equal(300m, summary.OverdueAging.Day11To30);
+        Assert.Equal(300m, summary.OverdueAging.Total);
+    }
+
+    [Fact]
     public async Task GetSummary_WhenFilteringAllStatuses_ExcludesCancelledInvoicesFromTotal()
     {
         await using var db = await CreateContextAsync();
@@ -1754,7 +1837,8 @@ public class InvoicesControllerCoverageTests
         decimal amount,
         PaymentStatus status,
         PaymentType type,
-        string? counterpartyName = null)
+        string? counterpartyName = null,
+        decimal? paidAmount = null)
     {
         var invoice = new Invoice
         {
@@ -1765,6 +1849,7 @@ public class InvoicesControllerCoverageTests
         db.Invoices.Add(invoice);
         await db.SaveChangesAsync();
 
+        var effectivePaidAmount = paidAmount ?? (status == PaymentStatus.Completed ? amount : 0m);
         var payment = new Payment
         {
             Account = invoiceNumber,
@@ -1779,9 +1864,9 @@ public class InvoicesControllerCoverageTests
             InvoiceId = invoice.Id,
             Status = status,
             Type = type,
-            PaidAmount = status == PaymentStatus.Completed ? amount : 0m,
-            PaidDate = status == PaymentStatus.Completed ? dueDate : null,
-            IsPaid = status == PaymentStatus.Completed,
+            PaidAmount = effectivePaidAmount,
+            PaidDate = effectivePaidAmount > 0m ? dueDate : null,
+            IsPaid = status == PaymentStatus.Completed && effectivePaidAmount >= amount,
         };
 
         db.Payments.Add(payment);

@@ -10,6 +10,8 @@ public class InvoiceDto
     public DateTime Date { get; set; }
     public DateTime? DueDate { get; set; }
     public decimal Amount { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal OutstandingAmount { get; set; }
     public PaymentType Type { get; set; }
     public PaymentStatus Status { get; set; }
     public bool IsPaid { get; set; }

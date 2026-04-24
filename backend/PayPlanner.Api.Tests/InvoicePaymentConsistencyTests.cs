@@ -279,6 +279,8 @@ public class InvoicePaymentConsistencyTests
         Assert.False(processingInvoice.IsPaid);
         Assert.Equal(new DateTime(2026, 4, 27), processingInvoice.DueDate);
         Assert.Equal(new DateTime(2026, 1, 30), processingInvoice.PaidDate);
+        Assert.Equal(36_000m, processingInvoice.PaidAmount);
+        Assert.Equal(18_000m, processingInvoice.OutstandingAmount);
 
         var pendingResult = await controller.Get(
             from: new DateTime(2025, 10, 1),
@@ -316,7 +318,8 @@ public class InvoicePaymentConsistencyTests
 
         Assert.Equal(1, summary.Total.Count);
         Assert.Equal(205_000m, summary.Total.Amount);
-        Assert.Equal(0, summary.Pending.Count);
+        Assert.Equal(1, summary.Pending.Count);
+        Assert.Equal(18_000m, summary.Pending.Amount);
         Assert.Equal(0, summary.Paid.Count);
         Assert.Equal(0, summary.Overdue.Count);
     }
