@@ -1211,6 +1211,7 @@ public class InvoicesController : ControllerBase
         var payments = await _db.Payments
             .Include(payment => payment.Invoice)
             .Include(payment => payment.InvoiceClientCases)
+            .Include(payment => payment.Responsibles)
             .Where(payment => payment.InvoiceId == invoiceEntityId)
             .OrderBy(payment => payment.Id)
             .ToListAsync(ct);
@@ -1234,6 +1235,8 @@ public class InvoicesController : ControllerBase
         var invoiceNumber = Normalize(representativeInvoice?.Number) ?? Normalize(representative?.Account) ?? string.Empty;
         var invoiceAmount = representative?.Amount ?? 0m;
         var childPaymentsTotal = childPayments.Sum(payment => payment.Amount);
+        var legacyAggregateDetected = representative is not null && IsLegacyBrokenInstallmentAggregate(payments);
+        var convertedLegacyAggregateDetected = representative is not null && IsConvertedLegacyInstallmentAggregate(payments, representative);
         var summary = new InvoiceLegacyInstallmentRepairSummaryDto
         {
             InvoiceEntityId = invoiceEntityId,
@@ -1245,10 +1248,30 @@ public class InvoicesController : ControllerBase
             ChildPaymentsTotal = childPaymentsTotal,
             RemainingUnscheduledAmount = Math.Max(invoiceAmount - childPaymentsTotal, 0m),
             DryRun = dryRun,
-            LegacyAggregateDetected = representative is not null && IsLegacyBrokenInstallmentAggregate(payments),
+            LegacyAggregateDetected = legacyAggregateDetected,
+            ConvertedLegacyAggregateDetected = convertedLegacyAggregateDetected,
         };
 
-        if (representative is null || !summary.LegacyAggregateDetected)
+        if (representative is not null && convertedLegacyAggregateDetected)
+        {
+            RepairConvertedLegacyInstallmentAggregate(
+                payments,
+                representative,
+                invoiceEntityId,
+                representativeInvoice,
+                summary,
+                dryRun);
+            if (dryRun)
+            {
+                _db.ChangeTracker.Clear();
+                return Ok(summary);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            return Ok(summary);
+        }
+
+        if (representative is null || !legacyAggregateDetected)
         {
             return Ok(summary);
         }
@@ -3799,6 +3822,271 @@ public class InvoicesController : ControllerBase
 
         payment.LegacyAccountNumber = normalizedNumber;
         payment.LegacyAccountDate = invoiceDate.Date;
+    }
+
+    private void RepairConvertedLegacyInstallmentAggregate(
+        IReadOnlyCollection<Payment> payments,
+        Payment representative,
+        int invoiceEntityId,
+        Invoice? representativeInvoice,
+        InvoiceLegacyInstallmentRepairSummaryDto summary,
+        bool dryRun)
+    {
+        var invoiceNumber = Normalize(representativeInvoice?.Number)
+            ?? Normalize(representative.Account)
+            ?? string.Empty;
+        var invoiceDate = representativeInvoice?.Date.Date
+            ?? representative.AccountDate?.Date
+            ?? representative.Date.Date;
+        var generatedInstallments = payments
+            .Where(payment => payment.Id != representative.Id
+                              && payment.DocumentKind != DocumentKind.Invoice
+                              && InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment))
+            .OrderBy(ResolveLegacyInstallmentDate)
+            .ThenBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .ToList();
+        var existingGeneratedTotal = generatedInstallments.Sum(payment => payment.Amount);
+        var effectiveClientId = representative.ClientId
+            ?? generatedInstallments.FirstOrDefault(payment => payment.ClientId.HasValue && payment.ClientId.Value > 0)?.ClientId;
+        var effectiveClientCaseId = representative.ClientCaseId is > 0
+            ? representative.ClientCaseId
+            : generatedInstallments.FirstOrDefault(payment => payment.ClientCaseId.HasValue && payment.ClientCaseId.Value > 0)?.ClientCaseId;
+
+        var missingPayment = CreateConvertedLegacyInstallmentPayment(
+            representative,
+            invoiceEntityId,
+            invoiceNumber,
+            invoiceDate,
+            effectiveClientId,
+            effectiveClientCaseId);
+        var resultingInstallments = generatedInstallments
+            .Append(missingPayment)
+            .OrderBy(ResolveLegacyInstallmentDate)
+            .ThenBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id == 0 ? int.MaxValue : payment.Id)
+            .ToList();
+        var resultingTotal = resultingInstallments.Sum(payment => payment.Amount);
+        var resultingPaid = resultingInstallments.Sum(payment => payment.PaidAmount);
+
+        summary.ChildPayments = generatedInstallments.Count;
+        summary.ChildPaymentsTotal = existingGeneratedTotal;
+        summary.MissingInstallmentAmount = representative.Amount;
+        summary.ResultingInvoiceAmount = resultingTotal;
+        summary.ResultingChildPaymentsTotal = resultingTotal;
+        summary.RemainingUnscheduledAmount = representative.Amount;
+        summary.CreatedPayments = 1;
+        summary.Actions.Add($"Создать платеж рассрочки на {representative.Amount:0.00} по строке счета #{representative.Id}.");
+
+        foreach (var payment in generatedInstallments)
+        {
+            if (NormalizeLegacyRepairPaymentLinks(
+                    payment,
+                    invoiceEntityId,
+                    invoiceNumber,
+                    invoiceDate,
+                    effectiveClientId,
+                    effectiveClientCaseId))
+            {
+                summary.NormalizedLinks++;
+            }
+        }
+
+        var installmentPlan = BuildLegacyRepairInstallmentPlan(resultingTotal, resultingInstallments);
+        for (var index = 0; index < resultingInstallments.Count; index++)
+        {
+            var payment = resultingInstallments[index];
+            var item = installmentPlan.Items[index];
+            var mergedSystemNotes = MergeInstallmentMetadataIntoSystemNotes(payment.SystemNotes, installmentPlan, item);
+            if (!string.Equals(payment.SystemNotes, mergedSystemNotes, StringComparison.Ordinal))
+            {
+                payment.SystemNotes = mergedSystemNotes;
+                summary.AddedMarkers++;
+            }
+
+            PaymentDomainService.Normalize(payment);
+        }
+
+        if (!AreAmountsEqual(representative.Amount, resultingTotal))
+        {
+            representative.Amount = resultingTotal;
+            summary.UpdatedInvoiceAmounts++;
+            summary.Actions.Add($"Обновить сумму счета #{representative.Id} до {resultingTotal:0.00}.");
+        }
+
+        if (!AreAmountsEqual(representative.PaidAmount, resultingPaid))
+        {
+            representative.PaidAmount = resultingPaid;
+            summary.UpdatedInvoicePaidAmounts++;
+        }
+
+        representative.Date = resultingInstallments
+            .Select(EffectivePlannedDate)
+            .DefaultIfEmpty(representative.Date)
+            .Max();
+        representative.PlannedDate = representative.Date;
+        representative.Status = DeriveInvoiceStatus(resultingInstallments, representative.Status, representative.Date);
+        representative.IsPaid = AreAmountsEqual(representative.PaidAmount, representative.Amount)
+                                && representative.Status == PaymentStatus.Completed;
+        representative.PaidDate = resultingInstallments
+            .Where(payment => payment.PaidDate.HasValue)
+            .Select(payment => payment.PaidDate!.Value)
+            .DefaultIfEmpty()
+            .Max();
+        if (representative.PaidDate == default)
+        {
+            representative.PaidDate = null;
+        }
+
+        representative.LastPaymentDate = resultingInstallments
+            .Where(payment => payment.LastPaymentDate.HasValue || payment.PaidDate.HasValue)
+            .Select(payment => payment.LastPaymentDate ?? payment.PaidDate!.Value)
+            .DefaultIfEmpty()
+            .Max();
+        if (representative.LastPaymentDate == default)
+        {
+            representative.LastPaymentDate = null;
+        }
+
+        PaymentDomainService.Normalize(representative);
+
+        if (effectiveClientId.HasValue
+            && effectiveClientId.Value > 0
+            && SyncInvoiceMigrationCaseLinks(representative, effectiveClientId.Value, effectiveClientCaseId))
+        {
+            summary.UpdatedCaseLinks++;
+        }
+
+        summary.Repaired = summary.CreatedPayments > 0
+            || summary.UpdatedInvoiceAmounts > 0
+            || summary.UpdatedInvoicePaidAmounts > 0
+            || summary.AddedMarkers > 0
+            || summary.NormalizedLinks > 0
+            || summary.UpdatedCaseLinks > 0;
+
+        if (!dryRun)
+        {
+            _db.Payments.Add(missingPayment);
+        }
+    }
+
+    private static Payment CreateConvertedLegacyInstallmentPayment(
+        Payment representative,
+        int invoiceEntityId,
+        string invoiceNumber,
+        DateTime invoiceDate,
+        int? effectiveClientId,
+        int? effectiveClientCaseId)
+    {
+        var payment = new Payment
+        {
+            Account = invoiceNumber,
+            AccountDate = invoiceDate,
+            Amount = representative.Amount,
+            ClientCaseId = effectiveClientCaseId,
+            ClientCaseReference = representative.ClientCaseReference,
+            ClientId = effectiveClientId ?? representative.ClientId,
+            ContractId = representative.ContractId,
+            CounterpartyName = representative.CounterpartyName,
+            Date = representative.Date,
+            DealTypeId = representative.DealTypeId,
+            Description = representative.Description,
+            DocumentKind = DocumentKind.Payment,
+            ExpenseClientId = representative.ExpenseClientId,
+            IncomeTypeId = representative.IncomeTypeId,
+            InvoiceId = invoiceEntityId,
+            IsNotForAccounting = representative.IsNotForAccounting,
+            IsPaid = representative.IsPaid,
+            LastPaymentDate = representative.LastPaymentDate,
+            Notes = representative.Notes,
+            PaidAmount = representative.PaidAmount,
+            PaidDate = representative.PaidDate,
+            PaymentSourceId = representative.PaymentSourceId,
+            PaymentStatusId = representative.PaymentStatusId,
+            PlannedDate = representative.PlannedDate == default ? representative.Date : representative.PlannedDate,
+            RescheduleCount = representative.RescheduleCount,
+            ServiceId = representative.ServiceId,
+            Status = representative.Status,
+            SystemNotes = representative.SystemNotes,
+            Type = representative.Type,
+        };
+
+        foreach (var responsibleId in representative.Responsibles.Select(item => item.UserId).Distinct())
+        {
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                UserId = responsibleId,
+            });
+        }
+
+        PaymentDomainService.Normalize(payment);
+        return payment;
+    }
+
+    private static bool NormalizeLegacyRepairPaymentLinks(
+        Payment payment,
+        int invoiceEntityId,
+        string invoiceNumber,
+        DateTime invoiceDate,
+        int? effectiveClientId,
+        int? effectiveClientCaseId)
+    {
+        var normalized = false;
+        if (payment.InvoiceId != invoiceEntityId)
+        {
+            payment.InvoiceId = invoiceEntityId;
+            normalized = true;
+        }
+
+        if (!string.Equals(Normalize(payment.Account), invoiceNumber, StringComparison.OrdinalIgnoreCase))
+        {
+            payment.Account = invoiceNumber;
+            normalized = true;
+        }
+
+        if (payment.AccountDate?.Date != invoiceDate.Date)
+        {
+            payment.AccountDate = invoiceDate.Date;
+            normalized = true;
+        }
+
+        if (effectiveClientId.HasValue && payment.ClientId != effectiveClientId)
+        {
+            payment.ClientId = effectiveClientId;
+            normalized = true;
+        }
+
+        if (effectiveClientCaseId.HasValue && payment.ClientCaseId != effectiveClientCaseId)
+        {
+            payment.ClientCaseId = effectiveClientCaseId;
+            normalized = true;
+        }
+
+        return normalized;
+    }
+
+    private static bool IsConvertedLegacyInstallmentAggregate(IReadOnlyCollection<Payment> payments, Payment representative)
+    {
+        if (payments.Count < 3 || representative.Amount <= 0m)
+        {
+            return false;
+        }
+
+        var generatedInstallments = payments
+            .Where(payment => payment.Id != representative.Id
+                              && payment.DocumentKind != DocumentKind.Invoice
+                              && InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment))
+            .ToList();
+        if (generatedInstallments.Count < 2)
+        {
+            return false;
+        }
+
+        var generatedTotal = generatedInstallments.Sum(payment => payment.Amount);
+        return generatedTotal > representative.Amount
+               && !HasConsistentInstallmentToPay(
+                   generatedInstallments.Select(payment => payment.SystemNotes),
+                   generatedTotal);
     }
 
     private static bool IsLegacyBrokenInstallmentAggregate(IReadOnlyCollection<Payment> payments)

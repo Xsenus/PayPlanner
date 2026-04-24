@@ -6233,6 +6233,9 @@ export function ClientDetail({
                             caseItem.status ?? ""
                           ).toLowerCase();
                           const finance = caseFinanceSummaries[caseItem.id];
+                          const casePaymentsCount = finance
+                            ? finance.incomeCount + finance.expenseCount
+                            : caseItem.payments?.length ?? 0;
                           const statusClass = statusValue.includes("open")
                             ? "bg-green-50 text-green-700 border-green-200"
                             : statusValue.includes("hold")
@@ -6267,7 +6270,7 @@ export function ClientDetail({
                                       Создано: {toRuDate(caseItem.createdAt)}
                                     </span>
                                     <span>
-                                      Платежей: {caseItem.payments?.length ?? 0}
+                                      Платежей: {casePaymentsCount}
                                     </span>
                                   </div>
                                   <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">

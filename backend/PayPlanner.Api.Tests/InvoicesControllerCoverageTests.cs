@@ -1403,6 +1403,164 @@ public class InvoicesControllerCoverageTests
         });
     }
 
+    [Fact]
+    public async Task RepairLegacyInstallments_RepairsConvertedLegacyAggregate_ByCreatingMissingPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Converted Repair Client");
+        var clientCaseId = await CreateClientCaseAsync(db, clientId, "Converted Repair Case");
+
+        var invoice = new Invoice
+        {
+            Number = "122",
+            Date = new DateTime(2025, 7, 3),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var first = CreateConvertedLegacyInstallmentPayment(
+            invoice,
+            clientId,
+            clientCaseId,
+            sequence: 1,
+            date: new DateTime(2025, 7, 8),
+            amount: 50_000m);
+        var second = CreateConvertedLegacyInstallmentPayment(
+            invoice,
+            clientId,
+            clientCaseId,
+            sequence: 2,
+            date: new DateTime(2025, 8, 8),
+            amount: 50_000m);
+        var third = CreateConvertedLegacyInstallmentPayment(
+            invoice,
+            clientId,
+            clientCaseId,
+            sequence: 3,
+            date: new DateTime(2025, 9, 9),
+            amount: 50_000m);
+        var representative = new Payment
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Amount = 62_500m,
+            PaidAmount = 62_500m,
+            PaidDate = new DateTime(2025, 10, 7),
+            LastPaymentDate = new DateTime(2025, 10, 7),
+            ClientId = clientId,
+            ClientCaseId = clientCaseId,
+            Date = new DateTime(2025, 10, 7),
+            PlannedDate = new DateTime(2025, 10, 7),
+            Description = "Last legacy installment",
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceId = invoice.Id,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+        };
+        db.Payments.AddRange(first, second, third, representative);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var dryRunAction = await controller.RepairLegacyInstallments(invoice.Id, true, CancellationToken.None);
+
+        var dryRunOk = Assert.IsType<OkObjectResult>(dryRunAction.Result);
+        var dryRunSummary = Assert.IsType<InvoiceLegacyInstallmentRepairSummaryDto>(dryRunOk.Value);
+        Assert.False(dryRunSummary.LegacyAggregateDetected);
+        Assert.True(dryRunSummary.ConvertedLegacyAggregateDetected);
+        Assert.True(dryRunSummary.DryRun);
+        Assert.True(dryRunSummary.Repaired);
+        Assert.Equal(1, dryRunSummary.CreatedPayments);
+        Assert.Equal(1, dryRunSummary.UpdatedInvoiceAmounts);
+        Assert.Equal(62_500m, dryRunSummary.MissingInstallmentAmount);
+        Assert.Equal(212_500m, dryRunSummary.ResultingInvoiceAmount);
+        Assert.Equal(212_500m, dryRunSummary.ResultingChildPaymentsTotal);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(4, await db.Payments.CountAsync(payment => payment.InvoiceId == invoice.Id));
+        Assert.Equal(62_500m, await db.Payments
+            .Where(payment => payment.Id == representative.Id)
+            .Select(payment => payment.Amount)
+            .SingleAsync());
+
+        var applyAction = await controller.RepairLegacyInstallments(invoice.Id, false, CancellationToken.None);
+
+        var applyOk = Assert.IsType<OkObjectResult>(applyAction.Result);
+        var applySummary = Assert.IsType<InvoiceLegacyInstallmentRepairSummaryDto>(applyOk.Value);
+        Assert.True(applySummary.ConvertedLegacyAggregateDetected);
+        Assert.True(applySummary.Repaired);
+        Assert.False(applySummary.DryRun);
+        Assert.Equal(1, applySummary.CreatedPayments);
+        Assert.Equal(1, applySummary.UpdatedInvoiceAmounts);
+        Assert.Equal(1, applySummary.UpdatedInvoicePaidAmounts);
+        Assert.Equal(4, applySummary.AddedMarkers);
+        Assert.Contains(applySummary.Actions, action => action.Contains("Создать платеж рассрочки", StringComparison.Ordinal));
+
+        db.ChangeTracker.Clear();
+
+        var storedPayments = await db.Payments.AsNoTracking()
+            .Where(payment => payment.InvoiceId == invoice.Id)
+            .OrderBy(payment => payment.DocumentKind == DocumentKind.Invoice ? 0 : 1)
+            .ThenBy(payment => payment.PlannedDate)
+            .ThenBy(payment => payment.Id)
+            .ToListAsync();
+        Assert.Equal(5, storedPayments.Count);
+
+        var storedRepresentative = Assert.Single(storedPayments, payment => payment.DocumentKind == DocumentKind.Invoice);
+        Assert.Equal(representative.Id, storedRepresentative.Id);
+        Assert.Equal(212_500m, storedRepresentative.Amount);
+        Assert.Equal(212_500m, storedRepresentative.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedRepresentative.Status);
+        Assert.True(storedRepresentative.IsPaid);
+
+        var storedInstallments = storedPayments
+            .Where(payment => payment.DocumentKind == DocumentKind.Payment)
+            .OrderBy(payment => payment.PlannedDate)
+            .ToList();
+        Assert.Equal(4, storedInstallments.Count);
+        Assert.Equal(212_500m, storedInstallments.Sum(payment => payment.Amount));
+        Assert.All(storedInstallments, payment =>
+        {
+            Assert.Contains("[pp:installment-payment]", payment.SystemNotes, StringComparison.Ordinal);
+            Assert.Contains("\"ToPay\":212500", payment.SystemNotes, StringComparison.Ordinal);
+            Assert.Contains("\"Months\":4", payment.SystemNotes, StringComparison.Ordinal);
+        });
+
+        var createdMissingPayment = Assert.Single(storedInstallments, payment => payment.Amount == 62_500m);
+        Assert.Equal(new DateTime(2025, 10, 7), createdMissingPayment.PlannedDate);
+        Assert.Equal(62_500m, createdMissingPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, createdMissingPayment.Status);
+    }
+
+    private static Payment CreateConvertedLegacyInstallmentPayment(
+        Invoice invoice,
+        int clientId,
+        int clientCaseId,
+        int sequence,
+        DateTime date,
+        decimal amount)
+        => new()
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Amount = amount,
+            PaidAmount = amount,
+            PaidDate = date,
+            LastPaymentDate = date,
+            ClientId = clientId,
+            ClientCaseId = clientCaseId,
+            Date = date,
+            PlannedDate = date,
+            Description = $"Converted installment {sequence}",
+            DocumentKind = DocumentKind.Payment,
+            InvoiceId = invoice.Id,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            SystemNotes = FormattableString.Invariant(
+                $"[pp:installment-payment] {{\"Sequence\":{sequence},\"Total\":62500,\"DownPayment\":0,\"AnnualRate\":0,\"Months\":3,\"StartDate\":\"2025-07-08T00:00:00\",\"RoundingMode\":0,\"RoundingStep\":null,\"ToPay\":62500,\"Overpay\":0,\"LoanAmount\":62500,\"BaseMonthlyPayment\":20833.33,\"RoundedMonthlyPayment\":null,\"Item\":{{\"Sequence\":{sequence},\"Date\":\"{date:yyyy-MM-dd}T00:00:00\",\"Principal\":{amount},\"Interest\":0,\"Payment\":{amount},\"Balance\":0}}}}"),
+        };
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
