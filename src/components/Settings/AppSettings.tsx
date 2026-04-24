@@ -39,6 +39,7 @@ type FinancialRulesSubsection = 'invoices' | 'contracts';
 type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge' | 'users-merge';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const SHOW_LEGACY_SQLITE_IMPORT = false;
 
 export function AppSettings() {
   const { user, isAdmin } = useAuth();
@@ -1086,7 +1087,7 @@ export function AppSettings() {
 
             {activeSection === 'db-import' && <SpreadsheetImportSettings />}
 
-            {false && activeSection === 'db-import' && (
+            {SHOW_LEGACY_SQLITE_IMPORT && activeSection === 'db-import' && (
               <div className="space-y-6">
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
