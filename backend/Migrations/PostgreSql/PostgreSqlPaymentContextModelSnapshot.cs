@@ -2373,6 +2373,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("PaidDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("PaymentDocumentDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("PaymentOrderNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<int?>("PaymentSourceId")
                         .HasColumnType("integer");
 
@@ -4058,7 +4065,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
-                        .WithMany()
+                        .WithMany("Payments")
                         .HasForeignKey("ContractId")
                         .OnDelete(DeleteBehavior.SetNull);
 
@@ -4312,6 +4319,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ContractInvoices");
 
                     b.Navigation("ContractPayments");
+
+                    b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>

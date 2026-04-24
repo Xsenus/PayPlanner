@@ -75,6 +75,8 @@ namespace PayPlanner.Api.Extensions
         public static IQueryable<Payment> WithPaymentIncludes(this IQueryable<Payment> q) =>
             q.Include(p => p.Client)
                  .ThenInclude(c => c!.ClientStatus)
+             .Include(p => p.ExpenseClient)
+                 .ThenInclude(c => c!.ClientStatus)
               .Include(p => p.ClientCase)
               .Include(p => p.DealType)
               .Include(p => p.IncomeType)
@@ -119,9 +121,13 @@ namespace PayPlanner.Api.Extensions
                     (p.Description != null && p.Description.ToLower().Contains(search)) ||
                     (p.Notes != null && p.Notes.ToLower().Contains(search)) ||
                     (p.Account != null && p.Account.ToLower().Contains(search)) ||
+                    (p.PaymentOrderNumber != null && p.PaymentOrderNumber.ToLower().Contains(search)) ||
                     (p.Client != null &&
                         ((p.Client.Name != null && p.Client.Name.ToLower().Contains(search)) ||
                          (p.Client.Company != null && p.Client.Company.ToLower().Contains(search)))) ||
+                    (p.ExpenseClient != null &&
+                        ((p.ExpenseClient.Name != null && p.ExpenseClient.Name.ToLower().Contains(search)) ||
+                         (p.ExpenseClient.Company != null && p.ExpenseClient.Company.ToLower().Contains(search)))) ||
                     (p.ClientCase != null && p.ClientCase.Title != null && p.ClientCase.Title.ToLower().Contains(search)) ||
                     (p.DealType != null && p.DealType.Name != null && p.DealType.Name.ToLower().Contains(search)) ||
                     (p.IncomeType != null && p.IncomeType.Name != null && p.IncomeType.Name.ToLower().Contains(search)) ||

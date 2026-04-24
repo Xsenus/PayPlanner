@@ -212,6 +212,16 @@ namespace PayPlanner.Api.Models
         public DateTime? PaidDate { get; set; }
 
         /// <summary>
+        /// Номер платёжного документа (платёжное поручение, ордер и т. п.).
+        /// </summary>
+        public string? PaymentOrderNumber { get; set; }
+
+        /// <summary>
+        /// Дата платёжного документа.
+        /// </summary>
+        public DateTime? PaymentDocumentDate { get; set; }
+
+        /// <summary>
         /// Навигация на источник платежа.
         /// </summary>
         public PaymentSource? PaymentSource { get; set; }

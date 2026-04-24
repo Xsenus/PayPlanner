@@ -87,6 +87,7 @@ public class PaymentsV1Controller : ControllerBase
         e.PaidDate = model.PaidDate;
         e.Notes = model.Notes;
         e.ClientId = model.ClientId;
+        e.ExpenseClientId = model.ExpenseClientId;
         e.ClientCaseId = model.ClientCaseId;
         e.DealTypeId = model.DealTypeId;
         e.IncomeTypeId = model.IncomeTypeId;
@@ -94,6 +95,8 @@ public class PaymentsV1Controller : ControllerBase
         e.PaymentStatusId = model.PaymentStatusId;
         e.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         e.AccountDate = model.AccountDate;
+        e.PaymentOrderNumber = model.PaymentOrderNumber;
+        e.PaymentDocumentDate = model.PaymentDocumentDate;
 
         await _db.SaveChangesAsync();
         return Ok(e);

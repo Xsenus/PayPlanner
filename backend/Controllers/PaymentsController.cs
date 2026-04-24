@@ -98,6 +98,8 @@ public class PaymentsController : ControllerBase
         }
 
         await SyncInvoiceLinkAsync(model, ct);
+        var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
+        if (createValidationError is not null) return createValidationError;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
 
@@ -154,6 +156,7 @@ public class PaymentsController : ControllerBase
         e.Description = model.Description ?? string.Empty;
         e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
+        e.ExpenseClientId = model.ExpenseClientId;
         e.ClientCaseId = model.ClientCaseId;
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
@@ -165,11 +168,15 @@ public class PaymentsController : ControllerBase
         e.DocumentKind = model.DocumentKind == default ? DocumentKind.Payment : model.DocumentKind;
         e.AccountDate = model.AccountDate;
         e.PaidDate = model.PaidDate;
+        e.PaymentOrderNumber = model.PaymentOrderNumber;
+        e.PaymentDocumentDate = model.PaymentDocumentDate;
         e.PaidAmount = model.PaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
         await SyncInvoiceLinkAsync(e, ct);
+        var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
+        if (updateValidationError is not null) return updateValidationError;
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -288,6 +295,7 @@ public class PaymentsController : ControllerBase
         e.Description = model.Description ?? string.Empty;
         e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
+        e.ExpenseClientId = model.ExpenseClientId;
         e.ClientCaseId = model.ClientCaseId;
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
@@ -295,6 +303,8 @@ public class PaymentsController : ControllerBase
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
         e.PaidDate = model.PaidDate;
+        e.PaymentOrderNumber = model.PaymentOrderNumber;
+        e.PaymentDocumentDate = model.PaymentDocumentDate;
         e.PaidAmount = model.PaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
@@ -307,6 +317,8 @@ public class PaymentsController : ControllerBase
         e.LegacyAccountDate = immutableLegacyAccountDate;
         e.Type = immutableType;
 
+        var invoiceManagedValidationError = await ValidatePaymentAttributionAsync(e, ct);
+        if (invoiceManagedValidationError is not null) return invoiceManagedValidationError;
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -438,7 +450,8 @@ public class PaymentsController : ControllerBase
     {
         var normalizedAccount = NormalizeInvoiceNumber(payment.Account);
         var originalAccountDate = (payment.AccountDate ?? payment.Date).Date;
-        var invoice = await ResolveInvoiceAsync(payment, ct);
+        var invoiceDocument = await ResolveInvoiceDocumentAsync(payment, ct);
+        var invoice = invoiceDocument?.Invoice;
         if (invoice is null)
         {
             payment.InvoiceId = null;
@@ -452,6 +465,7 @@ public class PaymentsController : ControllerBase
                 payment.LegacyAccountNumber = null;
                 payment.LegacyAccountDate = null;
             }
+            await SyncPaymentInvoiceClientCasesAsync(payment, [], ct);
             return;
         }
 
@@ -469,17 +483,60 @@ public class PaymentsController : ControllerBase
         payment.InvoiceId = invoice.Id;
         payment.Account = invoice.Number;
         payment.AccountDate = invoice.Date.Date;
+        if (invoiceDocument is not null)
+        {
+            payment.Type = invoiceDocument.Type;
+            payment.ClientId = invoiceDocument.ClientId;
+            payment.ExpenseClientId = invoiceDocument.ExpenseClientId;
+            payment.ContractId = invoiceDocument.ContractId;
+
+            var linkedCaseIds = invoiceDocument.InvoiceClientCases
+                .Select(link => link.ClientCaseId)
+                .Concat(invoiceDocument.ClientCaseId.HasValue ? [invoiceDocument.ClientCaseId.Value] : [])
+                .Where(caseId => caseId > 0)
+                .Distinct()
+                .ToList();
+
+            var firstCaseId = linkedCaseIds.FirstOrDefault();
+            payment.ClientCaseId = firstCaseId > 0 ? firstCaseId : null;
+
+            await SyncPaymentInvoiceClientCasesAsync(payment, linkedCaseIds, ct);
+        }
+        else
+        {
+            await SyncPaymentInvoiceClientCasesAsync(payment, [], ct);
+        }
     }
 
-    private async Task<Invoice?> ResolveInvoiceAsync(Payment payment, CancellationToken ct)
+    private async Task<Payment?> ResolveInvoiceDocumentAsync(Payment payment, CancellationToken ct)
     {
         if (payment.InvoiceId.HasValue && payment.InvoiceId.Value > 0)
         {
-            var linked = await _db.Invoices.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == payment.InvoiceId.Value, ct);
+            var linked = await _db.Payments
+                .AsNoTracking()
+                .Include(x => x.Invoice)
+                .Include(x => x.InvoiceClientCases)
+                .FirstOrDefaultAsync(x => x.InvoiceId == payment.InvoiceId.Value && x.DocumentKind == DocumentKind.Invoice, ct);
             if (linked is not null)
             {
                 return linked;
+            }
+
+            var invoice = await _db.Invoices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == payment.InvoiceId.Value, ct);
+            if (invoice is not null)
+            {
+                return new Payment
+                {
+                    InvoiceId = invoice.Id,
+                    Invoice = invoice,
+                    Type = payment.Type,
+                    ClientId = payment.ClientId,
+                    ExpenseClientId = payment.ExpenseClientId,
+                    ContractId = payment.ContractId,
+                    ClientCaseId = payment.ClientCaseId,
+                };
             }
         }
 
@@ -504,7 +561,7 @@ public class PaymentsController : ControllerBase
     private static string? NormalizeInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task<Invoice?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct)
+    private async Task<Payment?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct)
     {
         if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0)
         {
@@ -564,9 +621,100 @@ public class PaymentsController : ControllerBase
             return null;
         }
 
-        return await _db.Invoices
+        return await _db.Payments
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == invoiceId, ct);
+            .Include(x => x.Invoice)
+            .Include(x => x.InvoiceClientCases)
+            .FirstOrDefaultAsync(x => x.InvoiceId == invoiceId && x.DocumentKind == DocumentKind.Invoice, ct);
+    }
+
+    private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.Type == PaymentType.Expense && payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0)
+        {
+            var expenseClientExists = await _db.Clients
+                .AsNoTracking()
+                .AnyAsync(client => client.Id == payment.ExpenseClientId.Value, ct);
+            if (!expenseClientExists)
+            {
+                return BadRequest($"Unknown expenseClientId {payment.ExpenseClientId.Value}");
+            }
+        }
+
+        if (!payment.ClientCaseId.HasValue || payment.ClientCaseId.Value <= 0)
+        {
+            return null;
+        }
+
+        var caseOwnerClientId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseClientId
+            : payment.ClientId;
+        if (!caseOwnerClientId.HasValue || caseOwnerClientId.Value <= 0)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest("ExpenseClientId is required when clientCaseId is specified for expense payments.")
+                : BadRequest("ClientId is required when clientCaseId is specified.");
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == payment.ClientCaseId.Value, ct);
+        if (clientCase is null)
+        {
+            return BadRequest($"Unknown clientCaseId {payment.ClientCaseId.Value}");
+        }
+
+        if (clientCase.ClientId != caseOwnerClientId.Value)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseClientId {caseOwnerClientId.Value}")
+                : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to clientId {caseOwnerClientId.Value}");
+        }
+
+        return null;
+    }
+
+    private async Task SyncPaymentInvoiceClientCasesAsync(Payment payment, IReadOnlyCollection<int> clientCaseIds, CancellationToken ct)
+    {
+        var targetIds = clientCaseIds
+            .Where(caseId => caseId > 0)
+            .Distinct()
+            .ToHashSet();
+
+        var entry = _db.Entry(payment);
+        if (entry.State != EntityState.Detached)
+        {
+            var collection = entry.Collection(item => item.InvoiceClientCases);
+            if (!collection.IsLoaded)
+            {
+                await collection.LoadAsync(ct);
+            }
+        }
+
+        var toRemove = payment.InvoiceClientCases
+            .Where(link => !targetIds.Contains(link.ClientCaseId))
+            .ToList();
+        foreach (var link in toRemove)
+        {
+            payment.InvoiceClientCases.Remove(link);
+        }
+
+        var existingIds = payment.InvoiceClientCases
+            .Select(link => link.ClientCaseId)
+            .ToHashSet();
+        foreach (var clientCaseId in targetIds)
+        {
+            if (existingIds.Contains(clientCaseId))
+            {
+                continue;
+            }
+
+            payment.InvoiceClientCases.Add(new InvoiceClientCase
+            {
+                PaymentId = payment.Id,
+                ClientCaseId = clientCaseId,
+            });
+        }
     }
 
     private static List<(string Number, DateTime Date)> BuildLookupCandidates(Payment payment)
@@ -667,6 +815,8 @@ public class PaymentsController : ControllerBase
                 Notes = payment.Notes,
                 PaidAmount = payment.PaidAmount,
                 PaidDate = payment.PaidDate,
+                PaymentDocumentDate = payment.PaymentDocumentDate,
+                PaymentOrderNumber = payment.PaymentOrderNumber,
                 PaymentSourceId = payment.PaymentSourceId,
                 PaymentStatusId = payment.PaymentStatusId,
                 PlannedDate = payment.PlannedDate,
@@ -722,6 +872,34 @@ public class PaymentsController : ControllerBase
                         Description = payment.ClientCase.Description,
                         Status = payment.ClientCase.Status,
                         CreatedAt = payment.ClientCase.CreatedAt,
+                    },
+                ExpenseClient = payment.ExpenseClient == null
+                    ? null
+                    : new Client
+                    {
+                        Id = payment.ExpenseClient.Id,
+                        Name = payment.ExpenseClient.Name,
+                        Email = payment.ExpenseClient.Email,
+                        Phone = payment.ExpenseClient.Phone,
+                        Company = payment.ExpenseClient.Company,
+                        Address = payment.ExpenseClient.Address,
+                        Notes = payment.ExpenseClient.Notes,
+                        CreatedAt = payment.ExpenseClient.CreatedAt,
+                        IsActive = payment.ExpenseClient.IsActive,
+                        LegalEntityId = payment.ExpenseClient.LegalEntityId,
+                        ClientStatusId = payment.ExpenseClient.ClientStatusId,
+                        ResponsibleUserId = payment.ExpenseClient.ResponsibleUserId,
+                        ClientStatus = payment.ExpenseClient.ClientStatus == null
+                            ? null
+                            : new ClientStatusEntity
+                            {
+                                Id = payment.ExpenseClient.ClientStatus.Id,
+                                Name = payment.ExpenseClient.ClientStatus.Name,
+                                Description = payment.ExpenseClient.ClientStatus.Description,
+                                ColorHex = payment.ExpenseClient.ClientStatus.ColorHex,
+                                IsActive = payment.ExpenseClient.ClientStatus.IsActive,
+                                CreatedAt = payment.ExpenseClient.ClientStatus.CreatedAt,
+                            },
                     },
                 DealType = payment.DealType == null
                     ? null

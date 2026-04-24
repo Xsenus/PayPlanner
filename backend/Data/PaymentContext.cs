@@ -545,12 +545,14 @@ public class PaymentContext : DbContext
             entity.Property(p => p.RescheduleCount).HasDefaultValue(0);
             entity.Property(p => p.Account).HasMaxLength(120);
             entity.Property(p => p.LegacyAccountNumber).HasMaxLength(120);
+            entity.Property(p => p.PaymentOrderNumber).HasMaxLength(100);
             entity.Property(p => p.AccountDate).HasColumnType("date");
             entity.Property(p => p.LegacyAccountDate).HasColumnType("date");
             entity.Property(p => p.Date).HasColumnType("date");
             entity.Property(p => p.PlannedDate).HasColumnType("date");
             entity.Property(p => p.LastPaymentDate).HasColumnType("date");
             entity.Property(p => p.PaidDate).HasColumnType("date");
+            entity.Property(p => p.PaymentDocumentDate).HasColumnType("date");
             entity.Property(p => p.PaidAmount).HasColumnType("decimal(18,2)");
 
             // Связь с клиентом

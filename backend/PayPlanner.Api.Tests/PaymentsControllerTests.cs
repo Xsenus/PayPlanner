@@ -1207,6 +1207,91 @@ public class PaymentsControllerTests
         Assert.Null(payment.AuditUpdatedByUserName);
     }
 
+    [Fact]
+    public async Task Create_ExpensePayment_PersistsExpenseClientAndPaymentDocumentFields()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new Client { Name = "Поставщик", CreatedAt = DateTime.UtcNow };
+        var expenseClient = new Client { Name = "Клиент расхода", CreatedAt = DateTime.UtcNow };
+        db.Clients.AddRange(supplier, expenseClient);
+        await db.SaveChangesAsync();
+
+        var clientCase = new ClientCase
+        {
+            ClientId = expenseClient.Id,
+            Title = "Расходное дело",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 4, 29), 12_500m, "Расход по подрядчику");
+        model.Type = PaymentType.Expense;
+        model.ClientId = supplier.Id;
+        model.ExpenseClientId = expenseClient.Id;
+        model.ClientCaseId = clientCase.Id;
+        model.PaymentOrderNumber = "  ПП-458  ";
+        model.PaymentDocumentDate = new DateTime(2026, 4, 28, 13, 45, 0, DateTimeKind.Utc);
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(PaymentType.Expense, payment.Type);
+        Assert.Equal(supplier.Id, payment.ClientId);
+        Assert.Equal(expenseClient.Id, payment.ExpenseClientId);
+        Assert.Equal(clientCase.Id, payment.ClientCaseId);
+        Assert.Equal("ПП-458", payment.PaymentOrderNumber);
+        Assert.Equal(new DateTime(2026, 4, 28), payment.PaymentDocumentDate);
+
+        var getById = await controller.GetById(payment.Id, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(getById);
+        var projected = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(expenseClient.Id, projected.ExpenseClientId);
+        Assert.NotNull(projected.ExpenseClient);
+        Assert.Equal("Клиент расхода", projected.ExpenseClient!.Name);
+        Assert.Equal("ПП-458", projected.PaymentOrderNumber);
+    }
+
+    [Fact]
+    public async Task Create_RejectsExpenseClientCaseWithoutExpenseClientId()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new Client { Name = "Поставщик", CreatedAt = DateTime.UtcNow };
+        var expenseClient = new Client { Name = "Клиент расхода", CreatedAt = DateTime.UtcNow };
+        db.Clients.AddRange(supplier, expenseClient);
+        await db.SaveChangesAsync();
+
+        var clientCase = new ClientCase
+        {
+            ClientId = expenseClient.Id,
+            Title = "Дело без привязки",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 4, 30), 3_200m, "Расход без клиента расхода");
+        model.Type = PaymentType.Expense;
+        model.ClientId = supplier.Id;
+        model.ClientCaseId = clientCase.Id;
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Equal(
+            "ExpenseClientId is required when clientCaseId is specified for expense payments.",
+            badRequest.Value);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");

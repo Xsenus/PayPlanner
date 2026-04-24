@@ -24,17 +24,26 @@ public static class PaymentDomainService
         payment.Description ??= string.Empty;
         payment.Notes ??= string.Empty;
         payment.SystemNotes ??= string.Empty;
+        payment.PaymentOrderNumber = string.IsNullOrWhiteSpace(payment.PaymentOrderNumber)
+            ? null
+            : payment.PaymentOrderNumber.Trim();
 
         payment.Amount = NormalizeAmount(payment.Amount);
         payment.PaidAmount = NormalizeAmount(payment.PaidAmount);
         if (payment.PaidAmount < 0m) payment.PaidAmount = 0m;
         if (payment.PaidAmount > payment.Amount) payment.PaidAmount = payment.Amount;
 
+        if (payment.Type != PaymentType.Expense)
+        {
+            payment.ExpenseClientId = null;
+        }
+
         payment.Date = payment.Date.Date;
         payment.PlannedDate = (payment.PlannedDate == default ? payment.Date : payment.PlannedDate).Date;
         if (payment.AccountDate.HasValue) payment.AccountDate = payment.AccountDate.Value.Date;
         if (payment.LastPaymentDate.HasValue) payment.LastPaymentDate = payment.LastPaymentDate.Value.Date;
         if (payment.PaidDate.HasValue) payment.PaidDate = payment.PaidDate.Value.Date;
+        if (payment.PaymentDocumentDate.HasValue) payment.PaymentDocumentDate = payment.PaymentDocumentDate.Value.Date;
     }
 
     /// <summary>

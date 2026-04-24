@@ -136,7 +136,7 @@ public class PaymentsV2Controller : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model)
+    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
     {
         if (model.IncomeTypeId.HasValue)
         {
@@ -157,6 +157,8 @@ public class PaymentsV2Controller : ControllerBase
             model.LastPaymentDate = model.PaidDate.Value.Date;
         }
 
+        var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
+        if (createValidationError is not null) return createValidationError;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
 
@@ -166,7 +168,7 @@ public class PaymentsV2Controller : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model)
+    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct = default)
     {
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
@@ -214,6 +216,7 @@ public class PaymentsV2Controller : ControllerBase
         entity.Description = model.Description ?? string.Empty;
         entity.Notes = model.Notes ?? string.Empty;
         entity.ClientId = model.ClientId;
+        entity.ExpenseClientId = model.ExpenseClientId;
         entity.ClientCaseId = model.ClientCaseId;
         entity.ContractId = model.ContractId;
         entity.DealTypeId = model.DealTypeId;
@@ -223,10 +226,14 @@ public class PaymentsV2Controller : ControllerBase
         entity.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         entity.AccountDate = model.AccountDate;
         entity.PaidDate = model.PaidDate;
+        entity.PaymentOrderNumber = model.PaymentOrderNumber;
+        entity.PaymentDocumentDate = model.PaymentDocumentDate;
         entity.PaidAmount = model.PaidAmount;
         entity.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? entity.LastPaymentDate;
         entity.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
+        var updateValidationError = await ValidatePaymentAttributionAsync(entity, ct);
+        if (updateValidationError is not null) return updateValidationError;
         PaymentDomainService.Normalize(entity);
 
         if (entity.LastPaymentDate is null && entity.PaidAmount > 0m)
@@ -383,5 +390,51 @@ public class PaymentsV2Controller : ControllerBase
         AppendLines(incoming ?? string.Empty);
 
         return string.Join("\n", lines);
+    }
+
+    private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.Type == PaymentType.Expense && payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0)
+        {
+            var expenseClientExists = await _db.Clients
+                .AsNoTracking()
+                .AnyAsync(client => client.Id == payment.ExpenseClientId.Value, ct);
+            if (!expenseClientExists)
+            {
+                return BadRequest($"Unknown expenseClientId {payment.ExpenseClientId.Value}");
+            }
+        }
+
+        if (!payment.ClientCaseId.HasValue || payment.ClientCaseId.Value <= 0)
+        {
+            return null;
+        }
+
+        var caseOwnerClientId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseClientId
+            : payment.ClientId;
+        if (!caseOwnerClientId.HasValue || caseOwnerClientId.Value <= 0)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest("ExpenseClientId is required when clientCaseId is specified for expense payments.")
+                : BadRequest("ClientId is required when clientCaseId is specified.");
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == payment.ClientCaseId.Value, ct);
+        if (clientCase is null)
+        {
+            return BadRequest($"Unknown clientCaseId {payment.ClientCaseId.Value}");
+        }
+
+        if (clientCase.ClientId != caseOwnerClientId.Value)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseClientId {caseOwnerClientId.Value}")
+                : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to clientId {caseOwnerClientId.Value}");
+        }
+
+        return null;
     }
 }

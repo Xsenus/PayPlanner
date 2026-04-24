@@ -2312,6 +2312,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("PaidDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("PaymentDocumentDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("PaymentOrderNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("PaymentSourceId")
                         .HasColumnType("INTEGER");
 
@@ -3958,7 +3965,7 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
-                        .WithMany()
+                        .WithMany("Payments")
                         .HasForeignKey("ContractId")
                         .OnDelete(DeleteBehavior.SetNull);
 
@@ -4212,6 +4219,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ContractInvoices");
 
                     b.Navigation("ContractPayments");
+
+                    b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
