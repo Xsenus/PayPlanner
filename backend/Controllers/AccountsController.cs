@@ -260,6 +260,23 @@ public class AccountsController : ControllerBase
 
             var totalAmount = statusSourcePayments.Sum(item => item.Amount);
             group.TotalAmount = Math.Max(group.FallbackAmount, totalAmount);
+            if (statusSourcePayments.Count > 0)
+            {
+                group.PaidAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolvePaidAmount));
+                group.OutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolveOutstandingAmount));
+            }
+            else
+            {
+                group.PaidAmount = ResolvePaidAmount(
+                    group.Representative.Amount,
+                    group.Representative.PaidAmount,
+                    group.Representative.Status);
+                group.OutstandingAmount = ResolveOutstandingAmount(
+                    group.Representative.Amount,
+                    group.Representative.PaidAmount,
+                    group.Representative.Status);
+            }
+
             group.Status = DeriveAccountStatus(
                 statusSourcePayments.Select(CreateStatusSourcePayment),
                 group.Representative.Status,
@@ -863,7 +880,7 @@ public class AccountsController : ControllerBase
             switch (group.Status)
             {
                 case "paid":
-                    summary.Paid.Amount += group.TotalAmount;
+                    summary.Paid.Amount += ResolvePaidAccountSummaryAmount(group);
                     summary.Paid.Count += 1;
                     break;
                 case "cancelled":
@@ -871,14 +888,14 @@ public class AccountsController : ControllerBase
                     summary.Cancelled.Count += 1;
                     break;
                 default:
-                    summary.Pending.Amount += group.TotalAmount;
+                    summary.Pending.Amount += ResolveOutstandingAccountSummaryAmount(group);
                     summary.Pending.Count += 1;
                     break;
             }
 
             if (group.IsOverdue)
             {
-                summary.Overdue.Amount += group.TotalAmount;
+                summary.Overdue.Amount += ResolveOutstandingAccountSummaryAmount(group);
                 summary.Overdue.Count += 1;
             }
         }
@@ -937,6 +954,8 @@ public class AccountsController : ControllerBase
             Date = representative.Date,
             DueDate = group.DueDate ?? representative.DueDate,
             Amount = representative.Amount,
+            PaidAmount = group.PaidAmount,
+            OutstandingAmount = group.OutstandingAmount,
             Type = representative.Type,
             Status = effectiveInvoiceStatus,
             IsPaid = effectiveInvoiceStatus == PaymentStatus.Completed,
@@ -1437,6 +1456,59 @@ public class AccountsController : ControllerBase
         return "created";
     }
 
+    private static decimal ResolvePaidAmount(PaymentAggregateItem payment)
+        => ResolvePaidAmount(payment.Amount, payment.PaidAmount, payment.Status);
+
+    private static decimal ResolveOutstandingAmount(PaymentAggregateItem payment)
+        => ResolveOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
+
+    private static decimal ResolvePaidAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+    {
+        var normalizedAmount = NormalizeMoneyAmount(amount);
+        var normalizedPaidAmount = Math.Min(NormalizeMoneyAmount(paidAmount), normalizedAmount);
+        if (normalizedPaidAmount > 0m)
+        {
+            return normalizedPaidAmount;
+        }
+
+        return status == PaymentStatus.Completed ? normalizedAmount : 0m;
+    }
+
+    private static decimal ResolveOutstandingAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+    {
+        if (status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return 0m;
+        }
+
+        var normalizedAmount = NormalizeMoneyAmount(amount);
+        var resolvedPaidAmount = ResolvePaidAmount(normalizedAmount, paidAmount, status);
+        return NormalizeMoneyAmount(Math.Max(normalizedAmount - resolvedPaidAmount, 0m));
+    }
+
+    private static decimal ResolveOutstandingAccountSummaryAmount(WorkingAccountGroup group)
+        => group.OutstandingAmount > 0m
+            ? group.OutstandingAmount
+            : ResolveOutstandingAmount(group.TotalAmount, group.PaidAmount, MapAccountStatusToPaymentStatus(group.Status));
+
+    private static decimal ResolvePaidAccountSummaryAmount(WorkingAccountGroup group)
+        => group.PaidAmount > 0m
+            ? group.PaidAmount
+            : ResolvePaidAmount(group.TotalAmount, group.PaidAmount, MapAccountStatusToPaymentStatus(group.Status));
+
+    private static PaymentStatus MapAccountStatusToPaymentStatus(string status)
+        => status switch
+        {
+            "paid" => PaymentStatus.Completed,
+            "cancelled" => PaymentStatus.Cancelled,
+            "overdue" => PaymentStatus.Overdue,
+            "partial" => PaymentStatus.Processing,
+            _ => PaymentStatus.Pending,
+        };
+
+    private static decimal NormalizeMoneyAmount(decimal amount)
+        => Math.Round(Math.Max(amount, 0m), 2, MidpointRounding.AwayFromZero);
+
     private static DateTime? EffectivePlannedDate(PaymentAggregateItem payment)
         => payment.PlannedDate == default ? payment.Date : payment.PlannedDate;
 
@@ -1589,6 +1661,8 @@ public class AccountsController : ControllerBase
         public List<int> RelatedPaymentIds { get; set; } = new();
         public decimal FallbackAmount { get; init; }
         public decimal TotalAmount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal OutstandingAmount { get; set; }
         public DateTime? DueDate { get; set; }
         public DateTime? PaidDate { get; set; }
         public string Status { get; set; } = "created";

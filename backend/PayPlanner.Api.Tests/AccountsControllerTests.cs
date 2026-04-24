@@ -38,6 +38,13 @@ public class AccountsControllerTests
 
         Assert.Equal("partial", row.Status);
         Assert.False(row.IsOverdue);
+        Assert.Equal(86_000m, payload.Summary.Total.Amount);
+        Assert.Equal(71_000m, payload.Summary.Pending.Amount);
+        Assert.Equal(1, payload.Summary.Pending.Count);
+        Assert.Equal(0m, payload.Summary.Overdue.Amount);
+        Assert.NotNull(row.Invoice);
+        Assert.Equal(15_000m, row.Invoice!.PaidAmount);
+        Assert.Equal(71_000m, row.Invoice.OutstandingAmount);
     }
 
     [Fact]
@@ -68,6 +75,12 @@ public class AccountsControllerTests
         Assert.True(row.IsOverdue);
         Assert.Equal(6, row.Payments.Count);
         Assert.DoesNotContain(row.Payments, payment => payment.DocumentKind == DocumentKind.Invoice);
+        Assert.Equal(86_000m, payload.Summary.Total.Amount);
+        Assert.Equal(56_000m, payload.Summary.Pending.Amount);
+        Assert.Equal(56_000m, payload.Summary.Overdue.Amount);
+        Assert.NotNull(row.Invoice);
+        Assert.Equal(30_000m, row.Invoice!.PaidAmount);
+        Assert.Equal(56_000m, row.Invoice.OutstandingAmount);
     }
 
     [Fact]
