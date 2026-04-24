@@ -16,7 +16,7 @@ import {
   isClientsListPath,
   isContractsListPath,
   isPaymentsListPath,
-} from './App';
+} from './appRouting';
 
 describe('App payment routing helpers', () => {
   beforeEach(() => {

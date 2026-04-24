@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckSquare, FileSpreadsheet, History, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type {
@@ -213,10 +213,55 @@ export function SpreadsheetImportSettings() {
 
   const selectedCount = selectedPreviewIds.size;
 
+  const loadBatch = useCallback(async (batchId: number) => {
+    setBatchLoadingId(batchId);
+    try {
+      const batch = await apiService.getSpreadsheetImportBatch(batchId);
+      setSelectedBatch(batch);
+      setHistoryError(null);
+    } catch (loadError) {
+      const message = extractDisplayErrorMessage(loadError, 'Не удалось загрузить детали импорта.');
+      setHistoryError(message);
+      toast.error(message, 'Импорт данных');
+    } finally {
+      setBatchLoadingId(null);
+    }
+  }, [toast]);
+
+  const loadHistory = useCallback(async (selectBatchId?: number) => {
+    setHistoryLoading(true);
+    try {
+      const items = await apiService.getSpreadsheetImportBatches();
+      setHistoryItems(items ?? []);
+      setHistoryError(null);
+      if (selectBatchId) {
+        await loadBatch(selectBatchId);
+      }
+    } catch (loadError) {
+      setHistoryError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить историю импортов.'));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [loadBatch]);
+
+  const loadDatabaseStatus = useCallback(async () => {
+    setDatabaseStatusLoading(true);
+    try {
+      const status = await apiService.getDatabaseStatus();
+      setDatabaseStatus(status);
+      setSqliteImportError(null);
+    } catch (loadError) {
+      const message = extractDisplayErrorMessage(loadError, 'Не удалось загрузить статус базы данных.');
+      setSqliteImportError(message);
+    } finally {
+      setDatabaseStatusLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadHistory();
     void loadDatabaseStatus();
-  }, []);
+  }, [loadDatabaseStatus, loadHistory]);
 
   useEffect(() => {
     if (preview?.sections.length && !preview.sections.some((section) => section.key === activeSectionKey)) {
@@ -236,51 +281,6 @@ export function SpreadsheetImportSettings() {
     const totalPages = Math.max(1, Math.ceil(activeSection.rows.length / previewPageSize || 1));
     setPreviewPage((previous) => Math.min(previous, totalPages));
   }, [activeSection, previewPageSize]);
-
-  async function loadHistory(selectBatchId?: number) {
-    setHistoryLoading(true);
-    try {
-      const items = await apiService.getSpreadsheetImportBatches();
-      setHistoryItems(items ?? []);
-      setHistoryError(null);
-      if (selectBatchId) {
-        await loadBatch(selectBatchId);
-      }
-    } catch (loadError) {
-      setHistoryError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить историю импортов.'));
-    } finally {
-      setHistoryLoading(false);
-    }
-  }
-
-  async function loadDatabaseStatus() {
-    setDatabaseStatusLoading(true);
-    try {
-      const status = await apiService.getDatabaseStatus();
-      setDatabaseStatus(status);
-      setSqliteImportError(null);
-    } catch (loadError) {
-      const message = extractDisplayErrorMessage(loadError, 'Не удалось загрузить статус базы данных.');
-      setSqliteImportError(message);
-    } finally {
-      setDatabaseStatusLoading(false);
-    }
-  }
-
-  async function loadBatch(batchId: number) {
-    setBatchLoadingId(batchId);
-    try {
-      const batch = await apiService.getSpreadsheetImportBatch(batchId);
-      setSelectedBatch(batch);
-      setHistoryError(null);
-    } catch (loadError) {
-      const message = extractDisplayErrorMessage(loadError, 'Не удалось загрузить детали импорта.');
-      setHistoryError(message);
-      toast.error(message, 'Импорт данных');
-    } finally {
-      setBatchLoadingId(null);
-    }
-  }
 
   function addRowsToSelection(next: Set<string>, rows: SpreadsheetImportPreviewRowDto[]) {
     const queue = [...rows];

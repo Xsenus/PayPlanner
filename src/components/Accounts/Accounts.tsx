@@ -533,13 +533,16 @@ export function Accounts({
     cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
   };
 
-  const accountStatusLabels: Record<AccountStatus, string> = {
-    created: 'Не оплачен',
-    paid: 'Оплачен',
-    partial: 'Частично оплачен',
-    overdue: 'Просрочен',
-    cancelled: t('cancelledStatus') ?? 'Отменён',
-  };
+  const accountStatusLabels = useMemo<Record<AccountStatus, string>>(
+    () => ({
+      created: 'Не оплачен',
+      paid: 'Оплачен',
+      partial: 'Частично оплачен',
+      overdue: 'Просрочен',
+      cancelled: t('cancelledStatus') ?? 'Отменён',
+    }),
+    [t],
+  );
 
   const accountStatusClasses: Record<AccountStatus, string> = {
     created: 'bg-amber-100 text-amber-700 border border-amber-200',
@@ -558,11 +561,14 @@ export function Accounts({
     Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
   };
 
-  const typeFilterLabels: Record<FilterType, string> = {
-    All: t('invoiceTypeAll') ?? 'Все счета',
-    Income: t('invoiceTypeIncome') ?? 'Доходные счета',
-    Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
-  };
+  const typeFilterLabels = useMemo<Record<FilterType, string>>(
+    () => ({
+      All: t('invoiceTypeAll') ?? 'Все счета',
+      Income: t('invoiceTypeIncome') ?? 'Доходные счета',
+      Expense: t('invoiceTypeExpense') ?? 'Расходные счета',
+    }),
+    [t],
+  );
 
   const typeBadgeClasses: Record<PaymentKind, string> = {
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',

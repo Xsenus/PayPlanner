@@ -1804,7 +1804,7 @@ export function ClientDetail({
     setInvoiceViewModeTouched(false);
     setPaymentPage(1);
     setInvoicePage(1);
-  }, [clientId]);
+  }, [clientId, defaultInvoiceViewMode, defaultPaymentViewMode]);
 
   useEffect(() => {
     if (!paymentViewModeTouched) {
@@ -2055,13 +2055,16 @@ export function ClientDetail({
     overdue: { amount: 0, count: 0 },
   };
 
-  const invoiceStatusLabels: Record<PaymentStatus, string> = {
-    Pending: t("invoicePendingBadge") ?? t("pending") ?? "Ожидается",
-    Completed: t("invoicePaidBadge") ?? t("completedStatus") ?? "Оплачено",
-    Overdue: t("invoiceOverdueBadge") ?? t("overdue") ?? "Просрочено",
-    Processing: t("processingStatus") ?? "В обработке",
-    Cancelled: t("cancelledStatus") ?? "Отменено",
-  };
+  const invoiceStatusLabels = useMemo<Record<PaymentStatus, string>>(
+    () => ({
+      Pending: t("invoicePendingBadge") ?? t("pending") ?? "Ожидается",
+      Completed: t("invoicePaidBadge") ?? t("completedStatus") ?? "Оплачено",
+      Overdue: t("invoiceOverdueBadge") ?? t("overdue") ?? "Просрочено",
+      Processing: t("processingStatus") ?? "В обработке",
+      Cancelled: t("cancelledStatus") ?? "Отменено",
+    }),
+    [t],
+  );
 
   const {
     contracts: clientContracts,

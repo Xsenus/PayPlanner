@@ -2140,7 +2140,8 @@ export function InvoiceModal({
     form.expenseClientId,
     form.number,
     form.type,
-    invoice?.id,
+    invoice,
+    isPageMode,
     onCreateActPage,
     selectedResponsibleId,
   ]);
