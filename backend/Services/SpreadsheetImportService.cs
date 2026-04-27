@@ -114,6 +114,7 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public List<InvoiceDraft> InvoiceDrafts { get; } = new();
         public List<ActDraft> ActDrafts { get; } = new();
         public List<string> Messages { get; } = new();
+        public Dictionary<string, int> OneCNonImportObjectCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class ParsedFile
@@ -148,20 +149,42 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
 
         public void UpsertInvoice(InvoiceStateItem item)
         {
-            if (!Invoices.TryGetValue(item.Key, out var list))
+            foreach (var list in Invoices.Values)
             {
-                list = new List<InvoiceStateItem>();
-                Invoices[item.Key] = list;
+                list.RemoveAll(current => current.PaymentId == item.PaymentId);
             }
 
-            var existing = list.FindIndex(current => current.PaymentId == item.PaymentId);
-            if (existing >= 0)
+            var keys = BuildInvoiceMatchKeys(item.ExternalId, item.Number, item.Date, item.Type);
+            if (keys.Count == 0 && !string.IsNullOrWhiteSpace(item.Key))
             {
-                list[existing] = item;
+                keys.Add(item.Key);
             }
-            else
+
+            foreach (var key in keys)
             {
-                list.Add(item);
+                if (!Invoices.TryGetValue(key, out var list))
+                {
+                    list = new List<InvoiceStateItem>();
+                    Invoices[key] = list;
+                }
+
+                list.Add(new InvoiceStateItem
+                {
+                    PaymentId = item.PaymentId,
+                    Key = key,
+                    ExternalId = item.ExternalId,
+                    Number = item.Number,
+                    Date = item.Date,
+                    Amount = item.Amount,
+                    DueDate = item.DueDate,
+                    CounterpartyName = item.CounterpartyName,
+                    Status = item.Status,
+                    Type = item.Type,
+                    PaidDate = item.PaidDate,
+                    ActReference = item.ActReference,
+                    ResponsibleName = item.ResponsibleName,
+                    ImportedInCurrentBatch = item.ImportedInCurrentBatch,
+                });
             }
         }
 
@@ -180,20 +203,41 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
 
         public void UpsertAct(ActStateItem item)
         {
-            if (!Acts.TryGetValue(item.Key, out var list))
+            foreach (var list in Acts.Values)
             {
-                list = new List<ActStateItem>();
-                Acts[item.Key] = list;
+                list.RemoveAll(current => current.ActId == item.ActId);
             }
 
-            var existing = list.FindIndex(current => current.ActId == item.ActId);
-            if (existing >= 0)
+            var keys = BuildActMatchKeys(item.ExternalId, item.Number, item.Date, item.Type);
+            if (keys.Count == 0 && !string.IsNullOrWhiteSpace(item.Key))
             {
-                list[existing] = item;
+                keys.Add(item.Key);
             }
-            else
+
+            foreach (var key in keys)
             {
-                list.Add(item);
+                if (!Acts.TryGetValue(key, out var list))
+                {
+                    list = new List<ActStateItem>();
+                    Acts[key] = list;
+                }
+
+                list.Add(new ActStateItem
+                {
+                    ActId = item.ActId,
+                    Key = key,
+                    ExternalId = item.ExternalId,
+                    Number = item.Number,
+                    Date = item.Date,
+                    Amount = item.Amount,
+                    CounterpartyName = item.CounterpartyName,
+                    CounterpartyInn = item.CounterpartyInn,
+                    Status = item.Status,
+                    Type = item.Type,
+                    InvoiceNumber = item.InvoiceNumber,
+                    ResponsibleName = item.ResponsibleName,
+                    ImportedInCurrentBatch = item.ImportedInCurrentBatch,
+                });
             }
         }
     }
@@ -217,6 +261,7 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public string? NormalizedEmail { get; init; }
         public string? Phone { get; init; }
         public string? Email { get; init; }
+        public string? Address { get; init; }
         public string? ResponsibleName { get; init; }
         public int? LegalEntityId { get; init; }
         public string? LegalEntityShortName { get; init; }
@@ -230,11 +275,15 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public string ShortName { get; init; } = string.Empty;
         public string? FullName { get; init; }
         public string? Inn { get; init; }
+        public string? Kpp { get; init; }
+        public string? Ogrn { get; init; }
+        public string? Address { get; init; }
         public string? Phone { get; init; }
         public string? Email { get; init; }
         public string? Director { get; init; }
         public string? ResponsibleName { get; init; }
         public string? OrganizationForm { get; init; }
+        public string? BankAccountsJson { get; init; }
         public string NormalizedShortName { get; init; } = string.Empty;
         public string? NormalizedFullName { get; init; }
         public string? NormalizedInn { get; init; }
@@ -247,29 +296,35 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
     {
         public int PaymentId { get; init; }
         public string Key { get; init; } = string.Empty;
+        public string? ExternalId { get; init; }
         public string? Number { get; init; }
         public DateTime? Date { get; init; }
         public decimal Amount { get; init; }
         public DateTime? DueDate { get; init; }
         public string? CounterpartyName { get; init; }
         public PaymentStatus Status { get; init; }
+        public PaymentType Type { get; init; }
         public DateTime? PaidDate { get; init; }
         public string? ActReference { get; init; }
         public string? ResponsibleName { get; init; }
+        public bool ImportedInCurrentBatch { get; init; }
     }
 
     private sealed class ActStateItem
     {
         public int ActId { get; init; }
         public string Key { get; init; } = string.Empty;
+        public string? ExternalId { get; init; }
         public string? Number { get; init; }
         public DateTime? Date { get; init; }
         public decimal Amount { get; init; }
         public string? CounterpartyName { get; init; }
         public string? CounterpartyInn { get; init; }
         public ActStatus Status { get; init; }
+        public PaymentType Type { get; init; }
         public string? InvoiceNumber { get; init; }
         public string? ResponsibleName { get; init; }
+        public bool ImportedInCurrentBatch { get; init; }
     }
 
     private record CounterpartyDraft
@@ -289,6 +344,16 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public string? Article { get; init; }
         public string? ResponsibleName { get; init; }
         public string? AutoInvoiceResponsibleName { get; init; }
+        public string? ExternalId { get; init; }
+        public string? Kpp { get; init; }
+        public string? Ogrn { get; init; }
+        public string? Address { get; init; }
+        public string? OrganizationForm { get; init; }
+        public string? OrganizationFormFull { get; init; }
+        public string? BankName { get; init; }
+        public string? BankBik { get; init; }
+        public string? BankAccount { get; init; }
+        public string? BankCorrAccount { get; init; }
         public bool Derived { get; init; }
         public List<string> DependencyPreviewIds { get; init; } = new();
         public List<string> DependencyTitles { get; init; } = new();
@@ -305,12 +370,16 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public DateTime? Date { get; init; }
         public DateTime? DueDate { get; init; }
         public decimal? Amount { get; init; }
+        public PaymentType Type { get; init; } = PaymentType.Income;
         public string? CounterpartyName { get; init; }
         public string? CounterpartyInn { get; init; }
         public string? StatusText { get; init; }
         public DateTime? PaidDate { get; init; }
         public string? ActReference { get; init; }
         public string? Nomenclature { get; init; }
+        public string? ContractName { get; init; }
+        public string? Comment { get; init; }
+        public string? ExternalId { get; init; }
         public string? CreatedByName { get; init; }
         public string? ResponsibleName { get; init; }
         public List<ImportedLineItem> ParsedLineItems { get; init; } = new();
@@ -327,12 +396,18 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public string? Number { get; init; }
         public DateTime? Date { get; init; }
         public decimal? Amount { get; init; }
+        public PaymentType Type { get; init; } = PaymentType.Income;
         public string? CounterpartyName { get; init; }
         public string? CounterpartyInn { get; init; }
         public string? StatusText { get; init; }
-        public string? InvoiceNumber { get; init; }
+        public string? InvoiceNumber { get; set; }
+        public string? InvoiceExternalId { get; init; }
+        public DateTime? InvoiceDate { get; set; }
         public DateTime? PaymentDate { get; init; }
         public string? Nomenclature { get; init; }
+        public string? ContractName { get; init; }
+        public string? Comment { get; init; }
+        public string? ExternalId { get; init; }
         public string? ResponsibleName { get; init; }
         public List<ImportedLineItem> ParsedLineItems { get; init; } = new();
         public List<string> ParseWarnings { get; init; } = new();
@@ -364,11 +439,15 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public string ShortName { get; init; } = string.Empty;
         public string? FullName { get; init; }
         public string? Inn { get; init; }
+        public string? Kpp { get; init; }
+        public string? Ogrn { get; init; }
+        public string? Address { get; init; }
         public string? Phone { get; init; }
         public string? Email { get; init; }
         public string? Director { get; init; }
         public int? ResponsibleUserId { get; init; }
         public string? OrganizationForm { get; init; }
+        public string? BankAccountsJson { get; init; }
         public string? Notes { get; init; }
     }
 

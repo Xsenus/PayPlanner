@@ -148,25 +148,61 @@ public sealed partial class SpreadsheetImportService
     }
 
     private static string BuildInvoiceKey(string? number, DateTime? date)
-    {
-        var normalizedNumber = NormalizeDocumentNumber(number);
-        if (string.IsNullOrWhiteSpace(normalizedNumber) || !date.HasValue)
-        {
-            return string.Empty;
-        }
+        => BuildInvoiceKey(null, number, date, PaymentType.Income);
 
-        return $"{normalizedNumber}|{date.Value:yyyy-MM-dd}";
-    }
+    private static string BuildInvoiceKey(string? number, DateTime? date, PaymentType type)
+        => BuildInvoiceKey(null, number, date, type);
+
+    private static string BuildInvoiceKey(string? externalId, string? number, DateTime? date, PaymentType type)
+        => BuildInvoiceMatchKeys(externalId, number, date, type).FirstOrDefault() ?? string.Empty;
+
+    private static List<string> BuildInvoiceMatchKeys(string? externalId, string? number, DateTime? date, PaymentType type)
+        => BuildDocumentMatchKeys("invoice", externalId, number, date, type);
 
     private static string BuildActKey(string? number, DateTime? date)
+        => BuildActKey(null, number, date, PaymentType.Income);
+
+    private static string BuildActKey(string? number, DateTime? date, PaymentType type)
+        => BuildActKey(null, number, date, type);
+
+    private static string BuildActKey(string? externalId, string? number, DateTime? date, PaymentType type)
+        => BuildActMatchKeys(externalId, number, date, type).FirstOrDefault() ?? string.Empty;
+
+    private static List<string> BuildActMatchKeys(string? externalId, string? number, DateTime? date, PaymentType type)
+        => BuildDocumentMatchKeys("act", externalId, number, date, type);
+
+    private static List<string> BuildDocumentMatchKeys(string documentKind, string? externalId, string? number, DateTime? date, PaymentType type)
     {
+        var keys = new List<string>();
         var normalizedNumber = NormalizeDocumentNumber(number);
-        if (string.IsNullOrWhiteSpace(normalizedNumber) || !date.HasValue)
+        if (!string.IsNullOrWhiteSpace(normalizedNumber) && date.HasValue)
         {
-            return string.Empty;
+            keys.Add($"{type}|{documentKind}|number:{normalizedNumber}|{date.Value:yyyy-MM-dd}");
         }
 
-        return $"{normalizedNumber}|{date.Value:yyyy-MM-dd}";
+        var normalizedExternalId = NormalizeOneCExternalId(externalId);
+        if (!string.IsNullOrWhiteSpace(normalizedExternalId))
+        {
+            keys.Add($"{type}|{documentKind}|uid:{normalizedExternalId}");
+        }
+
+        return keys.Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    private static string BuildInvoiceNaturalKey(string? number, DateTime? date, PaymentType type)
+    {
+        var normalizedNumber = NormalizeDocumentNumber(number);
+        return string.IsNullOrWhiteSpace(normalizedNumber) || !date.HasValue
+            ? string.Empty
+            : $"{type}|invoice|number:{normalizedNumber}|{date.Value:yyyy-MM-dd}";
+    }
+
+    private static string BuildActNaturalKey(string? number, DateTime? date, PaymentType type)
+    {
+        var normalizedNumber = NormalizeDocumentNumber(number);
+        return string.IsNullOrWhiteSpace(normalizedNumber) || !date.HasValue
+            ? string.Empty
+            : $"{type}|act|number:{normalizedNumber}|{date.Value:yyyy-MM-dd}";
     }
 
     private static string NormalizeDocumentNumber(string? value)
@@ -187,6 +223,41 @@ public sealed partial class SpreadsheetImportService
         }
 
         return builder.ToString();
+    }
+
+    private static string? NormalizeOneCExternalId(string? value)
+    {
+        var normalized = NormalizeText(value);
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized.ToUpperInvariant();
+    }
+
+    private static string? ExtractOneCExternalId(string? value)
+    {
+        var normalized = NormalizeText(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        foreach (var marker in new[] { "UID 1С:", "UID 1C:" })
+        {
+            var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                continue;
+            }
+
+            var start = markerIndex + marker.Length;
+            var end = normalized.IndexOf(';', start);
+            var raw = end >= 0
+                ? normalized[start..end]
+                : normalized[start..];
+            return NormalizeOneCExternalId(raw);
+        }
+
+        return null;
     }
 
     private static LineItemParseResult ParseLineItems(string? rawValue, decimal totalAmount)
@@ -292,6 +363,11 @@ public sealed partial class SpreadsheetImportService
             if (normalized.Contains("отмен", StringComparison.Ordinal) || normalized.Contains("cancel", StringComparison.Ordinal))
             {
                 return PaymentStatus.Cancelled;
+            }
+
+            if (normalized.Contains("частич", StringComparison.Ordinal) || normalized.Contains("partial", StringComparison.Ordinal))
+            {
+                return PaymentStatus.Processing;
             }
 
             if (normalized.Contains("оплачен", StringComparison.Ordinal) || normalized.Contains("paid", StringComparison.Ordinal))
@@ -405,11 +481,15 @@ public sealed partial class SpreadsheetImportService
             ShortName = entity.ShortName,
             FullName = entity.FullName,
             Inn = entity.Inn,
+            Kpp = entity.Kpp,
+            Ogrn = entity.Ogrn,
+            Address = entity.Address,
             Phone = entity.Phone,
             Email = entity.Email,
             Director = entity.Director,
             ResponsibleUserId = entity.ResponsibleUserId,
             OrganizationForm = entity.OrganizationForm,
+            BankAccountsJson = entity.BankAccountsJson,
             Notes = entity.Notes,
         };
 
@@ -552,7 +632,7 @@ public sealed partial class SpreadsheetImportService
         return normalized[ClientProfileNotesPrefix.Length..].Trim();
     }
 
-    private static string MergeClientNotes(string? existingNotes, CounterpartyDraft draft, int batchId, DateTime importedAtUtc)
+    private static string MergeClientNotes(string? existingNotes, CounterpartyDraft draft)
     {
         var profile = ParseClientProfile(existingNotes) ?? new JsonObject();
         var legacyNotes = string.IsNullOrWhiteSpace(existingNotes) || existingNotes.TrimStart().StartsWith(ClientProfileNotesPrefix, StringComparison.Ordinal)
@@ -574,12 +654,16 @@ public sealed partial class SpreadsheetImportService
             commentParts.Add($"Договор: {draft.ContractName.Trim()}");
         }
 
+        if (!string.IsNullOrWhiteSpace(draft.Address))
+        {
+            commentParts.Add($"Адрес: {draft.Address.Trim()}");
+        }
+
         if (!string.IsNullOrWhiteSpace(draft.Article))
         {
             commentParts.Add($"Статья: {draft.Article.Trim()}");
         }
 
-        commentParts.Add($"Импорт batch #{batchId} от {importedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
         var mergedComment = MergeTextValues(profile["comment"]?.GetValue<string?>(), string.Join("; ", commentParts));
         SetProfileString(profile, "comment", mergedComment);
         SetProfileString(profile, "legacyNotes", legacyNotes);
@@ -702,7 +786,11 @@ public sealed partial class SpreadsheetImportService
         ClientStateItem? existingClient,
         LegalEntityStateItem? existingLegalEntity)
     {
-        if (existingClient?.LegalEntityId.HasValue == true || existingLegalEntity is not null || IsLikelyEntrepreneurName(draft.Name))
+        if (existingClient?.LegalEntityId.HasValue == true
+            || existingLegalEntity is not null
+            || IsLikelyEntrepreneurName(draft.Name)
+            || IsLikelyOrganizationName(draft.Name)
+            || HasLegalEntityDetails(draft))
         {
             return CounterpartyImportModeLegalEntityWithClient;
         }
@@ -726,6 +814,13 @@ public sealed partial class SpreadsheetImportService
         if (existingClient?.LegalEntityId.HasValue == true || existingLegalEntity is not null)
         {
             return "Для контрагента уже найдено связанное юридическое лицо. Импорт сохранит или обновит эту связь.";
+        }
+
+        if (IsLikelyOrganizationName(draft.Name) || HasLegalEntityDetails(draft))
+        {
+            return importMode == CounterpartyImportModeLegalEntityWithClient
+                ? "В выгрузке есть реквизиты организации. Будет создано или обновлено юридическое лицо и связанный клиент."
+                : "В этом режиме реквизиты организации сохранятся только в карточке клиента без отдельного юридического лица.";
         }
 
         return "При необходимости контрагента можно импортировать не только как клиента, но и как связанное юридическое лицо.";
@@ -760,11 +855,12 @@ public sealed partial class SpreadsheetImportService
         => NormalizeText(draft.ContactName) ?? ExtractEntrepreneurPersonalName(draft.Name);
 
     private static string? BuildCounterpartyOrganizationForm(CounterpartyDraft draft)
-        => IsLikelyEntrepreneurName(draft.Name)
+        => NormalizeText(draft.OrganizationForm)
+            ?? (IsLikelyEntrepreneurName(draft.Name)
             ? "ИП"
-            : null;
+            : null);
 
-    private static string MergeLegalEntityNotes(string? existingNotes, CounterpartyDraft draft, int batchId, DateTime importedAtUtc)
+    private static string MergeLegalEntityNotes(string? existingNotes, CounterpartyDraft draft)
     {
         var commentParts = new List<string>();
         if (!string.IsNullOrWhiteSpace(draft.ContactName))
@@ -772,8 +868,151 @@ public sealed partial class SpreadsheetImportService
             commentParts.Add($"Контакт: {draft.ContactName.Trim()}");
         }
 
-        commentParts.Add($"Импорт batch #{batchId} от {importedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
+        if (!string.IsNullOrWhiteSpace(draft.OrganizationFormFull))
+        {
+            commentParts.Add($"Форма: {draft.OrganizationFormFull.Trim()}");
+        }
+
         return MergeTextValues(existingNotes, string.Join("; ", commentParts));
+    }
+
+    private static bool HasLegalEntityDetails(CounterpartyDraft draft)
+        => !string.IsNullOrWhiteSpace(draft.Kpp)
+            || !string.IsNullOrWhiteSpace(draft.Ogrn)
+            || !string.IsNullOrWhiteSpace(draft.Address)
+            || !string.IsNullOrWhiteSpace(draft.OrganizationForm)
+            || !string.IsNullOrWhiteSpace(draft.OrganizationFormFull)
+            || !string.IsNullOrWhiteSpace(draft.BankAccount)
+            || !string.IsNullOrWhiteSpace(draft.BankBik);
+
+    private static string? MergeLegalEntityBankAccounts(string? existingJson, CounterpartyDraft draft)
+    {
+        var accountNumber = NormalizeText(draft.BankAccount);
+        var bankName = NormalizeText(draft.BankName);
+        var bik = NormalizeText(draft.BankBik);
+        var corrAccount = NormalizeText(draft.BankCorrAccount);
+
+        if (string.IsNullOrWhiteSpace(accountNumber)
+            && string.IsNullOrWhiteSpace(bankName)
+            && string.IsNullOrWhiteSpace(bik))
+        {
+            return existingJson;
+        }
+
+        JsonArray array;
+        try
+        {
+            array = string.IsNullOrWhiteSpace(existingJson)
+                ? new JsonArray()
+                : JsonNode.Parse(existingJson) as JsonArray ?? new JsonArray();
+        }
+        catch
+        {
+            array = new JsonArray();
+        }
+
+        var hasSameAccount = array
+            .OfType<JsonObject>()
+            .Any(item => string.Equals(
+                NormalizeText(item["accountNumber"]?.GetValue<string?>()),
+                accountNumber,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (!hasSameAccount)
+        {
+            var item = new JsonObject();
+            if (!string.IsNullOrWhiteSpace(bankName))
+            {
+                item["bank"] = bankName;
+                item["name"] = bankName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(bik))
+            {
+                item["bik"] = bik;
+            }
+
+            if (!string.IsNullOrWhiteSpace(accountNumber))
+            {
+                item["accountNumber"] = accountNumber;
+            }
+
+            if (!string.IsNullOrWhiteSpace(corrAccount))
+            {
+                item["corrAccountNumber"] = corrAccount;
+            }
+
+            item["accountType"] = "Расчетный";
+            array.Add(item);
+        }
+
+        var json = array.ToJsonString(JsonOptions);
+        return json.Length <= 16000 ? json : json[..16000];
+    }
+
+    private static string? ExtractBankAccountPreview(string? bankAccountsJson)
+    {
+        if (string.IsNullOrWhiteSpace(bankAccountsJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var array = JsonNode.Parse(bankAccountsJson) as JsonArray;
+            var first = array?.OfType<JsonObject>().FirstOrDefault();
+            return NormalizeText(first?["accountNumber"]?.GetValue<string?>());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FormatPaymentTypeLabel(PaymentType type)
+        => type == PaymentType.Expense ? "Расход" : "Доход";
+
+    private static string? BuildInvoiceImportNotes(InvoiceDraft draft)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(draft.ExternalId))
+        {
+            parts.Add($"UID 1С: {draft.ExternalId.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(draft.ContractName))
+        {
+            parts.Add($"Договор 1С: {draft.ContractName.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(draft.Comment))
+        {
+            parts.Add($"Комментарий 1С: {draft.Comment.Trim()}");
+        }
+
+        return parts.Count == 0 ? null : string.Join("; ", parts);
+    }
+
+    private static string? BuildActImportComment(ActDraft draft)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(draft.ExternalId))
+        {
+            parts.Add($"UID 1С: {draft.ExternalId.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(draft.ContractName))
+        {
+            parts.Add($"Договор 1С: {draft.ContractName.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(draft.Comment))
+        {
+            parts.Add($"Комментарий 1С: {draft.Comment.Trim()}");
+        }
+
+        parts.AddRange(draft.ParseWarnings);
+        return parts.Count == 0 ? null : string.Join("; ", parts);
     }
 
     private static CounterpartyDraft MergeCounterpartyDraft(CounterpartyDraft current, CounterpartyDraft incoming)
@@ -781,6 +1020,9 @@ public sealed partial class SpreadsheetImportService
         return current with
         {
             Inn = current.Inn ?? incoming.Inn,
+            Kpp = current.Kpp ?? incoming.Kpp,
+            Ogrn = current.Ogrn ?? incoming.Ogrn,
+            Address = current.Address ?? incoming.Address,
             ContactName = current.ContactName ?? incoming.ContactName,
             Phone = current.Phone ?? incoming.Phone,
             Email = current.Email ?? incoming.Email,
@@ -789,6 +1031,13 @@ public sealed partial class SpreadsheetImportService
             Article = current.Article ?? incoming.Article,
             ResponsibleName = current.ResponsibleName ?? incoming.ResponsibleName,
             AutoInvoiceResponsibleName = current.AutoInvoiceResponsibleName ?? incoming.AutoInvoiceResponsibleName,
+            ExternalId = current.ExternalId ?? incoming.ExternalId,
+            OrganizationForm = current.OrganizationForm ?? incoming.OrganizationForm,
+            OrganizationFormFull = current.OrganizationFormFull ?? incoming.OrganizationFormFull,
+            BankName = current.BankName ?? incoming.BankName,
+            BankBik = current.BankBik ?? incoming.BankBik,
+            BankAccount = current.BankAccount ?? incoming.BankAccount,
+            BankCorrAccount = current.BankCorrAccount ?? incoming.BankCorrAccount,
             Derived = current.Derived && incoming.Derived,
             DependencyPreviewIds = current.DependencyPreviewIds
                 .Concat(incoming.DependencyPreviewIds)
@@ -801,14 +1050,14 @@ public sealed partial class SpreadsheetImportService
         };
     }
 
-    private static string MergeImportMarker(string? systemNotes, int batchId, string sectionKey, string sourceFileName, int rowNumber, DateTime createdAtUtc)
+    private static string MergeImportMarker(string? systemNotes, string sectionKey, string sourceFileName, int rowNumber)
     {
         var lines = (systemNotes ?? string.Empty)
             .Split('\n', StringSplitOptions.TrimEntries)
             .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(ImportMarker, StringComparison.Ordinal))
             .ToList();
 
-        lines.Add($"{ImportMarker} batch={batchId}; section={sectionKey}; file={Path.GetFileName(sourceFileName)}; row={rowNumber}; at={createdAtUtc:O}");
+        lines.Add($"{ImportMarker} section={sectionKey}; file={Path.GetFileName(sourceFileName)}; row={rowNumber}");
         return string.Join("\n", lines);
     }
 }

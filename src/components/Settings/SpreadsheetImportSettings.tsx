@@ -363,7 +363,7 @@ export function SpreadsheetImportSettings() {
 
   async function analyzeFiles() {
     if (!files.length) {
-      const message = 'Сначала выберите хотя бы один Excel-файл.';
+      const message = 'Сначала выберите хотя бы один Excel, XML или ZIP-файл.';
       setError(message);
       toast.error(message, 'Импорт данных');
       return;
@@ -575,7 +575,7 @@ export function SpreadsheetImportSettings() {
             <input
               type="file"
               multiple
-              accept=".xls,.xlsx,.xlsm,.xlsb"
+              accept=".xls,.xlsx,.xlsm,.xlsb,.xml,.zip"
               onChange={(event) => {
                 setFiles(Array.from(event.target.files ?? []));
                 setPreview(null);

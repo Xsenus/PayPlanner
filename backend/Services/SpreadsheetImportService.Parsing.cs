@@ -14,11 +14,7 @@ public sealed partial class SpreadsheetImportService
         foreach (var file in files.Where(file => file.Content.Length > 0))
         {
             var parsedFile = ParseFile(file);
-            bundle.Files.AddRange(parsedFile.Files);
-            bundle.CounterpartyDrafts.AddRange(parsedFile.CounterpartyDrafts);
-            bundle.InvoiceDrafts.AddRange(parsedFile.InvoiceDrafts);
-            bundle.ActDrafts.AddRange(parsedFile.ActDrafts);
-            bundle.Messages.AddRange(parsedFile.Messages);
+            MergeParsedBundle(bundle, parsedFile);
         }
 
         return bundle;
@@ -26,6 +22,16 @@ public sealed partial class SpreadsheetImportService
 
     private ParsedImportBundle ParseFile(SpreadsheetImportUploadFile file)
     {
+        if (IsZipImportFile(file))
+        {
+            return ParseZipImportFile(file);
+        }
+
+        if (IsXmlImportFile(file))
+        {
+            return ParseXmlImportFile(file);
+        }
+
         var bundle = new ParsedImportBundle();
         using var stream = new MemoryStream(file.Content, writable: false);
         using var reader = ExcelReaderFactory.CreateReader(stream);
@@ -76,13 +82,32 @@ public sealed partial class SpreadsheetImportService
                     break;
                 default:
                     bundle.Messages.Add(
-                        $"Файл {file.FileName}, лист {sheet.Name}: структура не распознана. Поддерживаются счета, акты и списки контрагентов.");
+                        $"Файл {file.FileName}, лист {sheet.Name}: структура не распознана. Поддерживаются Excel-листы со счетами, актами и контрагентами, а также XML/ZIP выгрузки КУБ/1С.");
                     break;
             }
         }
         while (reader.NextResult());
 
         return bundle;
+    }
+
+    private static bool IsZipImportFile(SpreadsheetImportUploadFile file)
+        => string.Equals(Path.GetExtension(file.FileName), ".zip", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsXmlImportFile(SpreadsheetImportUploadFile file)
+    {
+        if (string.Equals(Path.GetExtension(file.FileName), ".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var index = 0;
+        while (index < file.Content.Length && char.IsWhiteSpace((char)file.Content[index]))
+        {
+            index++;
+        }
+
+        return index < file.Content.Length && file.Content[index] == (byte)'<';
     }
 
     private static SheetData ReadSheet(IExcelDataReader reader)

@@ -68,12 +68,16 @@ public sealed partial class SpreadsheetImportService
                     ShortName = Truncate(draft.Name, 200),
                     FullName = Truncate(draft.Name, 500),
                     Inn = Truncate(NormalizeInn(draft.Inn), 20),
+                    Kpp = Truncate(draft.Kpp, 20),
+                    Ogrn = Truncate(draft.Ogrn, 20),
+                    Address = Truncate(draft.Address, 500),
                     Phone = Truncate(draft.Phone, 100),
                     Email = Truncate(draft.Email, 200),
                     Director = Truncate(BuildCounterpartyLegalEntityDirector(draft), 200),
                     ResponsibleUserId = responsibleId,
                     OrganizationForm = Truncate(BuildCounterpartyOrganizationForm(draft), 64),
-                    Notes = MergeLegalEntityNotes(null, draft, batchId, now),
+                    BankAccountsJson = MergeLegalEntityBankAccounts(null, draft),
+                    Notes = MergeLegalEntityNotes(null, draft),
                     CreatedAt = now,
                     UpdatedAt = now,
                 };
@@ -97,6 +101,21 @@ public sealed partial class SpreadsheetImportService
                 if (string.IsNullOrWhiteSpace(legalEntity.Inn) && !string.IsNullOrWhiteSpace(draft.Inn))
                 {
                     legalEntity.Inn = Truncate(NormalizeInn(draft.Inn), 20);
+                }
+
+                if (string.IsNullOrWhiteSpace(legalEntity.Kpp) && !string.IsNullOrWhiteSpace(draft.Kpp))
+                {
+                    legalEntity.Kpp = Truncate(draft.Kpp, 20);
+                }
+
+                if (string.IsNullOrWhiteSpace(legalEntity.Ogrn) && !string.IsNullOrWhiteSpace(draft.Ogrn))
+                {
+                    legalEntity.Ogrn = Truncate(draft.Ogrn, 20);
+                }
+
+                if (string.IsNullOrWhiteSpace(legalEntity.Address) && !string.IsNullOrWhiteSpace(draft.Address))
+                {
+                    legalEntity.Address = Truncate(draft.Address, 500);
                 }
 
                 if (string.IsNullOrWhiteSpace(legalEntity.Phone) && !string.IsNullOrWhiteSpace(draft.Phone))
@@ -124,7 +143,8 @@ public sealed partial class SpreadsheetImportService
                     legalEntity.OrganizationForm = Truncate(BuildCounterpartyOrganizationForm(draft), 64);
                 }
 
-                legalEntity.Notes = MergeLegalEntityNotes(legalEntity.Notes, draft, batchId, now);
+                legalEntity.BankAccountsJson = MergeLegalEntityBankAccounts(legalEntity.BankAccountsJson, draft);
+                legalEntity.Notes = MergeLegalEntityNotes(legalEntity.Notes, draft);
                 legalEntity.UpdatedAt = now;
             }
 
@@ -135,7 +155,7 @@ public sealed partial class SpreadsheetImportService
                 Company = Truncate(BuildCounterpartyClientCompany(draft, normalizedImportMode), 200),
                 Phone = Truncate(draft.Phone, 50),
                 Email = Truncate(draft.Email, 200),
-                Notes = MergeClientNotes(null, draft, batchId, now),
+                Notes = MergeClientNotes(null, draft),
                 IsActive = true,
                 ResponsibleUserId = responsibleId,
             };
@@ -145,7 +165,7 @@ public sealed partial class SpreadsheetImportService
                 db.Clients.Add(client);
             }
 
-            ApplyCounterpartyValues(client, draft, batchId, now, responsibleId, normalizedImportMode);
+            ApplyCounterpartyValues(client, draft, responsibleId, normalizedImportMode);
 
             if (normalizedImportMode == CounterpartyImportModeLegalEntityWithClient && legalEntity is not null)
             {
@@ -277,6 +297,7 @@ public sealed partial class SpreadsheetImportService
             NormalizedEmail = NormalizeEmail(client.Email),
             Phone = NormalizeText(client.Phone),
             Email = NormalizeEmail(client.Email),
+            Address = NormalizeText(client.Address),
             ResponsibleName = null,
             LegalEntityId = client.LegalEntityId,
             LegalEntityShortName = NormalizeText(legalEntity?.ShortName),
@@ -297,11 +318,15 @@ public sealed partial class SpreadsheetImportService
             ShortName = entity.ShortName,
             FullName = NormalizeText(entity.FullName),
             Inn = NormalizeInn(entity.Inn),
+            Kpp = NormalizeText(entity.Kpp),
+            Ogrn = NormalizeText(entity.Ogrn),
+            Address = NormalizeText(entity.Address),
             Phone = NormalizeText(entity.Phone),
             Email = NormalizeEmail(entity.Email),
             Director = NormalizeText(entity.Director),
             ResponsibleName = null,
             OrganizationForm = NormalizeText(entity.OrganizationForm),
+            BankAccountsJson = NormalizeText(entity.BankAccountsJson),
             NormalizedShortName = NormalizeNameKey(entity.ShortName),
             NormalizedFullName = NormalizeNameKey(entity.FullName),
             NormalizedInn = NormalizeInn(entity.Inn),
@@ -318,7 +343,8 @@ public sealed partial class SpreadsheetImportService
         ImportState state,
         CancellationToken cancellationToken)
     {
-        var sourceKey = BuildInvoiceKey(draft.Number, draft.Date);
+        var sourceKeys = BuildInvoiceMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
+        var sourceKey = BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type);
         var sourceTitle = BuildInvoiceTitle(draft.Number, draft.Date);
         if (string.IsNullOrWhiteSpace(sourceKey) || !draft.Amount.HasValue || string.IsNullOrWhiteSpace(draft.CounterpartyName))
         {
@@ -344,9 +370,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             var responsibleId = FindUserId(state.Users, draft.ResponsibleName ?? draft.CreatedByName);
-            var existingPaymentId = state.Invoices.TryGetValue(sourceKey, out var existingItems)
-                ? existingItems.Select(item => item.PaymentId).FirstOrDefault()
-                : 0;
+            var existingPaymentId = FindExistingInvoiceStateItem(state, sourceKeys)?.PaymentId ?? 0;
 
             var payment = existingPaymentId > 0
                 ? await db.Payments.Include(item => item.Invoice).Include(item => item.InvoiceLineItems).Include(item => item.Responsibles)
@@ -354,14 +378,14 @@ public sealed partial class SpreadsheetImportService
                 : null;
 
             var beforeJson = payment is null ? null : SerializeSnapshot(CaptureInvoiceSnapshot(payment));
-            payment ??= new Payment { DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income };
+            payment ??= new Payment { DocumentKind = DocumentKind.Invoice, Type = draft.Type };
             if (payment.Id == 0)
             {
                 db.Payments.Add(payment);
             }
 
             var invoiceEntity = await ResolveInvoiceEntityAsync(db, payment, draft, cancellationToken);
-            ApplyInvoiceValues(payment, draft, batchId, clientId.Value, responsibleId, invoiceEntity);
+            ApplyInvoiceValues(payment, draft, clientId.Value, responsibleId, invoiceEntity);
             SyncInvoiceLineItems(db, payment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
             SyncPaymentResponsibles(payment, responsibleId);
 
@@ -382,16 +406,39 @@ public sealed partial class SpreadsheetImportService
             db.ChangeTracker.Clear();
             var persistedPayment = await LoadInvoicePaymentForSnapshotAsync(db, paymentId, cancellationToken);
             var afterJson = SerializeSnapshot(CaptureInvoiceSnapshot(persistedPayment));
-            state.UpsertInvoice(new InvoiceStateItem { PaymentId = paymentId, Key = sourceKey });
+            var operationAction = beforeJson is null
+                ? SpreadsheetImportOperationAction.Created
+                : string.Equals(beforeJson, afterJson, StringComparison.Ordinal)
+                    ? SpreadsheetImportOperationAction.Skipped
+                    : SpreadsheetImportOperationAction.Updated;
+            state.UpsertInvoice(new InvoiceStateItem
+            {
+                PaymentId = paymentId,
+                Key = sourceKey,
+                ExternalId = NormalizeOneCExternalId(draft.ExternalId),
+                Number = NormalizeText(draft.Number),
+                Date = draft.Date?.Date,
+                Amount = draft.Amount ?? 0m,
+                DueDate = draft.DueDate?.Date,
+                CounterpartyName = NormalizeText(draft.CounterpartyName),
+                Status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate),
+                Type = draft.Type,
+                PaidDate = draft.PaidDate?.Date,
+                ActReference = NormalizeText(draft.ActReference),
+                ResponsibleName = NormalizeText(draft.ResponsibleName ?? draft.CreatedByName),
+                ImportedInCurrentBatch = true,
+            });
 
             db.SpreadsheetImportBatchOperations.Add(CreateOperation(
                 batchId, "invoices", draft.FileName, draft.FileHash, draft.PreviewId, draft.RowNumber,
-                sourceKey, sourceTitle, beforeJson is null ? SpreadsheetImportOperationAction.Created : SpreadsheetImportOperationAction.Updated,
+                sourceKey, sourceTitle, operationAction,
                 "Payment",
                 paymentId,
-                beforeJson is null
+                operationAction == SpreadsheetImportOperationAction.Created
                     ? "Счет создан как платеж и привязан к карточке счета."
-                    : "Счет обновлен как платеж с сохранением связи с карточкой счета.",
+                    : operationAction == SpreadsheetImportOperationAction.Skipped
+                        ? "Изменений не требуется."
+                        : "Счет обновлен как платеж с сохранением связи с карточкой счета.",
                 beforeJson,
                 afterJson,
                 JsonSerializer.Serialize(new { draft.ParseWarnings }, JsonOptions)));

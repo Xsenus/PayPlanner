@@ -11,11 +11,15 @@ public sealed partial class SpreadsheetImportService
         entity.ShortName = snapshot.ShortName;
         entity.FullName = snapshot.FullName;
         entity.Inn = snapshot.Inn;
+        entity.Kpp = snapshot.Kpp;
+        entity.Ogrn = snapshot.Ogrn;
+        entity.Address = snapshot.Address;
         entity.Phone = snapshot.Phone;
         entity.Email = snapshot.Email;
         entity.Director = snapshot.Director;
         entity.ResponsibleUserId = snapshot.ResponsibleUserId;
         entity.OrganizationForm = snapshot.OrganizationForm;
+        entity.BankAccountsJson = snapshot.BankAccountsJson;
         entity.Notes = snapshot.Notes;
     }
 

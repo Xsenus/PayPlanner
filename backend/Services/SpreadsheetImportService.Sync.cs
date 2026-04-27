@@ -67,9 +67,10 @@ public sealed partial class SpreadsheetImportService
         act.Status = MapActStatus(draft.StatusText);
         act.ClientId = clientId;
         act.ResponsibleId = responsibleId ?? act.ResponsibleId;
-        if (string.IsNullOrWhiteSpace(act.Comment) && draft.ParseWarnings.Count > 0)
+        var importComment = BuildActImportComment(draft);
+        if (!string.IsNullOrWhiteSpace(importComment))
         {
-            act.Comment = Truncate(string.Join("; ", draft.ParseWarnings), 1000);
+            act.Comment = MergeTextValues(act.Comment, importComment);
         }
     }
 
@@ -114,10 +115,17 @@ public sealed partial class SpreadsheetImportService
         }
     }
 
-    private async Task<Payment?> FindInvoicePaymentByNumberAsync(PaymentContext db, string? invoiceNumber, CancellationToken cancellationToken)
+    private async Task<Payment?> FindInvoicePaymentForActAsync(
+        PaymentContext db,
+        string? invoiceExternalId,
+        string? invoiceNumber,
+        DateTime? invoiceDate,
+        PaymentType type,
+        CancellationToken cancellationToken)
     {
+        var normalizedExternalId = NormalizeOneCExternalId(invoiceExternalId);
         var normalizedNumber = NormalizeDocumentNumber(invoiceNumber);
-        if (string.IsNullOrWhiteSpace(normalizedNumber))
+        if (string.IsNullOrWhiteSpace(normalizedExternalId) && string.IsNullOrWhiteSpace(normalizedNumber))
         {
             return null;
         }
@@ -126,12 +134,65 @@ public sealed partial class SpreadsheetImportService
             .AsNoTracking()
             .Include(item => item.Invoice)
             .Include(item => item.InvoiceLineItems)
-            .Where(item => item.DocumentKind == DocumentKind.Invoice)
+            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Type == type)
             .ToListAsync(cancellationToken);
 
-        return candidates.FirstOrDefault(item =>
-            string.Equals(NormalizeDocumentNumber(item.Invoice?.Number), normalizedNumber, StringComparison.Ordinal)
-            || string.Equals(NormalizeDocumentNumber(item.Account), normalizedNumber, StringComparison.Ordinal)
-            || string.Equals(NormalizeDocumentNumber(item.LegacyAccountNumber), normalizedNumber, StringComparison.Ordinal));
+        var normalizedInvoiceDate = invoiceDate?.Date;
+        bool MatchesExternalId(Payment item)
+            => string.Equals(ExtractOneCExternalId(item.Notes), normalizedExternalId, StringComparison.Ordinal);
+
+        bool MatchesNumber(Payment item)
+            => string.Equals(NormalizeDocumentNumber(item.Invoice?.Number), normalizedNumber, StringComparison.Ordinal)
+                || string.Equals(NormalizeDocumentNumber(item.Account), normalizedNumber, StringComparison.Ordinal)
+                || string.Equals(NormalizeDocumentNumber(item.LegacyAccountNumber), normalizedNumber, StringComparison.Ordinal);
+
+        bool MatchesDate(Payment item)
+            => !normalizedInvoiceDate.HasValue
+                || item.Invoice?.Date.Date == normalizedInvoiceDate.Value
+                || item.AccountDate?.Date == normalizedInvoiceDate.Value
+                || item.LegacyAccountDate?.Date == normalizedInvoiceDate.Value;
+
+        Payment? SingleOrDefaultMatch(IEnumerable<Payment> source)
+        {
+            var matches = source.Take(2).ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedExternalId) && !string.IsNullOrWhiteSpace(normalizedNumber))
+        {
+            var byExternalIdAndNumber = SingleOrDefaultMatch(candidates.Where(item =>
+                MatchesExternalId(item) && MatchesNumber(item) && MatchesDate(item)));
+            if (byExternalIdAndNumber is not null)
+            {
+                return byExternalIdAndNumber;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedNumber))
+        {
+            var byNumber = candidates
+                .Where(item => MatchesNumber(item) && MatchesDate(item))
+                .ToList();
+            if (byNumber.Count == 1)
+            {
+                return byNumber[0];
+            }
+
+            if (byNumber.Count > 1)
+            {
+                return byNumber.FirstOrDefault();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedExternalId))
+        {
+            var byExternalId = SingleOrDefaultMatch(candidates.Where(MatchesExternalId));
+            if (byExternalId is not null)
+            {
+                return byExternalId;
+            }
+        }
+
+        return null;
     }
 }

@@ -34,6 +34,7 @@ public sealed partial class SpreadsheetImportService
                 client.Company,
                 client.Email,
                 client.Phone,
+                client.Address,
                 client.Notes,
                 client.LegalEntityId,
                 LegalEntityShortName = client.LegalEntity != null ? client.LegalEntity.ShortName : null,
@@ -51,10 +52,14 @@ public sealed partial class SpreadsheetImportService
                 entity.ShortName,
                 entity.FullName,
                 entity.Inn,
+                entity.Kpp,
+                entity.Ogrn,
+                entity.Address,
                 entity.Phone,
                 entity.Email,
                 entity.Director,
                 entity.OrganizationForm,
+                entity.BankAccountsJson,
                 ResponsibleName = entity.ResponsibleUser != null ? entity.ResponsibleUser.FullName : null,
             })
             .ToListAsync(cancellationToken);
@@ -72,6 +77,8 @@ public sealed partial class SpreadsheetImportService
                     ? (DateTime?)payment.Invoice.Date
                     : payment.AccountDate ?? payment.LegacyAccountDate ?? payment.Date,
                 payment.Amount,
+                payment.Type,
+                payment.Notes,
                 DueDate = (DateTime?)payment.Date,
                 CounterpartyName = payment.Client != null ? payment.Client.Name : payment.CounterpartyName,
                 payment.Status,
@@ -99,10 +106,45 @@ public sealed partial class SpreadsheetImportService
                 CounterpartyName = act.Client != null ? act.Client.Name : null,
                 act.CounterpartyInn,
                 act.Status,
+                Type = act.Invoice != null ? act.Invoice.Type : PaymentType.Income,
                 act.InvoiceNumber,
+                act.Comment,
                 ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
             })
             .ToListAsync(cancellationToken);
+
+        var invoiceStateItems = invoices.Select(invoice => new InvoiceStateItem
+        {
+            PaymentId = invoice.Id,
+            ExternalId = ExtractOneCExternalId(invoice.Notes),
+            Number = NormalizeText(invoice.Number),
+            Date = invoice.Date?.Date,
+            Amount = invoice.Amount,
+            DueDate = invoice.DueDate?.Date,
+            CounterpartyName = NormalizeText(invoice.CounterpartyName),
+            Status = invoice.Status,
+            Type = invoice.Type,
+            PaidDate = invoice.PaidDate?.Date,
+            ActReference = NormalizeText(invoice.ActReference),
+            ResponsibleName = NormalizeText(invoice.ResponsibleName),
+            ImportedInCurrentBatch = false,
+        }).ToList();
+
+        var actStateItems = acts.Select(act => new ActStateItem
+        {
+            ActId = act.Id,
+            ExternalId = ExtractOneCExternalId(act.Comment),
+            Number = NormalizeText(act.Number),
+            Date = act.Date.Date,
+            Amount = act.Amount,
+            CounterpartyName = NormalizeText(act.CounterpartyName),
+            CounterpartyInn = NormalizeInn(act.CounterpartyInn),
+            Status = act.Status,
+            Type = act.Type,
+            InvoiceNumber = NormalizeText(act.InvoiceNumber),
+            ResponsibleName = NormalizeText(act.ResponsibleName),
+            ImportedInCurrentBatch = false,
+        }).ToList();
 
         return new ImportState
         {
@@ -129,6 +171,7 @@ public sealed partial class SpreadsheetImportService
                 NormalizedEmail = NormalizeEmail(client.Email),
                 Phone = NormalizeText(client.Phone),
                 Email = NormalizeEmail(client.Email),
+                Address = NormalizeText(client.Address),
                 ResponsibleName = NormalizeText(client.ResponsibleName),
                 LegalEntityId = client.LegalEntityId,
                 LegalEntityShortName = NormalizeText(client.LegalEntityShortName),
@@ -145,11 +188,15 @@ public sealed partial class SpreadsheetImportService
                 ShortName = entity.ShortName,
                 FullName = NormalizeText(entity.FullName),
                 Inn = NormalizeInn(entity.Inn),
+                Kpp = NormalizeText(entity.Kpp),
+                Ogrn = NormalizeText(entity.Ogrn),
+                Address = NormalizeText(entity.Address),
                 Phone = NormalizeText(entity.Phone),
                 Email = NormalizeEmail(entity.Email),
                 Director = NormalizeText(entity.Director),
                 ResponsibleName = NormalizeText(entity.ResponsibleName),
                 OrganizationForm = NormalizeText(entity.OrganizationForm),
+                BankAccountsJson = NormalizeText(entity.BankAccountsJson),
                 NormalizedShortName = NormalizeNameKey(entity.ShortName),
                 NormalizedFullName = NormalizeNameKey(entity.FullName),
                 NormalizedInn = NormalizeInn(entity.Inn),
@@ -159,46 +206,96 @@ public sealed partial class SpreadsheetImportService
                     entity.ShortName,
                     entity.FullName),
             }).ToList(),
-            Invoices = invoices
-                .Where(invoice => !string.IsNullOrWhiteSpace(BuildInvoiceKey(invoice.Number, invoice.Date)))
-                .GroupBy(invoice => BuildInvoiceKey(invoice.Number, invoice.Date), StringComparer.Ordinal)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.Select(invoice => new InvoiceStateItem
-                    {
-                        PaymentId = invoice.Id,
-                        Key = group.Key,
-                        Number = NormalizeText(invoice.Number),
-                        Date = invoice.Date?.Date,
-                        Amount = invoice.Amount,
-                        DueDate = invoice.DueDate?.Date,
-                        CounterpartyName = NormalizeText(invoice.CounterpartyName),
-                        Status = invoice.Status,
-                        PaidDate = invoice.PaidDate?.Date,
-                        ActReference = NormalizeText(invoice.ActReference),
-                        ResponsibleName = NormalizeText(invoice.ResponsibleName),
-                    }).ToList(),
-                    StringComparer.Ordinal),
-            Acts = acts
-                .Where(act => !string.IsNullOrWhiteSpace(BuildActKey(act.Number, act.Date)))
-                .GroupBy(act => BuildActKey(act.Number, act.Date), StringComparer.Ordinal)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.Select(act => new ActStateItem
-                    {
-                        ActId = act.Id,
-                        Key = group.Key,
-                        Number = NormalizeText(act.Number),
-                        Date = act.Date.Date,
-                        Amount = act.Amount,
-                        CounterpartyName = NormalizeText(act.CounterpartyName),
-                        CounterpartyInn = NormalizeInn(act.CounterpartyInn),
-                        Status = act.Status,
-                        InvoiceNumber = NormalizeText(act.InvoiceNumber),
-                        ResponsibleName = NormalizeText(act.ResponsibleName),
-                    }).ToList(),
-                    StringComparer.Ordinal),
+            Invoices = BuildInvoiceStateIndex(invoiceStateItems),
+            Acts = BuildActStateIndex(actStateItems),
         };
+    }
+
+    private static Dictionary<string, List<InvoiceStateItem>> BuildInvoiceStateIndex(IEnumerable<InvoiceStateItem> items)
+    {
+        var index = new Dictionary<string, List<InvoiceStateItem>>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            foreach (var key in BuildInvoiceMatchKeys(item.ExternalId, item.Number, item.Date, item.Type))
+            {
+                AddInvoiceStateIndexItem(index, key, item);
+            }
+        }
+
+        return index;
+    }
+
+    private static Dictionary<string, List<ActStateItem>> BuildActStateIndex(IEnumerable<ActStateItem> items)
+    {
+        var index = new Dictionary<string, List<ActStateItem>>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            foreach (var key in BuildActMatchKeys(item.ExternalId, item.Number, item.Date, item.Type))
+            {
+                AddActStateIndexItem(index, key, item);
+            }
+        }
+
+        return index;
+    }
+
+    private static void AddInvoiceStateIndexItem(
+        IDictionary<string, List<InvoiceStateItem>> index,
+        string key,
+        InvoiceStateItem item)
+    {
+        if (!index.TryGetValue(key, out var list))
+        {
+            list = new List<InvoiceStateItem>();
+            index[key] = list;
+        }
+
+        list.Add(new InvoiceStateItem
+        {
+            PaymentId = item.PaymentId,
+            Key = key,
+            ExternalId = item.ExternalId,
+            Number = item.Number,
+            Date = item.Date,
+            Amount = item.Amount,
+            DueDate = item.DueDate,
+            CounterpartyName = item.CounterpartyName,
+            Status = item.Status,
+            Type = item.Type,
+            PaidDate = item.PaidDate,
+            ActReference = item.ActReference,
+            ResponsibleName = item.ResponsibleName,
+            ImportedInCurrentBatch = item.ImportedInCurrentBatch,
+        });
+    }
+
+    private static void AddActStateIndexItem(
+        IDictionary<string, List<ActStateItem>> index,
+        string key,
+        ActStateItem item)
+    {
+        if (!index.TryGetValue(key, out var list))
+        {
+            list = new List<ActStateItem>();
+            index[key] = list;
+        }
+
+        list.Add(new ActStateItem
+        {
+            ActId = item.ActId,
+            Key = key,
+            ExternalId = item.ExternalId,
+            Number = item.Number,
+            Date = item.Date,
+            Amount = item.Amount,
+            CounterpartyName = item.CounterpartyName,
+            CounterpartyInn = item.CounterpartyInn,
+            Status = item.Status,
+            Type = item.Type,
+            InvoiceNumber = item.InvoiceNumber,
+            ResponsibleName = item.ResponsibleName,
+            ImportedInCurrentBatch = item.ImportedInCurrentBatch,
+        });
     }
 
     private static string BuildBatchTitle(IReadOnlyCollection<ParsedFile> files)
@@ -507,6 +604,7 @@ public sealed partial class SpreadsheetImportService
             "counterparties" => "Контрагенты",
             "invoices" => "Счета",
             "acts" => "Акты",
+            OneCExchangeKind => "КУБ/1С XML",
             _ => "Неизвестный файл",
         };
     }

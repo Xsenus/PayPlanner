@@ -37,6 +37,14 @@ public sealed partial class SpreadsheetImportService
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
         var preview = BuildPreview(parsed, state);
+        var selectableIds = preview.Sections
+            .SelectMany(section => section.Rows)
+            .Where(row => row.IsSelectable)
+            .Select(row => row.PreviewId)
+            .ToHashSet(StringComparer.Ordinal);
+        var selectedSelectableIds = selectedIds
+            .Where(selectableIds.Contains)
+            .ToHashSet(StringComparer.Ordinal);
         var counterpartyPreviewDrafts = BuildCounterpartyPlan(parsed.CounterpartyDrafts, parsed.InvoiceDrafts, parsed.ActDrafts);
         var requestedCounterpartyModes = request.CounterpartyOptions
             .Where(option => !string.IsNullOrWhiteSpace(option.PreviewId))
@@ -47,13 +55,13 @@ public sealed partial class SpreadsheetImportService
                 StringComparer.Ordinal);
 
         var selectedCounterpartyDrafts = counterpartyPreviewDrafts
-            .Where(draft => selectedIds.Contains(draft.PreviewId))
+            .Where(draft => selectedSelectableIds.Contains(draft.PreviewId))
             .ToList();
         var selectedInvoiceDrafts = parsed.InvoiceDrafts
-            .Where(draft => selectedIds.Contains(draft.PreviewId))
+            .Where(draft => selectedSelectableIds.Contains(draft.PreviewId))
             .ToList();
         var selectedActDrafts = parsed.ActDrafts
-            .Where(draft => selectedIds.Contains(draft.PreviewId))
+            .Where(draft => selectedSelectableIds.Contains(draft.PreviewId))
             .ToList();
 
         if (selectedCounterpartyDrafts.Count == 0
@@ -137,6 +145,7 @@ public sealed partial class SpreadsheetImportService
             selectedCounterparties = selectedCounterpartyDrafts.Count,
             selectedInvoices = selectedInvoiceDrafts.Count,
             selectedActs = selectedActDrafts.Count,
+            ignoredNonSelectableSelections = selectedIds.Count - selectedSelectableIds.Count,
             derivedCounterparties = counterpartyPlan.Count(item => item.DependencyPreviewIds.Count > 0 || item.Derived),
             legalEntityCounterparties = counterpartyPlan.Count(draft =>
             {

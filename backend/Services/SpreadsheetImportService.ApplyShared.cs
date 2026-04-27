@@ -16,7 +16,8 @@ public sealed partial class SpreadsheetImportService
         ImportState state,
         CancellationToken cancellationToken)
     {
-        var sourceKey = BuildActKey(draft.Number, draft.Date);
+        var sourceKeys = BuildActMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
+        var sourceKey = BuildActNaturalKey(draft.Number, draft.Date, draft.Type);
         var sourceTitle = BuildActTitle(draft.Number, draft.Date);
         if (string.IsNullOrWhiteSpace(sourceKey) || !draft.Amount.HasValue || string.IsNullOrWhiteSpace(draft.CounterpartyName))
         {
@@ -41,9 +42,7 @@ public sealed partial class SpreadsheetImportService
                 return;
             }
 
-            var existingActId = state.Acts.TryGetValue(sourceKey, out var existingActs)
-                ? existingActs.Select(item => item.ActId).FirstOrDefault()
-                : 0;
+            var existingActId = FindExistingActStateItem(state, sourceKeys)?.ActId ?? 0;
 
             var act = existingActId > 0
                 ? await db.Acts.Include(item => item.LineItems).FirstOrDefaultAsync(item => item.Id == existingActId, cancellationToken)
@@ -57,7 +56,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             var responsibleId = FindUserId(state.Users, draft.ResponsibleName);
-            var invoicePayment = await FindInvoicePaymentByNumberAsync(db, draft.InvoiceNumber, cancellationToken);
+            var invoicePayment = await FindInvoicePaymentForActAsync(db, draft.InvoiceExternalId, draft.InvoiceNumber, draft.InvoiceDate, draft.Type, cancellationToken);
             ApplyActValues(act, draft, clientId.Value, responsibleId, invoicePayment);
             SyncActLineItems(db, act, invoicePayment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
 
@@ -78,12 +77,39 @@ public sealed partial class SpreadsheetImportService
             db.ChangeTracker.Clear();
             var persistedAct = await LoadActForSnapshotAsync(db, actId, cancellationToken);
             var afterJson = SerializeSnapshot(CaptureActSnapshot(persistedAct));
-            state.UpsertAct(new ActStateItem { ActId = actId, Key = sourceKey });
+            var operationAction = beforeJson is null
+                ? SpreadsheetImportOperationAction.Created
+                : string.Equals(beforeJson, afterJson, StringComparison.Ordinal)
+                    ? SpreadsheetImportOperationAction.Skipped
+                    : SpreadsheetImportOperationAction.Updated;
+            state.UpsertAct(new ActStateItem
+            {
+                ActId = actId,
+                Key = sourceKey,
+                ExternalId = NormalizeOneCExternalId(draft.ExternalId),
+                Number = NormalizeText(draft.Number),
+                Date = draft.Date?.Date,
+                Amount = draft.Amount ?? 0m,
+                CounterpartyName = NormalizeText(draft.CounterpartyName),
+                CounterpartyInn = NormalizeInn(draft.CounterpartyInn),
+                Status = MapActStatus(draft.StatusText),
+                Type = draft.Type,
+                InvoiceNumber = NormalizeText(draft.InvoiceNumber),
+                ResponsibleName = NormalizeText(draft.ResponsibleName),
+                ImportedInCurrentBatch = true,
+            });
 
             db.SpreadsheetImportBatchOperations.Add(CreateOperation(
                 batchId, "acts", draft.FileName, draft.FileHash, draft.PreviewId, draft.RowNumber,
-                sourceKey, sourceTitle, beforeJson is null ? SpreadsheetImportOperationAction.Created : SpreadsheetImportOperationAction.Updated,
-                "Act", actId, beforeJson is null ? "Акт создан." : "Акт обновлен.", beforeJson, afterJson,
+                sourceKey, sourceTitle, operationAction,
+                "Act", actId,
+                operationAction == SpreadsheetImportOperationAction.Created
+                    ? "Акт создан."
+                    : operationAction == SpreadsheetImportOperationAction.Skipped
+                        ? "Изменений не требуется."
+                        : "Акт обновлен.",
+                beforeJson,
+                afterJson,
                 JsonSerializer.Serialize(new { draft.ParseWarnings }, JsonOptions)));
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -140,7 +166,7 @@ public sealed partial class SpreadsheetImportService
             CreatedAt = DateTime.UtcNow,
         };
 
-    private static void ApplyCounterpartyValues(Client client, CounterpartyDraft draft, int batchId, DateTime now, int? responsibleId, string importMode)
+    private static void ApplyCounterpartyValues(Client client, CounterpartyDraft draft, int? responsibleId, string importMode)
     {
         var clientName = BuildCounterpartyClientName(draft, importMode);
         var clientCompany = BuildCounterpartyClientCompany(draft, importMode);
@@ -165,7 +191,12 @@ public sealed partial class SpreadsheetImportService
             client.Email = Truncate(draft.Email, 200);
         }
 
-        client.Notes = MergeClientNotes(client.Notes, draft, batchId, now);
+        if (string.IsNullOrWhiteSpace(client.Address) && !string.IsNullOrWhiteSpace(draft.Address))
+        {
+            client.Address = Truncate(draft.Address, 500);
+        }
+
+        client.Notes = MergeClientNotes(client.Notes, draft);
         if (!client.ResponsibleUserId.HasValue && responsibleId.HasValue)
         {
             client.ResponsibleUserId = responsibleId;
@@ -197,7 +228,7 @@ public sealed partial class SpreadsheetImportService
         return invoice;
     }
 
-    private void ApplyInvoiceValues(Payment payment, InvoiceDraft draft, int batchId, int clientId, int? responsibleId, Invoice invoiceEntity)
+    private void ApplyInvoiceValues(Payment payment, InvoiceDraft draft, int clientId, int? responsibleId, Invoice invoiceEntity)
     {
         var amount = Math.Max(0m, draft.Amount ?? 0m);
         var dueDate = (draft.DueDate ?? draft.Date ?? DateTime.UtcNow).Date;
@@ -205,10 +236,7 @@ public sealed partial class SpreadsheetImportService
         var status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate);
 
         payment.DocumentKind = DocumentKind.Invoice;
-        if (payment.Id == 0)
-        {
-            payment.Type = PaymentType.Income;
-        }
+        payment.Type = draft.Type;
 
         payment.Invoice = invoiceEntity;
         payment.InvoiceId = invoiceEntity.Id > 0 ? invoiceEntity.Id : null;
@@ -226,16 +254,20 @@ public sealed partial class SpreadsheetImportService
         payment.PaidDate = payment.PaidAmount > 0m ? draft.PaidDate ?? payment.PaidDate ?? invoiceDate : null;
         payment.LastPaymentDate = payment.PaidDate;
         payment.ClientId = clientId;
+        if (payment.Type != PaymentType.Expense)
+        {
+            payment.ExpenseClientId = null;
+        }
+
         payment.CounterpartyName = Truncate(draft.CounterpartyName, 200);
+        payment.Notes = MergeTextValues(payment.Notes, BuildInvoiceImportNotes(draft));
         payment.SystemNotes = Truncate(
             MergeImportMarker(
                 InvoiceLineItemStorage.MergeIntoSystemNotes(payment.SystemNotes, BuildInvoiceLineItemRequests(
                     BuildEffectiveLineItems(draft.ParsedLineItems, amount, draft.Nomenclature, BuildInvoiceTitle(draft.Number, draft.Date)))),
-                batchId,
                 "invoices",
                 draft.FileName,
-                draft.RowNumber,
-                DateTime.UtcNow),
+                draft.RowNumber),
             4000);
 
         if (responsibleId.HasValue && payment.Responsibles.All(item => item.UserId != responsibleId.Value))

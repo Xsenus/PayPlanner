@@ -38,7 +38,7 @@ public sealed partial class SpreadsheetImportService
                 SheetName = file.SheetName,
                 RowCount = file.RowCount,
                 Message = file.DetectedKind == "unknown"
-                    ? "Файл не распознан. Поддерживаются счета, акты и списки контрагентов."
+                    ? "Файл не распознан. Поддерживаются Excel-листы со счетами, актами и контрагентами, а также XML/ZIP выгрузки КУБ/1С."
                     : null,
             }).ToList(),
             Sections = sections,
@@ -110,6 +110,7 @@ public sealed partial class SpreadsheetImportService
                 RowNumber = invoice.RowNumber,
                 Name = invoice.CounterpartyName.Trim(),
                 Inn = NormalizeInn(invoice.CounterpartyInn),
+                ContractName = invoice.ContractName,
                 Derived = true,
                 DependencyPreviewIds = new List<string> { invoice.PreviewId },
                 DependencyTitles = new List<string> { BuildInvoiceTitle(invoice.Number, invoice.Date) },
@@ -132,6 +133,7 @@ public sealed partial class SpreadsheetImportService
                 RowNumber = act.RowNumber,
                 Name = act.CounterpartyName.Trim(),
                 Inn = NormalizeInn(act.CounterpartyInn),
+                ContractName = act.ContractName,
                 Derived = true,
                 DependencyPreviewIds = new List<string> { act.PreviewId },
                 DependencyTitles = new List<string> { BuildActTitle(act.Number, act.Date) },
@@ -242,11 +244,16 @@ public sealed partial class SpreadsheetImportService
                 {
                     CreateCell("name", "Название", draft.Name),
                     CreateCell("inn", "ИНН", draft.Inn),
+                    CreateCell("kpp", "КПП", draft.Kpp),
+                    CreateCell("ogrn", "ОГРН", draft.Ogrn),
                     CreateCell("contact", "Контакт", draft.ContactName),
                     CreateCell("phone", "Телефон", draft.Phone),
                     CreateCell("email", "Email", draft.Email),
+                    CreateCell("address", "Адрес", draft.Address),
                     CreateCell("contract", "Договор", draft.ContractName),
                     CreateCell("article", "Статья", draft.Article),
+                    CreateCell("bank", "Банк", draft.BankName ?? draft.BankBik),
+                    CreateCell("bankAccount", "Расчетный счет", draft.BankAccount),
                     CreateCell("responsible", "Ответственный", draft.ResponsibleName ?? draft.AutoInvoiceResponsibleName),
                 },
             });
@@ -261,7 +268,7 @@ public sealed partial class SpreadsheetImportService
     {
         var rows = new List<SpreadsheetImportPreviewRowDto>();
         var duplicateCounts = drafts
-            .Select(draft => BuildInvoiceKey(draft.Number, draft.Date))
+            .Select(draft => BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .GroupBy(key => key, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -270,13 +277,12 @@ public sealed partial class SpreadsheetImportService
         foreach (var draft in drafts.OrderBy(item => item.FileName, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.RowNumber))
         {
             var issues = new List<string>(draft.ParseWarnings);
-            var sourceKey = BuildInvoiceKey(draft.Number, draft.Date);
+            var sourceKeys = BuildInvoiceMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
+            var sourceKey = BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type);
             var action = SpreadsheetImportOperationAction.Error;
             var selectable = false;
             string? message;
-            var existing = !string.IsNullOrWhiteSpace(sourceKey) && state.Invoices.TryGetValue(sourceKey, out var existingItems)
-                ? existingItems.FirstOrDefault()
-                : null;
+            var existing = FindExistingInvoiceStateItem(state, sourceKeys);
             var changes = BuildInvoiceChanges(draft, existing, state.Users);
 
             if (string.IsNullOrWhiteSpace(draft.Number))
@@ -340,13 +346,16 @@ public sealed partial class SpreadsheetImportService
                 Cells = new List<SpreadsheetImportPreviewCellDto>
                 {
                     CreateCell("number", "Номер", draft.Number),
+                    CreateCell("externalId", "UID 1С", draft.ExternalId),
                     CreateCell("date", "Дата", FormatDate(draft.Date)),
+                    CreateCell("type", "Тип", FormatPaymentTypeLabel(draft.Type)),
                     CreateCell("amount", "Сумма", FormatAmount(draft.Amount)),
                     CreateCell("dueDate", "Оплатить до", FormatDate(draft.DueDate)),
                     CreateCell("counterparty", "Контрагент", draft.CounterpartyName),
                     CreateCell("status", "Статус", draft.StatusText),
                     CreateCell("paidDate", "Дата оплаты", FormatDate(draft.PaidDate)),
                     CreateCell("act", "Акт", draft.ActReference),
+                    CreateCell("contract", "Договор", draft.ContractName),
                     CreateCell("responsible", "Ответственный", draft.ResponsibleName ?? draft.CreatedByName),
                 },
             });
@@ -361,7 +370,7 @@ public sealed partial class SpreadsheetImportService
     {
         var rows = new List<SpreadsheetImportPreviewRowDto>();
         var duplicateCounts = drafts
-            .Select(draft => BuildActKey(draft.Number, draft.Date))
+            .Select(draft => BuildActNaturalKey(draft.Number, draft.Date, draft.Type))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .GroupBy(key => key, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -370,13 +379,12 @@ public sealed partial class SpreadsheetImportService
         foreach (var draft in drafts.OrderBy(item => item.FileName, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.RowNumber))
         {
             var issues = new List<string>(draft.ParseWarnings);
-            var sourceKey = BuildActKey(draft.Number, draft.Date);
+            var sourceKeys = BuildActMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
+            var sourceKey = BuildActNaturalKey(draft.Number, draft.Date, draft.Type);
             var action = SpreadsheetImportOperationAction.Error;
             var selectable = false;
             string? message;
-            var existing = !string.IsNullOrWhiteSpace(sourceKey) && state.Acts.TryGetValue(sourceKey, out var existingActs)
-                ? existingActs.FirstOrDefault()
-                : null;
+            var existing = FindExistingActStateItem(state, sourceKeys);
             var changes = BuildActChanges(draft, existing, state.Users);
 
             if (string.IsNullOrWhiteSpace(draft.Number))
@@ -440,19 +448,86 @@ public sealed partial class SpreadsheetImportService
                 Cells = new List<SpreadsheetImportPreviewCellDto>
                 {
                     CreateCell("number", "Номер", draft.Number),
+                    CreateCell("externalId", "UID 1С", draft.ExternalId),
                     CreateCell("date", "Дата", FormatDate(draft.Date)),
+                    CreateCell("type", "Тип", FormatPaymentTypeLabel(draft.Type)),
                     CreateCell("amount", "Сумма", FormatAmount(draft.Amount)),
                     CreateCell("counterparty", "Контрагент", draft.CounterpartyName),
                     CreateCell("inn", "ИНН", draft.CounterpartyInn),
                     CreateCell("status", "Статус", draft.StatusText),
                     CreateCell("invoice", "Счет", draft.InvoiceNumber),
                     CreateCell("paymentDate", "Дата платежа", FormatDate(draft.PaymentDate)),
+                    CreateCell("contract", "Договор", draft.ContractName),
                     CreateCell("responsible", "Ответственный", draft.ResponsibleName),
                 },
             });
         }
 
         return BuildSection("acts", "Акты", rows);
+    }
+
+    private static InvoiceStateItem? FindExistingInvoiceStateItem(ImportState state, IReadOnlyCollection<string> keys)
+    {
+        foreach (var key in keys.Where(key => key.Contains("|number:", StringComparison.Ordinal)))
+        {
+            if (state.Invoices.TryGetValue(key, out var existingItems))
+            {
+                return existingItems.FirstOrDefault();
+            }
+        }
+
+        foreach (var key in keys.Where(key => key.Contains("|uid:", StringComparison.Ordinal)))
+        {
+            if (!state.Invoices.TryGetValue(key, out var existingItems))
+            {
+                continue;
+            }
+
+            var distinctItems = existingItems
+                .Where(item => !item.ImportedInCurrentBatch)
+                .GroupBy(item => item.PaymentId)
+                .Select(group => group.First())
+                .Take(2)
+                .ToList();
+            if (distinctItems.Count == 1)
+            {
+                return distinctItems[0];
+            }
+        }
+
+        return null;
+    }
+
+    private static ActStateItem? FindExistingActStateItem(ImportState state, IReadOnlyCollection<string> keys)
+    {
+        foreach (var key in keys.Where(key => key.Contains("|number:", StringComparison.Ordinal)))
+        {
+            if (state.Acts.TryGetValue(key, out var existingItems))
+            {
+                return existingItems.FirstOrDefault();
+            }
+        }
+
+        foreach (var key in keys.Where(key => key.Contains("|uid:", StringComparison.Ordinal)))
+        {
+            if (!state.Acts.TryGetValue(key, out var existingItems))
+            {
+                continue;
+            }
+
+            var distinctItems = existingItems
+                .Where(item => !item.ImportedInCurrentBatch)
+                .GroupBy(item => item.ActId)
+                .Select(group => group.First())
+                .Take(2)
+                .ToList();
+            if (distinctItems.Count == 1)
+            {
+                return distinctItems[0];
+            }
+        }
+
+        return null;
     }
 
     private static SpreadsheetImportPreviewSectionDto BuildSection(
@@ -495,10 +570,14 @@ public sealed partial class SpreadsheetImportService
         var incomingInn = NormalizeInn(draft.Inn);
         var incomingPhone = NormalizeText(draft.Phone);
         var incomingEmail = NormalizeEmail(draft.Email);
+        var incomingAddress = NormalizeText(draft.Address);
         var incomingResponsible = ResolveResponsiblePreviewValue(users, draft.ResponsibleName ?? draft.AutoInvoiceResponsibleName);
         var incomingLegalEntityName = NormalizeText(draft.Name);
         var incomingDirector = NormalizeText(BuildCounterpartyLegalEntityDirector(draft));
         var incomingOrganizationForm = NormalizeText(BuildCounterpartyOrganizationForm(draft));
+        var incomingKpp = NormalizeText(draft.Kpp);
+        var incomingOgrn = NormalizeText(draft.Ogrn);
+        var incomingBankAccount = NormalizeText(draft.BankAccount);
 
         if (existingClient is null)
         {
@@ -507,12 +586,17 @@ public sealed partial class SpreadsheetImportService
             AddPreviewChange(changes, "inn", "ИНН", null, incomingInn);
             AddPreviewChange(changes, "phone", "Телефон", null, incomingPhone);
             AddPreviewChange(changes, "email", "Email", null, incomingEmail);
+            AddPreviewChange(changes, "address", "Адрес", null, incomingAddress);
             AddPreviewChange(changes, "responsible", "Ответственный", null, incomingResponsible);
             if (importMode == CounterpartyImportModeLegalEntityWithClient)
             {
                 AddPreviewChange(changes, "legalEntityName", "Юридическое лицо", null, incomingLegalEntityName);
+                AddPreviewChange(changes, "kpp", "КПП", null, incomingKpp);
+                AddPreviewChange(changes, "ogrn", "ОГРН", null, incomingOgrn);
+                AddPreviewChange(changes, "legalAddress", "Юридический адрес", null, incomingAddress);
                 AddPreviewChange(changes, "director", "Руководитель", null, incomingDirector);
                 AddPreviewChange(changes, "organizationForm", "Форма", null, incomingOrganizationForm);
+                AddPreviewChange(changes, "bankAccount", "Расчетный счет", null, incomingBankAccount);
             }
 
             return changes;
@@ -543,6 +627,11 @@ public sealed partial class SpreadsheetImportService
             AddPreviewChange(changes, "email", "Email", existingClient.Email, incomingEmail);
         }
 
+        if (string.IsNullOrWhiteSpace(existingClient.Address))
+        {
+            AddPreviewChange(changes, "address", "Адрес", existingClient.Address, incomingAddress);
+        }
+
         if (string.IsNullOrWhiteSpace(existingClient.ResponsibleName))
         {
             AddPreviewChange(changes, "responsible", "Ответственный", existingClient.ResponsibleName, incomingResponsible);
@@ -558,6 +647,24 @@ public sealed partial class SpreadsheetImportService
                 incomingLegalEntityName);
             AddPreviewChange(
                 changes,
+                "kpp",
+                "КПП",
+                NormalizeText(existingLegalEntity?.Kpp),
+                incomingKpp);
+            AddPreviewChange(
+                changes,
+                "ogrn",
+                "ОГРН",
+                NormalizeText(existingLegalEntity?.Ogrn),
+                incomingOgrn);
+            AddPreviewChange(
+                changes,
+                "legalAddress",
+                "Юридический адрес",
+                NormalizeText(existingLegalEntity?.Address),
+                incomingAddress);
+            AddPreviewChange(
+                changes,
                 "director",
                 "Руководитель",
                 NormalizeText(existingLegalEntity?.Director),
@@ -568,6 +675,12 @@ public sealed partial class SpreadsheetImportService
                 "Форма",
                 NormalizeText(existingLegalEntity?.OrganizationForm),
                 incomingOrganizationForm);
+            AddPreviewChange(
+                changes,
+                "bankAccount",
+                "Расчетный счет",
+                ExtractBankAccountPreview(existingLegalEntity?.BankAccountsJson),
+                incomingBankAccount);
         }
 
         return changes;
@@ -621,8 +734,10 @@ public sealed partial class SpreadsheetImportService
         var incomingStatus = FormatPaymentStatusLabel(MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate));
         var incomingResponsible = ResolveResponsiblePreviewValue(users, draft.ResponsibleName ?? draft.CreatedByName);
 
+        AddPreviewChange(changes, "externalId", "UID 1С", existing?.ExternalId, NormalizeOneCExternalId(draft.ExternalId));
         AddPreviewChange(changes, "number", "Номер", existing?.Number, NormalizeText(draft.Number));
         AddPreviewChange(changes, "date", "Дата", existing?.Date.HasValue == true ? FormatDate(existing.Date) : null, FormatDate(draft.Date));
+        AddPreviewChange(changes, "type", "Тип", existing is not null ? FormatPaymentTypeLabel(existing.Type) : null, FormatPaymentTypeLabel(draft.Type));
         AddPreviewChange(changes, "amount", "Сумма", existing is not null ? FormatAmount(existing.Amount) : null, FormatAmount(draft.Amount));
         AddPreviewChange(changes, "dueDate", "Оплатить до", existing?.DueDate.HasValue == true ? FormatDate(existing.DueDate) : null, FormatDate(draft.DueDate));
         AddPreviewChange(changes, "counterparty", "Контрагент", existing?.CounterpartyName, NormalizeText(draft.CounterpartyName));
@@ -643,8 +758,10 @@ public sealed partial class SpreadsheetImportService
         var incomingStatus = FormatActStatusLabel(MapActStatus(draft.StatusText));
         var incomingResponsible = ResolveResponsiblePreviewValue(users, draft.ResponsibleName);
 
+        AddPreviewChange(changes, "externalId", "UID 1С", existing?.ExternalId, NormalizeOneCExternalId(draft.ExternalId));
         AddPreviewChange(changes, "number", "Номер", existing?.Number, NormalizeText(draft.Number));
         AddPreviewChange(changes, "date", "Дата", existing?.Date.HasValue == true ? FormatDate(existing.Date) : null, FormatDate(draft.Date));
+        AddPreviewChange(changes, "type", "Тип", existing is not null ? FormatPaymentTypeLabel(existing.Type) : null, FormatPaymentTypeLabel(draft.Type));
         AddPreviewChange(changes, "amount", "Сумма", existing is not null ? FormatAmount(existing.Amount) : null, FormatAmount(draft.Amount));
         AddPreviewChange(changes, "counterparty", "Контрагент", existing?.CounterpartyName, NormalizeText(draft.CounterpartyName));
         AddPreviewChange(changes, "inn", "ИНН", existing?.CounterpartyInn, NormalizeInn(draft.CounterpartyInn));
@@ -745,7 +862,47 @@ public sealed partial class SpreadsheetImportService
             messages.Add("Каждый импортированный счет сохраняется как платеж типа «Счет» и сразу связывается с карточкой счета.");
         }
 
+        if (parsed.OneCNonImportObjectCounts.Count > 0)
+        {
+            messages.Add($"XML также содержит объекты без отдельных строк импорта: {FormatOneCNonImportObjectCounts(parsed.OneCNonImportObjectCounts)}.");
+        }
+
         messages.AddRange(parsed.Messages);
         return messages;
+    }
+
+    private static string FormatOneCNonImportObjectCounts(IReadOnlyDictionary<string, int> counts)
+    {
+        const int maxDisplayedTypes = 8;
+        var parts = counts
+            .OrderByDescending(item => item.Value)
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(maxDisplayedTypes)
+            .Select(item => $"{item.Key}: {item.Value}")
+            .ToList();
+
+        var hiddenTypes = counts.Count - parts.Count;
+        if (hiddenTypes > 0)
+        {
+            parts.Add($"еще {FormatOneCObjectTypeCount(hiddenTypes)}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string FormatOneCObjectTypeCount(int count)
+    {
+        var lastTwo = count % 100;
+        var last = count % 10;
+        var suffix = lastTwo is >= 11 and <= 14
+            ? "типов"
+            : last switch
+            {
+                1 => "тип",
+                >= 2 and <= 4 => "типа",
+                _ => "типов",
+            };
+
+        return $"{count} {suffix}";
     }
 }

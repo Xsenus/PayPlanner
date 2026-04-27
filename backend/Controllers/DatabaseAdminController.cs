@@ -195,7 +195,7 @@ public class DatabaseAdminController : ControllerBase
         var uploadFiles = await ReadSpreadsheetFilesAsync(files, cancellationToken);
         if (uploadFiles.Count == 0)
         {
-            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel-файл для анализа." });
+            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel, XML или ZIP-файл для анализа." });
         }
 
         try
@@ -222,7 +222,7 @@ public class DatabaseAdminController : ControllerBase
         var uploadFiles = await ReadSpreadsheetFilesAsync(files, cancellationToken);
         if (uploadFiles.Count == 0)
         {
-            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel-файл для импорта." });
+            return BadRequest(new { message = "Нужно выбрать хотя бы один Excel, XML или ZIP-файл для импорта." });
         }
 
         try
