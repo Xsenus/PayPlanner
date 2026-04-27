@@ -253,7 +253,7 @@ export function SpreadsheetImportPreviewModal({
     () => preview?.sections.find((section) => section.key === activeSectionKey) ?? preview?.sections[0] ?? null,
     [activeSectionKey, preview],
   );
-  const [showAllRows, setShowAllRows] = useState(false);
+  const [showAllRows] = useState(false);
 
   const allRows = useMemo(
     () => preview?.sections.flatMap((section) => section.rows) ?? [],
