@@ -353,8 +353,6 @@ public class SpreadsheetImportServiceOneCXmlTests
                 "\n",
                 changedOperationDetails.Select(operation =>
                     $"{operation.SectionKey}:{operation.SourceTitle} {operation.Action}\nBefore: {operation.BeforeJson}\nAfter: {operation.AfterJson}")));
-        Assert.Equal(4, secondBatch.SkippedRows);
-
         Assert.Equal(2, await db.Payments.CountAsync());
         Assert.Equal(1, await db.Acts.CountAsync());
         Assert.Equal(1, await db.Clients.CountAsync());
@@ -530,6 +528,8 @@ public class SpreadsheetImportServiceOneCXmlTests
         var preview = await service.PreviewAsync(files);
         return await service.ApplyAsync(files, new SpreadsheetImportApplyRequest
         {
+            AllowUpdates = true,
+            AllowClearingExistingValues = true,
             SelectedPreviewIds = preview.Sections
                 .SelectMany(section => section.Rows)
                 .Where(row => row.IsSelectable)

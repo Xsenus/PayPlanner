@@ -191,7 +191,7 @@ public sealed partial class SpreadsheetImportService
                 action = existingClient is not null
                     ? SpreadsheetImportOperationAction.Updated
                     : SpreadsheetImportOperationAction.Created;
-                selectable = true;
+                selectable = action == SpreadsheetImportOperationAction.Created || changes.Count > 0;
                 message = draft.DependencyPreviewIds.Count > 0
                     ? existingClient is not null
                         ? changes.Count > 0
@@ -203,6 +203,11 @@ public sealed partial class SpreadsheetImportService
                             ? "Будет обновлен существующий контрагент."
                             : "Контрагент уже есть в базе. По основным полям обновления не требуются."
                         : "Будет создан новый контрагент.";
+
+                if (existingClient is not null && changes.Count == 0)
+                {
+                    action = SpreadsheetImportOperationAction.Skipped;
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(sourceKey)
@@ -315,12 +320,17 @@ public sealed partial class SpreadsheetImportService
                 action = existing is not null
                     ? SpreadsheetImportOperationAction.Updated
                     : SpreadsheetImportOperationAction.Created;
-                selectable = true;
+                selectable = action == SpreadsheetImportOperationAction.Created || changes.Count > 0;
                 message = existing is not null
                     ? changes.Count > 0
                         ? "Будет обновлен существующий счет и связанный платеж."
                         : "Счет уже есть в базе. По основным полям обновления не обнаружены."
                     : "Будет создан новый счет и платеж в реестре.";
+
+                if (existing is not null && changes.Count == 0)
+                {
+                    action = SpreadsheetImportOperationAction.Skipped;
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(sourceKey)
@@ -417,12 +427,17 @@ public sealed partial class SpreadsheetImportService
                 action = existing is not null
                     ? SpreadsheetImportOperationAction.Updated
                     : SpreadsheetImportOperationAction.Created;
-                selectable = true;
+                selectable = action == SpreadsheetImportOperationAction.Created || changes.Count > 0;
                 message = existing is not null
                     ? changes.Count > 0
                         ? "Будет обновлен существующий акт."
                         : "Акт уже есть в базе. По основным полям обновления не обнаружены."
                     : "Будет создан новый акт.";
+
+                if (existing is not null && changes.Count == 0)
+                {
+                    action = SpreadsheetImportOperationAction.Skipped;
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(sourceKey)

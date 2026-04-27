@@ -1,5 +1,5 @@
 import { CheckSquare, FileSpreadsheet, Loader2, X } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   SpreadsheetImportPreviewChangeDto,
@@ -26,6 +26,7 @@ interface SpreadsheetImportPreviewModalProps {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onToggleRow: (row: SpreadsheetImportPreviewRowDto, checked: boolean, shiftKey: boolean) => void;
+  canSelectRow: (row: SpreadsheetImportPreviewRowDto) => boolean;
   onSelectAll: () => void;
   onClearAll: () => void;
   onSelectSection: (section: SpreadsheetImportPreviewSectionDto) => void;
@@ -210,6 +211,7 @@ export function SpreadsheetImportPreviewModal({
   onPageChange,
   onPageSizeChange,
   onToggleRow,
+  canSelectRow,
   onSelectAll,
   onClearAll,
   onSelectSection,
@@ -251,6 +253,7 @@ export function SpreadsheetImportPreviewModal({
     () => preview?.sections.find((section) => section.key === activeSectionKey) ?? preview?.sections[0] ?? null,
     [activeSectionKey, preview],
   );
+  const [showAllRows, setShowAllRows] = useState(false);
 
   const allRows = useMemo(
     () => preview?.sections.flatMap((section) => section.rows) ?? [],
@@ -296,22 +299,32 @@ export function SpreadsheetImportPreviewModal({
     return map;
   }, [preview]);
 
-  const totalPages = useMemo(() => {
-    if (!activeSection || pageSize <= 0) {
-      return 1;
-    }
-
-    return Math.max(1, Math.ceil(activeSection.rows.length / pageSize));
-  }, [activeSection, pageSize]);
-
-  const pagedRows = useMemo(() => {
+  const visibleRows = useMemo(() => {
     if (!activeSection) {
       return [];
     }
 
+    return showAllRows
+      ? activeSection.rows
+      : activeSection.rows.filter((row) => row.action !== 'Skipped');
+  }, [activeSection, showAllRows]);
+
+  const totalPages = useMemo(() => {
+    if (pageSize <= 0) {
+      return 1;
+    }
+
+    return Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  }, [pageSize, visibleRows.length]);
+
+  const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return activeSection.rows.slice(start, start + pageSize);
-  }, [activeSection, page, pageSize]);
+    return visibleRows.slice(start, start + pageSize);
+  }, [page, pageSize, visibleRows]);
+
+  useEffect(() => {
+    onPageChange(1);
+  }, [activeSectionKey, onPageChange, showAllRows]);
 
   function jumpToRow(row: SpreadsheetImportPreviewRowDto) {
     const sectionMeta = sectionMetaByPreviewId.get(row.previewId);
@@ -552,7 +565,7 @@ export function SpreadsheetImportPreviewModal({
                           <input
                             type="checkbox"
                             checked={checked}
-                            disabled={!row.isSelectable}
+                            disabled={!canSelectRow(row)}
                             onChange={(event) => onToggleRow(row, event.target.checked, Boolean((event.nativeEvent as MouseEvent).shiftKey))}
                             className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed"
                           />
@@ -646,7 +659,7 @@ export function SpreadsheetImportPreviewModal({
                                     <input
                                       type="checkbox"
                                       checked={documentChecked}
-                                      disabled={!documentRow.isSelectable}
+                                      disabled={!canSelectRow(documentRow)}
                                       onChange={(event) =>
                                         onToggleRow(
                                           documentRow,
@@ -726,7 +739,7 @@ export function SpreadsheetImportPreviewModal({
               <TablePagination
                 page={page}
                 totalPages={totalPages}
-                totalItems={activeSection.rows.length}
+                totalItems={visibleRows.length}
                 pageSize={pageSize}
                 pageSizeOptions={pageSizeOptions}
                 onPageChange={onPageChange}

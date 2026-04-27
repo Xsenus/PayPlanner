@@ -37,6 +37,30 @@ public sealed partial class SpreadsheetImportService
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
         var preview = BuildPreview(parsed, state);
+        var selectedPreviewRows = preview.Sections
+            .SelectMany(section => section.Rows)
+            .Where(row => selectedIds.Contains(row.PreviewId))
+            .ToList();
+        var selectedUpdateRows = selectedPreviewRows
+            .Where(row => row.Action == SpreadsheetImportOperationAction.Updated)
+            .ToList();
+        if (selectedUpdateRows.Count > 0 && !request.AllowUpdates)
+        {
+            var titles = string.Join(", ", selectedUpdateRows.Take(5).Select(row => row.Title));
+            throw new InvalidOperationException(
+                $"В выбранных строках есть обновления существующих записей. По умолчанию импорт создает только новые записи. Снимите эти строки или явно разрешите обновления. Строки: {titles}.");
+        }
+
+        var selectedClearingRows = selectedUpdateRows
+            .Where(row => row.Changes.Any(change => change.Kind == "Removed"))
+            .ToList();
+        if (selectedClearingRows.Count > 0 && !request.AllowClearingExistingValues)
+        {
+            var titles = string.Join(", ", selectedClearingRows.Take(5).Select(row => row.Title));
+            throw new InvalidOperationException(
+                $"В выбранных строках есть очистка существующих полей. Такой импорт требует отдельного подтверждения. Строки: {titles}.");
+        }
+
         var selectableIds = preview.Sections
             .SelectMany(section => section.Rows)
             .Where(row => row.IsSelectable)

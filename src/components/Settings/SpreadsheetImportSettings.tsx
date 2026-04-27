@@ -17,6 +17,10 @@ import { SpreadsheetImportPreviewModal } from './SpreadsheetImportPreviewModal';
 
 const PREVIEW_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
+function isSafeSpreadsheetImportRow(row: SpreadsheetImportPreviewRowDto) {
+  return row.isSelectable && row.action === 'Created' && row.issues.length === 0;
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
   try {
@@ -148,7 +152,7 @@ export function SpreadsheetImportSettings() {
   );
 
   const selectableRows = useMemo(
-    () => preview?.sections.flatMap((section) => section.rows.filter((row) => row.isSelectable)) ?? [],
+    () => preview?.sections.flatMap((section) => section.rows.filter(isSafeSpreadsheetImportRow)) ?? [],
     [preview],
   );
 
@@ -293,7 +297,7 @@ export function SpreadsheetImportSettings() {
       }
 
       seen.add(row.previewId);
-      if (!row.isSelectable) {
+      if (!isSafeSpreadsheetImportRow(row)) {
         continue;
       }
 
@@ -386,7 +390,7 @@ export function SpreadsheetImportSettings() {
       setActiveSectionKey(result.sections[0]?.key ?? '');
       setPreviewPage(1);
       setSelectedPreviewIds(new Set(
-        result.sections.flatMap((section) => section.rows.filter((row) => row.isSelectable).map((row) => row.previewId)),
+        result.sections.flatMap((section) => section.rows.filter(isSafeSpreadsheetImportRow).map((row) => row.previewId)),
       ));
       setCounterpartyImportModes(initialCounterpartyImportModes);
       setLastSelectedPreviewId(null);
@@ -411,7 +415,7 @@ export function SpreadsheetImportSettings() {
       const lastIndex = lastSelectedPreviewId ? rows.findIndex((item) => item.previewId === lastSelectedPreviewId) : -1;
       if (shiftKey && targetIndex >= 0 && lastIndex >= 0) {
         const [from, to] = targetIndex < lastIndex ? [targetIndex, lastIndex] : [lastIndex, targetIndex];
-        const affectedRows = rows.slice(from, to + 1).filter((item) => item.isSelectable);
+        const affectedRows = rows.slice(from, to + 1).filter(isSafeSpreadsheetImportRow);
         if (checked) {
           addRowsToSelection(next, affectedRows);
         } else {
@@ -878,6 +882,7 @@ export function SpreadsheetImportSettings() {
         onPageChange={setPreviewPage}
         onPageSizeChange={setPreviewPageSize}
         onToggleRow={toggleRow}
+        canSelectRow={isSafeSpreadsheetImportRow}
         onSelectAll={() => selectAll()}
         onClearAll={() => clearAll()}
         onSelectSection={selectAll}

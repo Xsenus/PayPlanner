@@ -968,12 +968,15 @@ export class ApiService {
     files: File[],
     selectedPreviewIds: string[],
     counterpartyOptions: Array<{ previewId: string; importMode: string }> = [],
+    options: { allowUpdates?: boolean; allowClearingExistingValues?: boolean } = {},
   ) {
     const payload = new FormData();
     files.forEach((file) => payload.append('files', file));
-    payload.append('requestJson', JSON.stringify({
-      SelectedPreviewIds: selectedPreviewIds,
-      CounterpartyOptions: counterpartyOptions.map((option) => ({
+      payload.append('requestJson', JSON.stringify({
+        SelectedPreviewIds: selectedPreviewIds,
+        AllowUpdates: options.allowUpdates ?? false,
+        AllowClearingExistingValues: options.allowClearingExistingValues ?? false,
+        CounterpartyOptions: counterpartyOptions.map((option) => ({
         PreviewId: option.previewId,
         ImportMode: option.importMode,
       })),
