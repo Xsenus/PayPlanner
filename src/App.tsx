@@ -41,7 +41,8 @@ const Calendar = lazy(() => import('./components/Calendar/Calendar').then((modul
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
-const Contacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
+const Contacts = lazy(() => import('./components/Contacts/UnifiedContacts').then((module) => ({ default: module.UnifiedContacts })));
+const PhoneContacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
 const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
 const ClientDetail = lazy(() => import('./components/Clients/ClientDetail').then((module) => ({ default: module.ClientDetail })));
 const Accounts = lazy(() => import('./components/Accounts/Accounts').then((module) => ({ default: module.Accounts })));
@@ -85,7 +86,8 @@ function AppContent() {
       legalEntities: 'Юр. лица',
       clients: 'Клиенты',
       contacts: 'Контакты',
-      contactsClients: 'Контакты: клиенты',
+      contactsClients: 'Контакты: физические лица',
+      contactsLegal: 'Контакты: юридические лица',
       contactsExternal: 'Контакты: сторонние',
       clientDetail: 'Карточка клиента',
       accounts: 'Счета',
@@ -150,8 +152,9 @@ function AppContent() {
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
-        { tab: 'contacts' as Tab, allowed: permissions.clients.canView },
+        { tab: 'contacts' as Tab, allowed: permissions.clients.canView || permissions.legalEntities.canView },
         { tab: 'contactsClients' as Tab, allowed: permissions.clients.canView },
+        { tab: 'contactsLegal' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'contactsExternal' as Tab, allowed: permissions.clients.canView },
         { tab: 'accounts' as Tab, allowed: permissions.accounts.canView },
         { tab: 'accountsIncome' as Tab, allowed: permissions.accounts.canView },
@@ -190,7 +193,11 @@ function AppContent() {
           return permissions.legalEntities.canView;
         case 'clients':
         case 'contacts':
+          return permissions.clients.canView || permissions.legalEntities.canView;
         case 'contactsClients':
+          return permissions.clients.canView;
+        case 'contactsLegal':
+          return permissions.legalEntities.canView;
         case 'contactsExternal':
         case 'clientDetail':
           return permissions.clients.canView;
@@ -698,7 +705,43 @@ function AppContent() {
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
 
       case 'contacts':
+        return permissions.clients.canView || permissions.legalEntities.canView
+          ? (
+              <Contacts
+                canViewClients={permissions.clients.canView}
+                canViewLegalEntities={permissions.legalEntities.canView}
+                initialKind="all"
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contacts' } })}
+              />
+            )
+          : renderNoAccess('Раздел контактов недоступен для вашей роли.');
+
       case 'contactsClients':
+        return permissions.clients.canView
+          ? (
+              <Contacts
+                canViewClients
+                canViewLegalEntities={false}
+                initialKind="client"
+                lockKind
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsClients' } })}
+              />
+            )
+          : renderNoAccess('Раздел контактов недоступен для вашей роли.');
+
+      case 'contactsLegal':
+        return permissions.legalEntities.canView
+          ? (
+              <Contacts
+                canViewClients={permissions.clients.canView}
+                canViewLegalEntities
+                initialKind="legal"
+                lockKind
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsLegal' } })}
+              />
+            )
+          : renderNoAccess('Раздел контактов недоступен для вашей роли.');
+
       case 'contactsExternal': {
         const contactScope: ContactScope =
           activeTab === 'contactsClients' ? 'clients' : activeTab === 'contactsExternal' ? 'external' : 'all';
@@ -707,7 +750,7 @@ function AppContent() {
         };
 
         return permissions.clients.canView
-          ? <Contacts initialScope={contactScope} onScopeChange={handleContactScopeChange} />
+          ? <PhoneContacts initialScope={contactScope} onScopeChange={handleContactScopeChange} />
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
       }
 

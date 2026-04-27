@@ -136,10 +136,15 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.clients.canView) {
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
+    }
+    if (permissions.clients.canView || permissions.legalEntities.canView) {
       const contactChildren: SidebarChild[] = [
-        { id: 'contacts' as Tab, label: 'Все', icon: Phone },
-        { id: 'contactsClients' as Tab, label: 'Клиенты', icon: Users },
-        { id: 'contactsExternal' as Tab, label: 'Сторонние', icon: Users },
+        ...(permissions.clients.canView
+          ? [{ id: 'contactsClients' as Tab, label: 'Физические лица', icon: Users }]
+          : []),
+        ...(permissions.legalEntities.canView
+          ? [{ id: 'contactsLegal' as Tab, label: 'Юридические лица', icon: Building2 }]
+          : []),
       ];
 
       items.push({

@@ -1,0 +1,581 @@
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  Building2,
+  LayoutGrid,
+  List,
+  Loader2,
+  Mail,
+  MapPin,
+  Phone,
+  Search,
+  UserRound,
+} from 'lucide-react';
+import { apiService } from '../../services/api';
+import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
+
+type ContactKind = 'all' | 'client' | 'legal';
+type ViewMode = 'cards' | 'table';
+
+type UnifiedContact =
+  | {
+      id: string;
+      kind: 'client';
+      sourceId: number;
+      title: string;
+      subtitle: string;
+      phone: string;
+      email: string;
+      inn: string;
+      kpp: string;
+      address: string;
+      statusText: string;
+      createdAt?: string | null;
+      client: Client;
+    }
+  | {
+      id: string;
+      kind: 'legal';
+      sourceId: number;
+      title: string;
+      subtitle: string;
+      phone: string;
+      email: string;
+      inn: string;
+      kpp: string;
+      address: string;
+      statusText: string;
+      createdAt?: string | null;
+      legalEntity: LegalEntitySummary;
+    };
+
+interface UnifiedContactsProps {
+  canViewClients?: boolean;
+  canViewLegalEntities?: boolean;
+  initialKind?: ContactKind;
+  lockKind?: boolean;
+  onOpenClient?: (id: number) => void;
+}
+
+const PAGE_SIZE = 24;
+
+function formatDate(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('ru-RU');
+}
+
+function normalize(value?: string | null) {
+  return value?.trim() ?? '';
+}
+
+function buildClientContact(client: Client): UnifiedContact {
+  const legal = client.legalEntity;
+  return {
+    id: `client-${client.id}`,
+    kind: 'client',
+    sourceId: client.id,
+    title: normalize(client.name) || `Клиент #${client.id}`,
+    subtitle: normalize(legal?.shortName) || normalize(client.company) || 'Физическое лицо',
+    phone: normalize(client.phone),
+    email: normalize(client.email),
+    inn: normalize(legal?.inn),
+    kpp: normalize(legal?.kpp),
+    address: normalize(client.address) || normalize(legal?.address),
+    statusText: `${client.isActive ? 'Активен' : 'Неактивен'}${client.clientStatus?.name ? ` · ${client.clientStatus.name}` : ''}`,
+    createdAt: client.createdAt,
+    client,
+  };
+}
+
+function buildLegalContact(entity: LegalEntitySummary): UnifiedContact {
+  return {
+    id: `legal-${entity.id}`,
+    kind: 'legal',
+    sourceId: entity.id,
+    title: normalize(entity.shortName) || `Юрлицо #${entity.id}`,
+    subtitle: normalize(entity.fullName) || normalize(entity.director) || 'Юридическое лицо',
+    phone: normalize(entity.phone),
+    email: normalize(entity.email),
+    inn: normalize(entity.inn),
+    kpp: normalize(entity.kpp),
+    address: normalize(entity.address),
+    statusText: `${entity.clientsCount ?? 0} клиент(ов)`,
+    createdAt: entity.createdAt,
+    legalEntity: entity,
+  };
+}
+
+function kindBadge(kind: UnifiedContact['kind']) {
+  return kind === 'client'
+    ? 'border-blue-200 bg-blue-50 text-blue-700'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+}
+
+function kindLabel(kind: UnifiedContact['kind']) {
+  return kind === 'client' ? 'Физическое лицо' : 'Юридическое лицо';
+}
+
+function matchesQuery(item: UnifiedContact, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  return [
+    item.title,
+    item.subtitle,
+    item.phone,
+    item.email,
+    item.inn,
+    item.kpp,
+    item.address,
+    item.statusText,
+  ]
+    .join(' ')
+    .toLowerCase()
+    .includes(q);
+}
+
+function FieldCell({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2 overflow-hidden">
+      <div className="mt-0.5 shrink-0 text-slate-400">{icon}</div>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <div className="text-[11px] font-medium uppercase text-slate-400">{label}</div>
+        <div
+          className={`w-full truncate text-sm ${value ? 'text-slate-700' : 'text-slate-400'}`}
+          title={value || undefined}
+        >
+          {value || 'Не заполнено'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex min-h-[58px] flex-col items-center justify-center rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-center">
+      <div className="text-[11px] font-medium uppercase text-slate-400">{label}</div>
+      <div className="mt-1 max-w-full truncate text-sm font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+export function UnifiedContacts({
+  canViewClients = true,
+  canViewLegalEntities = true,
+  initialKind = 'all',
+  lockKind = false,
+  onOpenClient,
+}: UnifiedContactsProps) {
+  const [items, setItems] = useState<UnifiedContact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [kind, setKind] = useState<ContactKind>(initialKind);
+  const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [page, setPage] = useState(1);
+  const [legalDetail, setLegalDetail] = useState<LegalEntityDetail | null>(null);
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+  const [clientInvoiceTotals, setClientInvoiceTotals] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    setKind(initialKind);
+  }, [initialKind]);
+
+  const load = useCallback(async (initial = false) => {
+    try {
+      if (initial) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      setError(null);
+
+      const [clientsResult, legalResult] = await Promise.allSettled([
+        canViewClients ? apiService.getClients() : Promise.resolve([] as Client[]),
+        canViewLegalEntities ? apiService.getLegalEntities() : Promise.resolve([] as LegalEntitySummary[]),
+      ]);
+
+      if (clientsResult.status === 'rejected' && legalResult.status === 'rejected') {
+        throw clientsResult.reason;
+      }
+
+      const clients = clientsResult.status === 'fulfilled' ? clientsResult.value : [];
+      const legalEntities = legalResult.status === 'fulfilled' ? legalResult.value : [];
+
+      setItems([
+        ...clients.map(buildClientContact),
+        ...legalEntities.map(buildLegalContact),
+      ].sort((a, b) => a.title.localeCompare(b.title, 'ru')));
+      setClientInvoiceTotals({});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить контакты');
+      setItems([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [canViewClients, canViewLegalEntities]);
+
+  useEffect(() => {
+    void load(true);
+  }, [load]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [kind, search, viewMode]);
+
+  const clientItems = useMemo(
+    () => items.filter((item): item is Extract<UnifiedContact, { kind: 'client' }> => item.kind === 'client'),
+    [items],
+  );
+
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) => {
+        if (kind !== 'all' && item.kind !== kind) return false;
+        return matchesQuery(item, search);
+      }),
+    [items, kind, search],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const pageItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const clientsCount = clientItems.length;
+  const legalCount = items.filter((item) => item.kind === 'legal').length;
+
+  useEffect(() => {
+    const ids = new Set<number>();
+    pageItems.forEach((item) => {
+      if (item.kind === 'client') {
+        ids.add(item.sourceId);
+        return;
+      }
+      clientItems
+        .filter((clientItem) => clientItem.client.legalEntityId === item.sourceId)
+        .forEach((clientItem) => ids.add(clientItem.sourceId));
+    });
+
+    const missing = Array.from(ids).filter((id) => clientInvoiceTotals[id] === undefined);
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    void Promise.allSettled(
+      missing.map(async (clientId) => {
+        const result = await apiService.getInvoices({ clientId, page: 1, pageSize: 1 });
+        return [clientId, result.total ?? result.items?.length ?? 0] as const;
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      setClientInvoiceTotals((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            const [clientId, total] = result.value;
+            next[clientId] = total;
+          }
+        });
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientInvoiceTotals, clientItems, pageItems]);
+
+  const linkedClients = useCallback(
+    (legalEntityId: number) => clientItems.filter((clientItem) => clientItem.client.legalEntityId === legalEntityId),
+    [clientItems],
+  );
+
+  const getCaseCount = useCallback((item: UnifiedContact) => {
+    if (item.kind === 'client') {
+      return item.client.cases?.length ?? 0;
+    }
+    return linkedClients(item.sourceId).reduce((sum, clientItem) => sum + (clientItem.client.cases?.length ?? 0), 0);
+  }, [linkedClients]);
+
+  const getInvoiceCount = useCallback((item: UnifiedContact) => {
+    if (item.kind === 'client') {
+      return clientInvoiceTotals[item.sourceId] ?? '...';
+    }
+    const clients = linkedClients(item.sourceId);
+    if (clients.length === 0) return 0;
+    if (clients.some((clientItem) => clientInvoiceTotals[clientItem.sourceId] === undefined)) return '...';
+    return clients.reduce((sum, clientItem) => sum + (clientInvoiceTotals[clientItem.sourceId] ?? 0), 0);
+  }, [clientInvoiceTotals, linkedClients]);
+
+  const openItem = async (item: UnifiedContact) => {
+    if (item.kind === 'client' && onOpenClient) {
+      onOpenClient(item.sourceId);
+      return;
+    }
+
+    if (item.kind === 'legal') {
+      try {
+        setDetailLoadingId(item.id);
+        const detail = await apiService.getLegalEntity(item.sourceId);
+        setLegalDetail(detail);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Не удалось открыть карточку юрлица');
+      } finally {
+        setDetailLoadingId(null);
+      }
+    }
+  };
+
+  const pageTitle = lockKind && initialKind === 'client'
+    ? 'Физические лица'
+    : lockKind && initialKind === 'legal'
+      ? 'Юридические лица'
+      : 'Контакты';
+
+  const pageSubtitle = lockKind && initialKind === 'client'
+    ? 'Клиенты-физические лица'
+    : lockKind && initialKind === 'legal'
+      ? 'Организации и ИП'
+      : 'Клиенты и юридические лица в одном реестре';
+
+  const contactCell = (item: UnifiedContact) => (
+    <div className="min-w-0">
+      <div className="flex items-center gap-2">
+        <span className={`inline-flex shrink-0 items-center rounded border px-2 py-0.5 text-xs font-medium ${kindBadge(item.kind)}`}>
+          {kindLabel(item.kind)}
+        </span>
+        <span className="truncate font-semibold text-slate-900">{item.title}</span>
+      </div>
+      <div className="mt-1 truncate text-sm text-slate-500">{item.subtitle}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">{pageTitle}</h1>
+          <p className="mt-1 text-slate-500">{pageSubtitle}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode('cards')}
+            className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border ${
+              viewMode === 'cards' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+            }`}
+            title="Карточки"
+          >
+            <LayoutGrid className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('table')}
+            className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border ${
+              viewMode === 'table' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+            }`}
+            title="Таблица"
+          >
+            <List className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void load(false)}
+            disabled={refreshing}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 disabled:opacity-60"
+          >
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 border-y border-slate-200 py-4 lg:flex-row lg:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            placeholder="Поиск по имени, телефону, email, ИНН или адресу"
+          />
+        </div>
+
+        {!lockKind ? (
+          <div className="grid grid-cols-3 gap-2 lg:w-auto">
+            {[
+              ['all', `Все ${items.length}`],
+              ['client', `Физлица ${clientsCount}`],
+              ['legal', `Юрлица ${legalCount}`],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setKind(value as ContactKind)}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                  kind === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : null}
+
+      {loading ? (
+        <div className="flex min-h-[360px] items-center justify-center text-slate-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          Загрузка контактов...
+        </div>
+      ) : viewMode === 'cards' ? (
+        <div className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {pageItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => void openItem(item)}
+              className="flex min-h-[300px] min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md"
+            >
+              <div className="flex items-start gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                  item.kind === 'client' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'
+                }`}>
+                  {detailLoadingId === item.id ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : item.kind === 'client' ? (
+                    <UserRound className="h-5 w-5" />
+                  ) : (
+                    <Building2 className="h-5 w-5" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">{contactCell(item)}</div>
+              </div>
+
+              <div className="mt-4 grid min-w-0 gap-3">
+                <div className="grid min-w-0 grid-cols-2 gap-4">
+                  <FieldCell icon={<Phone className="h-4 w-4" />} label="Телефон" value={item.phone} />
+                  <FieldCell icon={<Mail className="h-4 w-4" />} label="Email" value={item.email} />
+                </div>
+                <div className="grid min-w-0 grid-cols-2 gap-4">
+                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="ИНН" value={item.inn} />
+                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="КПП" value={item.kpp} />
+                </div>
+                <FieldCell icon={<MapPin className="h-4 w-4" />} label="Адрес" value={item.address} />
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <MetricTile label={item.kind === 'legal' ? 'Клиенты' : 'Статус'} value={item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : item.statusText} />
+                <MetricTile label="Дела" value={getCaseCount(item)} />
+                <MetricTile label="Счета" value={getInvoiceCount(item)} />
+              </div>
+
+              <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                <span className="truncate pr-3">{item.kind === 'legal' ? item.statusText : kindLabel(item.kind)}</span>
+                <span>{formatDate(item.createdAt)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Контакт</th>
+                  <th className="px-4 py-3">Телефон</th>
+                  <th className="px-4 py-3">Email</th>
+                  <th className="px-4 py-3">ИНН</th>
+                  <th className="px-4 py-3">Адрес</th>
+                  <th className="px-4 py-3">Дела</th>
+                  <th className="px-4 py-3">Счета</th>
+                  <th className="px-4 py-3">Создано</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pageItems.map((item) => (
+                  <tr
+                    key={item.id}
+                    onClick={() => void openItem(item)}
+                    className="cursor-pointer hover:bg-blue-50/50"
+                  >
+                    <td className="px-4 py-3">{contactCell(item)}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.phone || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.email || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.inn || '—'}</td>
+                    <td className="max-w-xs truncate px-4 py-3 text-slate-600">{item.address || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{getCaseCount(item)}</td>
+                    <td className="px-4 py-3 text-slate-600">{getInvoiceCount(item)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDate(item.createdAt) || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!loading && filteredItems.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-slate-500">
+          Ничего не найдено
+        </div>
+      ) : null}
+
+      {!loading && filteredItems.length > 0 ? (
+        <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            Показано {Math.min(filteredItems.length, (page - 1) * PAGE_SIZE + 1)}-{Math.min(filteredItems.length, page * PAGE_SIZE)} из {filteredItems.length}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:opacity-50"
+            >
+              Назад
+            </button>
+            <span>{page} / {totalPages}</span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:opacity-50"
+            >
+              Далее
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <LegalEntityModal
+        isOpen={Boolean(legalDetail)}
+        initial={legalDetail}
+        onClose={() => setLegalDetail(null)}
+        onSubmit={async (_payload: LegalEntityInput) => legalDetail as LegalEntityDetail}
+        suggest={(payload) => apiService.suggestLegalEntities(payload)}
+        findById={(payload) => apiService.findLegalEntityById(payload)}
+        allowEdit={false}
+        allowDelete={false}
+        hideFormActions
+        hideDadataSection
+        compactReadOnlyView
+        titleOverride="Карточка юридического лица"
+      />
+    </div>
+  );
+}
