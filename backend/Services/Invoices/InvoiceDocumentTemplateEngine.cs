@@ -20,6 +20,7 @@ public static class InvoiceDocumentTemplateEngine
         "ba913b728b9bc5352ce6affa7845f5b7e89889420470a2179d12f9a223d6abe0",
         "8c5beee74da7dafc884bfc05d78b4681371f0bc9874540b0676d1e1c15bce7e4",
         "92ca4fb24fbf8673ebc6256a299fdb9580ef9f3a64f78a3e3db7209bc226b18f",
+        "af28afb12f128c846dd0261081335eb96d8c4b4770947616f8a4f1b17783f534",
     };
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
@@ -458,7 +459,7 @@ public static class InvoiceDocumentTemplateEngine
             Foundation = foundation,
             Case = clientCase,
             Requisites = string.Join(", ", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
-            RequisitesHtml = string.Join("<br/>", requisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part)).Select(Encode)),
+            RequisitesHtml = BuildCounterpartyLinesHtml(requisitesLines),
         };
     }
 
@@ -1054,6 +1055,13 @@ public static class InvoiceDocumentTemplateEngine
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
 
+    private static string BuildCounterpartyLinesHtml(IEnumerable<string> lines)
+        => string.Join(
+            string.Empty,
+            lines
+                .Where(static line => !string.IsNullOrWhiteSpace(line))
+                .Select(static line => $"<span class=\"counterparty-line\">{Encode(line)}</span>"));
+
     private static string FirstNotEmpty(params string?[] values)
         => values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
@@ -1325,13 +1333,28 @@ public static class InvoiceDocumentTemplateEngine
       padding: 3px 4px;
       vertical-align: top;
       font-size: 12px !important;
+      line-height: 1.25;
     }
     .counterparty-label {
       width: 16%;
       color: #000000;
+      white-space: nowrap;
     }
     .counterparty-value {
       font-weight: 600;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: normal;
+      padding-left: 6px !important;
+    }
+    .counterparty-line {
+      display: block;
+      margin: 0;
+      padding: 0;
+      line-height: 1.25;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: normal;
     }
     .items-table {
       margin: 8px 0;

@@ -37,6 +37,8 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("{{invoice.qrCodeHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("<th class=\"sum\">Сумма</th>", dto.DefaultTemplateHtml);
         Assert.Contains("<td class=\"sum\">{{total}}</td>", dto.DefaultTemplateHtml);
+        Assert.Contains(".counterparty-line", dto.DefaultTemplateHtml);
+        Assert.Contains("overflow-wrap: anywhere;", dto.DefaultTemplateHtml);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", dto.DefaultTemplateHtml);
     }
 
@@ -217,6 +219,24 @@ public class InvoiceDocumentTemplateTests
         Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
         Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
         Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersBuyerRequisitesAsStableCounterpartyLines()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("<span class=\"counterparty-line\">Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00</span>", content.Content);
+        Assert.Contains("<span class=\"counterparty-line\">Паспорт 1234 № 567890", content.Content);
+        Assert.Contains("<span class=\"counterparty-line\">Самара, ул. Тестовая, д. 1</span>", content.Content);
+        Assert.DoesNotContain("<br/>Паспорт", content.Content);
+        Assert.DoesNotContain("<br/>Самара", content.Content);
     }
 
     [Fact]
