@@ -83,7 +83,7 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
             </button>
 
             {notificationsOpen ? (
-              <div className="absolute right-0 mt-3 w-64 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-xl">
+              <div className="absolute right-0 mt-4 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-xl">
                 Новых уведомлений пока нет
               </div>
             ) : null}

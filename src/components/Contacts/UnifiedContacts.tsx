@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Building2,
+  GripVertical,
   LayoutGrid,
   List,
   Loader2,
@@ -8,14 +9,69 @@ import {
   MapPin,
   Phone,
   Search,
+  SlidersHorizontal,
   UserRound,
 } from 'lucide-react';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
+import { TableColumnSettings } from '../ui/TableColumnSettings';
 
 type ContactKind = 'all' | 'client' | 'legal';
 type ViewMode = 'cards' | 'table';
+type ContactColumnKey =
+  | 'contact'
+  | 'sourceId'
+  | 'phone'
+  | 'email'
+  | 'inn'
+  | 'kpp'
+  | 'ogrn'
+  | 'address'
+  | 'responsible'
+  | 'status'
+  | 'company'
+  | 'notes'
+  | 'legalShortName'
+  | 'legalFullName'
+  | 'legalInn'
+  | 'legalKpp'
+  | 'legalOgrn'
+  | 'director'
+  | 'country'
+  | 'organizationForm'
+  | 'taxSystem'
+  | 'taxSystemMode'
+  | 'vatWithoutVat'
+  | 'okved'
+  | 'okpo'
+  | 'okato'
+  | 'oktmo'
+  | 'okogu'
+  | 'okfs'
+  | 'okopf'
+  | 'pfr'
+  | 'fss'
+  | 'taxOfficeCode'
+  | 'taxRegion'
+  | 'ifnsName'
+  | 'taxOfficePhone'
+  | 'treasuryInn'
+  | 'treasuryKpp'
+  | 'treasuryRecipientName'
+  | 'treasuryBankBik'
+  | 'treasuryBankName'
+  | 'treasuryAccountNumber'
+  | 'clientsCount'
+  | 'cases'
+  | 'contracts'
+  | 'invoices'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'auditCreatedBy'
+  | 'auditUpdatedBy';
 
 type UnifiedContact =
   | {
@@ -58,6 +114,101 @@ interface UnifiedContactsProps {
 }
 
 const PAGE_SIZE = 24;
+const CONTACTS_SETTINGS_VERSION = 'v1';
+
+type ContactColumnConfig = {
+  key: ContactColumnKey;
+  label: string;
+  defaultWidth: number;
+  defaultVisible?: boolean;
+};
+
+const COMMON_CONTACT_COLUMNS: ContactColumnConfig[] = [
+  { key: 'contact', label: 'Контакт', defaultWidth: 360 },
+  { key: 'phone', label: 'Телефон', defaultWidth: 150 },
+  { key: 'email', label: 'Email', defaultWidth: 190 },
+  { key: 'inn', label: 'ИНН', defaultWidth: 150 },
+  { key: 'kpp', label: 'КПП', defaultWidth: 130, defaultVisible: false },
+  { key: 'address', label: 'Адрес', defaultWidth: 320 },
+  { key: 'cases', label: 'Дела', defaultWidth: 90 },
+  { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'createdAt', label: 'Создано', defaultWidth: 120 },
+];
+
+const CLIENT_CONTACT_COLUMNS: ContactColumnConfig[] = [
+  { key: 'contact', label: 'Физическое лицо', defaultWidth: 360 },
+  { key: 'sourceId', label: 'ID', defaultWidth: 90, defaultVisible: false },
+  { key: 'phone', label: 'Телефон', defaultWidth: 150 },
+  { key: 'email', label: 'Email', defaultWidth: 190 },
+  { key: 'company', label: 'Компания', defaultWidth: 220, defaultVisible: false },
+  { key: 'address', label: 'Адрес', defaultWidth: 320 },
+  { key: 'status', label: 'Статус', defaultWidth: 180 },
+  { key: 'responsible', label: 'Ответственный', defaultWidth: 190 },
+  { key: 'notes', label: 'Комментарий', defaultWidth: 260, defaultVisible: false },
+  { key: 'legalShortName', label: 'Юрлицо', defaultWidth: 240, defaultVisible: false },
+  { key: 'legalFullName', label: 'Юрлицо полное', defaultWidth: 320, defaultVisible: false },
+  { key: 'legalInn', label: 'ИНН юрлица', defaultWidth: 150, defaultVisible: false },
+  { key: 'legalKpp', label: 'КПП юрлица', defaultWidth: 130, defaultVisible: false },
+  { key: 'legalOgrn', label: 'ОГРН юрлица', defaultWidth: 170, defaultVisible: false },
+  { key: 'cases', label: 'Дела', defaultWidth: 90 },
+  { key: 'contracts', label: 'Договоры', defaultWidth: 110, defaultVisible: false },
+  { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'createdAt', label: 'Создано', defaultWidth: 120 },
+  { key: 'auditCreatedBy', label: 'Кто создал', defaultWidth: 180, defaultVisible: false },
+  { key: 'updatedAt', label: 'Обновлено', defaultWidth: 130, defaultVisible: false },
+  { key: 'auditUpdatedBy', label: 'Кто обновил', defaultWidth: 180, defaultVisible: false },
+];
+
+const LEGAL_CONTACT_COLUMNS: ContactColumnConfig[] = [
+  { key: 'contact', label: 'Юридическое лицо', defaultWidth: 360 },
+  { key: 'sourceId', label: 'ID', defaultWidth: 90, defaultVisible: false },
+  { key: 'inn', label: 'ИНН', defaultWidth: 150 },
+  { key: 'kpp', label: 'КПП', defaultWidth: 130 },
+  { key: 'ogrn', label: 'ОГРН', defaultWidth: 170 },
+  { key: 'phone', label: 'Телефон', defaultWidth: 150 },
+  { key: 'email', label: 'Email', defaultWidth: 190 },
+  { key: 'address', label: 'Адрес', defaultWidth: 320 },
+  { key: 'director', label: 'Руководитель', defaultWidth: 220 },
+  { key: 'responsible', label: 'Ответственный', defaultWidth: 190, defaultVisible: false },
+  { key: 'clientsCount', label: 'Клиенты', defaultWidth: 100 },
+  { key: 'cases', label: 'Дела', defaultWidth: 90 },
+  { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'country', label: 'Страна', defaultWidth: 150, defaultVisible: false },
+  { key: 'organizationForm', label: 'Форма организации', defaultWidth: 190, defaultVisible: false },
+  { key: 'taxSystem', label: 'Налогообложение', defaultWidth: 180, defaultVisible: false },
+  { key: 'taxSystemMode', label: 'Режим налогообложения', defaultWidth: 210, defaultVisible: false },
+  { key: 'vatWithoutVat', label: 'Без НДС', defaultWidth: 120, defaultVisible: false },
+  { key: 'okved', label: 'ОКВЭД', defaultWidth: 150, defaultVisible: false },
+  { key: 'okpo', label: 'ОКПО', defaultWidth: 140, defaultVisible: false },
+  { key: 'okato', label: 'ОКАТО', defaultWidth: 150, defaultVisible: false },
+  { key: 'oktmo', label: 'ОКТМО', defaultWidth: 150, defaultVisible: false },
+  { key: 'okogu', label: 'ОКОГУ', defaultWidth: 150, defaultVisible: false },
+  { key: 'okfs', label: 'ОКФС', defaultWidth: 120, defaultVisible: false },
+  { key: 'okopf', label: 'ОКОПФ', defaultWidth: 150, defaultVisible: false },
+  { key: 'pfr', label: 'ПФР', defaultWidth: 150, defaultVisible: false },
+  { key: 'fss', label: 'ФСС', defaultWidth: 150, defaultVisible: false },
+  { key: 'taxOfficeCode', label: 'Код ИФНС', defaultWidth: 140, defaultVisible: false },
+  { key: 'taxRegion', label: 'Регион ФНС', defaultWidth: 160, defaultVisible: false },
+  { key: 'ifnsName', label: 'ИФНС', defaultWidth: 260, defaultVisible: false },
+  { key: 'taxOfficePhone', label: 'Телефон ИФНС', defaultWidth: 170, defaultVisible: false },
+  { key: 'treasuryInn', label: 'ИНН казначейства', defaultWidth: 170, defaultVisible: false },
+  { key: 'treasuryKpp', label: 'КПП казначейства', defaultWidth: 170, defaultVisible: false },
+  { key: 'treasuryRecipientName', label: 'Получатель казначейства', defaultWidth: 260, defaultVisible: false },
+  { key: 'treasuryBankBik', label: 'БИК казначейства', defaultWidth: 170, defaultVisible: false },
+  { key: 'treasuryBankName', label: 'Банк казначейства', defaultWidth: 240, defaultVisible: false },
+  { key: 'treasuryAccountNumber', label: 'Счет казначейства', defaultWidth: 190, defaultVisible: false },
+  { key: 'notes', label: 'Комментарий', defaultWidth: 260, defaultVisible: false },
+  { key: 'createdAt', label: 'Создано', defaultWidth: 120 },
+  { key: 'auditCreatedBy', label: 'Кто создал', defaultWidth: 180, defaultVisible: false },
+  { key: 'updatedAt', label: 'Обновлено', defaultWidth: 130, defaultVisible: false },
+  { key: 'auditUpdatedBy', label: 'Кто обновил', defaultWidth: 180, defaultVisible: false },
+];
+
+function columnsForScope(scope: ContactKind): ContactColumnConfig[] {
+  if (scope === 'client') return CLIENT_CONTACT_COLUMNS;
+  if (scope === 'legal') return LEGAL_CONTACT_COLUMNS;
+  return COMMON_CONTACT_COLUMNS;
+}
 
 function formatDate(value?: string | null) {
   if (!value) return '';
@@ -66,6 +217,37 @@ function formatDate(value?: string | null) {
 
 function normalize(value?: string | null) {
   return value?.trim() ?? '';
+}
+
+function isViewMode(value: unknown): value is ViewMode {
+  return value === 'cards' || value === 'table';
+}
+
+function readStoredViewMode(key: string): ViewMode | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return isViewMode(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredViewMode(key: string, value: ViewMode) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /** */
+  }
+}
+
+function yesNo(value?: boolean | null) {
+  if (value === true) return 'Да';
+  if (value === false) return 'Нет';
+  return '';
+}
+
+function contactSettingsKey(scope: ContactKind, suffix: string) {
+  return scope === 'all' ? `contacts_${suffix}` : `contacts_${scope}_${suffix}`;
 }
 
 function buildClientContact(client: Client): UnifiedContact {
@@ -175,21 +357,116 @@ export function UnifiedContacts({
   lockKind = false,
   onOpenClient,
 }: UnifiedContactsProps) {
+  const { user } = useAuth();
+  const settingsScope = lockKind ? initialKind : 'all';
+  const userStorageScope = user?.id ?? 'guest';
+  const viewModeStorageKey = `pp.contacts.${settingsScope}.viewMode.${userStorageScope}.${CONTACTS_SETTINGS_VERSION}`;
+  const viewModeSettingsKey = contactSettingsKey(settingsScope, 'view_mode');
+  const tableLayoutStorageKey = `pp.contacts.${settingsScope}.tableSettings.${userStorageScope}.${CONTACTS_SETTINGS_VERSION}`;
+  const tableLayoutSettingsKey = contactSettingsKey(settingsScope, 'table_settings');
+  const contactColumns = useMemo(() => columnsForScope(settingsScope), [settingsScope]);
+
   const [items, setItems] = useState<UnifiedContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<ContactKind>(initialKind);
-  const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredViewMode(viewModeStorageKey) ?? 'cards');
+  const [loadedViewModeSettingsKey, setLoadedViewModeSettingsKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [legalDetail, setLegalDetail] = useState<LegalEntityDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [clientInvoiceTotals, setClientInvoiceTotals] = useState<Record<number, number>>({});
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const viewModeSaveTimerRef = useRef<number | null>(null);
+  const {
+    columnOrder,
+    orderedVisibleColumns,
+    visibleColumns,
+    draggingColumn,
+    toggleColumn,
+    moveColumn,
+    handleColumnDragStart,
+    handleColumnDragOver,
+    handleColumnDrop,
+    handleColumnDragEnd,
+    handleResizeStart,
+    getColumnWidth,
+    resetTableSettings,
+  } = usePersistedTableSettings<ContactColumnKey>({
+    storageKey: tableLayoutStorageKey,
+    settingsKey: tableLayoutSettingsKey,
+    columns: contactColumns,
+    defaultPageSize: PAGE_SIZE,
+    minColumnWidth: 80,
+  });
+
+  const columnsByKey = useMemo(
+    () => Object.fromEntries(contactColumns.map((column) => [column.key, column])) as Record<ContactColumnKey, ContactColumnConfig>,
+    [contactColumns],
+  );
+  const orderedTableColumns = useMemo(
+    () => orderedVisibleColumns.map((key) => columnsByKey[key]).filter(Boolean),
+    [columnsByKey, orderedVisibleColumns],
+  );
+  const tableWidth = useMemo(
+    () => orderedTableColumns.reduce((sum, column) => sum + getColumnWidth(column.key), 0),
+    [getColumnWidth, orderedTableColumns],
+  );
 
   useEffect(() => {
     setKind(initialKind);
   }, [initialKind]);
+
+  useEffect(() => {
+    let active = true;
+    setLoadedViewModeSettingsKey(null);
+
+    const cachedMode = readStoredViewMode(viewModeStorageKey);
+    setViewMode(cachedMode ?? 'cards');
+
+    const loadViewMode = async () => {
+      try {
+        const response = await apiService.getUserSetting(viewModeSettingsKey);
+        if (!active || !response?.value) return;
+        if (!isViewMode(response.value)) return;
+        setViewMode(response.value);
+        writeStoredViewMode(viewModeStorageKey, response.value);
+      } catch {
+        /** */
+      } finally {
+        if (active) {
+          setLoadedViewModeSettingsKey(viewModeSettingsKey);
+        }
+      }
+    };
+
+    void loadViewMode();
+
+    return () => {
+      active = false;
+    };
+  }, [viewModeSettingsKey, viewModeStorageKey]);
+
+  useEffect(() => {
+    writeStoredViewMode(viewModeStorageKey, viewMode);
+    if (loadedViewModeSettingsKey !== viewModeSettingsKey) return;
+
+    if (viewModeSaveTimerRef.current) {
+      window.clearTimeout(viewModeSaveTimerRef.current);
+    }
+
+    viewModeSaveTimerRef.current = window.setTimeout(() => {
+      void apiService.upsertUserSetting(viewModeSettingsKey, viewMode);
+    }, 400);
+
+    return () => {
+      if (viewModeSaveTimerRef.current) {
+        window.clearTimeout(viewModeSaveTimerRef.current);
+      }
+    };
+  }, [loadedViewModeSettingsKey, viewMode, viewModeSettingsKey, viewModeStorageKey]);
 
   const load = useCallback(async (initial = false) => {
     try {
@@ -334,6 +611,11 @@ export function UnifiedContacts({
     }
   };
 
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    writeStoredViewMode(viewModeStorageKey, mode);
+  };
+
   const pageTitle = lockKind && initialKind === 'client'
     ? 'Физические лица'
     : lockKind && initialKind === 'legal'
@@ -358,6 +640,116 @@ export function UnifiedContacts({
     </div>
   );
 
+  const renderTableCell = (item: UnifiedContact, columnKey: ContactColumnKey) => {
+    const client = item.kind === 'client' ? item.client : null;
+    const legal = item.kind === 'legal' ? item.legalEntity : client?.legalEntity ?? null;
+
+    switch (columnKey) {
+      case 'contact':
+        return contactCell(item);
+      case 'sourceId':
+        return item.sourceId;
+      case 'phone':
+        return item.phone || '—';
+      case 'email':
+        return item.email || '—';
+      case 'inn':
+        return item.inn || '—';
+      case 'kpp':
+        return item.kpp || '—';
+      case 'ogrn':
+        return legal?.ogrn || '—';
+      case 'address':
+        return item.address || '—';
+      case 'responsible':
+        return client?.responsibleUserName || legal?.responsibleUserName || '—';
+      case 'status':
+        return item.statusText || '—';
+      case 'company':
+        return client?.company || '—';
+      case 'notes':
+        return client?.notes || legal?.notes || '—';
+      case 'legalShortName':
+        return client?.legalEntity?.shortName || '—';
+      case 'legalFullName':
+        return client?.legalEntity?.fullName || '—';
+      case 'legalInn':
+        return client?.legalEntity?.inn || '—';
+      case 'legalKpp':
+        return client?.legalEntity?.kpp || '—';
+      case 'legalOgrn':
+        return client?.legalEntity?.ogrn || '—';
+      case 'director':
+        return legal?.director || '—';
+      case 'country':
+        return legal?.country || '—';
+      case 'organizationForm':
+        return legal?.organizationForm || '—';
+      case 'taxSystem':
+        return legal?.taxSystem || '—';
+      case 'taxSystemMode':
+        return legal?.taxSystemMode || '—';
+      case 'vatWithoutVat':
+        return yesNo(legal?.vatWithoutVat) || '—';
+      case 'okved':
+        return legal?.okved || '—';
+      case 'okpo':
+        return legal?.okpo || '—';
+      case 'okato':
+        return legal?.okato || '—';
+      case 'oktmo':
+        return legal?.oktmo || '—';
+      case 'okogu':
+        return legal?.okogu || '—';
+      case 'okfs':
+        return legal?.okfs || '—';
+      case 'okopf':
+        return legal?.okopf || '—';
+      case 'pfr':
+        return legal?.pfr || '—';
+      case 'fss':
+        return legal?.fss || '—';
+      case 'taxOfficeCode':
+        return legal?.taxOfficeCode || '—';
+      case 'taxRegion':
+        return legal?.taxRegion || '—';
+      case 'ifnsName':
+        return legal?.ifnsName || '—';
+      case 'taxOfficePhone':
+        return legal?.taxOfficePhone || '—';
+      case 'treasuryInn':
+        return legal?.treasuryInn || '—';
+      case 'treasuryKpp':
+        return legal?.treasuryKpp || '—';
+      case 'treasuryRecipientName':
+        return legal?.treasuryRecipientName || '—';
+      case 'treasuryBankBik':
+        return legal?.treasuryBankBik || '—';
+      case 'treasuryBankName':
+        return legal?.treasuryBankName || '—';
+      case 'treasuryAccountNumber':
+        return legal?.treasuryAccountNumber || '—';
+      case 'clientsCount':
+        return item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : '—';
+      case 'cases':
+        return getCaseCount(item);
+      case 'contracts':
+        return item.kind === 'client' ? item.client.contracts?.length ?? 0 : '—';
+      case 'invoices':
+        return getInvoiceCount(item);
+      case 'createdAt':
+        return formatDate(item.createdAt) || '—';
+      case 'updatedAt':
+        return formatDate(client?.auditUpdatedAt || legal?.updatedAt || legal?.auditUpdatedAt) || '—';
+      case 'auditCreatedBy':
+        return client?.auditCreatedByUserName || legal?.auditCreatedByUserName || '—';
+      case 'auditUpdatedBy':
+        return client?.auditUpdatedByUserName || legal?.auditUpdatedByUserName || '—';
+      default:
+        return '—';
+    }
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -369,7 +761,8 @@ export function UnifiedContacts({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setViewMode('cards')}
+            onClick={() => handleViewModeChange('cards')}
+            aria-label="Показать карточки"
             className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border ${
               viewMode === 'cards' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
             }`}
@@ -379,7 +772,8 @@ export function UnifiedContacts({
           </button>
           <button
             type="button"
-            onClick={() => setViewMode('table')}
+            onClick={() => handleViewModeChange('table')}
+            aria-label="Показать таблицу"
             className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border ${
               viewMode === 'table' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
             }`}
@@ -387,6 +781,19 @@ export function UnifiedContacts({
           >
             <List className="h-5 w-5" />
           </button>
+          {viewMode === 'table' ? (
+            <button
+              type="button"
+              onClick={() => setColumnsOpen((value) => !value)}
+              aria-label="Настроить колонки"
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border ${
+                columnsOpen ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+              }`}
+              title="Настройка колонок"
+            >
+              <SlidersHorizontal className="h-5 w-5" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void load(false)}
@@ -434,6 +841,25 @@ export function UnifiedContacts({
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : null}
+
+      {viewMode === 'table' && columnsOpen ? (
+        <TableColumnSettings
+          columns={contactColumns.map((column) => ({
+            key: column.key,
+            label: column.label,
+          }))}
+          columnOrder={columnOrder}
+          visibleColumns={visibleColumns}
+          draggingColumn={draggingColumn}
+          onToggleColumn={toggleColumn}
+          onMoveColumn={moveColumn}
+          onDragStart={handleColumnDragStart}
+          onDragOver={handleColumnDragOver}
+          onDrop={handleColumnDrop}
+          onDragEnd={handleColumnDragEnd}
+          onReset={resetTableSettings}
+        />
       ) : null}
 
       {loading ? (
@@ -493,17 +919,46 @@ export function UnifiedContacts({
       ) : (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <table
+              className="table-fixed divide-y divide-slate-200 text-sm"
+              style={{ minWidth: tableWidth, width: '100%' }}
+            >
+              <colgroup>
+                {orderedTableColumns.map((column) => (
+                  <col key={column.key} style={{ width: getColumnWidth(column.key) }} />
+                ))}
+              </colgroup>
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Контакт</th>
-                  <th className="px-4 py-3">Телефон</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">ИНН</th>
-                  <th className="px-4 py-3">Адрес</th>
-                  <th className="px-4 py-3">Дела</th>
-                  <th className="px-4 py-3">Счета</th>
-                  <th className="px-4 py-3">Создано</th>
+                  {orderedTableColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      scope="col"
+                      style={{ width: getColumnWidth(column.key) }}
+                      className={`relative px-4 py-3 align-middle ${draggingColumn === column.key ? 'bg-blue-50 text-blue-700' : ''}`}
+                      onDragOver={handleColumnDragOver}
+                      onDrop={(event) => handleColumnDrop(column.key, event)}
+                    >
+                      <div
+                        className="inline-flex min-w-0 max-w-full cursor-grab select-none items-center gap-2 active:cursor-grabbing"
+                        draggable
+                        onDragStart={(event) => handleColumnDragStart(column.key, event)}
+                        onDragEnd={handleColumnDragEnd}
+                        title="Перетащите, чтобы изменить порядок"
+                      >
+                        <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+                        <span className="truncate">{column.label}</span>
+                      </div>
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Изменить ширину колонки ${column.label}`}
+                        className="absolute right-0 top-0 z-10 h-full w-3 cursor-col-resize"
+                        onMouseDown={(event) => handleResizeStart(column.key, event)}
+                        onDragStart={(event) => event.preventDefault()}
+                      />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -513,14 +968,20 @@ export function UnifiedContacts({
                     onClick={() => void openItem(item)}
                     className="cursor-pointer hover:bg-blue-50/50"
                   >
-                    <td className="px-4 py-3">{contactCell(item)}</td>
-                    <td className="px-4 py-3 text-slate-600">{item.phone || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{item.email || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{item.inn || '—'}</td>
-                    <td className="max-w-xs truncate px-4 py-3 text-slate-600">{item.address || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{getCaseCount(item)}</td>
-                    <td className="px-4 py-3 text-slate-600">{getInvoiceCount(item)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatDate(item.createdAt) || '—'}</td>
+                    {orderedTableColumns.map((column) => {
+                      const value = renderTableCell(item, column.key);
+                      return (
+                        <td
+                          key={column.key}
+                          style={{ width: getColumnWidth(column.key) }}
+                          className="max-w-0 overflow-hidden px-4 py-3 text-slate-600"
+                        >
+                          <div className="truncate" title={String(value)}>
+                            {value}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -566,7 +1027,7 @@ export function UnifiedContacts({
         isOpen={Boolean(legalDetail)}
         initial={legalDetail}
         onClose={() => setLegalDetail(null)}
-        onSubmit={async (_payload: LegalEntityInput) => legalDetail as LegalEntityDetail}
+        onSubmit={async () => legalDetail as LegalEntityDetail}
         suggest={(payload) => apiService.suggestLegalEntities(payload)}
         findById={(payload) => apiService.findLegalEntityById(payload)}
         allowEdit={false}

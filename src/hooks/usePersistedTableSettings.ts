@@ -170,7 +170,7 @@ export function usePersistedTableSettings<K extends string>({
   const [columnOrder, setColumnOrder] = useState<K[]>(initialSettings.columnOrder);
   const [columnWidths, setColumnWidths] = useState<Partial<Record<K, number>>>(initialSettings.columnWidths);
   const [pageSize, setPageSize] = useState<number>(initialSettings.pageSize);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [loadedSettingsKey, setLoadedSettingsKey] = useState<string | null>(null);
   const [draggingColumn, setDraggingColumn] = useState<K | null>(null);
 
   const resizingRef = useRef<{
@@ -182,6 +182,13 @@ export function usePersistedTableSettings<K extends string>({
 
   useEffect(() => {
     let active = true;
+    const cachedSettings = normalizeSettings(safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null));
+
+    setLoadedSettingsKey(null);
+    setVisibleColumns(cachedSettings.visibleColumns);
+    setColumnOrder(cachedSettings.columnOrder);
+    setColumnWidths(cachedSettings.columnWidths);
+    setPageSize(cachedSettings.pageSize);
 
     const loadServerSettings = async () => {
       try {
@@ -198,7 +205,7 @@ export function usePersistedTableSettings<K extends string>({
         /** */
       } finally {
         if (active) {
-          setSettingsLoaded(true);
+          setLoadedSettingsKey(settingsKey);
         }
       }
     };
@@ -218,7 +225,7 @@ export function usePersistedTableSettings<K extends string>({
       pageSize,
     });
     safeWrite(storageKey, payload);
-    if (!settingsLoaded) return;
+    if (loadedSettingsKey !== settingsKey) return;
 
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -239,7 +246,7 @@ export function usePersistedTableSettings<K extends string>({
     normalizeSettings,
     pageSize,
     settingsKey,
-    settingsLoaded,
+    loadedSettingsKey,
     storageKey,
     visibleColumns,
   ]);
@@ -368,7 +375,7 @@ export function usePersistedTableSettings<K extends string>({
     orderedVisibleColumns,
     pageSize,
     setPageSize,
-    settingsLoaded,
+    settingsLoaded: loadedSettingsKey === settingsKey,
     draggingColumn,
     toggleColumn,
     moveColumn,

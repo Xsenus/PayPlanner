@@ -6,6 +6,7 @@ import { Register } from './components/Auth/Register';
 import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
 import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
+import { DoubleHorizontalScrollbars } from './components/ui/DoubleHorizontalScrollbars';
 import type { Act, ActInput, Invoice, Payment } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
@@ -1121,6 +1122,7 @@ function AppContent() {
   return (
     <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
       <div className="min-h-screen bg-gray-50">
+        <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
         <div className="flex min-h-screen flex-col">
           <TopBar
