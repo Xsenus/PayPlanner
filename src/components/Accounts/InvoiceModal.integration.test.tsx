@@ -927,6 +927,93 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText('Платеж поступил по банку')).toBeTruthy();
   });
 
+  it('shows paid and debt amounts in the invoice page summary for a partially paid invoice', async () => {
+    const invoice = {
+      id: 570,
+      invoiceEntityId: 570,
+      number: '570',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 25000,
+      type: 'Income',
+      status: 'Processing',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'pcs', price: 25000 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 890,
+      invoiceId: 570,
+      amount: 25000,
+      paidAmount: 8000,
+      outstandingAmount: 17000,
+      hasPartialPayment: true,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      paidDate: '2026-04-11',
+      type: 'Income',
+      status: 'Processing',
+      description: 'Partial payment',
+      account: '570',
+      accountDate: '2026-04-08',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    expect(await screen.findByTestId('invoice-page-payment-summary')).toBeTruthy();
+    expect(screen.getByTestId('invoice-page-paid-amount').textContent).toMatch(/8\s000/);
+    expect(screen.getByTestId('invoice-page-debt-amount').textContent).toMatch(/17\s000/);
+  });
+
+  it('shows full payment and zero debt in the invoice page summary for a completed invoice without related payments', async () => {
+    const invoice = {
+      id: 571,
+      invoiceEntityId: 571,
+      number: '571',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 18000,
+      type: 'Income',
+      status: 'Completed',
+      lineItems: [{ name: 'Test service', quantity: 1, unit: 'pcs', price: 18000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    expect(await screen.findByTestId('invoice-page-payment-summary')).toBeTruthy();
+    expect(screen.getByTestId('invoice-page-paid-amount').textContent).toMatch(/18\s000/);
+    expect(screen.getByTestId('invoice-page-debt-amount').textContent).toContain('0');
+  });
+
   it('opens the existing payment modal callback for regular related payments when edit mode is available', async () => {
     const onEditRelatedPayment = vi.fn();
     const invoice = {

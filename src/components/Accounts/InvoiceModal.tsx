@@ -595,11 +595,19 @@ function buildInvoiceStatusSnapshot(
   const totalAmount = sourcePayments.length > 0
     ? Math.max(fallbackAmountValue, aggregatedTotalFromPayments)
     : (fallbackAmountValue > 0 ? fallbackAmountValue : aggregatedTotalFromPayments);
-  const paidAmount = sourcePayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0);
+  const paidAmount = sourcePayments.length > 0
+    ? sourcePayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0)
+    : status === 'Completed'
+      ? totalAmount
+      : 0;
   const rawOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
-  const outstandingAmount = rawOutstandingAmount > 0
-    ? rawOutstandingAmount
-    : Math.max(totalAmount - paidAmount, 0);
+  const outstandingAmount = sourcePayments.length > 0
+    ? rawOutstandingAmount > 0
+      ? rawOutstandingAmount
+      : Math.max(totalAmount - paidAmount, 0)
+    : status === 'Completed' || status === 'Cancelled'
+      ? 0
+      : Math.max(totalAmount - paidAmount, 0);
 
   let reason = 'Связанные платежи по счету еще не созданы.';
   if (status === 'Completed') {
@@ -3114,6 +3122,20 @@ export function InvoiceModal({
                 <div className="flex items-center justify-between">
                   <span className="text-xl font-semibold">{printableAmount}</span>
                   <span className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+                </div>
+                <div data-testid="invoice-page-payment-summary" className="mt-3 grid grid-cols-2 gap-2">
+                  <div className={`rounded-lg border px-3 py-2 text-center ${statusSnapshot.outstandingAmount > 0 ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Долг</div>
+                    <div data-testid="invoice-page-debt-amount" className={`mt-1 text-sm font-semibold tabular-nums ${statusSnapshot.outstandingAmount > 0 ? 'text-rose-700' : 'text-slate-700'}`}>
+                      {formatCurrencySmart(statusSnapshot.outstandingAmount).short}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Выплачено</div>
+                    <div data-testid="invoice-page-paid-amount" className="mt-1 text-sm font-semibold tabular-nums text-emerald-700">
+                      {formatCurrencySmart(statusSnapshot.paidAmount).short}
+                    </div>
+                  </div>
                 </div>
               </div>
 
