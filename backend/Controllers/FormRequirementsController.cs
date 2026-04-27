@@ -29,10 +29,16 @@ public class FormRequirementsController : ControllerBase
                 new("FirstName", "Имя"),
                 new("MiddleName", "Отчество"),
                 new("Comment", "Комментарий"),
-                new("Name", "Имя (legacy)", "Совместимость"),
-                new("Email", "Email", "Совместимость"),
                 new("Phone", "Телефон"),
-                new("Notes", "Комментарий (legacy)", "Совместимость"),
+            }),
+        new(
+            "clients-modal-legal",
+            "Юридическое лицо (форма)",
+            new List<FieldDef>
+            {
+                new("Inn", "ИНН"),
+                new("ShortName", "Наименование"),
+                new("Comment", "Комментарий"),
             }),
         new(
             "clients",
@@ -247,11 +253,18 @@ public class FormRequirementsController : ControllerBase
             .Select(x => new FormFieldRequirementDto
             {
                 Section = x.Section,
-                FieldKey = x.FieldKey,
+                FieldKey = NormalizeVisibleFieldKey(x.Section, x.FieldKey),
                 IsRequired = x.IsRequired,
                 UpdatedAt = x.UpdatedAt,
             })
             .ToListAsync(ct);
+
+        data = data
+            .GroupBy(x => $"{x.Section}:{x.FieldKey}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(x => x.UpdatedAt).First())
+            .OrderBy(x => x.Section)
+            .ThenBy(x => x.FieldKey)
+            .ToList();
 
         return Ok(data);
     }
@@ -262,13 +275,30 @@ public class FormRequirementsController : ControllerBase
         var data = Sections.Select(section => new FormRequirementSectionMetadataDto
         {
             Key = section.Key,
-            Title = section.Title,
+            Title = section.Key == "clients-modal" ? "Физическое лицо (форма)" : section.Title,
             Fields = section.Fields
                 .Select(f => new FormRequirementFieldMetadataDto { Key = f.Key, Label = f.Label, Category = f.Category })
                 .ToList(),
         }).ToList();
 
         return Ok(data);
+    }
+
+    private static string NormalizeVisibleFieldKey(string section, string fieldKey)
+    {
+        if (string.Equals(section, "clients-modal", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(fieldKey, "Name", StringComparison.OrdinalIgnoreCase)) return "FirstName";
+            if (string.Equals(fieldKey, "Notes", StringComparison.OrdinalIgnoreCase)) return "Comment";
+        }
+
+        if (string.Equals(section, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(fieldKey, "Notes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Comment";
+        }
+
+        return fieldKey;
     }
 
     [HttpPut]

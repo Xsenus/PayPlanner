@@ -68,6 +68,8 @@ import type {
   DadataAddressSuggestion,
   Invoice,
   InvoiceInput,
+  LegalEntityDetail,
+  LegalEntityInput,
   Payment,
   PaymentPayload,
   PaymentStatus,
@@ -82,6 +84,7 @@ import { formatCurrencySmart } from "../../utils/formatters";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
+import { LegalEntityModal } from "../LegalEntities/LegalEntityModal";
 import { FormPromptModal } from "../ui/FormPromptModal";
 import { LookupSelect } from "../ui/LookupSelect";
 import { TableColumnSettings } from "../ui/TableColumnSettings";
@@ -1250,6 +1253,7 @@ export function ClientDetail({
   const {
     legalEntities,
     createLegalEntity,
+    updateLegalEntity,
     refresh: refreshLegalEntities,
   } = useLegalEntities();
   const { statuses: clientStatuses } = useClientStatuses();
@@ -1354,6 +1358,9 @@ export function ClientDetail({
     shortName: "",
     inn: "",
   });
+  const [legalEntityModalOpen, setLegalEntityModalOpen] = useState(false);
+  const [legalEntityModalInitial, setLegalEntityModalInitial] =
+    useState<LegalEntityDetail | null>(null);
   const [poaPromptOpen, setPoaPromptOpen] = useState(false);
   const [poaPromptSubmitting, setPoaPromptSubmitting] = useState(false);
   const [poaPromptError, setPoaPromptError] = useState<string | null>(null);
@@ -1410,6 +1417,58 @@ export function ClientDetail({
     setLegalEntityDraft({ shortName: "", inn: "" });
   };
 
+  const openLegalEntityCreateModal = () => {
+    setLegalEntityModalInitial(null);
+    setLegalEntityModalOpen(true);
+  };
+
+  const openLegalEntityEditModal = async () => {
+    if (!selectedLegalEntity) return;
+    try {
+      const detail = await apiService.getLegalEntity(selectedLegalEntity.id);
+      setLegalEntityModalInitial(detail);
+      setLegalEntityModalOpen(true);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(
+        error,
+        "Не удалось загрузить карточку юридического лица",
+      );
+      toast.error(message, "Юрлица");
+    }
+  };
+
+  const closeLegalEntityModal = () => {
+    setLegalEntityModalOpen(false);
+    setLegalEntityModalInitial(null);
+  };
+
+  const submitLegalEntityModal = async (
+    payload: LegalEntityInput,
+  ): Promise<LegalEntityDetail> => {
+    const nextClientIds = Array.from(
+      new Set([...(payload.clientIds ?? []), clientId].filter((id) => id > 0)),
+    );
+    const nextPayload = { ...payload, clientIds: nextClientIds };
+    const saved = legalEntityModalInitial
+      ? await updateLegalEntity(legalEntityModalInitial.id, nextPayload)
+      : await createLegalEntity(nextPayload);
+
+    await refreshLegalEntities();
+    setClientFormState((prev) => ({
+      ...prev,
+      kind: "legal",
+      legalEntityId: String(saved.id),
+    }));
+    closeLegalEntityModal();
+    toast.success(
+      legalEntityModalInitial
+        ? "Карточка юридического лица обновлена."
+        : "Юридическое лицо создано и выбрано.",
+      "Юрлица",
+    );
+    return saved;
+  };
+
   const submitQuickLegalEntity = async () => {
     const shortName = legalEntityDraft.shortName.trim();
     const inn = legalEntityDraft.inn.trim();
@@ -1424,11 +1483,13 @@ export function ClientDetail({
       const created = await createLegalEntity({
         shortName,
         inn: inn || undefined,
-        clientIds: [],
+        clientIds: [clientId],
       });
       await refreshLegalEntities();
       setClientFormState((prev) => ({
         ...prev,
+        kind: "legal",
+        legalEntityId: String(created.id),
         workplaces: prev.workplaces.length
           ? prev.workplaces.map((workplace, index) =>
               index === prev.workplaces.length - 1
@@ -5123,6 +5184,26 @@ export function ClientDetail({
                 </>
               ) : (
                 <div className="md:col-span-2">
+                  <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={openLegalEntityCreateModal}
+                      disabled={!clientPermissions.canEdit}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Создать юрлицо
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openLegalEntityEditModal()}
+                      disabled={!clientPermissions.canEdit || !selectedLegalEntity}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Edit className="h-4 w-4" />
+                      Реквизиты
+                    </button>
+                  </div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     {t("legalEntity") || "Юридическое лицо"}
                   </label>
@@ -5141,6 +5222,32 @@ export function ClientDetail({
                       </option>
                     ))}
                   </select>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLegalEntityPromptError(null);
+                        setLegalEntityDraft({ shortName: "", inn: "" });
+                        setLegalEntityPromptOpen(true);
+                      }}
+                      disabled={!clientPermissions.canEdit}
+                      className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Быстрое создание
+                    </button>
+                  </div>
+                  {selectedLegalEntity ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <div className="font-medium text-slate-900">
+                        {selectedLegalEntity.fullName || selectedLegalEntity.shortName}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                        {selectedLegalEntity.inn ? <span>ИНН: {selectedLegalEntity.inn}</span> : null}
+                        {selectedLegalEntity.kpp ? <span>КПП: {selectedLegalEntity.kpp}</span> : null}
+                        {selectedLegalEntity.ogrn ? <span>ОГРН: {selectedLegalEntity.ogrn}</span> : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
 
@@ -8953,6 +9060,22 @@ export function ClientDetail({
             }
           />
         )}
+
+        <LegalEntityModal
+          isOpen={legalEntityModalOpen}
+          onClose={closeLegalEntityModal}
+          onSubmit={submitLegalEntityModal}
+          initial={legalEntityModalInitial}
+          suggest={(payload) => apiService.suggestLegalEntities(payload)}
+          findById={(payload) => apiService.findLegalEntityById(payload)}
+          allowEdit={clientPermissions.canEdit}
+          allowDelete={false}
+          titleOverride={
+            legalEntityModalInitial
+              ? "Реквизиты юридического лица"
+              : "Новое юридическое лицо"
+          }
+        />
 
         <FormPromptModal
           open={legalEntityPromptOpen}

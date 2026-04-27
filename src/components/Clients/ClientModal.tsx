@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDialog } from '../../hooks/useDialog';
-import type { Client, ClientInput } from '../../types';
+import type { Client, ClientInput, LegalEntityInput } from '../../types';
+import { apiService } from '../../services/api';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import {
+  applyLegalEntityDadataDetails,
   buildQuickClientPayload,
   isQuickClientModalFieldRequired,
   parseQuickClientModalFormData,
+  type QuickClientKind,
 } from './clientQuickModalUtils';
 
 interface ClientModalProps {
@@ -30,9 +33,12 @@ export function ClientModal({
   const { confirm } = useDialog();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [dadataLoading, setDadataLoading] = useState(false);
+  const [dadataMessage, setDadataMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const { isRequired } = useFormRequirements('clients-modal', isOpen);
   const [formData, setFormData] = useState(() => parseQuickClientModalFormData());
+  const requirementsSection = formData.kind === 'legal' ? 'clients-modal-legal' : 'clients-modal';
+  const { isRequired } = useFormRequirements(requirementsSection, isOpen);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -46,6 +52,7 @@ export function ClientModal({
   useEffect(() => {
     setFormData(parseQuickClientModalFormData(client));
     setErrorMessage(null);
+    setDadataMessage(null);
   }, [client, isOpen]);
 
   const fieldLabels: Record<string, string> = {
@@ -56,6 +63,23 @@ export function ClientModal({
     Phone: 'Телефон',
     Notes: 'Комментарий',
     Comment: 'Комментарий',
+    ShortName: 'Наименование',
+    Inn: 'ИНН',
+    FullName: 'Полное наименование',
+    Kpp: 'КПП',
+    Ogrn: 'ОГРН',
+    Address: 'Адрес',
+    Email: 'Email',
+    Director: 'Руководитель',
+    Country: 'Страна',
+    OrganizationForm: 'Форма организации',
+    TaxSystem: 'Система налогообложения',
+    Okved: 'ОКВЭД',
+    Okpo: 'ОКПО',
+    Okato: 'ОКАТО',
+    Oktmo: 'ОКТМО',
+    Okogu: 'ОКОГУ',
+    Okfs: 'ОКФС',
   };
 
   const extractErrorMessage = (error: unknown, fallback: string) => {
@@ -75,13 +99,44 @@ export function ClientModal({
     }
   };
 
+  const buildLegalEntityPayload = (): LegalEntityInput => ({
+    formRequirementsSection: 'clients-modal-legal',
+    shortName: formData.legalName.trim() || formData.legalFullName.trim() || 'Юридическое лицо',
+    fullName: formData.legalFullName.trim() || null,
+    inn: formData.legalInn.trim() || null,
+    kpp: formData.legalKpp.trim() || null,
+    ogrn: formData.legalOgrn.trim() || null,
+    address: formData.legalAddress.trim() || null,
+    phone: formData.legalPhone.trim() || null,
+    email: formData.legalEmail.trim() || null,
+    director: formData.legalDirector.trim() || null,
+    country: formData.legalCountry.trim() || null,
+    organizationForm: formData.legalOrganizationForm.trim() || null,
+    taxSystem: formData.legalTaxSystem.trim() || null,
+    okved: formData.legalOkved.trim() || null,
+    okpo: formData.legalOkpo.trim() || null,
+    okato: formData.legalOkato.trim() || null,
+    oktmo: formData.legalOktmo.trim() || null,
+    okogu: formData.legalOkogu.trim() || null,
+    okfs: formData.legalOkfs.trim() || null,
+    notes: formData.comment.trim() || null,
+    clientIds: [],
+  });
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setLoading(true);
     setErrorMessage(null);
+
     try {
-      await onSubmit(buildQuickClientPayload(formData, client));
+      let legalEntityId = client?.legalEntityId ?? null;
+      if (formData.kind === 'legal' && !legalEntityId) {
+        const createdLegalEntity = await apiService.createLegalEntity(buildLegalEntityPayload());
+        legalEntityId = createdLegalEntity.id;
+      }
+
+      await onSubmit(buildQuickClientPayload(formData, client, legalEntityId));
       onClose();
     } catch (error) {
       setErrorMessage(extractErrorMessage(error, 'Не удалось сохранить клиента'));
@@ -98,6 +153,31 @@ export function ClientModal({
       ...prev,
       [name]: value,
     }));
+  };
+
+  const handleKindChange = (kind: QuickClientKind) => {
+    setFormData((prev) => ({ ...prev, kind }));
+    setDadataMessage(null);
+  };
+
+  const handleFindLegalEntity = async () => {
+    const inn = formData.legalInn.trim();
+    if (!inn) {
+      setDadataMessage('Введите ИНН для поиска.');
+      return;
+    }
+
+    setDadataLoading(true);
+    setDadataMessage(null);
+    try {
+      const details = await apiService.findLegalEntityById({ query: inn });
+      setFormData((prev) => applyLegalEntityDadataDetails(prev, details));
+      setDadataMessage('Данные найдены и подставлены.');
+    } catch (error) {
+      setDadataMessage(extractErrorMessage(error, 'Не удалось найти организацию по ИНН'));
+    } finally {
+      setDadataLoading(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -128,6 +208,10 @@ export function ClientModal({
   const middleNameRequired = isQuickClientModalFieldRequired('MiddleName', isRequired);
   const phoneRequired = isQuickClientModalFieldRequired('Phone', isRequired);
   const commentRequired = isQuickClientModalFieldRequired('Comment', isRequired);
+  const legalInnRequired = isQuickClientModalFieldRequired('Inn', isRequired);
+  const legalNameRequired = isQuickClientModalFieldRequired('ShortName', isRequired);
+
+  const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500';
 
   const modal = (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4">
@@ -159,77 +243,145 @@ export function ClientModal({
             )}
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
-                Фамилия {lastNameRequired ? '*' : ''}
-              </label>
-              <input
-                type="text"
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleChange}
-                required={lastNameRequired}
-                className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${
-                  lastNameRequired
-                    ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                }`}
-              />
+              <label className="mb-2 block text-sm font-medium text-gray-700">Тип клиента</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleKindChange('individual')}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    formData.kind === 'individual'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  Физическое лицо
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKindChange('legal')}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    formData.kind === 'legal'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  Юридическое лицо
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
-                Имя {firstNameRequired ? '*' : ''}
-              </label>
-              <input
-                type="text"
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleChange}
-                required={firstNameRequired}
-                className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${
-                  firstNameRequired
-                    ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                }`}
-              />
-            </div>
+            {formData.kind === 'individual' ? (
+              <>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Фамилия {lastNameRequired ? '*' : ''}
+                  </label>
+                  <input
+                    type="text"
+                    name="lastName"
+                    value={formData.lastName}
+                    onChange={handleChange}
+                    required={lastNameRequired}
+                    className={inputClass}
+                  />
+                </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
-                Отчество {middleNameRequired ? '*' : ''}
-              </label>
-              <input
-                type="text"
-                name="middleName"
-                value={formData.middleName}
-                onChange={handleChange}
-                required={middleNameRequired}
-                className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${
-                  middleNameRequired
-                    ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                }`}
-              />
-            </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Имя {firstNameRequired ? '*' : ''}
+                  </label>
+                  <input
+                    type="text"
+                    name="firstName"
+                    value={formData.firstName}
+                    onChange={handleChange}
+                    required={firstNameRequired}
+                    className={inputClass}
+                  />
+                </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
-                {t('phone')} {phoneRequired ? '*' : ''}
-              </label>
-              <input
-                type="tel"
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                required={phoneRequired}
-                inputMode="tel"
-                className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${
-                  phoneRequired
-                    ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                }`}
-              />
-            </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Отчество {middleNameRequired ? '*' : ''}
+                  </label>
+                  <input
+                    type="text"
+                    name="middleName"
+                    value={formData.middleName}
+                    onChange={handleChange}
+                    required={middleNameRequired}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    {t('phone')} {phoneRequired ? '*' : ''}
+                  </label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    required={phoneRequired}
+                    inputMode="tel"
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    ИНН {legalInnRequired ? '*' : ''}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      name="legalInn"
+                      value={formData.legalInn}
+                      onChange={handleChange}
+                      required={legalInnRequired}
+                      inputMode="numeric"
+                      className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleFindLegalEntity()}
+                      disabled={dadataLoading}
+                      className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                      title="Найти по ИНН"
+                    >
+                      {dadataLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {dadataMessage ? <div className="mt-1 text-xs text-gray-500">{dadataMessage}</div> : null}
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Наименование {legalNameRequired ? '*' : ''}
+                  </label>
+                  <input
+                    type="text"
+                    name="legalName"
+                    value={formData.legalName}
+                    onChange={handleChange}
+                    required={legalNameRequired}
+                    className={inputClass}
+                  />
+                </div>
+
+                {(formData.legalKpp || formData.legalOgrn || formData.legalAddress || formData.legalOkved) && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                    {formData.legalKpp ? <div>КПП: {formData.legalKpp}</div> : null}
+                    {formData.legalOgrn ? <div>ОГРН: {formData.legalOgrn}</div> : null}
+                    {formData.legalOkved ? <div>ОКВЭД: {formData.legalOkved}</div> : null}
+                    {formData.legalAddress ? <div>Адрес: {formData.legalAddress}</div> : null}
+                  </div>
+                )}
+              </>
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -241,11 +393,7 @@ export function ClientModal({
                 onChange={handleChange}
                 rows={3}
                 required={commentRequired}
-                className={`w-full rounded-lg border px-3 py-2 focus:ring-2 ${
-                  commentRequired
-                    ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                }`}
+                className={inputClass}
                 placeholder={t('additionalInfo')}
               />
             </div>
@@ -258,7 +406,7 @@ export function ClientModal({
                   disabled={deleting || loading}
                   className="rounded-lg bg-red-600 px-4 py-2 font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                 >
-                  {deleting ? t('deleting') || 'Удаление…' : t('delete') || 'Удалить'}
+                  {deleting ? t('deleting') || 'Удаление...' : t('delete') || 'Удалить'}
                 </button>
               )}
               <button

@@ -5,6 +5,9 @@ namespace PayPlanner.Api.Models.Requests;
 
 public class LegalEntityRequest
 {
+    [MaxLength(64)]
+    public string? FormRequirementsSection { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string ShortName { get; set; } = string.Empty;

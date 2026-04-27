@@ -283,6 +283,7 @@ export interface LegalEntityAddressInput {
 }
 
 export interface LegalEntityInput {
+  formRequirementsSection?: string | null;
   shortName: string;
   fullName?: string | null;
   inn?: string | null;

@@ -25,6 +25,12 @@ public class LegalEntitiesController : ControllerBase
     private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
     private const int MaxInlineLegalEntityAssetDataUrlLength = 350_000;
     private const int MaxInlineLegalEntityAssetsTotalLength = 800_000;
+    private static readonly HashSet<string> LegalQuickClientRequirementFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Inn",
+        "ShortName",
+        "Comment",
+    };
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichmentService;
@@ -860,7 +866,16 @@ public class LegalEntitiesController : ControllerBase
     [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
+        var requirementsSection = string.Equals(request.FormRequirementsSection, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
+            ? "clients-modal-legal"
+            : "legal-entities";
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync(requirementsSection, request, ct);
+        if (requirementsSection == "clients-modal-legal")
+        {
+            missingCreate = missingCreate
+                .Where(field => LegalQuickClientRequirementFields.Contains(field))
+                .ToList();
+        }
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
         if (string.IsNullOrWhiteSpace(request.ShortName))

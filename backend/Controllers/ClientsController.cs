@@ -19,6 +19,12 @@ public class ClientsController : ControllerBase
 {
     private const string CLIENT_PROFILE_NOTES_PREFIX = "__PP_CLIENT_PROFILE_V2__:";
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly HashSet<string> LegalQuickClientRequirementFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Inn",
+        "ShortName",
+        "Comment",
+    };
 
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichment;
@@ -702,8 +708,20 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
         var requirementsModel = BuildClientRequirementsModel(model);
-        var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync("clients-modal", ct);
-        var missingCreate = await _formRequirements.GetMissingFieldsAsync("clients-modal", requirementsModel, ct);
+        var quickRequirementsSection = IsLegalQuickClient(model, requirementsModel)
+            ? "clients-modal-legal"
+            : "clients-modal";
+        var requiredQuickFields = await _formRequirements.GetRequiredFieldsAsync(quickRequirementsSection, ct);
+        var missingCreate = await _formRequirements.GetMissingFieldsAsync(quickRequirementsSection, requirementsModel, ct);
+        if (quickRequirementsSection == "clients-modal-legal")
+        {
+            requiredQuickFields = requiredQuickFields
+                .Where(field => LegalQuickClientRequirementFields.Contains(field))
+                .ToList();
+            missingCreate = missingCreate
+                .Where(field => LegalQuickClientRequirementFields.Contains(field))
+                .ToList();
+        }
         missingCreate = NormalizeQuickClientModalMissingFields(requiredQuickFields, requirementsModel, missingCreate);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
@@ -1278,6 +1296,10 @@ public class ClientsController : ControllerBase
         return normalized.ToList();
     }
 
+    private static bool IsLegalQuickClient(Client model, ClientRequirementsModel requirementsModel)
+        => model.LegalEntityId.HasValue
+            || string.Equals(requirementsModel.Kind, "legal", StringComparison.OrdinalIgnoreCase);
+
     private static ClientRequirementsModel BuildClientRequirementsModel(Client model)
     {
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
@@ -1296,6 +1318,7 @@ public class ClientsController : ControllerBase
             ResponsibleUserId = model.ResponsibleUserId,
             ClientStatusId = model.ClientStatusId,
 
+            Kind = profile?.Kind,
             LastName = profile?.LastName,
             FirstName = profile?.FirstName,
             MiddleName = profile?.MiddleName,
@@ -1322,6 +1345,20 @@ public class ClientsController : ControllerBase
             PowersOfAttorney = model.PowersOfAttorney?.Select(x => x.Id).ToList() ?? new List<int>(),
             Comment = profile?.Comment,
             LegacyNotes = profile?.LegacyNotes,
+            ShortName = profile?.ShortName ?? model.Company ?? model.Name,
+            FullName = profile?.FullName,
+            Kpp = profile?.Kpp,
+            Ogrn = profile?.Ogrn,
+            Director = profile?.Director,
+            Country = profile?.Country,
+            OrganizationForm = profile?.OrganizationForm,
+            TaxSystem = profile?.TaxSystem,
+            Okved = profile?.Okved,
+            Okpo = profile?.Okpo,
+            Okato = profile?.Okato,
+            Oktmo = profile?.Oktmo,
+            Okogu = profile?.Okogu,
+            Okfs = profile?.Okfs,
         };
     }
 }
@@ -1343,6 +1380,7 @@ public sealed class ClientRequirementsModel
     public int? ResponsibleUserId { get; init; }
     public int? ClientStatusId { get; init; }
 
+    public string? Kind { get; init; }
     public string? LastName { get; init; }
     public string? FirstName { get; init; }
     public string? MiddleName { get; init; }
@@ -1369,10 +1407,25 @@ public sealed class ClientRequirementsModel
 
     public string? Comment { get; init; }
     public string? LegacyNotes { get; init; }
+    public string? ShortName { get; init; }
+    public string? FullName { get; init; }
+    public string? Kpp { get; init; }
+    public string? Ogrn { get; init; }
+    public string? Director { get; init; }
+    public string? Country { get; init; }
+    public string? OrganizationForm { get; init; }
+    public string? TaxSystem { get; init; }
+    public string? Okved { get; init; }
+    public string? Okpo { get; init; }
+    public string? Okato { get; init; }
+    public string? Oktmo { get; init; }
+    public string? Okogu { get; init; }
+    public string? Okfs { get; init; }
 }
 
 public sealed class ClientRequirementsProfile
 {
+    public string? Kind { get; init; }
     public string? LastName { get; init; }
     public string? FirstName { get; init; }
     public string? MiddleName { get; init; }
@@ -1398,6 +1451,20 @@ public sealed class ClientRequirementsProfile
 
     public string? Comment { get; init; }
     public string? LegacyNotes { get; init; }
+    public string? ShortName { get; init; }
+    public string? FullName { get; init; }
+    public string? Kpp { get; init; }
+    public string? Ogrn { get; init; }
+    public string? Director { get; init; }
+    public string? Country { get; init; }
+    public string? OrganizationForm { get; init; }
+    public string? TaxSystem { get; init; }
+    public string? Okved { get; init; }
+    public string? Okpo { get; init; }
+    public string? Okato { get; init; }
+    public string? Oktmo { get; init; }
+    public string? Okogu { get; init; }
+    public string? Okfs { get; init; }
 }
 
 public sealed class ClientAddressProfile

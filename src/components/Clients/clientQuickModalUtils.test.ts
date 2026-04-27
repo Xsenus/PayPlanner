@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Client } from '../../types';
+import type { Client, LegalEntityDadataDetails } from '../../types';
 import {
+  applyLegalEntityDadataDetails,
   buildQuickClientPayload,
   CLIENT_PROFILE_NOTES_PREFIX,
   isQuickClientModalFieldRequired,
@@ -25,6 +26,7 @@ function createClient(overrides?: Partial<Client>): Client {
 describe('clientQuickModalUtils', () => {
   it('builds a client payload with structured notes for quick creation', () => {
     const payload = buildQuickClientPayload({
+      ...parseQuickClientModalFormData(),
       lastName: 'Иванов',
       firstName: 'Иван',
       middleName: 'Иванович',
@@ -66,12 +68,59 @@ describe('clientQuickModalUtils', () => {
     });
 
     expect(parseQuickClientModalFormData(client)).toEqual({
+      ...parseQuickClientModalFormData(),
       lastName: 'Петров',
       firstName: 'Петр',
       middleName: 'Петрович',
       phone: '+7 999 000-00-00',
       comment: 'Нужен договор',
     });
+  });
+
+  it('fills legal client fields from Dadata and builds a linked client payload', () => {
+    const details: LegalEntityDadataDetails = {
+      shortName: 'OOO Romashka',
+      fullName: 'Obshchestvo s ogranichennoy otvetstvennostyu Romashka',
+      inn: '7707083893',
+      kpp: '770701001',
+      ogrn: '1027700132195',
+      address: 'Moscow, Test street, 1',
+      director: 'Ivanov Ivan Ivanovich',
+      country: 'Russia',
+      opfShort: 'OOO',
+      taxSystem: 'USN',
+      okved: '62.01',
+      okpo: '12345678',
+      okato: '45286585000',
+      oktmo: '45382000000',
+      okogu: '4210014',
+      okfs: '16',
+      phones: ['+7 495 000-00-00'],
+      emails: ['info@example.test'],
+    };
+
+    const formData = applyLegalEntityDadataDetails(parseQuickClientModalFormData(), details);
+    const payload = buildQuickClientPayload(formData, undefined, 42);
+
+    expect(formData.kind).toBe('legal');
+    expect(formData.legalInn).toBe('7707083893');
+    expect(formData.legalName).toBe('OOO Romashka');
+    expect(formData.legalOkved).toBe('62.01');
+    expect(payload.name).toBe('OOO Romashka');
+    expect(payload.company).toBe('OOO Romashka');
+    expect(payload.phone).toBe('+7 495 000-00-00');
+    expect(payload.legalEntityId).toBe(42);
+
+    const profile = JSON.parse(payload.notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)) as {
+      kind: string;
+      inn: string;
+      firstName: string;
+      phones: string[];
+    };
+    expect(profile.kind).toBe('legal');
+    expect(profile.inn).toBe('7707083893');
+    expect(profile.firstName).toBe('OOO Romashka');
+    expect(profile.phones).toEqual(['+7 495 000-00-00']);
   });
 
   it('treats legacy Name requirement as first-name-only and keeps notes compatibility', () => {

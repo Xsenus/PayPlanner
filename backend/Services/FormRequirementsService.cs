@@ -21,7 +21,11 @@ public class FormRequirementsService : IFormRequirementsService
         => _db.FormFieldRequirements.AsNoTracking()
             .Where(x => x.Section == section && x.IsRequired)
             .Select(x => x.FieldKey)
-            .ToListAsync(ct);
+            .ToListAsync(ct)
+            .ContinueWith(task => task.Result
+                .Select(key => NormalizeFieldKey(section, key))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(), ct);
 
     public async Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
     {
@@ -91,5 +95,22 @@ public class FormRequirementsService : IFormRequirementsService
             });
         }
         return false;
+    }
+
+    private static string NormalizeFieldKey(string section, string fieldKey)
+    {
+        if (string.Equals(section, "clients-modal", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(fieldKey, "Name", StringComparison.OrdinalIgnoreCase)) return "FirstName";
+            if (string.Equals(fieldKey, "Notes", StringComparison.OrdinalIgnoreCase)) return "Comment";
+        }
+
+        if (string.Equals(section, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(fieldKey, "Notes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Comment";
+        }
+
+        return fieldKey;
     }
 }
