@@ -409,4 +409,76 @@ describe('PaymentModal integration', () => {
       }),
     );
   });
+
+  it('annuls an editable payment from the payment card', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        payment={{
+          id: 992,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 15_000,
+          paidAmount: 2_000,
+          outstandingAmount: 13_000,
+          hasPartialPayment: true,
+          status: 'Overdue',
+          description: 'Просроченный расходный платеж',
+          isPaid: false,
+          paidDate: '2026-04-11',
+          lastPaymentDate: '2026-04-11',
+          notes: 'Комментарий',
+          clientId: 77,
+          expenseClientId: 88,
+          clientCaseId: 501,
+          paymentSourceId: 5,
+          type: 'Expense',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Expense Case 501',
+            status: 'Open',
+            clientId: 88,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const statusSelect = document.body.querySelector('select[name="status"]') as HTMLSelectElement | null;
+    expect(statusSelect).not.toBeNull();
+    expect(Array.from(statusSelect!.options).some((option) => option.value === 'Cancelled')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 992,
+        status: 'Cancelled',
+        isPaid: false,
+        paidAmount: 0,
+        paidDate: undefined,
+        lastPaymentDate: undefined,
+        amount: 15_000,
+        type: 'Expense',
+        clientId: 77,
+        expenseClientId: 88,
+      }),
+    );
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Аннулировать' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

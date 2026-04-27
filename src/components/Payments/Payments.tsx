@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ChevronDown, Loader2, Lock, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Ban, ChevronDown, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -22,6 +22,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
+import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -746,7 +747,7 @@ export function Payments({
     (type: Payment['type']) => {
       if (!paymentsPermissions.canCreate) {
         showPermissionNotice(t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.');
-        return;
+        return false;
       }
       setModalType(type);
       setEditingPayment(null);
@@ -759,7 +760,7 @@ export function Payments({
     (payment: Payment) => {
       if (!paymentsPermissions.canEdit) {
         showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
-        return;
+        return false;
       }
       setEditingPayment(payment);
       setModalType(payment.type);
@@ -772,15 +773,15 @@ export function Payments({
     async (payment: Payment) => {
       if (isInvoiceManagedPayment(payment)) {
         toast.error('Счет и график рассрочки удаляются через раздел "Счета".', t('payments') ?? 'Платежи');
-        return;
+        return false;
       }
       if (!paymentsPermissions.canDelete) {
         showPermissionNotice(t('permissionNoDeletePayment') ?? 'Недостаточно прав для удаления платежей.');
-        return;
+        return false;
       }
       const confirmed = await confirm({ title: 'Подтверждение удаления', description: t('confirmDeletePayment') ?? 'Удалить платёж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
       if (!confirmed) {
-        return;
+        return false;
       }
       try {
         await apiService.deletePayment(payment.id);
@@ -790,12 +791,51 @@ export function Payments({
         } else {
           await refresh();
         }
+        return true;
       } catch (error) {
         const message = extractDisplayErrorMessage(error, t('paymentsDeleteError') ?? 'Не удалось удалить платёж.');
         toast.error(message, t('payments') ?? 'Платежи');
+        return false;
       }
     },
     [confirm, page, payments.length, paymentsPermissions.canDelete, refresh, showPermissionNotice, t, toast],
+  );
+
+  const handleCancelPayment = useCallback(
+    async (payment: Payment) => {
+      if (isInvoiceManagedPayment(payment)) {
+        toast.error('Счет и график рассрочки управляют этим платежом. Измените статус через счет.', t('payments') ?? 'Платежи');
+        return false;
+      }
+      if (!paymentsPermissions.canEdit) {
+        showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+        return false;
+      }
+      if (payment.status === 'Cancelled') {
+        return false;
+      }
+
+      const confirmed = await confirm({
+        title: 'Аннулировать платеж',
+        description: 'Платеж будет переведен в статус "Отменен", оплаченная сумма будет сброшена. Продолжить?',
+        confirmLabel: 'Аннулировать',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      });
+      if (!confirmed) return false;
+
+      try {
+        await apiService.updatePayment(payment.id, buildCancelledPaymentPayload(payment));
+        toast.success('Платеж аннулирован.', t('payments') ?? 'Платежи');
+        await refresh();
+        return true;
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, 'Не удалось аннулировать платеж.');
+        toast.error(message, t('payments') ?? 'Платежи');
+        return false;
+      }
+    },
+    [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
   );
 
   const handleSubmit = useCallback(
@@ -1453,7 +1493,48 @@ export function Payments({
               ) : null}
             </div>
 
-            <div className="flex justify-end border-t border-slate-200 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {routePaymentPreview && paymentsPermissions.canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleEditPayment(routePaymentPreview);
+                      closeRoutePaymentPreview();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Редактировать
+                  </button>
+                ) : null}
+                {routePaymentPreview && paymentsPermissions.canEdit && routePaymentPreview.status !== 'Cancelled' && !isInvoiceManagedPayment(routePaymentPreview) ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const cancelled = await handleCancelPayment(routePaymentPreview);
+                      if (cancelled) closeRoutePaymentPreview();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100"
+                  >
+                    <Ban className="h-4 w-4" />
+                    Аннулировать
+                  </button>
+                ) : null}
+                {routePaymentPreview && paymentsPermissions.canDelete && !isInvoiceManagedPayment(routePaymentPreview) ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const deleted = await handleDeletePayment(routePaymentPreview);
+                      if (deleted) closeRoutePaymentPreview();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Удалить
+                  </button>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={closeRoutePaymentPreview}

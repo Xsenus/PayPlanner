@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History, Search, UserRoundSearch } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch, Ban } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -17,6 +17,7 @@ import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getVisibleSystemNoteLines } from '../../utils/systemNotes';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -1061,6 +1062,15 @@ export function PaymentModal({
       else if (newStatus === 'Pending') markPending();
       else if (newStatus === 'Overdue')
         setFormData((s) => ({ ...s, status: 'Overdue', isPaid: false, paidDate: '' }));
+      else if (newStatus === 'Cancelled')
+        setFormData((s) => ({
+          ...s,
+          status: 'Cancelled',
+          isPaid: false,
+          paidAmount: '',
+          paidDate: '',
+          lastPaymentDate: '',
+        }));
       return;
     }
 
@@ -1164,6 +1174,29 @@ export function PaymentModal({
   };
 
   const canDelete = !!payment && !!onDelete && !isInvoiceManagedPayment(payment);
+  const canCancelPayment = !!payment && !isInvoiceManagedPayment(payment) && payment.status !== 'Cancelled';
+  const handleCancelPayment = async () => {
+    if (!payment || loading) return;
+
+    const approved = await confirm({
+      title: 'Аннулировать платеж',
+      description: 'Платеж будет переведен в статус "Отменен", оплаченная сумма будет сброшена. Продолжить?',
+      confirmLabel: 'Аннулировать',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    try {
+      setLoading(true);
+      await onSubmit({ id: payment.id, ...buildCancelledPaymentPayload(payment) });
+      onClose();
+    } catch {
+      return;
+    } finally {
+      setLoading(false);
+    }
+  };
   if (!isOpen) return null;
 
   const amountNum = parseDecimal(formData.amount);
@@ -1410,7 +1443,7 @@ export function PaymentModal({
                       <div>
                         <label className={centeredLabelClass}>{t('status')}</label>
                         <select name="status" value={formData.status} onChange={handleChange} className={paymentInfoSelectClass}>
-                          <option value="Pending">{t('pending')}</option><option value="Completed">{t('completedStatus')}</option><option value="Overdue">{t('overdue')}</option>
+                          <option value="Pending">{t('pending')}</option><option value="Completed">{t('completedStatus')}</option><option value="Overdue">{t('overdue')}</option><option value="Cancelled">{t('cancelledStatus') ?? 'Отменен'}</option>
                         </select>
                       </div>
                     </div>
@@ -1888,6 +1921,17 @@ export function PaymentModal({
             <div className="border-t border-gray-200 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center">
+                  <div className="flex flex-wrap items-center gap-2">
+                  {canCancelPayment && (
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelPayment()}
+                      disabled={loading}
+                      className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-amber-50 px-4 py-2 font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-60">
+                      <Ban className="h-4 w-4" />
+                      Аннулировать
+                    </button>
+                  )}
                   {canDelete && (
                     <button
                       type="button"
@@ -1913,6 +1957,7 @@ export function PaymentModal({
                       {t('delete')}
                     </button>
                   )}
+                  </div>
                 </div>
 
                 <div className="flex w-full justify-end gap-3 sm:w-auto">

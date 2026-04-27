@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Payment } from '../../types';
 import { Payments } from './Payments';
 
-const { usePaymentsPagedMock } = vi.hoisted(() => ({
+const { confirmMock, usePaymentsPagedMock } = vi.hoisted(() => ({
+  confirmMock: vi.fn(),
   usePaymentsPagedMock: vi.fn(),
 }));
 
@@ -59,7 +60,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({ confirm: vi.fn().mockResolvedValue(true) }),
+  useDialog: () => ({ confirm: confirmMock }),
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
@@ -157,7 +158,12 @@ import { apiService } from '../../services/api';
 
 describe('Payments integration', () => {
   beforeEach(() => {
+    confirmMock.mockReset();
+    confirmMock.mockResolvedValue(true);
     vi.mocked(apiService.getPayment).mockReset();
+    vi.mocked(apiService.createPayment).mockReset();
+    vi.mocked(apiService.updatePayment).mockReset();
+    vi.mocked(apiService.deletePayment).mockReset();
     usePaymentsPagedMock.mockReset();
     usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];
@@ -257,6 +263,114 @@ describe('Payments integration', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Закрыть' })[1]);
 
+    expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
+  });
+
+  it('annuls a route-driven payment preview and closes the preview after refresh', async () => {
+    const onRoutePaymentChange = vi.fn();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      refresh,
+    });
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      id: 881,
+      amount: 15_000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      type: 'Expense',
+      status: 'Overdue',
+      description: 'Просроченный расходный платеж',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 1_500,
+      outstandingAmount: 13_500,
+      hasPartialPayment: true,
+      rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z',
+      clientId: 12,
+      expenseClientId: 34,
+      client: { id: 12, name: 'Безняков' },
+      expenseClient: { id: 34, name: 'Поставщик' },
+      documentKind: 'Payment',
+    } as unknown as Payment);
+    vi.mocked(apiService.updatePayment).mockResolvedValue({ id: 881, status: 'Cancelled' } as Payment);
+
+    render(
+      <Payments
+        routePaymentId={881}
+        onRoutePaymentChange={onRoutePaymentChange}
+      />,
+    );
+
+    expect(await screen.findByTestId('payments-route-payment-preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' }));
+
+    await waitFor(() => {
+      expect(apiService.updatePayment).toHaveBeenCalledWith(
+        881,
+        expect.objectContaining({
+          status: 'Cancelled',
+          isPaid: false,
+          paidAmount: 0,
+          paidDate: undefined,
+          lastPaymentDate: undefined,
+          type: 'Expense',
+          expenseClientId: 34,
+        }),
+      );
+    });
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Аннулировать' }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
+  });
+
+  it('deletes a route-driven payment preview only after confirmation succeeds', async () => {
+    const onRoutePaymentChange = vi.fn();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      refresh,
+    });
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      id: 882,
+      amount: 15_000,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      type: 'Expense',
+      status: 'Overdue',
+      description: 'Просроченный расходный платеж',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 0,
+      outstandingAmount: 15_000,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z',
+      documentKind: 'Payment',
+    } as unknown as Payment);
+    vi.mocked(apiService.deletePayment).mockResolvedValue(undefined);
+
+    render(
+      <Payments
+        routePaymentId={882}
+        onRoutePaymentChange={onRoutePaymentChange}
+      />,
+    );
+
+    expect(await screen.findByTestId('payments-route-payment-preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+
+    await waitFor(() => {
+      expect(apiService.deletePayment).toHaveBeenCalledWith(882);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
   });
 });
