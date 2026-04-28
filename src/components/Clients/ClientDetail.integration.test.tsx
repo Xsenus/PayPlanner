@@ -491,6 +491,18 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getOkpdtrDictionary).mockResolvedValue([]);
   });
 
+  it('does not enable hidden tab data hooks on the initial profile view', async () => {
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+
+    expect(useClientCasesMock).toHaveBeenCalledWith(1, expect.objectContaining({ enabled: false }));
+    expect(usePaymentsPagedMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
   it('shows delete controls in profile subsections and removes an education row', async () => {
     const user = userEvent.setup();
 

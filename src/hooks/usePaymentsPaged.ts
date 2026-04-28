@@ -19,6 +19,7 @@ type UsePaymentsPagedParams = {
   sortDir?: 'asc' | 'desc';
   page: number;
   pageSize: number;
+  enabled?: boolean;
 };
 
 const EMPTY_SUMMARY: PaymentsListSummary = {
@@ -78,10 +79,22 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       params.type,
     ],
   );
+  const enabled = params.enabled ?? true;
 
   const fetchPage = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
       abortRef.current?.abort();
+
+      if (!enabled) {
+        setPayments([]);
+        setTotal(0);
+        setSummary(EMPTY_SUMMARY);
+        setLoadingInitial(false);
+        setRefreshing(false);
+        setError(null);
+        return;
+      }
+
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -114,7 +127,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
         }
       }
     },
-    [requestParams],
+    [enabled, requestParams],
   );
 
   useEffect(() => {

@@ -4,16 +4,18 @@ import type { ClientCase } from '../types';
 
 type CaseCreateUpdate = Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 
-export function useClientCases(clientId?: number | string) {
+export function useClientCases(clientId?: number | string, options: { enabled?: boolean } = {}) {
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   const cid = clientId != null ? Number(clientId) : undefined;
+  const enabled = options.enabled ?? true;
 
   const refresh = useCallback(async () => {
-    if (!cid) {
+    if (!enabled || !cid) {
       setCases([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -26,7 +28,7 @@ export function useClientCases(clientId?: number | string) {
     } finally {
       setLoading(false);
     }
-  }, [cid]);
+  }, [cid, enabled]);
 
   useEffect(() => {
     void refresh();

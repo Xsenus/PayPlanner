@@ -14,6 +14,7 @@ export interface ContractsFilters {
   sortDir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
+  enabled?: boolean;
 }
 
 export interface ContractsPagination {
@@ -47,9 +48,19 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
 
   const hasLoadedRef = useRef(false);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const enabled = filters.enabled ?? true;
 
   const fetchContracts = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      if (!enabled) {
+        setContracts([]);
+        setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
+        setLoading(false);
+        setRefreshing(false);
+        setError(null);
+        return;
+      }
+
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -90,7 +101,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         }
       }
     },
-    [filters.from, filters.to, filters.clientId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.clientId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   useEffect(() => {

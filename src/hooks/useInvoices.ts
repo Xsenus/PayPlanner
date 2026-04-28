@@ -27,6 +27,7 @@ export interface InvoicesFilters {
   sortDir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
+  enabled?: boolean;
 }
 
 export interface InvoicesPagination {
@@ -77,12 +78,22 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const hasLoadedRef = useRef(false);
   const hasSummaryLoadedRef = useRef(false);
+  const enabled = filters.enabled ?? true;
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
   const fetchInvoices = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      if (!enabled) {
+        setInvoices([]);
+        setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
+        setLoading(false);
+        setRefreshing(false);
+        setError(null);
+        return;
+      }
+
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -140,11 +151,18 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.sortDir,
       filters.page,
       filters.pageSize,
+      enabled,
     ],
   );
 
   const fetchSummary = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      if (!enabled) {
+        setSummary(null);
+        setSummaryLoading(false);
+        return;
+      }
+
       const isInitial = mode === 'refresh' ? false : !hasSummaryLoadedRef.current;
       if (isInitial) {
         setSummaryLoading(true);
@@ -181,6 +199,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.responsibleId,
       filters.search,
       filters.type,
+      enabled,
     ],
   );
 

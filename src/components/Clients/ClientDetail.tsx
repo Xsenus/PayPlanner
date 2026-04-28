@@ -1250,6 +1250,34 @@ export function ClientDetail({
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
   const contractPermissions = permissions.contracts;
+  const sectionPermissions = useCallback(
+    (section: ClientDetailSection) =>
+      permissions[SECTION_PERMISSION_MAP[section]],
+    [permissions],
+  );
+  const [activeSection, setActiveSection] = useState<ClientDetailSection>(
+    () => {
+      if (initialSection && initialSection !== "settlement") {
+        try {
+          if (sectionPermissions(initialSection).canView) {
+            return initialSection;
+          }
+        } catch {
+          // ignore invalid initial section and use the first available one
+        }
+      }
+
+      const firstAllowed = SECTION_ORDER.find((section) => {
+        if (section === "settlement") return false;
+        try {
+          return sectionPermissions(section).canView;
+        } catch {
+          return false;
+        }
+      });
+      return firstAllowed ?? "payments";
+    },
+  );
   const {
     legalEntities,
     createLegalEntity,
@@ -1257,11 +1285,6 @@ export function ClientDetail({
     refresh: refreshLegalEntities,
   } = useLegalEntities();
   const { statuses: clientStatuses } = useClientStatuses();
-  const sectionPermissions = useCallback(
-    (section: ClientDetailSection) =>
-      permissions[SECTION_PERMISSION_MAP[section]],
-    [permissions],
-  );
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(
@@ -1661,7 +1684,11 @@ export function ClientDetail({
     clientStatuses,
   ]);
 
-  const { cases: serverCases } = useClientCases(clientId);
+  const { cases: serverCases } = useClientCases(clientId, {
+    enabled:
+      activeSection === "cases" ||
+      (activeSection === "payments" && isSupplierCard),
+  });
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
   const cases = useMemo(
@@ -2033,6 +2060,7 @@ export function ClientDetail({
     updateAct,
     deleteAct,
   } = useActs({
+    enabled: activeSection === "acts",
     from: resolvedActPeriod.from,
     to: resolvedActPeriod.to,
     status: actStatusFilter === "all" ? undefined : actStatusFilter,
@@ -2078,6 +2106,7 @@ export function ClientDetail({
     updateInvoice: updateClientInvoice,
     deleteInvoice: deleteClientInvoice,
   } = useInvoices({
+    enabled: activeSection === "accounts",
     from: resolvedInvoicePeriod.from,
     to: resolvedInvoicePeriod.to,
     status: invoiceStatusFilter === "all" ? undefined : invoiceStatusFilter,
@@ -2140,6 +2169,7 @@ export function ClientDetail({
     updateContract,
     deleteContract,
   } = useContracts({
+    enabled: activeSection === "contracts",
     from: resolvedContractPeriod.from,
     to: resolvedContractPeriod.to,
     search: debouncedContractSearch || undefined,
@@ -2565,30 +2595,6 @@ export function ClientDetail({
     [sectionPermissions],
   );
 
-  const [activeSection, setActiveSection] = useState<ClientDetailSection>(
-    () => {
-      if (initialSection && initialSection !== "settlement") {
-        try {
-          if (sectionPermissions(initialSection).canView) {
-            return initialSection;
-          }
-        } catch {
-          // ignore invalid initial section and use the first available one
-        }
-      }
-
-      const firstAllowed = SECTION_ORDER.find((section) => {
-        if (section === "settlement") return false;
-        try {
-          return sectionPermissions(section).canView;
-        } catch {
-          return false;
-        }
-      });
-      return firstAllowed ?? "payments";
-    },
-  );
-
   useEffect(() => {
     if (
       activeSection === "settlement" ||
@@ -2938,6 +2944,7 @@ export function ClientDetail({
     error: paymentsError,
     refresh: refreshPayments,
   } = usePaymentsPaged({
+    enabled: activeSection === "payments",
     from: fromDateStr,
     to: toDateStr,
     clientId,
