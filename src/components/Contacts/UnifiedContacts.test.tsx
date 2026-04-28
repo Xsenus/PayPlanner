@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UnifiedContacts } from './UnifiedContacts';
 import { apiService, type UserSettingDto } from '../../services/api';
-import type { Client, LegalEntitySummary } from '../../types';
+import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
+
+const legalEntityModalMock = vi.hoisted(() => vi.fn(() => null));
+const toastSuccessMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -11,8 +14,29 @@ vi.mock('../../contexts/AuthContext', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => ({
+    legalEntities: {
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
+    },
+  }),
+}));
+
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => ({
+    success: toastSuccessMock,
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+  }),
+}));
+
 vi.mock('../LegalEntities/LegalEntityModal', () => ({
-  LegalEntityModal: () => null,
+  LegalEntityModal: legalEntityModalMock,
 }));
 
 vi.mock('../../services/api', () => ({
@@ -23,6 +47,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: vi.fn(),
     getInvoices: vi.fn(),
     getLegalEntity: vi.fn(),
+    updateLegalEntity: vi.fn(),
     suggestLegalEntities: vi.fn(),
     findLegalEntityById: vi.fn(),
     getUserSetting: vi.fn(),
@@ -135,6 +160,8 @@ function mockApiData() {
   vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: clients, total: clients.length, page: 1, pageSize: 24 });
   vi.mocked(apiService.getLegalEntities).mockResolvedValue(legalEntities);
   vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: legalEntities, total: legalEntities.length, page: 1, pageSize: 24 });
+  vi.mocked(apiService.getLegalEntity).mockResolvedValue(createLegalEntity() as LegalEntityDetail);
+  vi.mocked(apiService.updateLegalEntity).mockResolvedValue(createLegalEntity({ shortName: 'ООО Обновлено' }) as LegalEntityDetail);
   vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1 });
   vi.mocked(apiService.upsertUserSetting).mockResolvedValue(createSetting('saved', 'ok'));
 }
@@ -238,5 +265,67 @@ describe('UnifiedContacts', () => {
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText('69.10')).toBeTruthy();
     expect(within(row as HTMLElement).getByText('03212643000000014200')).toBeTruthy();
+  });
+
+  it('opens legal entity from contacts as editable page', async () => {
+    const legalEntity = createLegalEntity({ shortName: 'ООО Ромашка' });
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+      items: [legalEntity],
+      total: 1,
+      page: 1,
+      pageSize: 24,
+    });
+    vi.mocked(apiService.getLegalEntity).mockResolvedValue(legalEntity as LegalEntityDetail);
+
+    render(<UnifiedContacts initialKind="legal" lockKind />);
+
+    fireEvent.click(await screen.findByText('ООО Ромашка'));
+
+    await waitFor(() => {
+      expect(apiService.getLegalEntity).toHaveBeenCalledWith(21);
+    });
+
+    await waitFor(() => {
+      const props = legalEntityModalMock.mock.calls.at(-1)?.[0];
+      expect(props).toMatchObject({
+        isOpen: true,
+        allowEdit: true,
+        allowDelete: false,
+        mode: 'page',
+      });
+      expect(typeof props.onBack).toBe('function');
+      expect(props.hideFormActions).toBeUndefined();
+      expect(props.hideDadataSection).toBeUndefined();
+      expect(props.compactReadOnlyView).toBeUndefined();
+      expect(props.titleOverride).toBeUndefined();
+    });
+  });
+
+  it('saves legal entity changes from the contacts detail page', async () => {
+    const legalEntity = createLegalEntity({ shortName: 'ООО Ромашка' });
+    const savedEntity = createLegalEntity({ shortName: 'ООО Ромашка плюс' }) as LegalEntityDetail;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+      items: [legalEntity],
+      total: 1,
+      page: 1,
+      pageSize: 24,
+    });
+    vi.mocked(apiService.getLegalEntity).mockResolvedValue(legalEntity as LegalEntityDetail);
+    vi.mocked(apiService.updateLegalEntity).mockResolvedValue(savedEntity);
+
+    render(<UnifiedContacts initialKind="legal" lockKind />);
+
+    fireEvent.click(await screen.findByText('ООО Ромашка'));
+
+    await waitFor(() => {
+      expect(apiService.getLegalEntity).toHaveBeenCalledWith(21);
+    });
+
+    const props = legalEntityModalMock.mock.calls.at(-1)?.[0];
+    const payload = { shortName: 'ООО Ромашка плюс' } as Parameters<typeof props.onSubmit>[0];
+    await props.onSubmit(payload);
+
+    expect(apiService.updateLegalEntity).toHaveBeenCalledWith(21, payload);
+    expect(toastSuccessMock).toHaveBeenCalledWith('Юр. лицо обновлено');
   });
 });

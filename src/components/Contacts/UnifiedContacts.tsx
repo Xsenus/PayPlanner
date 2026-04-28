@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
-import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
+import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 
@@ -339,6 +341,9 @@ export function UnifiedContacts({
   onOpenClient,
 }: UnifiedContactsProps) {
   const { user } = useAuth();
+  const toast = useToast();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canEditLegalEntities = permissions.legalEntities.canEdit;
   const settingsScope = lockKind ? initialKind : 'all';
   const userStorageScope = user?.id ?? 'guest';
   const viewModeStorageKey = `pp.contacts.${settingsScope}.viewMode.${userStorageScope}.${CONTACTS_SETTINGS_VERSION}`;
@@ -361,6 +366,7 @@ export function UnifiedContacts({
   const [clientsTotal, setClientsTotal] = useState(0);
   const [legalTotal, setLegalTotal] = useState(0);
   const [legalDetail, setLegalDetail] = useState<LegalEntityDetail | null>(null);
+  const [detailPageOpen, setDetailPageOpen] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const viewModeSaveTimerRef = useRef<number | null>(null);
@@ -618,12 +624,30 @@ export function UnifiedContacts({
         setDetailLoadingId(item.id);
         const detail = await apiService.getLegalEntity(item.sourceId);
         setLegalDetail(detail);
+        setDetailPageOpen(true);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Не удалось открыть карточку юрлица');
       } finally {
         setDetailLoadingId(null);
       }
     }
+  };
+
+  const handleLegalEntitySubmit = async (payload: LegalEntityInput) => {
+    if (!legalDetail) {
+      throw new Error('Не выбрано юридическое лицо для обновления');
+    }
+
+    const saved = await apiService.updateLegalEntity(legalDetail.id, payload);
+    setLegalDetail(saved);
+    toast.success('Юр. лицо обновлено');
+    await load(false);
+    return saved;
+  };
+
+  const closeLegalDetailPage = () => {
+    setDetailPageOpen(false);
+    setLegalDetail(null);
   };
 
   const handleViewModeChange = (mode: ViewMode) => {
@@ -642,6 +666,25 @@ export function UnifiedContacts({
     : lockKind && initialKind === 'legal'
       ? 'Организации и ИП'
       : 'Клиенты и юридические лица в одном реестре';
+
+  if (detailPageOpen) {
+    return (
+      <div className="p-6">
+        <LegalEntityModal
+          isOpen={Boolean(legalDetail)}
+          initial={legalDetail}
+          onClose={closeLegalDetailPage}
+          onSubmit={handleLegalEntitySubmit}
+          suggest={(payload) => apiService.suggestLegalEntities(payload)}
+          findById={(payload) => apiService.findLegalEntityById(payload)}
+          allowEdit={canEditLegalEntities}
+          allowDelete={false}
+          mode="page"
+          onBack={closeLegalDetailPage}
+        />
+      </div>
+    );
+  }
 
   const contactCell = (item: UnifiedContact) => (
     <div className="min-w-0">
@@ -1037,21 +1080,6 @@ export function UnifiedContacts({
           </div>
         </div>
       ) : null}
-
-      <LegalEntityModal
-        isOpen={Boolean(legalDetail)}
-        initial={legalDetail}
-        onClose={() => setLegalDetail(null)}
-        onSubmit={async () => legalDetail as LegalEntityDetail}
-        suggest={(payload) => apiService.suggestLegalEntities(payload)}
-        findById={(payload) => apiService.findLegalEntityById(payload)}
-        allowEdit={false}
-        allowDelete={false}
-        hideFormActions
-        hideDadataSection
-        compactReadOnlyView
-        titleOverride="Карточка юридического лица"
-      />
     </div>
   );
 }
