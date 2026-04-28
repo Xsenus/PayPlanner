@@ -1894,6 +1894,8 @@ export function ClientDetail({
   const [paymentSearch, setPaymentSearch] = useState("");
   const debouncedPaymentSearch = useDebouncedValue(paymentSearch.trim(), 400);
   const [paymentPage, setPaymentPage] = useState(1);
+  const [expandedSystemNotePaymentIds, setExpandedSystemNotePaymentIds] =
+    useState<Set<number>>(() => new Set());
   const [paymentTableSettingsOpen, setPaymentTableSettingsOpen] =
     useState(false);
   const {
@@ -1923,6 +1925,18 @@ export function ClientDetail({
     defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
     minColumnWidth: 120,
   });
+
+  const togglePaymentSystemNote = useCallback((paymentId: number) => {
+    setExpandedSystemNotePaymentIds((current) => {
+      const next = new Set(current);
+      if (next.has(paymentId)) {
+        next.delete(paymentId);
+      } else {
+        next.add(paymentId);
+      }
+      return next;
+    });
+  }, []);
 
   const [actPeriod, setActPeriod] = useState<PeriodFilter>({
     mode: "preset",
@@ -7442,6 +7456,11 @@ export function ClientDetail({
                               const visibleNotes = getVisibleNotes(
                                 payment.notes,
                               );
+                              const systemNoteExpanded =
+                                expandedSystemNotePaymentIds.has(payment.id);
+                              const systemNoteExpandable =
+                                visibleSystemNotes.length > 180 ||
+                                visibleSystemNotes.split(/\r?\n/).length > 4;
 
                               return (
                                 <tr
@@ -7675,10 +7694,33 @@ export function ClientDetail({
                                               className="mt-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500"
                                               title={visibleSystemNotes}
                                             >
-                                              <span className="font-medium text-slate-600">
-                                                Системно:
-                                              </span>{" "}
-                                              {visibleSystemNotes}
+                                              <div
+                                                className={
+                                                  systemNoteExpanded
+                                                    ? "whitespace-pre-wrap leading-5"
+                                                    : "max-h-20 overflow-hidden whitespace-pre-wrap leading-5"
+                                                }
+                                              >
+                                                <span className="font-medium text-slate-600">
+                                                  Системно:
+                                                </span>{" "}
+                                                {visibleSystemNotes}
+                                              </div>
+                                              {systemNoteExpandable ? (
+                                                <button
+                                                  type="button"
+                                                  className="mt-1 text-[11px] font-medium text-blue-600 hover:text-blue-700"
+                                                  onClick={() =>
+                                                    togglePaymentSystemNote(
+                                                      payment.id,
+                                                    )
+                                                  }
+                                                >
+                                                  {systemNoteExpanded
+                                                    ? "Свернуть"
+                                                    : "Показать полностью"}
+                                                </button>
+                                              ) : null}
                                             </div>
                                           ) : null}
                                         </>

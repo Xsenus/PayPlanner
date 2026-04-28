@@ -950,6 +950,60 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('keeps long system payment notes compact and expandable', async () => {
+    const user = userEvent.setup();
+    usePaymentsPagedMock.mockReturnValue({
+      ...emptyPaymentsResult,
+      total: 1,
+      payments: [
+        {
+          id: 501,
+          date: '2026-04-28',
+          plannedDate: '2026-04-28',
+          amount: 16_250,
+          paidAmount: 250,
+          outstandingAmount: 16_000,
+          hasPartialPayment: true,
+          status: 'Pending',
+          description: 'Рассрочка по счету №3 · платеж 5/6',
+          isPaid: false,
+          paidDate: null,
+          lastPaymentDate: '2026-04-28',
+          notes: '',
+          systemNotes: [
+            'Зачтено с баланса клиента: 150,00',
+            'Зачтено с баланса клиента: 100,00',
+            'Дата платежа изменена: 25.05.2026 → 28.04.2026',
+            'Изменена оплаченная сумма: было 750,00, стало 16 250,00',
+            'Статус обновлён: Ожидается → Выполнен',
+          ].join('\n'),
+          clientId: 1,
+          client: { id: 1, name: 'Вашурина Анастасия Олеговна' },
+          clientCase: { id: 7, title: 'Исполнение решения суда', status: 'Open' },
+          type: 'Income',
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-04-28T00:00:00Z',
+          rescheduleCount: 0,
+        },
+      ],
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await screen.findByText('Рассрочка по счету №3 · платеж 5/6');
+    const expandButton = await screen.findByRole('button', { name: 'Показать полностью' });
+    const noteCard = expandButton.closest('div');
+
+    expect(noteCard?.querySelector('.max-h-20')).toBeTruthy();
+
+    await user.click(expandButton);
+
+    expect(await screen.findByRole('button', { name: 'Свернуть' })).toBeTruthy();
+    expect(noteCard?.querySelector('.max-h-20')).toBeFalsy();
+  });
+
   it('passes payment client role to payments and stats hooks', async () => {
     const user = userEvent.setup();
 
