@@ -83,8 +83,8 @@ describe('systemNotes helpers', () => {
 
   it('repairs old windows-1251 mojibake system notes for display', () => {
     const notes = [
-      'Системно: Р—Р°С‡С‚РµРЅРѕ СЃ Р±Р°Р»Р°РЅСЃР° РєР»РёРµРЅС‚Р°: 750,00',
-      'РџСЂРѕСЃСЂРѕС‡РµРЅ РІС‹РїРѕР»РЅРµРЅ',
+      '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u043e: \u0420\u2014\u0420\xb0\u0421\u2021\u0421\u201a\u0420\xb5\u0420\u0405\u0420\u0455 \u0421\u0403 \u0420\xb1\u0420\xb0\u0420\xbb\u0420\xb0\u0420\u0405\u0421\u0403\u0420\xb0 \u0420\u0454\u0420\xbb\u0420\u0451\u0420\xb5\u0420\u0405\u0421\u201a\u0420\xb0: 750,00',
+      '\u0420\u045f\u0421\u0402\u0420\u0455\u0421\u0403\u0421\u0402\u0420\u0455\u0421\u2021\u0420\xb5\u0420\u0405 \u0420\u0406\u0421\u2039\u0420\u0457\u0420\u0455\u0420\xbb\u0420\u0405\u0420\xb5\u0420\u0405',
     ].join('\n');
 
     expect(getVisibleSystemNoteLines(notes)).toEqual([

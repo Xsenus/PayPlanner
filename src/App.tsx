@@ -917,7 +917,7 @@ function AppContent() {
                 onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Income' })}
               />
             )
-          : renderNoAccess('Р Р°Р·РґРµР» Р°РєС‚РѕРІ РЅРµРґРѕСЃС‚СѓРїРµРЅ РґР»СЏ РІР°С€РµР№ СЂРѕР»Рё.');
+          : renderNoAccess('Раздел актов недоступен для вашей роли.');
 
       case 'actsExpense':
         return permissions.acts.canView
@@ -931,7 +931,7 @@ function AppContent() {
                 onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Expense' })}
               />
             )
-          : renderNoAccess('Р Р°Р·РґРµР» Р°РєС‚РѕРІ РЅРµРґРѕСЃС‚СѓРїРµРЅ РґР»СЏ РІР°С€РµР№ СЂРѕР»Рё.');
+          : renderNoAccess('Раздел актов недоступен для вашей роли.');
 
       case 'actCreate':
         return permissions.acts.canCreate

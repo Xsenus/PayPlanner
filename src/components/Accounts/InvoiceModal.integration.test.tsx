@@ -1204,7 +1204,7 @@ describe('InvoiceModal integration', () => {
       amount: 21000,
       type: 'Income',
       status: 'Pending',
-      lineItems: [{ name: 'Р®СЂРёРґРёС‡РµСЃРєРёРµ СѓСЃР»СѓРіРё', quantity: 1, unit: 'С€С‚', price: 21000 }],
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 21000 }],
     } as unknown as Invoice;
 
     const relatedPayment = {
@@ -1216,7 +1216,7 @@ describe('InvoiceModal integration', () => {
       paidDate: '2026-04-11',
       type: 'Income',
       status: 'Completed',
-      description: 'РџРµСЂРІР°СЏ РѕРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ в„–551',
+      description: 'Первая оплата по счету №551',
       account: '551',
       accountDate: '2026-04-08',
       notes: '',
@@ -1225,7 +1225,7 @@ describe('InvoiceModal integration', () => {
 
     vi.mocked(apiService.getPayment).mockResolvedValue({
       ...relatedPayment,
-      notes: 'РџР»Р°С‚РµР¶ Р·Р°С‡С‚РµРЅ РєР°Рє РѕСЃРЅРѕРІРЅРѕР№',
+      notes: 'Платеж зачтен как основной',
     } as Payment);
 
     render(
@@ -1253,7 +1253,7 @@ describe('InvoiceModal integration', () => {
     expect(onOpenPayment).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 881,
-        notes: 'РџР»Р°С‚РµР¶ Р·Р°С‡С‚РµРЅ РєР°Рє РѕСЃРЅРѕРІРЅРѕР№',
+        notes: 'Платеж зачтен как основной',
       }),
     );
   });
@@ -1511,9 +1511,9 @@ describe('InvoiceModal integration', () => {
       invoiceId: 618,
       status: 'Created',
       clientId: 1,
-      clientName: 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚',
+      clientName: 'Тестовый клиент',
       responsibleId: 9,
-      responsibleName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ',
+      responsibleName: 'Ответственный менеджер',
       lineItems: [],
       createdAt: '2026-04-10T00:00:00Z',
     } as Act);
@@ -1529,8 +1529,8 @@ describe('InvoiceModal integration', () => {
       status: 'Pending',
       clientId: 1,
       contractId: 77,
-      responsibles: [{ id: 9, fullName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ' }],
-      lineItems: [{ name: 'РЎРѕСЃС‚Р°РІР»РµРЅРёРµ РёСЃРєР°', quantity: 1, unit: 'СѓСЃР».РµРґ.', price: 18000 }],
+      responsibles: [{ id: 9, fullName: 'Ответственный менеджер' }],
+      lineItems: [{ name: 'Составление иска', quantity: 1, unit: 'усл.ед.', price: 18000 }],
     } as unknown as Invoice;
 
     render(
@@ -1541,8 +1541,8 @@ describe('InvoiceModal integration', () => {
         onClose={vi.fn()}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         submitting={false}
-        clients={[createTestClient(1, 'РўРµСЃС‚РѕРІС‹Р№ РєР»РёРµРЅС‚')]}
-        responsibles={[{ id: 9, fullName: 'РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№ РјРµРЅРµРґР¶РµСЂ' }]}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[{ id: 9, fullName: 'Ответственный менеджер' }]}
         lookupsLoading={false}
         relatedPayments={[]}
       />,
