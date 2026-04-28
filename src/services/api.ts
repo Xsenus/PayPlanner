@@ -763,6 +763,7 @@ export class ApiService {
     search?: string;
     sortBy?: ActsSortKey;
     sortDir?: SortDir;
+    includeLineItems?: boolean;
     page?: number;
     pageSize?: number;
   }) {

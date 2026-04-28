@@ -750,7 +750,7 @@ public class ActsControllerTests
         var request = new UpsertActRequest
         {
             Number = "ACT-200",
-            Title = "Р РѓС‡РЅРѕР№ Р°РєС‚",
+            Title = "Ручной акт",
             Date = new DateTime(2026, 4, 20),
             Amount = 12_345m,
             CreationMode = ActCreationMode.Manual,
@@ -758,7 +758,7 @@ public class ActsControllerTests
             CounterpartyInn = "1234567890",
             Status = ActStatus.Transferred,
             ClientId = client.Id,
-            Comment = "РЈСЃР»СѓРіРё Р±РµР· РїСЂРёРІСЏР·РєРё Рє С‡С‘С‚Сѓ",
+            Comment = "Услуги без привязки к счёту",
         };
 
         var action = await controller.Create(request, CancellationToken.None);
@@ -767,14 +767,14 @@ public class ActsControllerTests
         var dto = Assert.IsType<ActDto>(created.Value);
 
         Assert.Equal("ACT-200", dto.Number);
-        Assert.Equal("Р РѓС‡РЅРѕР№ Р°РєС‚", dto.Title);
+        Assert.Equal("Ручной акт", dto.Title);
         Assert.Equal(12_345m, dto.Amount);
         Assert.Equal(ActCreationMode.Manual, dto.CreationMode);
         Assert.Equal("MAN-200", dto.InvoiceNumber);
         Assert.Equal("1234567890", dto.CounterpartyInn);
         Assert.Equal(ActStatus.Transferred, dto.Status);
         Assert.Equal(client.Id, dto.ClientId);
-        Assert.Equal("РЈСЃР»СѓРіРё Р±РµР· РїСЂРёРІСЏР·РєРё Рє С‡С‘С‚Сѓ", dto.Comment);
+        Assert.Equal("Услуги без привязки к счёту", dto.Comment);
         Assert.Empty(dto.LineItems);
     }
 
@@ -789,8 +789,8 @@ public class ActsControllerTests
             new DateTime(2026, 4, 18),
             client.Id,
             [
-                new InvoiceLineItem { Name = "РџРѕРґРіРѕС‚РѕРІРєР° РїРѕР·РёС†РёРё", Quantity = 1m, Unit = "СѓСЃР».РµРґ.", Price = 7_000m, SortOrder = 0 },
-                new InvoiceLineItem { Name = "Р’С‹РµР·Рґ РЅР° Р·Р°СЃРµРґР°РЅРёРµ", Quantity = 2m, Unit = "СѓСЃР».РµРґ.", Price = 4_000m, SortOrder = 1 },
+                new InvoiceLineItem { Name = "Подготовка позиции", Quantity = 1m, Unit = "усл.ед.", Price = 7_000m, SortOrder = 0 },
+                new InvoiceLineItem { Name = "Выезд на заседание", Quantity = 2m, Unit = "усл.ед.", Price = 4_000m, SortOrder = 1 },
             ]);
 
         var controller = new ActsController(db, new NoopFormRequirementsService());
@@ -813,14 +813,14 @@ public class ActsControllerTests
         var updateRequest = new UpsertActRequest
         {
             Number = "ACT-201-UPDATED",
-            Title = "РћР±РЅРѕРІР»С‘РЅРЅС‹Р№ Р°РєС‚",
+            Title = "Обновлённый акт",
             Date = new DateTime(2026, 4, 20),
             Amount = 1m,
             InvoiceId = invoicePayment.Id,
             ClientId = client.Id,
             Status = ActStatus.Signed,
             CreationMode = ActCreationMode.Manual,
-            Comment = "РЎС‚СЂРѕРєРё РґРѕР»Р¶РЅС‹ РѕСЃС‚Р°С‚СЊСЃСЏ РёР· С‡РµСЂРЅРѕРІРёРєР°",
+            Comment = "Строки должны остаться из черновика",
         };
 
         var updateAction = await controller.Update(dto.Id, updateRequest, CancellationToken.None);
@@ -828,9 +828,9 @@ public class ActsControllerTests
         var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
         var updated = Assert.IsType<ActDto>(ok.Value);
         Assert.Equal("ACT-201-UPDATED", updated.Number);
-        Assert.Equal("РћР±РЅРѕРІР»С‘РЅРЅС‹Р№ Р°РєС‚", updated.Title);
+        Assert.Equal("Обновлённый акт", updated.Title);
         Assert.Equal(ActStatus.Signed, updated.Status);
-        Assert.Equal("РЎС‚СЂРѕРєРё РґРѕР»Р¶РЅС‹ РѕСЃС‚Р°С‚СЊСЃСЏ РёР· С‡РµСЂРЅРѕРІРёРєР°", updated.Comment);
+        Assert.Equal("Строки должны остаться из черновика", updated.Comment);
         Assert.Equal(ActCreationMode.Full, updated.CreationMode);
         Assert.Equal(15_000m, updated.Amount);
         Assert.Equal(2, updated.LineItems.Count);
@@ -838,12 +838,12 @@ public class ActsControllerTests
             updated.LineItems.OrderBy(item => item.SourceSortOrder),
             first =>
             {
-                Assert.Equal("РџРѕРґРіРѕС‚РѕРІРєР° РїРѕР·РёС†РёРё", first.Name);
+                Assert.Equal("Подготовка позиции", first.Name);
                 Assert.Equal(1m, first.Quantity);
             },
             second =>
             {
-                Assert.Equal("Р’С‹РµР·Рґ РЅР° Р·Р°СЃРµРґР°РЅРёРµ", second.Name);
+                Assert.Equal("Выезд на заседание", second.Name);
                 Assert.Equal(2m, second.Quantity);
             });
     }
@@ -859,7 +859,7 @@ public class ActsControllerTests
             new DateTime(2026, 4, 18),
             client.Id,
             [
-                new InvoiceLineItem { Name = "РЈСЃР»СѓРіР° РґР»СЏ СѓРґР°Р»РµРЅРёСЏ", Quantity = 1m, Unit = "СѓСЃР».РµРґ.", Price = 5_500m, SortOrder = 0 },
+                new InvoiceLineItem { Name = "Услуга для удаления", Quantity = 1m, Unit = "усл.ед.", Price = 5_500m, SortOrder = 0 },
             ]);
 
         var controller = new ActsController(db, new NoopFormRequirementsService());
@@ -1021,6 +1021,68 @@ public class ActsControllerTests
 
         Assert.Equal(new[] { "ACT-CAN", "ACT-CMAN", "ACT-LEG" }, items.Select(item => item.Number).ToArray());
         Assert.DoesNotContain(items, item => item.Number == "ACT-OUT");
+    }
+
+    [Fact]
+    public async Task Get_OmitsLineItemsByDefault_AndCanIncludeThem()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-LIST-LINES", 7_500m, ActStatus.Created);
+        db.Set<ActLineItem>().Add(new ActLineItem
+        {
+            ActId = act.Id,
+            Name = "Service",
+            Quantity = 1m,
+            Unit = "pcs",
+            Price = 7_500m,
+            SortOrder = 0,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var listAction = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var listOk = Assert.IsType<OkObjectResult>(listAction);
+        var listItems = Assert.IsAssignableFrom<IEnumerable<ActDto>>(listOk.Value?.GetType().GetProperty("items")?.GetValue(listOk.Value)).ToList();
+        var listItem = Assert.Single(listItems);
+        Assert.Empty(listItem.LineItems);
+
+        var fullAction = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            includeLineItems: true);
+
+        var fullOk = Assert.IsType<OkObjectResult>(fullAction);
+        var fullItems = Assert.IsAssignableFrom<IEnumerable<ActDto>>(fullOk.Value?.GetType().GetProperty("items")?.GetValue(fullOk.Value)).ToList();
+        Assert.Single(Assert.Single(fullItems).LineItems);
     }
 
     [Fact]

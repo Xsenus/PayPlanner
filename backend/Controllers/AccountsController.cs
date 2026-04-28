@@ -185,11 +185,20 @@ public class AccountsController : ControllerBase
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var legacyAccountNumbers = groups
+            .Select(group => group.Representative.Number)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim().ToLower())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var paymentAggregateItems = await _db.Payments
             .AsNoTracking()
             .Where(payment =>
                 (payment.InvoiceId.HasValue && canonicalIds.Contains(payment.InvoiceId.Value))
-                || (!payment.InvoiceId.HasValue && payment.Account != null && payment.Account != string.Empty))
+                || (!payment.InvoiceId.HasValue
+                    && payment.Account != null
+                    && legacyAccountNumbers.Contains(payment.Account.Trim().ToLower())))
             .Select(payment => new PaymentAggregateItem
             {
                 Id = payment.Id,

@@ -82,39 +82,74 @@ public class InvoicesController : ControllerBase
             return Unauthorized();
         }
 
-        var items = await QueryInvoiceDtosAsync(
+        if (status.HasValue)
+        {
+            var statusItems = await QueryInvoiceDtosAsync(
+                from,
+                to,
+                clientId,
+                ParseIntList(clientIds),
+                contractId,
+                caseId,
+                effectiveResponsibleId,
+                search,
+                type,
+                clientRole,
+                includeMetadata: true,
+                ct);
+
+            statusItems = statusItems
+                .Where(item => item.Status == status.Value)
+                .ToList();
+
+            var orderedStatusItems = ApplyInvoiceSort(statusItems, sortBy, sortDir).ToList();
+            var statusTotal = orderedStatusItems.Count;
+            var statusTotalPages = Math.Max(1, (int)Math.Ceiling(statusTotal / (double)pageSize));
+            if (page > statusTotalPages)
+            {
+                page = statusTotalPages;
+            }
+
+            var statusPageItems = orderedStatusItems
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return Ok(new { items = statusPageItems, total = statusTotal, page, pageSize });
+        }
+
+        var query = BuildInvoiceQuery();
+        query = ApplyFilters(
+            query,
             from,
             to,
+            null,
             clientId,
-            ParseIntList(clientIds),
             contractId,
             caseId,
             effectiveResponsibleId,
             search,
             type,
             clientRole,
-            includeMetadata: true,
-            ct);
+            ParseIntList(clientIds));
 
-        if (status.HasValue)
-        {
-            items = items
-                .Where(item => item.Status == status.Value)
-                .ToList();
-        }
-
-        var orderedItems = ApplyInvoiceSort(items, sortBy, sortDir).ToList();
-        var total = orderedItems.Count;
+        var total = await query.CountAsync(ct);
         var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
         if (page > totalPages)
         {
             page = totalPages;
         }
 
-        var pageItems = orderedItems
+        var rawPageItems = await ApplySort(query, sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Select(ProjectionRaw)
+            .ToListAsync(ct);
+
+        var pageItems = rawPageItems
+            .Select(MapFromRaw)
             .ToList();
+        await EnrichInvoiceDtosAsync(pageItems, ct);
 
         return Ok(new { items = pageItems, total, page, pageSize });
     }
@@ -2747,6 +2782,13 @@ public class InvoicesController : ControllerBase
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var legacyAccountNumbers = items
+            .Select(item => item.Number)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (invoiceEntityIds.Count == 0 && legacyGroupKeys.Count == 0)
         {
             return;
@@ -2756,7 +2798,9 @@ public class InvoicesController : ControllerBase
             .AsNoTracking()
             .Where(payment =>
                 (payment.InvoiceId.HasValue && invoiceEntityIds.Contains(payment.InvoiceId.Value))
-                || (!payment.InvoiceId.HasValue && payment.Account != null && payment.Account != string.Empty))
+                || (!payment.InvoiceId.HasValue
+                    && payment.Account != null
+                    && legacyAccountNumbers.Contains(payment.Account.Trim().ToLower())))
             .ToListAsync(ct);
 
         var linkedPaymentsByInvoiceId = candidatePayments

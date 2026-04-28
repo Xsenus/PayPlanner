@@ -61,7 +61,8 @@ public class ActsController : ControllerBase
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] bool includeLineItems = false)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -91,7 +92,7 @@ public class ActsController : ControllerBase
         var items = await query
             .Skip(skip)
             .Take(pageSize)
-            .Select(MapToDtoExpression)
+            .Select(includeLineItems ? MapToDtoExpression : MapToListDtoExpression)
             .ToListAsync(ct);
 
         return Ok(new { items, total, page, pageSize });
@@ -500,6 +501,38 @@ public class ActsController : ControllerBase
                 Price = item.Price,
             })
             .ToList(),
+        CreatedAt = act.CreatedAt,
+        UpdatedAt = act.UpdatedAt,
+        AuditCreatedByUserId = EF.Property<int?>(act, "CreatedByUserId"),
+        AuditCreatedByUserName = EF.Property<string?>(act, "CreatedByUserName"),
+        AuditUpdatedAt = EF.Property<DateTime?>(act, "UpdatedAt"),
+        AuditUpdatedByUserId = EF.Property<int?>(act, "UpdatedByUserId"),
+        AuditUpdatedByUserName = EF.Property<string?>(act, "UpdatedByUserName"),
+        AuditIsDeleted = EF.Property<bool>(act, "IsDeleted"),
+        AuditDeletedAt = EF.Property<DateTime?>(act, "DeletedAt"),
+        AuditDeletedByUserId = EF.Property<int?>(act, "DeletedByUserId"),
+        AuditDeletedByUserName = EF.Property<string?>(act, "DeletedByUserName"),
+    };
+
+    private static readonly System.Linq.Expressions.Expression<Func<Act, ActDto>> MapToListDtoExpression = act => new ActDto
+    {
+        Id = act.Id,
+        Number = act.Number,
+        Title = act.Title,
+        Date = act.Date,
+        Amount = act.Amount,
+        CreationMode = act.CreationMode,
+        InvoiceNumber = act.InvoiceNumber,
+        InvoiceId = act.InvoiceId,
+        Type = act.Invoice != null ? act.Invoice.Type : null,
+        ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
+        CounterpartyInn = act.CounterpartyInn,
+        Status = act.Status,
+        ClientId = act.ClientId,
+        ClientName = act.Client != null ? act.Client.Name : null,
+        ResponsibleId = act.ResponsibleId,
+        ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
+        Comment = act.Comment,
         CreatedAt = act.CreatedAt,
         UpdatedAt = act.UpdatedAt,
         AuditCreatedByUserId = EF.Property<int?>(act, "CreatedByUserId"),

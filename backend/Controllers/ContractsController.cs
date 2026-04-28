@@ -41,7 +41,7 @@ public class ContractsController : ControllerBase
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
-        var query = ApplySort(ApplyFilters(BuildContractsQuery(), from, to, clientId, search), sortBy, sortDir);
+        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
         var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, search), sortBy, sortDir)
             .Skip((page - 1) * pageSize)
@@ -197,6 +197,8 @@ public class ContractsController : ControllerBase
     private IQueryable<Contract> BuildContractsQuery() => _db.Contracts.AsNoTracking()
         .Include(c => c.ClientContracts).ThenInclude(cc => cc.Client)
         .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments);
+
+    private IQueryable<Contract> BuildContractsListCountQuery() => _db.Contracts.AsNoTracking();
 
     private static readonly Expression<Func<Contract, ContractDto>> MapToDtoExpression = contract => new ContractDto
     {
