@@ -1363,6 +1363,9 @@ export function ClientDetail({
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>(
     [],
   );
+  const [oksoLoaded, setOksoLoaded] = useState(false);
+  const [okpdtrLoaded, setOkpdtrLoaded] = useState(false);
+  const [powersOfAttorneyLoaded, setPowersOfAttorneyLoaded] = useState(false);
   const [activeProfileGroup, setActiveProfileGroup] = useState<
     | "main"
     | "passports"
@@ -1733,21 +1736,90 @@ export function ClientDetail({
   );
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const [okso, okpdtr, poa] = await Promise.all([
-          apiService.getOksoDictionary(),
-          apiService.getOkpdtrDictionary(),
-          apiService.getClientPowersOfAttorney(clientId),
-        ]);
-        setOksoOptions(okso ?? []);
-        setOkpdtrOptions(okpdtr ?? []);
-        setPowersOfAttorney(poa ?? []);
-      } catch {
-        // optional
-      }
-    })();
+    setPowersOfAttorney([]);
+    setPowersOfAttorneyLoaded(false);
   }, [clientId]);
+
+  useEffect(() => {
+    if (
+      activeSection !== "profile" ||
+      activeProfileGroup !== "education" ||
+      oksoLoaded
+    ) {
+      return;
+    }
+
+    let alive = true;
+    apiService
+      .getOksoDictionary()
+      .then((items) => {
+        if (!alive) return;
+        setOksoOptions(items ?? []);
+        setOksoLoaded(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setOksoLoaded(true);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeProfileGroup, activeSection, oksoLoaded]);
+
+  useEffect(() => {
+    if (
+      activeSection !== "profile" ||
+      activeProfileGroup !== "professions" ||
+      okpdtrLoaded
+    ) {
+      return;
+    }
+
+    let alive = true;
+    apiService
+      .getOkpdtrDictionary()
+      .then((items) => {
+        if (!alive) return;
+        setOkpdtrOptions(items ?? []);
+        setOkpdtrLoaded(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setOkpdtrLoaded(true);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeProfileGroup, activeSection, okpdtrLoaded]);
+
+  useEffect(() => {
+    if (
+      activeSection !== "profile" ||
+      activeProfileGroup !== "poa" ||
+      powersOfAttorneyLoaded
+    ) {
+      return;
+    }
+
+    let alive = true;
+    apiService
+      .getClientPowersOfAttorney(clientId)
+      .then((items) => {
+        if (!alive) return;
+        setPowersOfAttorney(items ?? []);
+        setPowersOfAttorneyLoaded(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setPowersOfAttorneyLoaded(true);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeProfileGroup, activeSection, clientId, powersOfAttorneyLoaded]);
 
   const [monthFrom, setMonthFrom] = useState<string>("");
   const [monthTo, setMonthTo] = useState<string>("");
@@ -1790,6 +1862,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.payments.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_payments_table",
+    enabled: activeSection === "payments",
     columns: PAYMENT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -1832,6 +1905,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<ActTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.acts.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_acts_table",
+    enabled: activeSection === "acts",
     columns: ACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -1850,6 +1924,8 @@ export function ClientDetail({
   const [actModalError, setActModalError] = useState<string | null>(null);
   const [actClients, setActClients] = useState<Client[]>([]);
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
+  const [actClientsLoaded, setActClientsLoaded] = useState(false);
+  const [actResponsiblesLoaded, setActResponsiblesLoaded] = useState(false);
   const [actLookupsLoading, setActLookupsLoading] = useState(false);
   const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
@@ -1895,6 +1971,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<InvoiceTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? "guest"}.v2`,
     settingsKey: "client_detail_invoices_table",
+    enabled: activeSection === "accounts",
     columns: INVOICE_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -1961,6 +2038,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<ContractTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.contracts.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_contracts_table",
+    enabled: activeSection === "contracts",
     columns: CONTRACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -3534,18 +3612,31 @@ export function ClientDetail({
     [clientResponsibleOptions],
   );
 
-  const ensureActLookups = useCallback(async () => {
+  const ensureActLookups = useCallback(async (options?: { includeClients?: boolean }) => {
+    const includeClients = options?.includeClients ?? true;
     if (actLookupsLoading) return;
-    if (actClients.length > 0 && actResponsibles.length > 0 && !actLookupsError)
+    const needsClients =
+      includeClients && (!actClientsLoaded || Boolean(actLookupsError));
+    const needsResponsibles =
+      !actResponsiblesLoaded || Boolean(actLookupsError);
+    if (!needsClients && !needsResponsibles)
       return;
     setActLookupsLoading(true);
     try {
       const [clientsResponse, responsiblesResponse] = await Promise.all([
-        apiService.getClients(),
-        apiService.getActResponsibles(),
+        needsClients ? apiService.getClients() : Promise.resolve(actClients),
+        needsResponsibles
+          ? apiService.getActResponsibles()
+          : Promise.resolve(actResponsibles),
       ]);
-      setActClients(clientsResponse ?? []);
-      setActResponsibles(responsiblesResponse ?? []);
+      if (needsClients) {
+        setActClients(clientsResponse ?? []);
+        setActClientsLoaded(true);
+      }
+      if (needsResponsibles) {
+        setActResponsibles(responsiblesResponse ?? []);
+        setActResponsiblesLoaded(true);
+      }
       setActLookupsError(null);
     } catch (error) {
       setActLookupsError(
@@ -3557,21 +3648,23 @@ export function ClientDetail({
       setActLookupsLoading(false);
     }
   }, [
-    actClients.length,
-    actResponsibles.length,
+    actClients,
+    actClientsLoaded,
+    actResponsibles,
+    actResponsiblesLoaded,
     actLookupsError,
     actLookupsLoading,
   ]);
 
   useEffect(() => {
     if (actModalOpen) {
-      void ensureActLookups();
+      void ensureActLookups({ includeClients: true });
     }
   }, [actModalOpen, ensureActLookups]);
 
   useEffect(() => {
     if (invoiceModalOpen || canManageClientResponsible) {
-      void ensureActLookups();
+      void ensureActLookups({ includeClients: false });
     }
   }, [canManageClientResponsible, ensureActLookups, invoiceModalOpen]);
 
@@ -9027,7 +9120,8 @@ export function ClientDetail({
           </div>
         ) : null}
 
-        <InvoiceModal
+        {invoiceModalOpen ? (
+          <InvoiceModal
           open={invoiceModalOpen}
           mode={invoiceModalMode}
           invoice={selectedInvoice}
@@ -9057,7 +9151,8 @@ export function ClientDetail({
                   onCreateActPage(initialValues, { section: "accounts" })
               : undefined
           }
-        />
+          />
+        ) : null}
 
         <ActModal
           open={actModalOpen}
@@ -9085,14 +9180,9 @@ export function ClientDetail({
           defaultClients={contractDefaultClients}
         />
 
-        <PaymentModal
-          key={
-            payModalOpen
-              ? editingPayment
-                ? `edit-${editingPayment.id}`
-                : "new"
-              : "closed"
-          }
+        {payModalOpen ? (
+          <PaymentModal
+          key={editingPayment ? `edit-${editingPayment.id}` : "new"}
           isOpen={payModalOpen}
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
@@ -9133,7 +9223,8 @@ export function ClientDetail({
             selectedCaseId === "all" ? undefined : Number(selectedCaseId)
           }
           casesPrefetch={paymentModalCasesPrefetch}
-        />
+          />
+        ) : null}
 
         {caseModalOpen && (
           <CaseModal
@@ -9151,7 +9242,8 @@ export function ClientDetail({
           />
         )}
 
-        <LegalEntityModal
+        {legalEntityModalOpen ? (
+          <LegalEntityModal
           isOpen={legalEntityModalOpen}
           onClose={closeLegalEntityModal}
           onSubmit={submitLegalEntityModal}
@@ -9165,7 +9257,8 @@ export function ClientDetail({
               ? "Реквизиты юридического лица"
               : "Новое юридическое лицо"
           }
-        />
+          />
+        ) : null}
 
         <FormPromptModal
           open={legalEntityPromptOpen}

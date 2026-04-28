@@ -16,6 +16,7 @@ const {
   emptyInvoicesResult,
   emptyLegalEntitiesResult,
   emptyPaymentsResult,
+  authState,
   permissionsResult,
   toastInfoMock,
   toastErrorMock,
@@ -79,6 +80,7 @@ const {
     error: null,
     refresh: vi.fn(),
   },
+  authState: { isAdmin: false },
   permissionsResult: createPermissions(),
   toastInfoMock: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -199,7 +201,7 @@ function formatLocalYmd(date: Date): string {
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 7, role: { id: 1 } },
-    isAdmin: () => false,
+    isAdmin: () => authState.isAdmin,
   }),
 }));
 
@@ -278,6 +280,8 @@ vi.mock('../../services/api', () => ({
     getClientPowersOfAttorney: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getClientCaseExpenseDetails: vi.fn(),
+    getClients: vi.fn(),
+    getActResponsibles: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
     updateClientPowerOfAttorney: vi.fn(),
     deleteClientPowerOfAttorney: vi.fn(),
@@ -463,6 +467,10 @@ vi.mock('./ClientStatusBadge', () => ({
 
 describe('ClientDetail integration', () => {
   beforeEach(() => {
+    Object.assign(permissionsResult.clients, createPermissions().clients);
+    Object.assign(permissionsResult.accounts, createPermissions().accounts);
+    Object.assign(permissionsResult.acts, createPermissions().acts);
+    Object.assign(permissionsResult.contracts, createPermissions().contracts);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     toastInfoMock.mockReset();
@@ -476,6 +484,7 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReset();
     useContractsMock.mockReset();
     usePaymentsPagedMock.mockReset();
+    authState.isAdmin = false;
 
     useClientCasesMock.mockReturnValue(emptyClientCasesResult);
     useActsMock.mockReturnValue(emptyActsResult);
@@ -484,6 +493,8 @@ describe('ClientDetail integration', () => {
     usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
 
     vi.mocked(apiService.getClient).mockResolvedValue(createClient());
+    vi.mocked(apiService.getClients).mockResolvedValue([]);
+    vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
     vi.mocked(apiService.updateClient).mockResolvedValue(createClient());
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
@@ -511,6 +522,52 @@ describe('ClientDetail integration', () => {
     expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getOksoDictionary).not.toHaveBeenCalled();
+    expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
+    expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
+  });
+
+  it('does not load all clients for admin responsible lookup on initial profile view', async () => {
+    authState.isAdmin = true;
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+
+    await waitFor(() => {
+      expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
+    });
+    expect(apiService.getClients).not.toHaveBeenCalled();
+  });
+
+  it('loads profile dictionaries and powers of attorney only when their groups are opened', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+    expect(apiService.getOksoDictionary).not.toHaveBeenCalled();
+    expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
+    expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Образование/ }));
+    await waitFor(() => {
+      expect(apiService.getOksoDictionary).toHaveBeenCalledTimes(1);
+    });
+    expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
+    expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Профессии/ }));
+    await waitFor(() => {
+      expect(apiService.getOkpdtrDictionary).toHaveBeenCalledTimes(1);
+    });
+    expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Доверенности/ }));
+    await waitFor(() => {
+      expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledWith(1);
+    });
   });
 
   it('loads legal entity lookup with paged search for legal client profile', async () => {
@@ -1022,6 +1079,7 @@ describe('ClientDetail integration', () => {
 
   it('prefills expense client from selected supplier case when creating supplier payments', async () => {
     const user = userEvent.setup();
+    permissionsResult.clients.canCreate = true;
 
     vi.mocked(apiService.getClient).mockResolvedValue({
       ...createClient(),
@@ -1060,6 +1118,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
 
     await user.click(await screen.findByRole('button', { name: 'Matter case' }));
+    await user.click(screen.getByRole('button', { name: /Добавить плат/ }));
 
     await waitFor(() => {
       const props = paymentModalPropsSpy.mock.calls.at(-1)?.[0] as {

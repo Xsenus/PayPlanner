@@ -33,6 +33,7 @@ type UsePersistedTableSettingsOptions<K extends string> = {
   settingsKey: string;
   columns: TableColumnConfig<K>[];
   defaultPageSize: number;
+  enabled?: boolean;
   minPageSize?: number;
   maxPageSize?: number;
   minColumnWidth?: number;
@@ -68,6 +69,7 @@ export function usePersistedTableSettings<K extends string>({
   settingsKey,
   columns,
   defaultPageSize,
+  enabled = true,
   minPageSize = 5,
   maxPageSize = 100,
   minColumnWidth = 96,
@@ -181,6 +183,11 @@ export function usePersistedTableSettings<K extends string>({
   const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoadedSettingsKey(null);
+      return;
+    }
+
     let active = true;
     const cachedSettings = normalizeSettings(safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null));
 
@@ -215,7 +222,7 @@ export function usePersistedTableSettings<K extends string>({
     return () => {
       active = false;
     };
-  }, [normalizeSettings, settingsKey, storageKey]);
+  }, [enabled, normalizeSettings, settingsKey, storageKey]);
 
   useEffect(() => {
     const payload = normalizeSettings({
@@ -225,6 +232,7 @@ export function usePersistedTableSettings<K extends string>({
       pageSize,
     });
     safeWrite(storageKey, payload);
+    if (!enabled) return;
     if (loadedSettingsKey !== settingsKey) return;
 
     if (saveTimerRef.current) {
@@ -243,6 +251,7 @@ export function usePersistedTableSettings<K extends string>({
   }, [
     columnOrder,
     columnWidths,
+    enabled,
     normalizeSettings,
     pageSize,
     settingsKey,
