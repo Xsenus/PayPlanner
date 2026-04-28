@@ -11,6 +11,8 @@ const {
   getCasesMock,
   getContractsMock,
   getInvoicesMock,
+  getClientBalanceMock,
+  applyClientBalanceMock,
   invoiceModalPropsSpy,
   toastErrorMock,
   toastSuccessMock,
@@ -22,6 +24,8 @@ const {
   getCasesMock: vi.fn(),
   getContractsMock: vi.fn(),
   getInvoicesMock: vi.fn(),
+  getClientBalanceMock: vi.fn(),
+  applyClientBalanceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -73,6 +77,8 @@ vi.mock('../../services/api', () => ({
     getCase: getCaseMock,
     getContracts: getContractsMock,
     createInvoice: createInvoiceMock,
+    getClientBalance: getClientBalanceMock,
+    applyClientBalance: applyClientBalanceMock,
   },
 }));
 
@@ -147,6 +153,8 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockReset();
     getContractsMock.mockReset();
     getInvoicesMock.mockReset();
+    getClientBalanceMock.mockReset();
+    applyClientBalanceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
@@ -169,6 +177,8 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockResolvedValue([]);
     getContractsMock.mockResolvedValue({ items: [] });
     getInvoicesMock.mockResolvedValue({ items: [] });
+    getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
+    applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
   });
 
   it('shows the locked linked invoice context for a payment created from an invoice', async () => {
@@ -408,6 +418,130 @@ describe('PaymentModal integration', () => {
         type: 'Expense',
       }),
     );
+  });
+
+  it('submits the full overpaid amount and shows balance warning', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 995,
+          date: '2026-04-25',
+          plannedDate: '2026-04-27',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Рассрочка по счету №3',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-04-25T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const paidAmountInput = document.body.querySelector(
+      'input[name="paidAmount"]',
+    ) as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+
+    fireEvent.change(paidAmountInput!, { target: { value: '17000' } });
+    fireEvent.blur(paidAmountInput!);
+
+    expect(await screen.findByText(/Переплата 750.00 будет записана на баланс клиента/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 995,
+        amount: 16_250,
+        paidAmount: 17_000,
+      }),
+    );
+  });
+
+  it('applies available client balance to an existing payment', async () => {
+    const onBalanceApplied = vi.fn().mockResolvedValue(undefined);
+    getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 750 });
+    applyClientBalanceMock.mockResolvedValue({ appliedAmount: 750, balance: 0 });
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onBalanceApplied={onBalanceApplied}
+        payment={{
+          id: 996,
+          date: '2026-05-25',
+          plannedDate: '2026-05-25',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Рассрочка по счету №3',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-05-25T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(await screen.findByText(/Доступно 750.00/i)).toBeTruthy();
+
+    const balanceInput = screen.getByPlaceholderText('750.00');
+    fireEvent.change(balanceInput, { target: { value: '750' } });
+    fireEvent.click(screen.getByRole('button', { name: /Зачесть/i }));
+
+    await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledWith(69, { paymentId: 996, amount: 750 }));
+    await waitFor(() => expect(onBalanceApplied).toHaveBeenCalledWith(996));
+    expect(screen.getAllByDisplayValue('750.00').length).toBeGreaterThan(0);
   });
 
   it('annuls an editable payment from the payment card', async () => {

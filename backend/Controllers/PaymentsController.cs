@@ -84,11 +84,14 @@ public class PaymentsController : ControllerBase
         await SyncInvoiceLinkAsync(model, ct);
         var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
         if (createValidationError is not null) return createValidationError;
+        var rawPaidAmount = model.PaidAmount;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync();
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, model, rawPaidAmount, now, HttpContext, ct);
+        await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
         return Created($"/api/payments/{model.Id}", model);
     }
@@ -154,7 +157,8 @@ public class PaymentsController : ControllerBase
         e.PaidDate = model.PaidDate;
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
-        e.PaidAmount = model.PaidAmount;
+        var rawPaidAmount = model.PaidAmount;
+        e.PaidAmount = rawPaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
@@ -220,6 +224,7 @@ public class PaymentsController : ControllerBase
 
         e.RescheduleCount = rescheduleCount;
 
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
         await _db.SaveChangesAsync();
         PopulateAuditMetadata(_db, e);
         return Ok(e);
@@ -289,7 +294,8 @@ public class PaymentsController : ControllerBase
         e.PaidDate = model.PaidDate;
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
-        e.PaidAmount = model.PaidAmount;
+        var rawPaidAmount = model.PaidAmount;
+        e.PaidAmount = rawPaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
@@ -318,7 +324,7 @@ public class PaymentsController : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"РР·РјРµРЅРµРЅР° РїР»Р°РЅРѕРІР°СЏ РґР°С‚Р°: {originalPlannedDate:dd.MM.yyyy} в†’ {e.PlannedDate:dd.MM.yyyy}",
+                $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -329,7 +335,7 @@ public class PaymentsController : ControllerBase
             rescheduleCount++;
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° РёР·РјРµРЅРµРЅР°: {originalDueDate:dd.MM.yyyy} в†’ {e.Date:dd.MM.yyyy}",
+                $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -337,7 +343,7 @@ public class PaymentsController : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"Р”Р°С‚Р° РїР»Р°С‚РµР¶Р° Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅР° РЅР° {e.Date:dd.MM.yyyy}",
+                $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
                 now,
                 actor);
         }
@@ -346,7 +352,7 @@ public class PaymentsController : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"РР·РјРµРЅРµРЅР° РѕРїР»Р°С‡РµРЅРЅР°СЏ СЃСѓРјРјР°: Р±С‹Р»Рѕ {originalPaidAmount.ToString("N2", culture)}, СЃС‚Р°Р»Рѕ {e.PaidAmount.ToString("N2", culture)}",
+                $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
                 now,
                 actor);
         }
@@ -355,13 +361,14 @@ public class PaymentsController : ControllerBase
         {
             PaymentDomainService.AppendSystemNote(
                 e,
-                $"РЎС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»С‘РЅ: {originalStatus.ToDisplayString()} в†’ {e.Status.ToDisplayString()}",
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
                 now,
                 actor);
         }
 
         e.RescheduleCount = rescheduleCount;
 
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
         await _db.SaveChangesAsync();
         PopulateAuditMetadata(_db, e);
         return Ok(e);

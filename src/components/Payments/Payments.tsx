@@ -842,7 +842,11 @@ export function Payments({
     async (payload: SubmitDTO) => {
       try {
         if ('id' in payload) {
-          await apiService.updatePayment(payload.id, payload);
+          if (editingPayment && isInvoiceManagedPayment(editingPayment)) {
+            await apiService.updateInvoiceManagedPayment(payload.id, payload);
+          } else {
+            await apiService.updatePayment(payload.id, payload);
+          }
           await refresh();
           toast.success(t('paymentSaved') ?? 'Платёж обновлён.', t('payments') ?? 'Платежи');
         } else {
@@ -863,7 +867,7 @@ export function Payments({
         throw new Error(message);
       }
     },
-    [page, refresh, t, toast],
+    [editingPayment, page, refresh, t, toast],
   );
 
   const handleCloseModal = useCallback(() => {
@@ -1552,6 +1556,9 @@ export function Payments({
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
         onCreateRemainder={apiService.createPayment}
+        onBalanceApplied={async () => {
+          await refresh();
+        }}
         payment={editingPayment}
         type={modalType}
         onDelete={

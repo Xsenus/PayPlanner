@@ -19,6 +19,8 @@ const {
   toastErrorMock,
   updateInvoiceManagedPaymentMock,
   updatePaymentMock,
+  getClientBalanceMock,
+  applyClientBalanceMock,
 } = vi.hoisted(() => ({
   createPaymentMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
@@ -33,6 +35,8 @@ const {
   toastErrorMock: vi.fn(),
   updateInvoiceManagedPaymentMock: vi.fn(),
   updatePaymentMock: vi.fn(),
+  getClientBalanceMock: vi.fn(),
+  applyClientBalanceMock: vi.fn(),
 }));
 
 function createPermissions() {
@@ -269,6 +273,8 @@ vi.mock('../../services/api', () => ({
     getActResponsibles: getActResponsiblesMock,
     updateInvoiceManagedPayment: updateInvoiceManagedPaymentMock,
     updatePayment: updatePaymentMock,
+    getClientBalance: getClientBalanceMock,
+    applyClientBalance: applyClientBalanceMock,
   },
 }));
 
@@ -434,6 +440,8 @@ describe('Accounts integration', () => {
     toastErrorMock.mockReset();
     updateInvoiceManagedPaymentMock.mockReset();
     updatePaymentMock.mockReset();
+    getClientBalanceMock.mockReset();
+    applyClientBalanceMock.mockReset();
     createPaymentMock.mockReset();
     clearInvoiceEditorDraftMock.mockReset();
     peekInvoiceEditorDraftMock.mockReset();
@@ -480,6 +488,8 @@ describe('Accounts integration', () => {
     getActResponsiblesMock.mockResolvedValue([]);
     updateInvoiceManagedPaymentMock.mockResolvedValue(createSiblingPayment());
     updatePaymentMock.mockResolvedValue(createSiblingPayment());
+    getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
+    applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
     createPaymentMock.mockResolvedValue(createSiblingPayment({ id: 600 }));
     clearInvoiceEditorDraftMock.mockImplementation(() => undefined);
     peekInvoiceEditorDraftMock.mockReturnValue(null);

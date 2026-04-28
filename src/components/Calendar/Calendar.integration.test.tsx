@@ -73,6 +73,14 @@ vi.mock('../../hooks/usePayments', () => ({
   usePayments: () => paymentsResult,
 }));
 
+vi.mock('../../services/api', () => ({
+  apiService: {
+    getClientBalance: vi.fn().mockResolvedValue({ clientId: 1, balance: 0 }),
+    applyClientBalance: vi.fn().mockResolvedValue({ appliedAmount: 0, balance: 0 }),
+    updateInvoiceManagedPayment: vi.fn(),
+  },
+}));
+
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: ({
     columns,

@@ -18,6 +18,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { apiService } from '../../services/api';
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
@@ -308,7 +309,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     const isUpdate = 'id' in payload;
 
     try {
-      if (isUpdate) await updatePayment(payload);
+      if (isUpdate && editingPayment && isInvoiceManagedPayment(editingPayment)) {
+        await apiService.updateInvoiceManagedPayment(payload.id, payload);
+      } else if (isUpdate) await updatePayment(payload);
       else await createPayment(payload);
 
       await refreshPayments();
@@ -743,6 +746,10 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           type={modalType}
           onSubmit={handleSubmit}
           onCreateRemainder={createPayment}
+          onBalanceApplied={async () => {
+            await refreshPayments();
+            bumpStats();
+          }}
           payment={editingPayment}
           onDelete={
             calendarPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))

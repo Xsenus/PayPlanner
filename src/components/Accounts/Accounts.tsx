@@ -1756,6 +1756,9 @@ export function Accounts({
       payment={editingPayment ?? undefined}
       type={paymentModalType}
       linkedInvoice={paymentModalInvoiceContext}
+      onBalanceApplied={async () => {
+        await refreshAccounts();
+      }}
       onDelete={
         canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
           ? async (id) => {

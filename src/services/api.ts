@@ -1511,6 +1511,21 @@ export class ApiService {
     return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries${q}`);
   }
 
+  async getClientBalance(id: number) {
+    return this.request<ClientBalanceSummary>(`/clients/${id}/balance`);
+  }
+
+  async getClientBalanceTransactions(id: number) {
+    return this.request<ClientBalanceTransaction[]>(`/clients/${id}/balance/transactions`);
+  }
+
+  async applyClientBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null }) {
+    return this.request<ApplyClientBalanceResult>(`/clients/${id}/balance/apply`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getClientCaseExpenseDetails(
     id: number,
     params?: { caseId?: number; clientRole?: ClientRole },
@@ -2273,6 +2288,9 @@ import type {
   MoneyOperationSource,
   MoneyOperationsSummary,
   PaymentsListSummary,
+  ClientBalanceSummary,
+  ClientBalanceTransaction,
+  ApplyClientBalanceResult,
   CleanedAddress,
   DadataAddressSuggestion,
   ClientReferenceItem,

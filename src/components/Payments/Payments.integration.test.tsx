@@ -150,7 +150,10 @@ vi.mock('../../services/api', () => ({
     getPayment: vi.fn(),
     createPayment: vi.fn(),
     updatePayment: vi.fn(),
+    updateInvoiceManagedPayment: vi.fn(),
     deletePayment: vi.fn(),
+    getClientBalance: vi.fn(),
+    applyClientBalance: vi.fn(),
   },
 }));
 
@@ -163,7 +166,12 @@ describe('Payments integration', () => {
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.createPayment).mockReset();
     vi.mocked(apiService.updatePayment).mockReset();
+    vi.mocked(apiService.updateInvoiceManagedPayment).mockReset();
     vi.mocked(apiService.deletePayment).mockReset();
+    vi.mocked(apiService.getClientBalance).mockReset();
+    vi.mocked(apiService.applyClientBalance).mockReset();
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     usePaymentsPagedMock.mockReset();
     usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];

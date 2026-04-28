@@ -666,6 +666,37 @@ public class PaymentContext : DbContext
             entity.HasIndex(x => x.UserId).HasDatabaseName("IX_PaymentResponsibles_UserId");
         });
 
+        modelBuilder.Entity<ClientBalanceTransaction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Type).HasConversion<string>();
+            entity.Property(e => e.Direction).HasConversion<string>();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.ExternalKey).HasMaxLength(160);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.Client)
+                  .WithMany()
+                  .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Invoice)
+                  .WithMany()
+                  .HasForeignKey(e => e.InvoiceId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.Payment)
+                  .WithMany()
+                  .HasForeignKey(e => e.PaymentId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientBalanceTransactions_ClientId_CreatedAt");
+            entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_ClientBalanceTransactions_PaymentId");
+            entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_ClientBalanceTransactions_InvoiceId");
+            entity.HasIndex(e => e.ExternalKey).IsUnique().HasDatabaseName("IX_ClientBalanceTransactions_ExternalKey");
+        });
+
         // ------------------ MoneyOperation ------------------
         modelBuilder.Entity<MoneyOperation>(entity =>
         {
@@ -1843,6 +1874,8 @@ public class PaymentContext : DbContext
     /// Платежи клиентов.
     /// </summary>
     public DbSet<Payment> Payments { get; set; }
+
+    public DbSet<ClientBalanceTransaction> ClientBalanceTransactions { get; set; }
 
     /// <summary>
     /// Источники платежей.

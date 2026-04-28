@@ -1371,6 +1371,100 @@ public class PaymentsControllerTests
             badRequest.Value);
     }
 
+    [Fact]
+    public async Task UpdateInvoiceManaged_WithOverpayment_AddsClientBalanceCredit()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с переплатой", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "3", Date = new DateTime(2026, 1, 19) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 16_250m, "Счет №3");
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+
+        var installment = CreatePayment(new DateTime(2026, 4, 25), 16_250m, "Рассрочка по счету №3");
+        installment.ClientId = client.Id;
+        installment.InvoiceId = invoice.Id;
+        installment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатеж 3/6";
+        db.Payments.AddRange(invoiceDocument, installment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(installment.Date, 16_250m, installment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.PaidAmount = 17_000m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = new DateTime(2026, 4, 25);
+        update.LastPaymentDate = new DateTime(2026, 4, 25);
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var payment = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(16_250m, payment.PaidAmount);
+
+        var transaction = await db.ClientBalanceTransactions.SingleAsync();
+        Assert.Equal(client.Id, transaction.ClientId);
+        Assert.Equal(installment.Id, transaction.PaymentId);
+        Assert.Equal(750m, transaction.Amount);
+        Assert.Equal(ClientBalanceTransactionType.Overpayment, transaction.Type);
+        Assert.Equal(ClientBalanceDirection.Credit, transaction.Direction);
+    }
+
+    [Fact]
+    public async Task ApplyCredit_UsesClientBalanceAndCompletesPayment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с балансом", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Следующий платеж");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 250m;
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Переплата",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ClientBalancesController(db);
+
+        var actionResult = await controller.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updatedPayment = await db.Payments.FindAsync(payment.Id);
+        Assert.NotNull(updatedPayment);
+        Assert.Equal(1_000m, updatedPayment!.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, updatedPayment.Status);
+
+        var balance = await ClientBalanceService.GetBalanceAsync(db, client.Id);
+        Assert.Equal(50m, balance);
+        Assert.Equal(2, await db.ClientBalanceTransactions.CountAsync());
+        Assert.Contains(await db.ClientBalanceTransactions.ToListAsync(), item =>
+            item.Type == ClientBalanceTransactionType.CreditApplied
+            && item.Direction == ClientBalanceDirection.Debit
+            && item.Amount == 750m);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");

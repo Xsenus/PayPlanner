@@ -538,6 +538,38 @@ export interface PaymentsListSummary {
   expenseCount: number;
   total: number;
 }
+
+export type ClientBalanceTransactionType =
+  | 'Overpayment'
+  | 'CreditApplied'
+  | 'ManualAdjustment'
+  | 'Refund';
+
+export type ClientBalanceDirection = 'Credit' | 'Debit';
+
+export interface ClientBalanceSummary {
+  clientId: number;
+  balance: number;
+}
+
+export interface ClientBalanceTransaction {
+  id: number;
+  clientId: number;
+  invoiceId?: number | null;
+  paymentId?: number | null;
+  amount: number;
+  type: ClientBalanceTransactionType;
+  direction: ClientBalanceDirection;
+  description: string;
+  createdAt: string;
+  createdByUserName?: string | null;
+}
+
+export interface ApplyClientBalanceResult {
+  appliedAmount: number;
+  balance: number;
+}
+
 export interface IncomeType {
   id: number;
   name: string;

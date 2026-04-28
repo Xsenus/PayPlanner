@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History, Search, UserRoundSearch, Ban } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -71,6 +71,9 @@ interface PaymentModalProps {
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
   onCreateRemainder?: (payment: PaymentPayload) => Promise<unknown>;
+  availableClientBalance?: number;
+  onApplyClientBalance?: (amount: number) => Promise<unknown>;
+  onBalanceApplied?: (paymentId: number) => Promise<unknown> | unknown;
 }
 
 export function PaymentModal({
@@ -80,6 +83,9 @@ export function PaymentModal({
   payment,
   onDelete,
   onCreateRemainder,
+  availableClientBalance,
+  onApplyClientBalance,
+  onBalanceApplied,
   defaultClientId,
   defaultExpenseClientId,
   defaultClientCaseId,
@@ -97,6 +103,10 @@ export function PaymentModal({
   const { isRequired } = useFormRequirements('payments', isOpen);
 
   const [loading, setLoading] = useState(false);
+  const [balanceApplyLoading, setBalanceApplyLoading] = useState(false);
+  const [balanceApplyAmount, setBalanceApplyAmount] = useState('');
+  const [fetchedClientBalance, setFetchedClientBalance] = useState(0);
+  const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [fallbackCase, setFallbackCase] = useState<ClientCase | null>(null);
 
@@ -372,6 +382,8 @@ export function PaymentModal({
       setInvoiceSearch('');
       setInvoicePickerError(null);
       setInvoiceCreateSeedContractId('');
+      setFetchedClientBalance(0);
+      setBalanceApplyAmount('');
       return;
     }
 
@@ -459,6 +471,33 @@ export function PaymentModal({
       prevOpenRef.current = true;
     }
   }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, isOpen, linkedInvoice, type]);
+
+  useEffect(() => {
+    if (!isOpen || availableClientBalance !== undefined) return;
+    const clientId = Number(formData.clientId || 0);
+    if (!clientId || formData.type !== 'Income') {
+      setFetchedClientBalance(0);
+      return;
+    }
+
+    let cancelled = false;
+    setClientBalanceLoading(true);
+    apiService
+      .getClientBalance(clientId)
+      .then((summary) => {
+        if (!cancelled) setFetchedClientBalance(summary.balance ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedClientBalance(0);
+      })
+      .finally(() => {
+        if (!cancelled) setClientBalanceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availableClientBalance, formData.clientId, formData.type, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -726,8 +765,9 @@ export function PaymentModal({
     }
 
     const rawPaidAmount = parseDecimal(formData.paidAmount);
-    const safePaidAmount = Math.min(Math.max(rawPaidAmount, 0), amountNum);
-    const remainder = Math.max(Number((amountNum - safePaidAmount).toFixed(2)), 0);
+    const safePaidAmount = Math.max(rawPaidAmount, 0);
+    const paidForRemainder = Math.min(safePaidAmount, amountNum);
+    const remainder = Math.max(Number((amountNum - paidForRemainder).toFixed(2)), 0);
 
     setLoading(true);
 
@@ -772,7 +812,7 @@ export function PaymentModal({
     }
 
     try {
-      const baseAmount = shouldCreateRemainder ? Number(safePaidAmount.toFixed(2)) : amountNum;
+      const baseAmount = shouldCreateRemainder ? Number(paidForRemainder.toFixed(2)) : amountNum;
       const primaryStatus = shouldCreateRemainder ? 'Completed' : formData.status;
       const primaryPaidDate = shouldCreateRemainder
         ? normalizedPaidDate ?? normalizedDate
@@ -790,7 +830,7 @@ export function PaymentModal({
         : [];
 
       const payableBreakdownNote = shouldCreateRemainder
-        ? `Частичная оплата: ${formatMoneyDisplayValue(safePaidAmount)} / ${formatMoneyDisplayValue(
+        ? `Частичная оплата: ${formatMoneyDisplayValue(paidForRemainder)} / ${formatMoneyDisplayValue(
             amountNum,
           )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`
         : undefined;
@@ -859,7 +899,7 @@ export function PaymentModal({
           systemNotes: [
             `Остаток после частичной оплаты (${toRuDate(formData.date) || formData.date})`,
             `Источник платежа${payment?.id ? ` #${payment.id}` : ''}: ${formatMoneyDisplayValue(amountNum)} • Оплачено ${formatMoneyDisplayValue(
-              safePaidAmount,
+              paidForRemainder,
             )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`,
           ].join('\n'),
           rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
@@ -1197,13 +1237,61 @@ export function PaymentModal({
       setLoading(false);
     }
   };
+
+  const handleApplyClientBalance = async () => {
+    if (!payment || balanceApplyLoading) return;
+
+    const requestedAmount = parseDecimal(balanceApplyAmount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      toast.error('Укажите сумму зачета с баланса.');
+      return;
+    }
+
+    try {
+      setBalanceApplyLoading(true);
+      const clientId = Number(formData.clientId || 0);
+      if (onApplyClientBalance) {
+        await onApplyClientBalance(requestedAmount);
+      } else {
+        if (!clientId) {
+          throw new Error('Клиент не выбран.');
+        }
+        const result = await apiService.applyClientBalance(clientId, {
+          paymentId: payment.id,
+          amount: requestedAmount,
+        });
+        const amount = parseDecimal(formData.amount);
+        const paid = parseDecimal(formData.paidAmount);
+        const nextPaid = Math.min(amount, paid + (result.appliedAmount ?? requestedAmount));
+        setFormData((prev) => ({
+          ...prev,
+          paidAmount: formatMoneyDisplayValue(nextPaid),
+          isPaid: nextPaid >= amount - 0.005,
+          status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
+          lastPaymentDate: prev.lastPaymentDate || todayYMD(),
+          paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || todayYMD() : prev.paidDate,
+        }));
+        setFetchedClientBalance(result.balance ?? 0);
+      }
+      await onBalanceApplied?.(payment.id);
+      toast.success('Баланс зачтен в платеж.');
+      setBalanceApplyAmount('');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
+    } finally {
+      setBalanceApplyLoading(false);
+    }
+  };
   if (!isOpen) return null;
 
   const amountNum = parseDecimal(formData.amount);
   const paidAmountNum = parseDecimal(formData.paidAmount);
-  const remainingAmount = Math.max(amountNum - paidAmountNum, 0);
+  const remainingAmount = Math.max(amountNum - Math.min(paidAmountNum, amountNum), 0);
+  const overpaymentAmount = Math.max(paidAmountNum - amountNum, 0);
   const overpaid = paidAmountNum > amountNum + 0.005;
   const hasPartial = paidAmountNum > 0 && remainingAmount > 0;
+  const effectiveClientBalance = availableClientBalance ?? fetchedClientBalance;
+  const canApplyClientBalance = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
 
   const selDealTypeId = formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined;
   const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
@@ -1524,7 +1612,49 @@ export function PaymentModal({
                         </div>
                       </div>
                     )}
-                    {overpaid && <div className="text-sm text-rose-600">{'Внесённая сумма превышает запланированную.'} {formatMoneyDisplayValue(amountNum)}</div>}
+                    {overpaid && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                        Переплата {formatMoneyDisplayValue(overpaymentAmount)} будет записана на баланс клиента.
+                      </div>
+                    )}
+                    {canApplyClientBalance && (
+                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div className="min-w-[180px] flex-1">
+                            <label className="mb-1 block text-sm font-medium text-blue-900">
+                              Баланс клиента
+                            </label>
+                            <div className="text-sm text-blue-700">
+                              {clientBalanceLoading
+                                ? 'Проверяем баланс...'
+                                : `Доступно ${formatMoneyDisplayValue(effectiveClientBalance)}`}
+                            </div>
+                          </div>
+                          <div className="w-40">
+                            <label className="mb-1 block text-sm font-medium text-blue-900">
+                              Сумма зачета
+                            </label>
+                            <input
+                              type="text"
+                              value={balanceApplyAmount}
+                              onChange={(event) => setBalanceApplyAmount(event.target.value)}
+                              onBlur={(event) => setBalanceApplyAmount(normalizeMoneyInputValue(event.target.value))}
+                              className="w-full rounded-lg border border-blue-200 px-3 py-2 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                              placeholder={formatMoneyDisplayValue(Math.min(effectiveClientBalance, remainingAmount))}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleApplyClientBalance}
+                            disabled={balanceApplyLoading}
+                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <WalletCards className="h-4 w-4" />
+                            Зачесть
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('lastPaymentDate') ?? 'Дата фактического платежа'}</label>

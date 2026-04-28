@@ -575,6 +575,71 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("Clients");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientBalanceTransaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalKey")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExternalKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ClientBalanceTransactions_ExternalKey");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_ClientBalanceTransactions_InvoiceId");
+
+                    b.HasIndex("PaymentId")
+                        .HasDatabaseName("IX_ClientBalanceTransactions_PaymentId");
+
+                    b.HasIndex("ClientId", "CreatedAt")
+                        .HasDatabaseName("IX_ClientBalanceTransactions_ClientId_CreatedAt");
+
+                    b.ToTable("ClientBalanceTransactions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
                     b.Property<int>("Id")
@@ -3885,6 +3950,31 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LegalEntity");
 
                     b.Navigation("ResponsibleUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientBalanceTransaction", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Invoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("Invoice");
+
+                    b.Navigation("Payment");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
