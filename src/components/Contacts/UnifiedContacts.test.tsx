@@ -18,7 +18,9 @@ vi.mock('../LegalEntities/LegalEntityModal', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getClients: vi.fn(),
+    getClientsV2: vi.fn(),
     getLegalEntities: vi.fn(),
+    getLegalEntitiesPaged: vi.fn(),
     getInvoices: vi.fn(),
     getLegalEntity: vi.fn(),
     suggestLegalEntities: vi.fn(),
@@ -127,8 +129,12 @@ function mockUserSettings(values: Record<string, string | null> = {}) {
 }
 
 function mockApiData() {
-  vi.mocked(apiService.getClients).mockResolvedValue([createClient()]);
-  vi.mocked(apiService.getLegalEntities).mockResolvedValue([createLegalEntity()]);
+  const clients = [createClient()];
+  const legalEntities = [createLegalEntity()];
+  vi.mocked(apiService.getClients).mockResolvedValue(clients);
+  vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: clients, total: clients.length, page: 1, pageSize: 24 });
+  vi.mocked(apiService.getLegalEntities).mockResolvedValue(legalEntities);
+  vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: legalEntities, total: legalEntities.length, page: 1, pageSize: 24 });
   vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1 });
   vi.mocked(apiService.upsertUserSetting).mockResolvedValue(createSetting('saved', 'ok'));
 }

@@ -1257,9 +1257,63 @@ public class LegalEntitiesController : ControllerBase
             .Take(pageSize)
             .ToListAsync(ct);
 
+        var itemIds = items.Select(item => item.Id).ToList();
+        var casesCountByLegalEntity = itemIds.Count == 0
+            ? new Dictionary<int, int>()
+            : await _db.ClientCases
+                .AsNoTracking()
+                .Where(clientCase => clientCase.Client != null
+                    && clientCase.Client.LegalEntityId.HasValue
+                    && itemIds.Contains(clientCase.Client.LegalEntityId.Value))
+                .GroupBy(clientCase => clientCase.Client!.LegalEntityId!.Value)
+                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
+
+        var invoicesCountByLegalEntity = new Dictionary<int, int>();
+        if (itemIds.Count > 0)
+        {
+            var invoiceRows = await _db.Payments
+                .AsNoTracking()
+                .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
+                .Where(payment =>
+                    (payment.Client != null
+                        && payment.Client.LegalEntityId.HasValue
+                        && itemIds.Contains(payment.Client.LegalEntityId.Value)) ||
+                    (payment.ExpenseClient != null
+                        && payment.ExpenseClient.LegalEntityId.HasValue
+                        && itemIds.Contains(payment.ExpenseClient.LegalEntityId.Value)))
+                .Select(payment => new
+                {
+                    ClientLegalEntityId = payment.Client != null ? payment.Client.LegalEntityId : null,
+                    ExpenseClientLegalEntityId = payment.ExpenseClient != null ? payment.ExpenseClient.LegalEntityId : null,
+                })
+                .ToListAsync(ct);
+
+            foreach (var row in invoiceRows)
+            {
+                if (row.ClientLegalEntityId.HasValue && itemIds.Contains(row.ClientLegalEntityId.Value))
+                {
+                    invoicesCountByLegalEntity[row.ClientLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ClientLegalEntityId.Value) + 1;
+                }
+
+                if (row.ExpenseClientLegalEntityId.HasValue
+                    && itemIds.Contains(row.ExpenseClientLegalEntityId.Value)
+                    && row.ExpenseClientLegalEntityId != row.ClientLegalEntityId)
+                {
+                    invoicesCountByLegalEntity[row.ExpenseClientLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ExpenseClientLegalEntityId.Value) + 1;
+                }
+            }
+        }
+
         return Ok(new PagedResponse<LegalEntityListItemDto>
         {
-            Items = items.Select(item => MapDetail(item)).ToList(),
+            Items = items.Select(item =>
+            {
+                var dto = MapDetail(item);
+                dto.CasesCount = casesCountByLegalEntity.GetValueOrDefault(item.Id);
+                dto.InvoicesCount = invoicesCountByLegalEntity.GetValueOrDefault(item.Id);
+                return dto;
+            }).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize

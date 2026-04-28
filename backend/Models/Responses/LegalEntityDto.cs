@@ -72,6 +72,8 @@ public class LegalEntityListItemDto
     public string? ContactEmailsJson { get; set; }
     public string? Notes { get; set; }
     public int ClientsCount { get; set; }
+    public int CasesCount { get; set; }
+    public int InvoicesCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? AuditCreatedByUserId { get; set; }

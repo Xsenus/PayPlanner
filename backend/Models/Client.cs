@@ -47,6 +47,15 @@ namespace PayPlanner.Api.Models
         [NotMapped]
         public string? ResponsibleUserName { get; set; }
 
+        [NotMapped]
+        public int CasesCount { get; set; }
+
+        [NotMapped]
+        public int ContractsCount { get; set; }
+
+        [NotMapped]
+        public int InvoicesCount { get; set; }
+
         /// <summary>
         /// Дата и время создания записи (UTC).
         /// </summary>

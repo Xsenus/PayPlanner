@@ -297,25 +297,6 @@ function kindLabel(kind: UnifiedContact['kind']) {
   return kind === 'client' ? 'Физическое лицо' : 'Юридическое лицо';
 }
 
-function matchesQuery(item: UnifiedContact, query: string) {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-
-  return [
-    item.title,
-    item.subtitle,
-    item.phone,
-    item.email,
-    item.inn,
-    item.kpp,
-    item.address,
-    item.statusText,
-  ]
-    .join(' ')
-    .toLowerCase()
-    .includes(q);
-}
-
 function FieldCell({
   icon,
   label,
@@ -371,13 +352,16 @@ export function UnifiedContacts({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [kind, setKind] = useState<ContactKind>(initialKind);
   const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredViewMode(viewModeStorageKey) ?? 'cards');
   const [loadedViewModeSettingsKey, setLoadedViewModeSettingsKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [clientsTotal, setClientsTotal] = useState(0);
+  const [legalTotal, setLegalTotal] = useState(0);
   const [legalDetail, setLegalDetail] = useState<LegalEntityDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
-  const [clientInvoiceTotals, setClientInvoiceTotals] = useState<Record<number, number>>({});
   const [columnsOpen, setColumnsOpen] = useState(false);
   const viewModeSaveTimerRef = useRef<number | null>(null);
   const {
@@ -477,31 +461,116 @@ export function UnifiedContacts({
       }
       setError(null);
 
+      const query = debouncedSearch.trim() || undefined;
+
+      if (kind === 'client') {
+        if (!canViewClients) {
+          setItems([]);
+          setTotal(0);
+          setClientsTotal(0);
+          setLegalTotal(0);
+          return;
+        }
+
+        const [result, legalCounter] = await Promise.all([
+          apiService.getClientsV2({
+            search: query,
+            page,
+            pageSize: PAGE_SIZE,
+            sortBy: 'name',
+            sortDir: 'asc',
+          }),
+          !lockKind && canViewLegalEntities
+            ? apiService.getLegalEntitiesPaged({ search: query, page: 1, pageSize: 1 })
+            : Promise.resolve(null),
+        ]);
+        setItems(result.items.map(buildClientContact));
+        setTotal(result.total);
+        setClientsTotal(result.total);
+        if (legalCounter) {
+          setLegalTotal(legalCounter.total);
+        }
+        return;
+      }
+
+      if (kind === 'legal') {
+        if (!canViewLegalEntities) {
+          setItems([]);
+          setTotal(0);
+          setClientsTotal(0);
+          setLegalTotal(0);
+          return;
+        }
+
+        const [result, clientsCounter] = await Promise.all([
+          apiService.getLegalEntitiesPaged({
+            search: query,
+            page,
+            pageSize: PAGE_SIZE,
+          }),
+          !lockKind && canViewClients
+            ? apiService.getClientsV2({
+                search: query,
+                page: 1,
+                pageSize: 1,
+                sortBy: 'name',
+                sortDir: 'asc',
+              })
+            : Promise.resolve(null),
+        ]);
+        setItems(result.items.map(buildLegalContact));
+        setTotal(result.total);
+        if (clientsCounter) {
+          setClientsTotal(clientsCounter.total);
+        }
+        setLegalTotal(result.total);
+        return;
+      }
+
+      const windowSize = page * PAGE_SIZE;
       const [clientsResult, legalResult] = await Promise.allSettled([
-        canViewClients ? apiService.getClients() : Promise.resolve([] as Client[]),
-        canViewLegalEntities ? apiService.getLegalEntities() : Promise.resolve([] as LegalEntitySummary[]),
+        canViewClients
+          ? apiService.getClientsV2({
+              search: query,
+              page: 1,
+              pageSize: windowSize,
+              sortBy: 'name',
+              sortDir: 'asc',
+            })
+          : Promise.resolve({ items: [] as Client[], total: 0, page: 1, pageSize: windowSize }),
+        canViewLegalEntities
+          ? apiService.getLegalEntitiesPaged({ search: query, page: 1, pageSize: windowSize })
+          : Promise.resolve({ items: [] as LegalEntitySummary[], total: 0, page: 1, pageSize: windowSize }),
       ]);
 
       if (clientsResult.status === 'rejected' && legalResult.status === 'rejected') {
         throw clientsResult.reason;
       }
 
-      const clients = clientsResult.status === 'fulfilled' ? clientsResult.value : [];
-      const legalEntities = legalResult.status === 'fulfilled' ? legalResult.value : [];
+      const clientsPage = clientsResult.status === 'fulfilled'
+        ? clientsResult.value
+        : { items: [] as Client[], total: 0 };
+      const legalPage = legalResult.status === 'fulfilled'
+        ? legalResult.value
+        : { items: [] as LegalEntitySummary[], total: 0 };
+      const merged = [
+        ...clientsPage.items.map(buildClientContact),
+        ...legalPage.items.map(buildLegalContact),
+      ].sort((a, b) => a.title.localeCompare(b.title, 'ru'));
 
-      setItems([
-        ...clients.map(buildClientContact),
-        ...legalEntities.map(buildLegalContact),
-      ].sort((a, b) => a.title.localeCompare(b.title, 'ru')));
-      setClientInvoiceTotals({});
+      setItems(merged.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE));
+      setClientsTotal(clientsPage.total);
+      setLegalTotal(legalPage.total);
+      setTotal(clientsPage.total + legalPage.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить контакты');
       setItems([]);
+      setTotal(0);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [canViewClients, canViewLegalEntities]);
+  }, [canViewClients, canViewLegalEntities, debouncedSearch, kind, lockKind, page]);
 
   useEffect(() => {
     void load(true);
@@ -509,88 +578,34 @@ export function UnifiedContacts({
 
   useEffect(() => {
     setPage(1);
-  }, [kind, search, viewMode]);
-
-  const clientItems = useMemo(
-    () => items.filter((item): item is Extract<UnifiedContact, { kind: 'client' }> => item.kind === 'client'),
-    [items],
-  );
-
-  const filteredItems = useMemo(
-    () =>
-      items.filter((item) => {
-        if (kind !== 'all' && item.kind !== kind) return false;
-        return matchesQuery(item, search);
-      }),
-    [items, kind, search],
-  );
-
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
-  const pageItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const clientsCount = clientItems.length;
-  const legalCount = items.filter((item) => item.kind === 'legal').length;
+  }, [kind, search]);
 
   useEffect(() => {
-    const ids = new Set<number>();
-    pageItems.forEach((item) => {
-      if (item.kind === 'client') {
-        ids.add(item.sourceId);
-        return;
-      }
-      clientItems
-        .filter((clientItem) => clientItem.client.legalEntityId === item.sourceId)
-        .forEach((clientItem) => ids.add(clientItem.sourceId));
-    });
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
 
-    const missing = Array.from(ids).filter((id) => clientInvoiceTotals[id] === undefined);
-    if (missing.length === 0) return;
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-    let cancelled = false;
-    void Promise.allSettled(
-      missing.map(async (clientId) => {
-        const result = await apiService.getInvoices({ clientId, page: 1, pageSize: 1 });
-        return [clientId, result.total ?? result.items?.length ?? 0] as const;
-      }),
-    ).then((results) => {
-      if (cancelled) return;
-      setClientInvoiceTotals((prev) => {
-        const next = { ...prev };
-        results.forEach((result) => {
-          if (result.status === 'fulfilled') {
-            const [clientId, total] = result.value;
-            next[clientId] = total;
-          }
-        });
-        return next;
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [clientInvoiceTotals, clientItems, pageItems]);
-
-  const linkedClients = useCallback(
-    (legalEntityId: number) => clientItems.filter((clientItem) => clientItem.client.legalEntityId === legalEntityId),
-    [clientItems],
-  );
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageItems = items;
+  const clientsCount = kind === 'client' ? total : clientsTotal;
+  const legalCount = kind === 'legal' ? total : legalTotal;
 
   const getCaseCount = useCallback((item: UnifiedContact) => {
     if (item.kind === 'client') {
-      return item.client.cases?.length ?? 0;
+      return item.client.casesCount ?? item.client.cases?.length ?? 0;
     }
-    return linkedClients(item.sourceId).reduce((sum, clientItem) => sum + (clientItem.client.cases?.length ?? 0), 0);
-  }, [linkedClients]);
+    return item.legalEntity.casesCount ?? 0;
+  }, []);
 
   const getInvoiceCount = useCallback((item: UnifiedContact) => {
     if (item.kind === 'client') {
-      return clientInvoiceTotals[item.sourceId] ?? '...';
+      return item.client.invoicesCount ?? 0;
     }
-    const clients = linkedClients(item.sourceId);
-    if (clients.length === 0) return 0;
-    if (clients.some((clientItem) => clientInvoiceTotals[clientItem.sourceId] === undefined)) return '...';
-    return clients.reduce((sum, clientItem) => sum + (clientInvoiceTotals[clientItem.sourceId] ?? 0), 0);
-  }, [clientInvoiceTotals, linkedClients]);
+    return item.legalEntity.invoicesCount ?? 0;
+  }, []);
 
   const openItem = async (item: UnifiedContact) => {
     if (item.kind === 'client' && onOpenClient) {
@@ -734,7 +749,7 @@ export function UnifiedContacts({
       case 'cases':
         return getCaseCount(item);
       case 'contracts':
-        return item.kind === 'client' ? item.client.contracts?.length ?? 0 : '—';
+        return item.kind === 'client' ? item.client.contractsCount ?? item.client.contracts?.length ?? 0 : '—';
       case 'invoices':
         return getInvoiceCount(item);
       case 'createdAt':
@@ -820,7 +835,7 @@ export function UnifiedContacts({
         {!lockKind ? (
           <div className="grid grid-cols-3 gap-2 lg:w-auto">
             {[
-              ['all', `Все ${items.length}`],
+              ['all', `Все ${clientsTotal + legalTotal}`],
               ['client', `Физлица ${clientsCount}`],
               ['legal', `Юрлица ${legalCount}`],
             ].map(([value, label]) => (
@@ -990,16 +1005,16 @@ export function UnifiedContacts({
         </div>
       )}
 
-      {!loading && filteredItems.length === 0 ? (
+      {!loading && total === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-slate-500">
           Ничего не найдено
         </div>
       ) : null}
 
-      {!loading && filteredItems.length > 0 ? (
+      {!loading && total > 0 ? (
         <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            Показано {Math.min(filteredItems.length, (page - 1) * PAGE_SIZE + 1)}-{Math.min(filteredItems.length, page * PAGE_SIZE)} из {filteredItems.length}
+            Показано {Math.min(total, (page - 1) * PAGE_SIZE + 1)}-{Math.min(total, (page - 1) * PAGE_SIZE + pageItems.length)} из {total}
           </div>
           <div className="flex items-center gap-2">
             <button

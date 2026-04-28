@@ -85,8 +85,6 @@ public class ClientsV2Controller : ControllerBase
         }
 
         var q = BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
-            .Include(c => c.Cases)
-            .Include(c => c.Contracts)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
@@ -100,7 +98,12 @@ public class ClientsV2Controller : ControllerBase
                 (c.Email != null && c.Email.ToLower().Contains(search)) ||
                 (c.Phone != null && c.Phone.ToLower().Contains(search)) ||
                 (c.Company != null && c.Company.ToLower().Contains(search)) ||
-                (c.Address != null && c.Address.ToLower().Contains(search)));
+                (c.Address != null && c.Address.ToLower().Contains(search)) ||
+                (c.LegalEntity != null && c.LegalEntity.ShortName.ToLower().Contains(search)) ||
+                (c.LegalEntity != null && c.LegalEntity.FullName != null && c.LegalEntity.FullName.ToLower().Contains(search)) ||
+                (c.LegalEntity != null && c.LegalEntity.Inn != null && c.LegalEntity.Inn.ToLower().Contains(search)) ||
+                (c.LegalEntity != null && c.LegalEntity.Kpp != null && c.LegalEntity.Kpp.ToLower().Contains(search)) ||
+                (c.LegalEntity != null && c.LegalEntity.Ogrn != null && c.LegalEntity.Ogrn.ToLower().Contains(search)));
         }
 
         if (id.HasValue)
@@ -195,6 +198,54 @@ public class ClientsV2Controller : ControllerBase
         var total = await q.CountAsync(ct);
         var items = await q.AsNoTracking().Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
         PopulateResponsibleUserNames(items);
+
+        var itemIds = items.Select(c => c.Id).ToList();
+        if (itemIds.Count > 0)
+        {
+            var casesCountByClient = await _db.ClientCases
+                .AsNoTracking()
+                .Where(c => itemIds.Contains(c.ClientId))
+                .GroupBy(c => c.ClientId)
+                .Select(g => new { ClientId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
+
+            var contractsCountByClient = await _db.ClientContracts
+                .AsNoTracking()
+                .Where(c => itemIds.Contains(c.ClientId))
+                .GroupBy(c => c.ClientId)
+                .Select(g => new { ClientId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
+
+            var invoiceRows = await _db.Payments
+                .AsNoTracking()
+                .Where(p => p.DocumentKind == DocumentKind.Invoice)
+                .Where(p =>
+                    (p.ClientId.HasValue && itemIds.Contains(p.ClientId.Value)) ||
+                    (p.ExpenseClientId.HasValue && itemIds.Contains(p.ExpenseClientId.Value)))
+                .Select(p => new { p.ClientId, p.ExpenseClientId })
+                .ToListAsync(ct);
+
+            var invoicesCountByClient = new Dictionary<int, int>();
+            foreach (var row in invoiceRows)
+            {
+                if (row.ClientId.HasValue && itemIds.Contains(row.ClientId.Value))
+                {
+                    invoicesCountByClient[row.ClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ClientId.Value) + 1;
+                }
+
+                if (row.ExpenseClientId.HasValue && itemIds.Contains(row.ExpenseClientId.Value) && row.ExpenseClientId != row.ClientId)
+                {
+                    invoicesCountByClient[row.ExpenseClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ExpenseClientId.Value) + 1;
+                }
+            }
+
+            foreach (var item in items)
+            {
+                item.CasesCount = casesCountByClient.GetValueOrDefault(item.Id);
+                item.ContractsCount = contractsCountByClient.GetValueOrDefault(item.Id);
+                item.InvoicesCount = invoicesCountByClient.GetValueOrDefault(item.Id);
+            }
+        }
 
         return Ok(new { items, total, page, pageSize });
     }

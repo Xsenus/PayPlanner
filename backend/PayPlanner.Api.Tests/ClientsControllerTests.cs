@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
@@ -17,6 +18,119 @@ namespace PayPlanner.Api.Tests;
 public class ClientsControllerTests
 {
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
+
+    [Fact]
+    public async Task V2Get_ReturnsPagedSearchResults_WithContactCounters()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "admin");
+        var legalEntityId = await CreateLegalEntityAsync(db, "Alpha Legal");
+
+        var target = new Client
+        {
+            Name = "Alpha Client",
+            Email = "alpha@example.com",
+            Phone = "+70000000001",
+            Company = "Alpha",
+            Address = "Alpha Street",
+            LegalEntityId = legalEntityId,
+            IsActive = true,
+            ResponsibleUserId = userId,
+        };
+        var other = new Client
+        {
+            Name = "Beta Client",
+            Email = "beta@example.com",
+            Phone = "+70000000002",
+            Company = "Beta",
+            Address = "Beta Street",
+            IsActive = true,
+            ResponsibleUserId = userId,
+        };
+
+        db.Clients.AddRange(target, other);
+        await db.SaveChangesAsync();
+
+        db.ClientCases.AddRange(
+            new ClientCase { ClientId = target.Id, Title = "Case 1" },
+            new ClientCase { ClientId = target.Id, Title = "Case 2" });
+
+        var contract = new Contract
+        {
+            Number = "C-1",
+            Date = DateTime.UtcNow.Date,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        db.ClientContracts.Add(new ClientContract { ClientId = target.Id, ContractId = contract.Id });
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                ClientId = target.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 1000m,
+            },
+            new Payment
+            {
+                ExpenseClientId = target.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 2000m,
+            },
+            new Payment
+            {
+                ClientId = target.Id,
+                DocumentKind = DocumentKind.Payment,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 3000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateV2Controller(db, userId);
+
+        var action = await controller.Get(
+            search: "alpha",
+            isActive: null,
+            id: null,
+            name: null,
+            email: null,
+            phone: null,
+            company: null,
+            address: null,
+            notes: null,
+            legalEntityId: null,
+            legalEntityShortName: null,
+            legalEntityFullName: null,
+            legalEntityInn: null,
+            legalEntityOgrn: null,
+            legalEntityKpp: null,
+            clientStatusId: null,
+            clientStatus: null,
+            sortBy: "name",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 1,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var items = Assert.IsAssignableFrom<IEnumerable<Client>>(ok.Value!.GetType().GetProperty("items")!.GetValue(ok.Value)).ToList();
+        var total = Assert.IsType<int>(ok.Value.GetType().GetProperty("total")!.GetValue(ok.Value));
+        var item = Assert.Single(items);
+
+        Assert.Equal(1, total);
+        Assert.Equal(target.Id, item.Id);
+        Assert.Equal(2, item.CasesCount);
+        Assert.Equal(1, item.ContractsCount);
+        Assert.Equal(2, item.InvoicesCount);
+    }
 
     [Fact]
     public async Task Create_RoundTripsStructuredAddressEntries_WithFullAddress()
@@ -1100,6 +1214,26 @@ public class ClientsControllerTests
         };
 
         return controller;
+    }
+
+    private static ClientsV2Controller CreateV2Controller(PaymentContext db, int userId)
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Name, "РўРµСЃС‚РѕРІС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ"),
+        };
+
+        return new ClientsV2Controller(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

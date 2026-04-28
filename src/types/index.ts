@@ -142,6 +142,8 @@ export interface LegalEntitySummary {
   contactEmailsJson?: string | null;
   notes?: string | null;
   clientsCount: number;
+  casesCount?: number;
+  invoicesCount?: number;
   createdAt: string;
   updatedAt?: string | null;
   auditCreatedByUserId?: number | null;
@@ -373,6 +375,9 @@ export interface Client {
   clientStatus?: ClientStatus | null;
   cases?: ClientCase[];
   contracts?: Contract[];
+  casesCount?: number;
+  contractsCount?: number;
+  invoicesCount?: number;
   addresses?: AddressRecord[];
 }
 

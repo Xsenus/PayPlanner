@@ -325,6 +325,94 @@ public class LegalEntitiesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetPaged_ReturnsContactCounters_ForVisiblePageOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var targetLegalId = await CreateLegalEntityAsync(db, "Alpha Legal", inn: "7700000001");
+        var otherLegalId = await CreateLegalEntityAsync(db, "Beta Legal", inn: "7700000002");
+
+        var firstClient = new Client
+        {
+            Name = "Alpha Client 1",
+            LegalEntityId = targetLegalId,
+            IsActive = true,
+        };
+        var secondClient = new Client
+        {
+            Name = "Alpha Client 2",
+            LegalEntityId = targetLegalId,
+            IsActive = true,
+        };
+        var otherClient = new Client
+        {
+            Name = "Beta Client",
+            LegalEntityId = otherLegalId,
+            IsActive = true,
+        };
+
+        db.Clients.AddRange(firstClient, secondClient, otherClient);
+        await db.SaveChangesAsync();
+
+        db.ClientCases.AddRange(
+            new ClientCase { ClientId = firstClient.Id, Title = "Case 1" },
+            new ClientCase { ClientId = secondClient.Id, Title = "Case 2" },
+            new ClientCase { ClientId = otherClient.Id, Title = "Other Case" });
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                ClientId = firstClient.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 1000m,
+            },
+            new Payment
+            {
+                ExpenseClientId = secondClient.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 2000m,
+            },
+            new Payment
+            {
+                ClientId = firstClient.Id,
+                DocumentKind = DocumentKind.Payment,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 3000m,
+            },
+            new Payment
+            {
+                ClientId = otherClient.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 4000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+
+        var action = await controller.GetPaged(search: "alpha", page: 1, pageSize: 1, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var paged = Assert.IsType<PagedResponse<LegalEntityListItemDto>>(ok.Value);
+        var item = Assert.Single(paged.Items);
+
+        Assert.Equal(1, paged.Total);
+        Assert.Equal(targetLegalId, item.Id);
+        Assert.Equal(2, item.ClientsCount);
+        Assert.Equal(2, item.CasesCount);
+        Assert.Equal(2, item.InvoicesCount);
+    }
+
+    [Fact]
     public async Task Suggest_RejectsEmptyInput()
     {
         await using var db = await CreateContextAsync();
