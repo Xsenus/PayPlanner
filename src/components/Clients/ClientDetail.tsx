@@ -47,7 +47,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
 import { useToast } from "../../hooks/useToast";
-import { useLegalEntities } from "../../hooks/useLegalEntities";
 import { extractDisplayErrorMessage } from "../../utils/errorUtils";
 import { PaymentModal } from "../Calendar/PaymentModal";
 import type {
@@ -70,6 +69,7 @@ import type {
   InvoiceInput,
   LegalEntityDetail,
   LegalEntityInput,
+  LegalEntitySummary,
   Payment,
   PaymentPayload,
   PaymentStatus,
@@ -225,6 +225,7 @@ const SECTION_ORDER: ClientDetailSection[] = [
 ];
 
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const LEGAL_ENTITY_LOOKUP_PAGE_SIZE = 20;
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = "pp.client_detail_table";
 
 const PAYMENT_TABLE_COLUMNS: Array<{
@@ -1278,12 +1279,6 @@ export function ClientDetail({
       return firstAllowed ?? "payments";
     },
   );
-  const {
-    legalEntities,
-    createLegalEntity,
-    updateLegalEntity,
-    refresh: refreshLegalEntities,
-  } = useLegalEntities();
   const { statuses: clientStatuses } = useClientStatuses();
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
@@ -1350,6 +1345,15 @@ export function ClientDetail({
     isActive: true,
     clientStatusId: "",
   });
+  const [legalEntityOptions, setLegalEntityOptions] = useState<LegalEntitySummary[]>([]);
+  const [legalEntityLookupSearch, setLegalEntityLookupSearch] = useState("");
+  const debouncedLegalEntityLookupSearch = useDebouncedValue(
+    legalEntityLookupSearch.trim(),
+    300,
+  );
+  const [legalEntityLookupLoading, setLegalEntityLookupLoading] =
+    useState(false);
+  const [legalEntityLookupTotal, setLegalEntityLookupTotal] = useState(0);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<
     Record<number, DadataAddressSuggestion[]>
   >({});
@@ -1440,6 +1444,18 @@ export function ClientDetail({
     setLegalEntityDraft({ shortName: "", inn: "" });
   };
 
+  const mergeLegalEntityOptions = useCallback((items: LegalEntitySummary[]) => {
+    setLegalEntityOptions((prev) => {
+      const byId = new Map<number, LegalEntitySummary>();
+      [...prev, ...items].forEach((item) => byId.set(item.id, item));
+      return [...byId.values()].sort((a, b) =>
+        a.shortName.localeCompare(b.shortName, undefined, {
+          sensitivity: "base",
+        }),
+      );
+    });
+  }, []);
+
   const openLegalEntityCreateModal = () => {
     setLegalEntityModalInitial(null);
     setLegalEntityModalOpen(true);
@@ -1473,10 +1489,10 @@ export function ClientDetail({
     );
     const nextPayload = { ...payload, clientIds: nextClientIds };
     const saved = legalEntityModalInitial
-      ? await updateLegalEntity(legalEntityModalInitial.id, nextPayload)
-      : await createLegalEntity(nextPayload);
+      ? await apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
+      : await apiService.createLegalEntity(nextPayload);
 
-    await refreshLegalEntities();
+    mergeLegalEntityOptions([saved]);
     setClientFormState((prev) => ({
       ...prev,
       kind: "legal",
@@ -1503,12 +1519,12 @@ export function ClientDetail({
 
     try {
       setLegalEntityPromptSubmitting(true);
-      const created = await createLegalEntity({
+      const created = await apiService.createLegalEntity({
         shortName,
         inn: inn || undefined,
         clientIds: [clientId],
       });
-      await refreshLegalEntities();
+      mergeLegalEntityOptions([created]);
       setClientFormState((prev) => ({
         ...prev,
         kind: "legal",
@@ -2820,6 +2836,65 @@ export function ClientDetail({
     // });
   }, [clientData]);
 
+  useEffect(() => {
+    if (clientData?.legalEntity) {
+      mergeLegalEntityOptions([clientData.legalEntity]);
+    }
+  }, [clientData?.legalEntity, mergeLegalEntityOptions]);
+
+  useEffect(() => {
+    if (activeSection !== "profile" || clientFormState.kind !== "legal") {
+      return;
+    }
+
+    let alive = true;
+    setLegalEntityLookupLoading(true);
+
+    apiService
+      .getLegalEntitiesPaged({
+        search: debouncedLegalEntityLookupSearch || undefined,
+        page: 1,
+        pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE,
+      })
+      .then((response) => {
+        if (!alive) return;
+        setLegalEntityOptions((prev) => {
+          const selectedId = clientFormState.legalEntityId
+            ? Number(clientFormState.legalEntityId)
+            : null;
+          const selected = selectedId
+            ? prev.find((item) => item.id === selectedId)
+            : null;
+          const byId = new Map<number, LegalEntitySummary>();
+          if (selected) byId.set(selected.id, selected);
+          (response.items ?? []).forEach((item) => byId.set(item.id, item));
+          return [...byId.values()].sort((a, b) =>
+            a.shortName.localeCompare(b.shortName, undefined, {
+              sensitivity: "base",
+            }),
+          );
+        });
+        setLegalEntityLookupTotal(response.total ?? 0);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setLegalEntityLookupTotal(0);
+      })
+      .finally(() => {
+        if (!alive) return;
+        setLegalEntityLookupLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [
+    activeSection,
+    clientFormState.kind,
+    clientFormState.legalEntityId,
+    debouncedLegalEntityLookupSearch,
+  ]);
+
   const caseIdForQuery =
     selectedCaseId === "all" ? undefined : Number(selectedCaseId);
   const filteredCases = useMemo(() => {
@@ -3395,16 +3470,6 @@ export function ClientDetail({
   const editClientLabel = t("editClient") ?? "Изменить клиента";
   const addCaseLabel = t("addCase") ?? "Добавить дело";
 
-  const sortedLegalEntities = useMemo(
-    () =>
-      [...legalEntities].sort((a, b) =>
-        a.shortName.localeCompare(b.shortName, undefined, {
-          sensitivity: "base",
-        }),
-      ),
-    [legalEntities],
-  );
-
   const sortedClientStatuses = useMemo(
     () =>
       [...clientStatuses].sort((a, b) =>
@@ -3416,11 +3481,13 @@ export function ClientDetail({
   const selectedLegalEntity = useMemo(() => {
     if (!clientFormState.legalEntityId) return null;
     return (
-      sortedLegalEntities.find(
+      legalEntityOptions.find(
         (entity) => entity.id === Number(clientFormState.legalEntityId),
       ) ?? null
     );
-  }, [clientFormState.legalEntityId, sortedLegalEntities]);
+  }, [clientFormState.legalEntityId, legalEntityOptions]);
+
+  const sortedLegalEntities = legalEntityOptions;
 
   const selectedClientStatus = useMemo(() => {
     if (!clientFormState.clientStatusId) return null;
@@ -5214,6 +5281,17 @@ export function ClientDetail({
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     {t("legalEntity") || "Юридическое лицо"}
                   </label>
+                  <input
+                    type="text"
+                    value={legalEntityLookupSearch}
+                    onChange={(event) =>
+                      setLegalEntityLookupSearch(event.target.value)
+                    }
+                    disabled={!clientPermissions.canEdit}
+                    placeholder="Поиск по названию, ИНН, КПП или ОГРН"
+                    aria-label="Поиск юридического лица клиента"
+                    className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                  />
                   <select
                     name="legalEntityId"
                     value={clientFormState.legalEntityId}
@@ -5229,6 +5307,11 @@ export function ClientDetail({
                       </option>
                     ))}
                   </select>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {legalEntityLookupLoading
+                      ? "Загрузка юрлиц..."
+                      : `Найдено: ${legalEntityLookupTotal}`}
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"

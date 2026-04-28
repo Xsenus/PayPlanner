@@ -283,6 +283,10 @@ vi.mock('../../services/api', () => ({
     deleteClientPowerOfAttorney: vi.fn(),
     getOksoDictionary: vi.fn(),
     getOkpdtrDictionary: vi.fn(),
+    getLegalEntitiesPaged: vi.fn(),
+    createLegalEntity: vi.fn(),
+    updateLegalEntity: vi.fn(),
+    getLegalEntity: vi.fn(),
   },
 }));
 
@@ -489,6 +493,12 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
     vi.mocked(apiService.getOksoDictionary).mockResolvedValue([]);
     vi.mocked(apiService.getOkpdtrDictionary).mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+    });
   });
 
   it('does not enable hidden tab data hooks on the initial profile view', async () => {
@@ -501,6 +511,57 @@ describe('ClientDetail integration', () => {
     expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
+  it('loads legal entity lookup with paged search for legal client profile', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(apiService.getClient).mockResolvedValue({
+      ...createClient({ kind: 'legal' }),
+      legalEntityId: 21,
+      legalEntity: {
+        id: 21,
+        shortName: 'ООО Ромашка',
+        fullName: 'Общество с ограниченной ответственностью Ромашка',
+        inn: '6312000000',
+        clients: [],
+      },
+    } as Client);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+      items: [
+        {
+          id: 21,
+          shortName: 'ООО Ромашка',
+          fullName: 'Общество с ограниченной ответственностью Ромашка',
+          inn: '6312000000',
+          clients: [],
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await waitFor(() => {
+      expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledWith({
+        search: undefined,
+        page: 1,
+        pageSize: 20,
+      });
+    });
+    expect(screen.getByText(/ООО Ромашка/)).toBeTruthy();
+
+    await user.type(screen.getByLabelText('Поиск юридического лица клиента'), 'ром');
+
+    await waitFor(() => {
+      expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledWith({
+        search: 'ром',
+        page: 1,
+        pageSize: 20,
+      });
+    });
   });
 
   it('shows delete controls in profile subsections and removes an education row', async () => {
