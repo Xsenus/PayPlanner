@@ -242,7 +242,7 @@ public class PaymentsController : ControllerBase
     public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
-        if (missingUpdate.Count > 0) return BadRequest(new { message = "РќРµ Р·Р°РїРѕР»РЅРµРЅС‹ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ", missingFields = missingUpdate });
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
