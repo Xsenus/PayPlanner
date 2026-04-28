@@ -4,6 +4,13 @@ export const INVOICE_LINE_ITEMS_MARKER = '[pp:invoice-items]';
 
 const HIDDEN_SYSTEM_NOTE_MARKERS = [INSTALLMENT_PAYMENT_MARKER, INVOICE_LINE_ITEMS_MARKER] as const;
 const SYSTEM_NOTE_PREFIXES = ['system:', 'системно:'] as const;
+const WINDOWS_1251_DECODED_80_TO_FF =
+  'ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏђ‘’“”•–—\u0098™љ›њќћџ\u00A0ЎўЈ¤Ґ¦§Ё©Є«¬\u00AD®Ї°±Ііґµ¶·ё№є»јЅѕїАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя';
+
+const WINDOWS_1251_CHAR_TO_BYTE = new Map<string, number>(
+  Array.from(WINDOWS_1251_DECODED_80_TO_FF).map((char, index) => [char, index + 0x80]),
+);
+const MOJIBAKE_CYRILLIC_PATTERN = /[РС][\u0080-\u04FF]|[\u0402-\u045F][РС]/;
 
 function stripListPrefix(line: string): string {
   return line.startsWith('\u2022 ') ? line.slice(2) : line;
@@ -11,6 +18,34 @@ function stripListPrefix(line: string): string {
 
 function stripBom(line: string): string {
   return line.replace(/^\uFEFF/, '');
+}
+
+function repairWindows1251Mojibake(value: string): string {
+  if (!MOJIBAKE_CYRILLIC_PATTERN.test(value)) {
+    return value;
+  }
+
+  const bytes: number[] = [];
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code <= 0x7f) {
+      bytes.push(code);
+      continue;
+    }
+
+    const byte = WINDOWS_1251_CHAR_TO_BYTE.get(char);
+    if (byte === undefined) {
+      return value;
+    }
+
+    bytes.push(byte);
+  }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return value;
+  }
 }
 
 function stripSystemNotePrefix(line: string): string {
@@ -23,7 +58,7 @@ function stripSystemNotePrefix(line: string): string {
     }
   }
 
-  return normalized;
+  return repairWindows1251Mojibake(normalized);
 }
 
 function safeJsonParse(value: string): unknown | null {
@@ -141,4 +176,26 @@ export function getVisibleNoteLines(notes?: string | null): string[] {
 
 export function getVisibleNotes(notes?: string | null): string {
   return getVisibleNoteLines(notes).join('\n');
+}
+
+function parseMoneyFromText(value: string): number {
+  const normalized = value
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.-]/g, '');
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+export function getAppliedClientBalanceAmount(systemNotes?: string | null): number {
+  const total = getVisibleSystemNoteLines(systemNotes).reduce((sum, line) => {
+    const match = line.match(/зачтено\s+с\s+баланса(?:\s+клиента)?\s*:\s*([0-9\s.,-]+)/i);
+    if (!match) {
+      return sum;
+    }
+
+    return sum + Math.max(parseMoneyFromText(match[1]), 0);
+  }, 0);
+
+  return Number(total.toFixed(2));
 }

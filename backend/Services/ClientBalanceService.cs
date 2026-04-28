@@ -16,6 +16,15 @@ public static class ClientBalanceService
             .Where(item => item.ClientId == clientId)
             .SumAsync(item => item.Direction == ClientBalanceDirection.Credit ? item.Amount : -item.Amount, ct);
 
+    public static Task<decimal> GetAppliedCreditAmountAsync(PaymentContext db, int paymentId, CancellationToken ct = default)
+        => db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.PaymentId == paymentId
+                && item.Type == ClientBalanceTransactionType.CreditApplied
+                && item.Direction == ClientBalanceDirection.Debit)
+            .SumAsync(item => item.Amount, ct);
+
     public static async Task UpsertPaymentOverpaymentAsync(
         PaymentContext db,
         Payment payment,

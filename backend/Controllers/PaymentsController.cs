@@ -158,6 +158,14 @@ public class PaymentsController : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
         var rawPaidAmount = model.PaidAmount;
+        var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
+        if (rawPaidAmount + 0.009m < appliedCreditAmount)
+        {
+            return BadRequest(new
+            {
+                message = $"Оплата не может быть меньше зачтенной суммы с баланса клиента: {appliedCreditAmount.ToString("N2", culture)}."
+            });
+        }
         e.PaidAmount = rawPaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
@@ -295,6 +303,14 @@ public class PaymentsController : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
         var rawPaidAmount = model.PaidAmount;
+        var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
+        if (rawPaidAmount + 0.009m < appliedCreditAmount)
+        {
+            return BadRequest(new
+            {
+                message = $"Оплата не может быть меньше зачтенной суммы с баланса клиента: {appliedCreditAmount.ToString("N2", culture)}."
+            });
+        }
         e.PaidAmount = rawPaidAmount;
         e.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? e.LastPaymentDate;
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);

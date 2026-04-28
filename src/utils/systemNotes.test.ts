@@ -4,6 +4,7 @@ import {
   getVisibleNotes,
   getVisibleSystemNoteLines,
   getVisibleSystemNotes,
+  getAppliedClientBalanceAmount,
 } from './systemNotes';
 import { INSTALLMENT_PAYMENT_MARKER } from './installmentPlan';
 
@@ -78,5 +79,27 @@ describe('systemNotes helpers', () => {
     expect(getVisibleSystemNoteLines(notes)).toEqual(['Комментарий клиента']);
     expect(getVisibleNoteLines(notes)).toEqual(['Комментарий клиента']);
     expect(getVisibleNotes(notes)).toBe('Комментарий клиента');
+  });
+
+  it('repairs old windows-1251 mojibake system notes for display', () => {
+    const notes = [
+      'Системно: Р—Р°С‡С‚РµРЅРѕ СЃ Р±Р°Р»Р°РЅСЃР° РєР»РёРµРЅС‚Р°: 750,00',
+      'РџСЂРѕСЃСЂРѕС‡РµРЅ РІС‹РїРѕР»РЅРµРЅ',
+    ].join('\n');
+
+    expect(getVisibleSystemNoteLines(notes)).toEqual([
+      'Зачтено с баланса клиента: 750,00',
+      'Просрочен выполнен',
+    ]);
+  });
+
+  it('calculates applied client balance from visible system notes', () => {
+    const notes = [
+      'Системно: Зачтено с баланса клиента: 750,00',
+      'Зачтено с баланса клиента: 1 250.50',
+      'Системно: источник платежа изменен',
+    ].join('\n');
+
+    expect(getAppliedClientBalanceAmount(notes)).toBe(2000.5);
   });
 });

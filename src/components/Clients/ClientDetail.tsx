@@ -3853,7 +3853,7 @@ export function ClientDetail({
   const applyClientBalanceToPayment = async (amount: number) => {
     if (!editingPayment?.id || !clientId) return;
 
-    await apiService.applyClientBalance(clientId, {
+    const result = await apiService.applyClientBalance(clientId, {
       paymentId: editingPayment.id,
       amount,
     });
@@ -3863,6 +3863,7 @@ export function ClientDetail({
     await refreshClientBalance();
     if (clientBalanceExpanded) await refreshClientBalanceTransactions();
     bumpStats();
+    return result;
   };
 
   const removePayment = async (target: Payment | number) => {

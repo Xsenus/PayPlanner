@@ -1465,6 +1465,93 @@ public class PaymentsControllerTests
             && item.Amount == 750m);
     }
 
+    [Fact]
+    public async Task Update_WithAppliedClientBalance_RejectsLowerPaidAmount()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с зачетом", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 6, 25), 16_250m, "Следующий платеж");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 250m;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            PaymentId = payment.Id,
+            Amount = 250m,
+            Type = ClientBalanceTransactionType.CreditApplied,
+            Direction = ClientBalanceDirection.Debit,
+            Description = "Зачет баланса",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(payment.Date, payment.Amount, payment.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 100m;
+
+        var actionResult = await controller.Update(payment.Id, update, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("Оплата не может быть меньше зачтенной суммы", badRequest.Value?.ToString());
+        Assert.Equal(250m, (await db.Payments.FindAsync(payment.Id))!.PaidAmount);
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_WithAppliedClientBalance_RejectsLowerPaidAmount()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с зачетом по счету", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "3", Date = new DateTime(2026, 1, 19) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var installment = CreatePayment(new DateTime(2026, 6, 25), 16_250m, "Рассрочка по счету №3");
+        installment.ClientId = client.Id;
+        installment.InvoiceId = invoice.Id;
+        installment.DocumentKind = DocumentKind.Payment;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.PaidAmount = 250m;
+        installment.SystemNotes = $"{InstallmentPaymentMarker}\nЗачтено с баланса клиента: 250,00";
+        db.Payments.Add(installment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            InvoiceId = invoice.Id,
+            PaymentId = installment.Id,
+            Amount = 250m,
+            Type = ClientBalanceTransactionType.CreditApplied,
+            Direction = ClientBalanceDirection.Debit,
+            Description = "Зачет баланса",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(installment.Date, installment.Amount, installment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.PaidAmount = 100m;
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("Оплата не может быть меньше зачтенной суммы", badRequest.Value?.ToString());
+        Assert.Equal(250m, (await db.Payments.FindAsync(installment.Id))!.PaidAmount);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");

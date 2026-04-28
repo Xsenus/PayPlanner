@@ -533,15 +533,98 @@ describe('PaymentModal integration', () => {
       />,
     );
 
-    expect(await screen.findByText(/Доступно 750.00/i)).toBeTruthy();
+    expect(await screen.findByText('Баланс:')).toBeTruthy();
+    expect(await screen.findByText('750.00')).toBeTruthy();
 
-    const balanceInput = screen.getByPlaceholderText('750.00');
+    const balanceInput = screen.getByRole('textbox', { name: 'Сумма зачета' });
     fireEvent.change(balanceInput, { target: { value: '750' } });
     fireEvent.click(screen.getByRole('button', { name: /Зачесть/i }));
 
     await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledWith(69, { paymentId: 996, amount: 750 }));
     await waitFor(() => expect(onBalanceApplied).toHaveBeenCalledWith(996));
     expect(screen.getAllByDisplayValue('750.00').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Зачтено с баланса: 750.00/i)).toBeTruthy();
+
+    const paidAmountInput = document.body.querySelector(
+      'input[name="paidAmount"]',
+    ) as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+    fireEvent.change(paidAmountInput!, { target: { value: '100' } });
+    fireEvent.blur(paidAmountInput!);
+    expect(paidAmountInput!.value).toBe('750.00');
+  });
+
+  it('restores existing balance credit as minimum paid amount', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 500 });
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 997,
+          date: '2026-06-25',
+          plannedDate: '2026-06-25',
+          amount: 16_250,
+          paidAmount: 11,
+          outstandingAmount: 16_239,
+          hasPartialPayment: true,
+          status: 'Pending',
+          description: 'Рассрочка по счету №3',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: '2026-04-28',
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-06-25T00:00:00Z',
+          systemNotes: 'Системно: Зачтено с баланса клиента: 500,00',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const paidAmountInput = document.body.querySelector(
+      'input[name="paidAmount"]',
+    ) as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+    await waitFor(() => expect(paidAmountInput!.value).toBe('500.00'));
+
+    fireEvent.change(paidAmountInput!, { target: { value: '11' } });
+    expect(paidAmountInput!.value).toBe('11');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(paidAmountInput!.value).toBe('500.00');
+
+    fireEvent.change(paidAmountInput!, { target: { value: '11' } });
+    expect(paidAmountInput!.value).toBe('11');
+    fireEvent.blur(paidAmountInput!);
+    expect(paidAmountInput!.value).toBe('500.00');
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 997,
+        paidAmount: 500,
+      }),
+    );
   });
 
   it('annuls an editable payment from the payment card', async () => {
