@@ -291,6 +291,9 @@ vi.mock('../../services/api', () => ({
     createLegalEntity: vi.fn(),
     updateLegalEntity: vi.fn(),
     getLegalEntity: vi.fn(),
+    getClientBalance: vi.fn().mockResolvedValue({ clientId: 1, balance: 0 }),
+    getClientBalanceTransactions: vi.fn().mockResolvedValue([]),
+    applyClientBalance: vi.fn().mockResolvedValue({ appliedAmount: 0, balance: 0 }),
   },
 }));
 
@@ -458,6 +461,8 @@ vi.mock('../ui/TablePagination', () => ({
 }));
 
 vi.mock('../ui/ObjectAuditModal', () => ({
+  ObjectAuditModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="object-audit-modal" /> : null,
   ObjectAuditLauncher: () => null,
 }));
 
@@ -539,6 +544,38 @@ describe('ClientDetail integration', () => {
       expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
     });
     expect(apiService.getClients).not.toHaveBeenCalled();
+  });
+
+  it('opens balance journal and audit from compact header actions', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });
+    vi.mocked(apiService.getClientBalanceTransactions).mockResolvedValue([
+      {
+        id: 11,
+        clientId: 1,
+        amount: 750,
+        type: 'Overpayment',
+        direction: 'Credit',
+        description: 'Переплата по платежу',
+        createdAt: '2026-04-28T08:00:00Z',
+        createdByUserName: 'Администратор',
+      },
+    ]);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    const balanceButton = await screen.findByRole('button', { name: /История баланса/ });
+    await waitFor(() => {
+      expect(balanceButton.textContent).toContain('750');
+    });
+
+    await user.click(balanceButton);
+    expect(await screen.findByText('Баланс клиента')).toBeTruthy();
+    expect(await screen.findByText('Переплата по платежу')).toBeTruthy();
+    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(1);
+
+    await user.click(screen.getByRole('button', { name: 'История клиента' }));
+    expect(await screen.findByTestId('object-audit-modal')).toBeTruthy();
   });
 
   it('loads profile dictionaries and powers of attorney only when their groups are opened', async () => {

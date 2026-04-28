@@ -23,6 +23,8 @@ import {
   FileCheck2,
   FileSignature,
   Calculator,
+  History,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -73,6 +75,8 @@ import type {
   Payment,
   PaymentPayload,
   PaymentStatus,
+  ClientBalanceSummary,
+  ClientBalanceTransaction,
   PowerOfAttorney,
 } from "../../types";
 import type { MenuSectionKey } from "../../types/permissions";
@@ -89,7 +93,7 @@ import { FormPromptModal } from "../ui/FormPromptModal";
 import { LookupSelect } from "../ui/LookupSelect";
 import { TableColumnSettings } from "../ui/TableColumnSettings";
 import { TablePagination } from "../ui/TablePagination";
-import { ObjectAuditLauncher } from "../ui/ObjectAuditModal";
+import { ObjectAuditModal } from "../ui/ObjectAuditModal";
 import { isInvoiceManagedPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { ClientStatusBadge } from "./ClientStatusBadge";
@@ -227,6 +231,15 @@ const SECTION_ORDER: ClientDetailSection[] = [
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const LEGAL_ENTITY_LOOKUP_PAGE_SIZE = 20;
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = "pp.client_detail_table";
+const CLIENT_BALANCE_TRANSACTION_LABELS: Record<
+  ClientBalanceTransaction["type"],
+  string
+> = {
+  Overpayment: "Переплата",
+  CreditApplied: "Зачет",
+  ManualAdjustment: "Корректировка",
+  Refund: "Возврат",
+};
 
 const PAYMENT_TABLE_COLUMNS: Array<{
   key: PaymentTableColumnKey;
@@ -1282,10 +1295,50 @@ export function ClientDetail({
   const { statuses: clientStatuses } = useClientStatuses();
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
+  const [clientBalance, setClientBalance] = useState<ClientBalanceSummary | null>(null);
+  const [clientBalanceTransactions, setClientBalanceTransactions] = useState<ClientBalanceTransaction[]>([]);
+  const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
+  const [clientBalanceExpanded, setClientBalanceExpanded] = useState(false);
+  const [clientAuditOpen, setClientAuditOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(
     initialCaseId ?? "all",
   );
   const [clientFormSaving, setClientFormSaving] = useState(false);
+  const refreshClientBalance = useCallback(async () => {
+    if (!clientId) return;
+
+    setClientBalanceLoading(true);
+    try {
+      const summary = await apiService.getClientBalance(clientId);
+      setClientBalance(summary);
+    } catch (error) {
+      console.error("Failed to load client balance", error);
+      setClientBalance(null);
+    } finally {
+      setClientBalanceLoading(false);
+    }
+  }, [clientId]);
+
+  const refreshClientBalanceTransactions = useCallback(async () => {
+    if (!clientId) return;
+
+    try {
+      const transactions = await apiService.getClientBalanceTransactions(clientId);
+      setClientBalanceTransactions(transactions);
+    } catch (error) {
+      console.error("Failed to load client balance transactions", error);
+      setClientBalanceTransactions([]);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    void refreshClientBalance();
+  }, [refreshClientBalance]);
+
+  useEffect(() => {
+    if (!clientBalanceExpanded) return;
+    void refreshClientBalanceTransactions();
+  }, [clientBalanceExpanded, refreshClientBalanceTransactions]);
   // Временно закомментировано: будет возвращено при реинтеграции табов профиля.
   // const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
   // const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
@@ -2497,10 +2550,6 @@ export function ClientDetail({
     setContractPage(1);
   };
 
-  const openClientProfile = () => {
-    setActiveSection("profile");
-  };
-
   const handleUpdateClient = async (payload: ClientInput) => {
     if (!clientPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования клиента.");
@@ -3545,7 +3594,6 @@ export function ClientDetail({
     setActPage(1);
   }, [actPageSize]);
 
-  const editClientLabel = t("editClient") ?? "Изменить клиента";
   const addCaseLabel = t("addCase") ?? "Добавить дело";
 
   const sortedClientStatuses = useMemo(
@@ -3777,11 +3825,17 @@ export function ClientDetail({
     try {
       if (isEdit) {
         const { id, ...rest } = payload;
-        await apiService.updatePayment(id, toBody(rest));
+        if (editingPayment && isInvoiceManagedPayment(editingPayment)) {
+          await apiService.updateInvoiceManagedPayment(id, toBody(rest));
+        } else {
+          await apiService.updatePayment(id, toBody(rest));
+        }
       } else {
         await apiService.createPayment(toBody(payload));
       }
       await refreshPayments();
+      await refreshClientBalance();
+      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
       bumpStats();
       toast.success(isEdit ? "Платёж обновлён." : "Платёж создан.", "Платежи");
     } catch (error) {
@@ -3794,6 +3848,21 @@ export function ClientDetail({
       );
       throw error;
     }
+  };
+
+  const applyClientBalanceToPayment = async (amount: number) => {
+    if (!editingPayment?.id || !clientId) return;
+
+    await apiService.applyClientBalance(clientId, {
+      paymentId: editingPayment.id,
+      amount,
+    });
+    const freshPayment = await apiService.getPayment(editingPayment.id);
+    setEditingPayment(freshPayment);
+    await refreshPayments();
+    await refreshClientBalance();
+    if (clientBalanceExpanded) await refreshClientBalanceTransactions();
+    bumpStats();
   };
 
   const removePayment = async (target: Payment | number) => {
@@ -4917,17 +4986,24 @@ export function ClientDetail({
             <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {clientPermissions.canEdit && (
-              <button
-                type="button"
-                onClick={openClientProfile}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-600 shadow-sm transition-colors hover:bg-emerald-50"
-                title={editClientLabel}
-                aria-label={editClientLabel}
-              >
-                <Edit className="h-5 w-5" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setClientBalanceExpanded(true)}
+              className="inline-flex h-10 items-center rounded-lg border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
+              title="История баланса"
+              aria-label="История баланса"
+            >
+              Баланс: {clientBalanceLoading ? "..." : formatCurrencySmart(clientBalance?.balance ?? 0).full}
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientAuditOpen(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+              title="История клиента"
+              aria-label="История клиента"
+            >
+              <History className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
@@ -4957,45 +5033,55 @@ export function ClientDetail({
               <button
                 type="button"
                 onClick={openAddCase}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
+                title={addCaseLabel}
+                aria-label={addCaseLabel}
               >
-                <Plus size={16} /> {addCaseLabel}
+                <FileCheck2 size={18} />
               </button>
             )}
             {clientPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openAddPayment}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700"
+                title={SECTION_META.payments.actionLabel}
+                aria-label={SECTION_META.payments.actionLabel}
               >
-                <Plus size={16} /> {SECTION_META.payments.actionLabel}
+                <WalletCards size={18} />
               </button>
             )}
             {accountPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openInvoiceCreate}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm transition-colors hover:bg-teal-700"
+                title={SECTION_META.accounts.actionLabel}
+                aria-label={SECTION_META.accounts.actionLabel}
               >
-                <Plus size={16} /> {SECTION_META.accounts.actionLabel}
+                <Send size={18} />
               </button>
             )}
             {actPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openAddAct}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700"
+                title={SECTION_META.acts.actionLabel}
+                aria-label={SECTION_META.acts.actionLabel}
               >
-                <Plus size={16} /> {SECTION_META.acts.actionLabel}
+                <FileSignature size={18} />
               </button>
             )}
             {contractPermissions.canCreate && (
               <button
                 type="button"
                 onClick={openContractCreate}
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
+                title={SECTION_META.contracts.actionLabel}
+                aria-label={SECTION_META.contracts.actionLabel}
               >
-                <Plus size={16} /> {SECTION_META.contracts.actionLabel}
+                <Calculator size={18} />
               </button>
             )}
           </div>
@@ -5072,22 +5158,6 @@ export function ClientDetail({
                 просмотр.
               </div>
             )}
-            <div className="mb-4">
-              <ObjectAuditLauncher
-                objectType="client"
-                objectId={clientData?.id ?? 0}
-                createdAt={clientData?.createdAt}
-                createdByUserName={clientData?.auditCreatedByUserName}
-                updatedAt={clientData?.auditUpdatedAt}
-                updatedByUserName={clientData?.auditUpdatedByUserName}
-                isDeleted={clientData?.auditIsDeleted}
-                deletedAt={clientData?.auditDeletedAt}
-                deletedByUserName={clientData?.auditDeletedByUserName}
-                triggerTitle="Аудит клиента"
-                triggerDescription="Паспорт клиента и история изменений открываются в отдельном окне."
-                title="История клиента"
-              />
-            </div>
             <form
               onSubmit={handleClientFormSubmit}
               className="grid gap-4 md:grid-cols-2"
@@ -6717,9 +6787,6 @@ export function ClientDetail({
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-slate-500">
-                  {invoiceViewConfig.description}
-                </p>
               </ClientSectionFilterField>
               <DatePeriodPicker
                 label="Период"
@@ -6772,6 +6839,9 @@ export function ClientDetail({
                 </div>
               </ClientSectionFilterField>
             </ClientSectionFilterPanel>
+            <p className="-mt-4 mb-6 px-4 text-xs text-slate-500">
+              {invoiceViewConfig.description}
+            </p>
 
             <div className="mb-6 flex justify-end">
               <button
@@ -9120,6 +9190,99 @@ export function ClientDetail({
           </div>
         ) : null}
 
+        {clientBalanceExpanded ? (
+          <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/50 p-4">
+            <div className="flex max-h-[82vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Баланс клиента
+                  </p>
+                  <h2 className="mt-1 text-2xl font-semibold text-slate-900">
+                    {formatCurrencySmart(clientBalance?.balance ?? 0).full}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setClientBalanceExpanded(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50"
+                  title="Закрыть"
+                  aria-label="Закрыть"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto p-5">
+                {clientBalanceTransactions.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                    Движений по балансу пока нет.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {clientBalanceTransactions.map((item) => {
+                      const isCredit = item.direction === "Credit";
+                      const signedAmount = `${isCredit ? "+" : "-"}${formatCurrencySmart(item.amount).full}`;
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-slate-900">
+                                  {CLIENT_BALANCE_TRANSACTION_LABELS[item.type] ?? item.type}
+                                </span>
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                                  {new Date(item.createdAt).toLocaleString("ru-RU")}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-sm text-slate-600">
+                                {item.description || "Без описания"}
+                              </p>
+                              {item.createdByUserName ? (
+                                <p className="mt-1 text-xs text-slate-400">
+                                  Автор: {item.createdByUserName}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div
+                              className={`shrink-0 text-right text-base font-semibold ${
+                                isCredit ? "text-emerald-700" : "text-blue-700"
+                              }`}
+                            >
+                              {signedAmount}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {clientData?.id ? (
+          <ObjectAuditModal
+            open={clientAuditOpen}
+            onClose={() => setClientAuditOpen(false)}
+            objectType="client"
+            objectId={clientData.id}
+            createdAt={clientData.createdAt}
+            createdByUserName={clientData.auditCreatedByUserName}
+            updatedAt={clientData.auditUpdatedAt}
+            updatedByUserName={clientData.auditUpdatedByUserName}
+            isDeleted={clientData.auditIsDeleted}
+            deletedAt={clientData.auditDeletedAt}
+            deletedByUserName={clientData.auditDeletedByUserName}
+            title="История клиента"
+            subtitle="Паспорт клиента и история изменений."
+          />
+        ) : null}
+
         {invoiceModalOpen ? (
           <InvoiceModal
           open={invoiceModalOpen}
@@ -9187,10 +9350,14 @@ export function ClientDetail({
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
+          availableClientBalance={clientBalance?.balance ?? 0}
+          onApplyClientBalance={applyClientBalanceToPayment}
           onCreateRemainder={async (payload) => {
             try {
               await apiService.createPayment(toBody(payload));
               await refreshPayments();
+              await refreshClientBalance();
+              if (clientBalanceExpanded) await refreshClientBalanceTransactions();
               bumpStats();
             } catch (error) {
               toast.error(
