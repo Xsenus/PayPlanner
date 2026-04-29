@@ -486,6 +486,36 @@ describe('MoneyOperations integration', () => {
     expect(screen.queryByText('Поставщик А')).toBeNull();
   });
 
+  it('shows total turnover cards across all money sources', async () => {
+    operations = [
+      createOperation({
+        id: 1,
+        source: 'Bank',
+        direction: 'Income',
+        amount: 25000,
+        accountName: 'Основной банк',
+        counterpartyName: 'Клиент',
+      }),
+      createOperation({
+        id: 2,
+        source: 'Cash',
+        direction: 'Expense',
+        amount: 5000,
+        accountName: 'Касса',
+        counterpartyName: 'Поставщик',
+      }),
+    ];
+
+    render(<MoneyOperations source="Total" />);
+
+    expect(await screen.findByText('Общий баланс')).toBeTruthy();
+    expect(screen.getByText('Приход за период')).toBeTruthy();
+    expect(screen.getByText('Расход за период')).toBeTruthy();
+    expect(document.body.textContent).toContain('25 000,00 ₽');
+    expect(document.body.textContent).toContain('5 000,00 ₽');
+    expect(document.body.textContent).toContain('20 000,00 ₽');
+  });
+
   it('normalizes API dates in the edit form and updates the operation', async () => {
     const user = userEvent.setup();
     operations = [

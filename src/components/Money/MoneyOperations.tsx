@@ -1555,6 +1555,33 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             </button>
           </div>
 
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm text-slate-500">Баланс на начало</div>
+              <div className="mt-1 text-xl font-semibold text-amber-600">{formatMoney(totalRows.total.start)} ₽</div>
+              <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
+              <div className="mt-2 text-xs text-slate-400">{formatDate(from)}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm text-slate-500">Приход за период</div>
+              <div className="mt-1 text-xl font-semibold text-emerald-600">{formatMoney(totalRows.total.income)} ₽</div>
+              <div className="mt-3 h-0.5 w-full rounded-full bg-emerald-400"></div>
+              <div className="mt-2 text-xs text-slate-400">Все источники</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm text-slate-500">Расход за период</div>
+              <div className="mt-1 text-xl font-semibold text-rose-600">{formatMoney(totalRows.total.expense)} ₽</div>
+              <div className="mt-3 h-0.5 w-full rounded-full bg-rose-400"></div>
+              <div className="mt-2 text-xs text-slate-400">Все источники</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm text-slate-500">Общий баланс</div>
+              <div className="mt-1 text-xl font-semibold text-blue-700">{formatMoney(totalRows.total.end)} ₽</div>
+              <div className="mt-3 h-0.5 w-full rounded-full bg-blue-500"></div>
+              <div className="mt-2 text-xs text-slate-400">{formatDate(to)}</div>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-slate-200 bg-white">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] table-fixed text-sm">
