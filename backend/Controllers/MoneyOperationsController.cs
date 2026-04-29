@@ -673,8 +673,9 @@ public class MoneyOperationsController : ControllerBase
     }
 
     [HttpPost("bank-statement/import")]
+    [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxStatementFileSizeBytes)]
-    public async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement([FromForm] IFormFile? file, CancellationToken ct)
+    public async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement(IFormFile? file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
         {
