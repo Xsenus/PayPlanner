@@ -2134,6 +2134,7 @@ export class ApiService {
     source?: MoneyOperationSource;
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
+    accountName?: string;
     search?: string;
   }) {
     const q = buildQuery(params ?? {});
@@ -2146,12 +2147,27 @@ export class ApiService {
     source?: MoneyOperationSource;
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
+    accountName?: string;
     search?: string;
     page?: number;
     pageSize?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(`/money-operations/paged${q}`);
+  }
+
+  async getMoneyOperationAccounts(params?: { source?: MoneyOperationSource }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string[]>(`/money-operations/accounts${q}`);
+  }
+
+  async getMoneyOperationAccountSummaries(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyOperationAccountSummary[]>(`/money-operations/account-summaries${q}`);
   }
 
   async getMoneyOperation(id: number) {
@@ -2210,8 +2226,80 @@ export class ApiService {
     return this.request<PagedResult<CashOrder>>(`/cash-orders/paged${q}`);
   }
 
+  async getCashBook(params?: { from?: string; to?: string }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`);
+  }
+
+  async getCashBookPrintHtml(params?: { from?: string; to?: string }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/cash-orders/cashbook/print${q}`);
+  }
+
+  async getCashOrderRegister(params?: {
+    from?: string;
+    to?: string;
+    type?: 'Incoming' | 'Outgoing';
+    status?: 'Draft' | 'Posted' | 'Cancelled';
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 25,
+    });
+    return this.request<CashOrderRegister>(`/cash-orders/register${q}`);
+  }
+
+  async getCashOrderRegisterPrintHtml(params?: {
+    from?: string;
+    to?: string;
+    type?: 'Incoming' | 'Outgoing';
+    status?: 'Draft' | 'Posted' | 'Cancelled';
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/cash-orders/register/print${q}`);
+  }
+
+  async getCashOrder(id: number) {
+    return this.request<CashOrder>(`/cash-orders/${id}`);
+  }
+
+  async updateCashOrder(id: number, payload: CashOrder) {
+    return this.request<CashOrder>(`/cash-orders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async cancelCashOrder(id: number) {
+    return this.request<CashOrder>(`/cash-orders/${id}/cancel`, { method: 'POST' });
+  }
+
+  async copyCashOrder(id: number) {
+    return this.request<CashOrder>(`/cash-orders/${id}/copy`, { method: 'POST' });
+  }
+
   async getCashOrderPrintHtml(id: number) {
     return this.request<string>(`/cash-orders/${id}/print`);
+  }
+
+  async downloadCashOrderPdf(id: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/cash-orders/${id}/pdf`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response.blob();
   }
 
   getCashOrderPrintUrl(id: number) {
@@ -2330,11 +2418,14 @@ import type {
   PeriodKey,
   SummaryStatus,
   BankStatementImportResult,
+  CashBookSummary,
   CashOrder,
+  CashOrderRegister,
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  MoneyOperationAccountSummary,
   MoneyOperationsSummary,
   PaymentsListSummary,
   ClientBalanceSummary,

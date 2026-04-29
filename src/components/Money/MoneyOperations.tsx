@@ -2,18 +2,23 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar,
+  Ban,
   ChevronDown,
+  Copy,
+  Download,
   Filter,
   GripVertical,
   Plus,
   Pencil,
   Printer,
   ReceiptText,
+  Save,
   Search,
   SlidersHorizontal,
   Trash2,
   WalletCards,
   UploadCloud,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -29,10 +34,13 @@ import { TablePagination } from '../ui/TablePagination';
 import type {
   BankStatementImportCreatedOperation,
   MoneyOperation,
+  MoneyOperationAccountSummary,
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  CashBookSummary,
   CashOrder,
+  CashOrderRegister,
   CashOrderType,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -159,20 +167,281 @@ function formatDate(value: string) {
   return value;
 }
 
+function mapCashOrderToForm(order: CashOrder): CashOrder {
+  return {
+    ...order,
+    date: toDateInputValue(order.date) || todayYMD(),
+    currency: order.currency || 'RUB',
+    account: order.account || '',
+    payerName: order.payerName || '',
+    basis: order.basis || '',
+    comment: order.comment || '',
+  };
+}
+
+function CashOrderModal({
+  order,
+  open,
+  isSaving,
+  onClose,
+  onSave,
+  onCancelOrder,
+  onCopy,
+  onDownloadPdf,
+  onPrint,
+}: {
+  order: CashOrder | null;
+  open: boolean;
+  isSaving: boolean;
+  onClose: () => void;
+  onSave: (payload: CashOrder) => Promise<void>;
+  onCancelOrder: (order: CashOrder) => Promise<void>;
+  onCopy: (order: CashOrder) => Promise<void>;
+  onDownloadPdf: (id: number) => Promise<void>;
+  onPrint: (id: number) => void;
+}) {
+  const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open && order) {
+      setForm(mapCashOrderToForm(order));
+      setError(null);
+    }
+  }, [open, order]);
+
+  if (!open || !order || !form) return null;
+
+  const isCancelled = form.status === 'Cancelled';
+  const title = `${form.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'} ${form.number}`;
+
+  const setField = <K extends keyof CashOrder>(key: K, value: CashOrder[K]) => {
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      await onSave({
+        ...form,
+        date: fromInputToApiDate(form.date) ?? form.date,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить кассовый ордер.');
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Кассовый документ</div>
+            <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{formatDate(form.date)}</span>
+              <span>•</span>
+              <span>{formatMoney(form.amount)} ₽</span>
+              <span
+                className={[
+                  'rounded-full px-2 py-0.5 text-xs font-medium',
+                  isCancelled ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700',
+                ].join(' ')}>
+                {isCancelled ? 'Отменён' : 'Проведён'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
+            aria-label="Закрыть карточку кассового ордера">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {error && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Тип
+              <select
+                value={form.type}
+                disabled={isCancelled}
+                onChange={(event) => setField('type', event.target.value as CashOrderType)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100">
+                <option value="Incoming">ПКО</option>
+                <option value="Outgoing">РКО</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Дата
+              <input
+                type="date"
+                value={form.date}
+                disabled={isCancelled}
+                onChange={(event) => setField('date', event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Сумма
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.amount}
+                disabled={isCancelled}
+                onChange={(event) => setField('amount', Number(event.target.value) || 0)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Валюта
+              <input
+                value={form.currency ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('currency', event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Счёт / касса
+              <input
+                value={form.account ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('account', event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Плательщик / получатель
+              <input
+                value={form.payerName ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('payerName', event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Основание
+              <textarea
+                value={form.basis ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('basis', event.target.value)}
+                rows={4}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Комментарий
+              <textarea
+                value={form.comment ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('comment', event.target.value)}
+                rows={4}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-3">
+            <div>
+              <div className="text-xs uppercase text-slate-400">Клиент</div>
+              <div className="mt-1 font-medium text-slate-800">{form.clientName ?? '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-slate-400">Связанный платёж</div>
+              <div className="mt-1 font-medium text-slate-800">{form.paymentId ? `#${form.paymentId}` : '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-slate-400">Операция денег</div>
+              <div className="mt-1 font-medium text-slate-800">{form.moneyOperationId ? `#${form.moneyOperationId}` : '—'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPrint(form.id)}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+              <Printer className="h-4 w-4" />
+              Печать
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDownloadPdf(form.id)}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <Download className="h-4 w-4" />
+              PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => void onCopy(form)}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+              <Copy className="h-4 w-4" />
+              Копировать
+            </button>
+            <button
+              type="button"
+              onClick={() => void onCancelOrder(form)}
+              disabled={isCancelled || isSaving}
+              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">
+              <Ban className="h-4 w-4" />
+              Отменить
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              Закрыть
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={isCancelled || isSaving}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              <Save className="h-4 w-4" />
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CashOrdersPanel({
   from,
   to,
   search,
   refreshKey,
+  onOpen,
   onPrint,
 }: {
   from: string;
   to: string;
   search: string;
   refreshKey: number;
+  onOpen: (cashOrderId: number) => void;
   onPrint: (cashOrderId: number) => void;
 }) {
   const [orders, setOrders] = useState<CashOrder[]>([]);
+  const [cashBook, setCashBook] = useState<CashBookSummary | null>(null);
+  const [registerSummary, setRegisterSummary] = useState<CashOrderRegister | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<CashOrderType | 'all'>('all');
@@ -181,13 +450,44 @@ function CashOrdersPanel({
   const [error, setError] = useState<string | null>(null);
   const pageSize = 10;
 
+  const openPrintHtml = (html: string) => {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const handlePrintCashBook = async () => {
+    try {
+      const html = await apiService.getCashBookPrintHtml({ from, to });
+      openPrintHtml(html);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму кассовой книги.'));
+    }
+  };
+
+  const handlePrintRegister = async () => {
+    try {
+      const html = await apiService.getCashOrderRegisterPrintHtml({
+        from,
+        to,
+        type: typeFilter === 'all' ? undefined : typeFilter,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search,
+      });
+      openPrintHtml(html);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму журнала регистрации.'));
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    apiService
-      .getCashOrdersPaged({
+    Promise.all([
+      apiService.getCashOrderRegister({
         from,
         to,
         type: typeFilter === 'all' ? undefined : typeFilter,
@@ -195,16 +495,22 @@ function CashOrdersPanel({
         search,
         page,
         pageSize,
-      })
-      .then((data) => {
+      }),
+      apiService.getCashBook({ from, to }),
+    ])
+      .then(([data, book]) => {
         if (cancelled) return;
         setOrders(data.items);
         setTotal(data.total);
+        setRegisterSummary(data);
+        setCashBook(book);
       })
       .catch((err) => {
         if (cancelled) return;
         setOrders([]);
         setTotal(0);
+        setRegisterSummary(null);
+        setCashBook(null);
         setError(extractDisplayErrorMessage(err, 'Не удалось загрузить кассовые ордера.'));
       })
       .finally(() => {
@@ -230,6 +536,20 @@ function CashOrdersPanel({
           <p className="text-sm text-slate-500">ПКО и РКО по выбранному периоду кассы</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handlePrintCashBook()}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50">
+            <Printer className="h-4 w-4" />
+            Кассовая книга
+          </button>
+          <button
+            type="button"
+            onClick={() => void handlePrintRegister()}
+            className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50">
+            <Printer className="h-4 w-4" />
+            Журнал
+          </button>
           {([
             { key: 'all', label: 'Все' },
             { key: 'Incoming', label: 'ПКО' },
@@ -270,6 +590,88 @@ function CashOrdersPanel({
           <div className="ml-2 text-sm text-slate-500">Всего: {total}</div>
         </div>
       </div>
+
+      {registerSummary && (
+        <div className="grid gap-3 border-b border-slate-200 px-4 py-3 md:grid-cols-4">
+          <div className="rounded-lg bg-emerald-50 px-3 py-2">
+            <div className="text-xs uppercase text-emerald-700/70">Приходные ордера</div>
+            <div className="mt-1 text-base font-semibold text-emerald-700">
+              {registerSummary.incomingCount} на {formatMoney(registerSummary.incomingAmount)} ₽
+            </div>
+          </div>
+          <div className="rounded-lg bg-rose-50 px-3 py-2">
+            <div className="text-xs uppercase text-rose-700/70">Расходные ордера</div>
+            <div className="mt-1 text-base font-semibold text-rose-700">
+              {registerSummary.outgoingCount} на {formatMoney(registerSummary.outgoingAmount)} ₽
+            </div>
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="text-xs uppercase text-slate-500">Проведено</div>
+            <div className="mt-1 text-base font-semibold text-slate-800">{registerSummary.postedCount}</div>
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="text-xs uppercase text-slate-500">Отменено</div>
+            <div className="mt-1 text-base font-semibold text-slate-800">{registerSummary.cancelledCount}</div>
+          </div>
+        </div>
+      )}
+
+      {cashBook && (
+        <div className="grid gap-3 border-b border-slate-200 bg-slate-50/60 p-4 md:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-xs uppercase text-slate-400">Остаток на начало</div>
+            <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.openingBalance)} ₽</div>
+            <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.from)}</div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-xs uppercase text-slate-400">Приход</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-600">{formatMoney(cashBook.income)} ₽</div>
+            <div className="mt-1 text-xs text-slate-400">ПКО: {cashBook.incomingCount}</div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-xs uppercase text-slate-400">Расход</div>
+            <div className="mt-1 text-lg font-semibold text-rose-600">{formatMoney(cashBook.expense)} ₽</div>
+            <div className="mt-1 text-xs text-slate-400">РКО: {cashBook.outgoingCount}</div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-xs uppercase text-slate-400">Остаток на конец</div>
+            <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.closingBalance)} ₽</div>
+            <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.to)}</div>
+          </div>
+          {cashBook.days.length > 0 && (
+            <div className="md:col-span-4">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead className="bg-white text-xs uppercase text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">День</th>
+                      <th className="px-3 py-2 text-right font-medium">Начало</th>
+                      <th className="px-3 py-2 text-right font-medium">Приход</th>
+                      <th className="px-3 py-2 text-right font-medium">Расход</th>
+                      <th className="px-3 py-2 text-right font-medium">Конец</th>
+                      <th className="px-3 py-2 text-right font-medium">Документы</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {cashBook.days.map((day) => (
+                      <tr key={day.date}>
+                        <td className="px-3 py-2 font-medium text-slate-800">{formatDate(day.date)}</td>
+                        <td className="px-3 py-2 text-right">{formatMoney(day.openingBalance)} ₽</td>
+                        <td className="px-3 py-2 text-right text-emerald-600">{formatMoney(day.income)} ₽</td>
+                        <td className="px-3 py-2 text-right text-rose-600">{formatMoney(day.expense)} ₽</td>
+                        <td className="px-3 py-2 text-right font-medium">{formatMoney(day.closingBalance)} ₽</td>
+                        <td className="px-3 py-2 text-right text-slate-500">
+                          ПКО: {day.incomingCount}, РКО: {day.outgoingCount}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] table-fixed text-sm">
@@ -315,7 +717,14 @@ function CashOrdersPanel({
             ) : (
               orders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2 font-medium text-slate-900">{order.number}</td>
+                  <td className="px-3 py-2 font-medium text-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(order.id)}
+                      className="text-left text-blue-700 hover:text-blue-900 hover:underline">
+                      {order.number}
+                    </button>
+                  </td>
                   <td className="px-3 py-2">{formatDate(order.date)}</td>
                   <td className="px-3 py-2">
                     <span
@@ -336,6 +745,14 @@ function CashOrdersPanel({
                     </div>
                   </td>
                   <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(order.id)}
+                      className="mr-2 rounded-md border border-blue-200 p-2 text-blue-700 hover:bg-blue-50"
+                      aria-label="Открыть карточку кассового ордера"
+                      title="Открыть карточку кассового ордера">
+                      <ReceiptText className="h-4 w-4" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => onPrint(order.id)}
@@ -625,6 +1042,8 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
@@ -632,6 +1051,9 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
   const [page, setPage] = useState(1);
   const [cashOrdersRefreshKey, setCashOrdersRefreshKey] = useState(0);
+  const [cashOrderModalOpen, setCashOrderModalOpen] = useState(false);
+  const [selectedCashOrder, setSelectedCashOrder] = useState<CashOrder | null>(null);
+  const [cashOrderSaving, setCashOrderSaving] = useState(false);
   const [bankStatementImporting, setBankStatementImporting] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     rowsRead: number;
@@ -689,6 +1111,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     from,
     to,
     source: apiSource,
+    accountName: accountName || undefined,
     search: debouncedSearch,
     page: source === 'Total' ? 1 : page,
     pageSize: effectivePageSize,
@@ -709,6 +1132,38 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     () => orderedVisibleColumns.map((key) => moneyColumnsByKey[key]).filter(Boolean),
     [moneyColumnsByKey, orderedVisibleColumns],
   );
+  const selectedAccountSummary = useMemo(
+    () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
+    [accountName, accountSummaries],
+  );
+
+  useEffect(() => {
+    if (source === 'Total') {
+      setAccountName('');
+      setAccountSummaries([]);
+      return;
+    }
+
+    let cancelled = false;
+    setAccountName('');
+
+    apiService
+      .getMoneyOperationAccountSummaries({ from, to, source })
+      .then((accounts) => {
+        if (!cancelled) {
+          setAccountSummaries(accounts);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAccountSummaries([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [from, source, to]);
 
   const totalRows = useMemo(() => {
     const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
@@ -756,6 +1211,86 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму кассового ордера.');
       toast.error(message, 'Касса');
+    }
+  };
+
+  const handleOpenCashOrder = async (cashOrderId: number) => {
+    try {
+      const order = await apiService.getCashOrder(cashOrderId);
+      setSelectedCashOrder(order);
+      setCashOrderModalOpen(true);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось открыть карточку кассового ордера.');
+      toast.error(message, 'Касса');
+    }
+  };
+
+  const handleSaveCashOrder = async (payload: CashOrder) => {
+    setCashOrderSaving(true);
+    try {
+      const updated = await apiService.updateCashOrder(payload.id, payload);
+      setSelectedCashOrder(updated);
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success('Кассовый ордер сохранён.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить кассовый ордер.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    } finally {
+      setCashOrderSaving(false);
+    }
+  };
+
+  const handleCancelCashOrder = async (order: CashOrder) => {
+    setCashOrderSaving(true);
+    try {
+      const cancelled = await apiService.cancelCashOrder(order.id);
+      setSelectedCashOrder(cancelled);
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success('Кассовый ордер отменён.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось отменить кассовый ордер.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    } finally {
+      setCashOrderSaving(false);
+    }
+  };
+
+  const handleCopyCashOrder = async (order: CashOrder) => {
+    setCashOrderSaving(true);
+    try {
+      const copied = await apiService.copyCashOrder(order.id);
+      setSelectedCashOrder(copied);
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success(`Создана копия кассового ордера ${copied.number}.`, 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось скопировать кассовый ордер.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    } finally {
+      setCashOrderSaving(false);
+    }
+  };
+
+  const handleDownloadCashOrderPdf = async (cashOrderId: number) => {
+    try {
+      const blob = await apiService.downloadCashOrderPdf(cashOrderId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${selectedCashOrder?.number ?? `cash-order-${cashOrderId}`}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось скачать PDF кассового ордера.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
     }
   };
 
@@ -882,9 +1417,9 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
           return (
             <button
               type="button"
-              onClick={() => item.cashOrderId && handlePrintCashOrder(item.cashOrderId)}
+              onClick={() => item.cashOrderId && void handleOpenCashOrder(item.cashOrderId)}
               className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-              title="Открыть печатную форму кассового ордера">
+              title="Открыть карточку кассового ордера">
               <ReceiptText className="h-3.5 w-3.5" />
               {item.cashOrderNumber}
             </button>
@@ -908,7 +1443,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   useEffect(() => {
     if (source === 'Total') return;
     setPage(1);
-  }, [debouncedSearch, from, pageSize, source, to]);
+  }, [accountName, debouncedSearch, from, pageSize, source, to]);
 
   useEffect(() => {
     if (source === 'Total') return;
@@ -1067,6 +1602,32 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Добавить счёт или кассу</h1>
           <p className="text-sm text-slate-500">Операции по деньгам ({SOURCE_LABELS[source]})</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-400" htmlFor="money-account-filter">
+              {source === 'Bank' ? 'Банковский счёт' : source === 'Cash' ? 'Касса' : 'Счёт'}
+            </label>
+            <select
+              id="money-account-filter"
+              value={accountName}
+              onChange={(event) => setAccountName(event.target.value)}
+              className="min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-500 focus:outline-none">
+              <option value="">Все счета</option>
+              {accountSummaries.map((account) => (
+                <option key={`${account.source}-${account.accountName}`} value={account.accountName}>
+                  {account.accountName}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedAccountSummary && (
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              <span>
+                Остаток: <strong className="font-semibold text-slate-800">{formatMoney(selectedAccountSummary.endBalance)} ₽</strong>
+              </span>
+              <span className="text-emerald-600">Приход: {formatMoney(selectedAccountSummary.income)} ₽</span>
+              <span className="text-rose-600">Расход: {formatMoney(selectedAccountSummary.expense)} ₽</span>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {source === 'Bank' && (
@@ -1448,11 +2009,11 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                         )}
                         {item.cashOrderId && (
                           <button
-                            onClick={() => handlePrintCashOrder(item.cashOrderId!)}
+                            onClick={() => void handleOpenCashOrder(item.cashOrderId!)}
                             className="rounded-md border border-emerald-200 p-2 text-emerald-700 hover:bg-emerald-50"
-                            aria-label="Печать кассового ордера"
-                            title="Печать кассового ордера">
-                            <Printer className="h-4 w-4" />
+                            aria-label="Открыть карточку кассового ордера"
+                            title="Открыть карточку кассового ордера">
+                            <ReceiptText className="h-4 w-4" />
                           </button>
                         )}
                         <button
@@ -1499,9 +2060,25 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
           to={to}
           search={debouncedSearch}
           refreshKey={cashOrdersRefreshKey}
+          onOpen={(cashOrderId) => void handleOpenCashOrder(cashOrderId)}
           onPrint={handlePrintCashOrder}
         />
       )}
+
+      <CashOrderModal
+        order={selectedCashOrder}
+        open={cashOrderModalOpen}
+        isSaving={cashOrderSaving}
+        onClose={() => {
+          setCashOrderModalOpen(false);
+          setSelectedCashOrder(null);
+        }}
+        onSave={handleSaveCashOrder}
+        onCancelOrder={handleCancelCashOrder}
+        onCopy={handleCopyCashOrder}
+        onDownloadPdf={handleDownloadCashOrderPdf}
+        onPrint={handlePrintCashOrder}
+      />
 
       <MoneyOperationModal
         source={apiSource ?? 'Bank'}

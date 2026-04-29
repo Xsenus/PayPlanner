@@ -539,12 +539,58 @@ export interface CashOrder {
   updatedAt?: string | null;
 }
 
+export interface CashBookDay {
+  date: string;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  closingBalance: number;
+  incomingCount: number;
+  outgoingCount: number;
+}
+
+export interface CashBookSummary {
+  from: string;
+  to: string;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  closingBalance: number;
+  incomingCount: number;
+  outgoingCount: number;
+  days: CashBookDay[];
+}
+
+export interface CashOrderRegister {
+  items: CashOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+  incomingCount: number;
+  outgoingCount: number;
+  postedCount: number;
+  cancelledCount: number;
+  incomingAmount: number;
+  outgoingAmount: number;
+}
+
 export interface MoneyOperationSourceSummary {
   source: MoneyOperationSource;
   startBalance: number;
   income: number;
   expense: number;
   endBalance: number;
+}
+
+export interface MoneyOperationAccountSummary {
+  accountName: string;
+  source: MoneyOperationSource;
+  startBalance: number;
+  income: number;
+  expense: number;
+  endBalance: number;
+  incomeCount: number;
+  expenseCount: number;
 }
 
 export interface MoneyOperationsSummary {

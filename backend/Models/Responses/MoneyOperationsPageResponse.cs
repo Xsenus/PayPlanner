@@ -44,6 +44,18 @@ public sealed class MoneyOperationSourceSummaryDto
     public decimal EndBalance { get; init; }
 }
 
+public sealed class MoneyOperationAccountSummaryDto
+{
+    public string AccountName { get; init; } = string.Empty;
+    public MoneyOperationSource Source { get; init; }
+    public decimal StartBalance { get; init; }
+    public decimal Income { get; init; }
+    public decimal Expense { get; init; }
+    public decimal EndBalance { get; init; }
+    public int IncomeCount { get; init; }
+    public int ExpenseCount { get; init; }
+}
+
 public sealed class MoneyOperationsSummaryDto
 {
     public decimal StartBalance { get; init; }

@@ -39,11 +39,12 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
-        [FromQuery] string? search,
-        CancellationToken ct)
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
     {
         var list = await SqliteRetryHelper.ExecuteAsync(
-            async cancellationToken => await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, search)
+            async cancellationToken => await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
                 .OrderByDescending(item => item.Date)
                 .ThenByDescending(item => item.Id)
                 .ToListAsync(cancellationToken),
@@ -60,7 +61,8 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
-        [FromQuery] string? search,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? search = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
@@ -70,7 +72,7 @@ public class MoneyOperationsController : ControllerBase
 
         var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, search);
+            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search);
             var total = await query.CountAsync(cancellationToken);
             var items = await query
                 .OrderByDescending(item => item.Date)
@@ -95,7 +97,47 @@ public class MoneyOperationsController : ControllerBase
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
+            var openingQuery = from.HasValue
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, accountName, search)
+                : null;
+
+            var openingSummary = openingQuery is null
+                ? null
+                : await openingQuery
+                    .GroupBy(_ => 1)
+                    .Select(group => new
+                    {
+                        Income = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Sum(item => item.Amount),
+                        Expense = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Sum(item => item.Amount),
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+
+            var openingRows = openingQuery is null
+                ? new List<MoneyOperationSourceSummaryDto>()
+                : await openingQuery
+                    .GroupBy(item => item.Source)
+                    .Select(group => new MoneyOperationSourceSummaryDto
+                    {
+                        Source = group.Key,
+                        StartBalance = 0m,
+                        Income = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Sum(item => item.Amount),
+                        Expense = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Sum(item => item.Amount),
+                        EndBalance =
+                            group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
+                            group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                    })
+                    .ToListAsync(cancellationToken);
+
             var sourceRows = await query
+                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact)
                 .GroupBy(item => item.Source)
                 .Select(group => new MoneyOperationSourceSummaryDto
                 {
@@ -121,18 +163,28 @@ public class MoneyOperationsController : ControllerBase
             };
 
             var orderedSourceRows = orderedSources
-                .Select(sourceKey => sourceRows.FirstOrDefault(row => row.Source == sourceKey) ?? new MoneyOperationSourceSummaryDto
+                .Select(sourceKey =>
                 {
-                    Source = sourceKey,
-                    StartBalance = 0m,
-                    Income = 0m,
-                    Expense = 0m,
-                    EndBalance = 0m,
+                    var periodRow = sourceRows.FirstOrDefault(row => row.Source == sourceKey);
+                    var openingRow = openingRows.FirstOrDefault(row => row.Source == sourceKey);
+                    var startBalance = openingRow?.EndBalance ?? 0m;
+                    var incomeAmount = periodRow?.Income ?? 0m;
+                    var expenseAmount = periodRow?.Expense ?? 0m;
+
+                    return new MoneyOperationSourceSummaryDto
+                    {
+                        Source = sourceKey,
+                        StartBalance = startBalance,
+                        Income = incomeAmount,
+                        Expense = expenseAmount,
+                        EndBalance = startBalance + incomeAmount - expenseAmount,
+                    };
                 })
                 .ToList();
 
             var income = factSummary?.Income ?? 0m;
             var expense = factSummary?.Expense ?? 0m;
+            var startBalance = (openingSummary?.Income ?? 0m) - (openingSummary?.Expense ?? 0m);
 
             return new MoneyOperationsPageResponse
             {
@@ -142,10 +194,10 @@ public class MoneyOperationsController : ControllerBase
                 PageSize = pageSize,
                 Summary = new MoneyOperationsSummaryDto
                 {
-                    StartBalance = 0m,
+                    StartBalance = startBalance,
                     Income = income,
                     Expense = expense,
-                    EndBalance = income - expense,
+                    EndBalance = startBalance + income - expense,
                     IncomeCount = factSummary?.IncomeCount ?? 0,
                     ExpenseCount = factSummary?.ExpenseCount ?? 0,
                     BySource = orderedSourceRows,
@@ -156,12 +208,124 @@ public class MoneyOperationsController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("accounts")]
+    public async Task<ActionResult<IReadOnlyList<string>>> GetAccounts(
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct = default)
+    {
+        var accounts = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null)
+                .Where(item => item.AccountName != null && item.AccountName != "")
+                .Select(item => item.AccountName!)
+                .Distinct()
+                .OrderBy(account => account)
+                .Take(200)
+                .ToListAsync(cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(accounts);
+    }
+
+    [HttpGet("account-summaries")]
+    public async Task<ActionResult<IReadOnlyList<MoneyOperationAccountSummaryDto>>> GetAccountSummaries(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct = default)
+    {
+        var summaries = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        {
+            var openingQuery = from.HasValue
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null)
+                    .Where(item => item.AccountName != null && item.AccountName != "")
+                : null;
+
+            var openingRows = openingQuery is null
+                ? new List<MoneyOperationAccountSummaryDto>()
+                : await openingQuery
+                    .GroupBy(item => new { item.Source, item.AccountName })
+                    .Select(group => new MoneyOperationAccountSummaryDto
+                    {
+                        Source = group.Key.Source,
+                        AccountName = group.Key.AccountName!,
+                        StartBalance = 0m,
+                        Income = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Sum(item => item.Amount),
+                        Expense = group
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Sum(item => item.Amount),
+                        EndBalance =
+                            group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
+                            group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                    })
+                    .ToListAsync(cancellationToken);
+
+            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null)
+                .Where(item => item.AccountName != null && item.AccountName != "")
+                .GroupBy(item => new { item.Source, item.AccountName })
+                .Select(group => new MoneyOperationAccountSummaryDto
+                {
+                    Source = group.Key.Source,
+                    AccountName = group.Key.AccountName!,
+                    StartBalance = 0m,
+                    Income = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Amount),
+                    Expense = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Amount),
+                    EndBalance =
+                        group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
+                        group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                })
+                .ToListAsync(cancellationToken);
+
+            var keys = openingRows
+                .Select(row => new { row.Source, row.AccountName })
+                .Concat(periodRows.Select(row => new { row.Source, row.AccountName }))
+                .Distinct()
+                .OrderBy(row => row.AccountName)
+                .ThenBy(row => row.Source)
+                .ToList();
+
+            return keys
+                .Select(key =>
+                {
+                    var opening = openingRows.FirstOrDefault(row => row.Source == key.Source && row.AccountName == key.AccountName);
+                    var period = periodRows.FirstOrDefault(row => row.Source == key.Source && row.AccountName == key.AccountName);
+                    var startBalance = opening?.EndBalance ?? 0m;
+                    var income = period?.Income ?? 0m;
+                    var expense = period?.Expense ?? 0m;
+
+                    return new MoneyOperationAccountSummaryDto
+                    {
+                        Source = key.Source,
+                        AccountName = key.AccountName,
+                        StartBalance = startBalance,
+                        Income = income,
+                        Expense = expense,
+                        EndBalance = startBalance + income - expense,
+                        IncomeCount = period?.IncomeCount ?? 0,
+                        ExpenseCount = period?.ExpenseCount ?? 0,
+                    };
+                })
+                .ToList();
+        }, _logger, ct);
+
+        return Ok(summaries);
+    }
+
     private IQueryable<MoneyOperationListItemDto> BuildMoneyOperationsQuery(
         DateTime? from,
         DateTime? to,
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        string? accountName,
         string? search)
     {
         var customOperations = ApplyMoneyOperationFilters(
@@ -171,6 +335,7 @@ public class MoneyOperationsController : ControllerBase
                 source,
                 direction,
                 accountingType,
+                accountName,
                 search)
             .Select(operation => new MoneyOperationListItemDto
             {
@@ -230,6 +395,7 @@ public class MoneyOperationsController : ControllerBase
                 source,
                 direction,
                 accountingType,
+                accountName,
                 search)
             .Select(payment => new MoneyOperationListItemDto
             {
@@ -317,6 +483,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        string? accountName,
         string? search)
     {
         if (from.HasValue)
@@ -346,6 +513,12 @@ public class MoneyOperationsController : ControllerBase
             query = query.Where(operation => operation.AccountingType == accountingType.Value);
         }
 
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            var accountTerm = accountName.Trim();
+            query = query.Where(operation => operation.AccountName == accountTerm);
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -370,6 +543,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        string? accountName,
         string? search)
     {
         query = query.Where(payment => payment.Status == PaymentStatus.Completed);
@@ -438,6 +612,12 @@ public class MoneyOperationsController : ControllerBase
             query = accountingType.Value == MoneyOperationAccountingType.Fact
                 ? query.Where(payment => payment.Status == PaymentStatus.Completed)
                 : query.Where(payment => payment.Status != PaymentStatus.Completed);
+        }
+
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            var accountTerm = accountName.Trim();
+            query = query.Where(payment => payment.Account == accountTerm);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
