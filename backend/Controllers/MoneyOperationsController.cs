@@ -44,10 +44,15 @@ public class MoneyOperationsController : ControllerBase
         CancellationToken ct = default)
     {
         var list = await SqliteRetryHelper.ExecuteAsync(
-            async cancellationToken => await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
+            async cancellationToken =>
+            {
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
                 .OrderByDescending(item => item.Date)
                 .ThenByDescending(item => item.Id)
-                .ToListAsync(cancellationToken),
+                    .ToListAsync(cancellationToken);
+
+                return rows.Select(MapMoneyOperationRow).ToList();
+            },
             _logger,
             ct);
 
@@ -74,26 +79,27 @@ public class MoneyOperationsController : ControllerBase
         {
             var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search);
             var total = await query.CountAsync(cancellationToken);
-            var items = await query
+            var itemRows = await query
                 .OrderByDescending(item => item.Date)
                 .ThenByDescending(item => item.Id)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync(cancellationToken);
+            var items = itemRows.Select(MapMoneyOperationRow).ToList();
 
             var factSummary = await query
-                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact)
+                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact.ToString())
                 .GroupBy(_ => 1)
                 .Select(group => new
                 {
                     Income = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                         .Sum(item => item.Amount),
                     Expense = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                         .Sum(item => item.Amount),
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -108,52 +114,56 @@ public class MoneyOperationsController : ControllerBase
                     .Select(group => new
                     {
                         Income = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                             .Sum(item => item.Amount),
                         Expense = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                             .Sum(item => item.Amount),
                     })
                     .FirstOrDefaultAsync(cancellationToken);
 
-            var openingRows = openingQuery is null
-                ? new List<MoneyOperationSourceSummaryDto>()
-                : await openingQuery
+            var openingRows = new List<MoneyOperationSourceSummaryDto>();
+            if (openingQuery is not null)
+            {
+                var openingSummaryRows = await openingQuery
                     .GroupBy(item => item.Source)
-                    .Select(group => new MoneyOperationSourceSummaryDto
+                    .Select(group => new MoneyOperationSourceSummaryQueryRow
                     {
                         Source = group.Key,
                         StartBalance = 0m,
                         Income = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                             .Sum(item => item.Amount),
                         Expense = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                             .Sum(item => item.Amount),
                         EndBalance =
-                            group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
-                            group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                            group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                            group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
                     })
                     .ToListAsync(cancellationToken);
+                openingRows = openingSummaryRows.Select(MapSourceSummaryRow).ToList();
+            }
 
             var sourceRows = await query
-                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact)
+                .Where(item => item.AccountingType == MoneyOperationAccountingType.Fact.ToString())
                 .GroupBy(item => item.Source)
-                .Select(group => new MoneyOperationSourceSummaryDto
+                .Select(group => new MoneyOperationSourceSummaryQueryRow
                 {
                     Source = group.Key,
                     StartBalance = 0m,
                     Income = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                         .Sum(item => item.Amount),
                     Expense = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                         .Sum(item => item.Amount),
                     EndBalance =
-                        group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
-                        group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                        group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                        group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
                 })
                 .ToListAsync(cancellationToken);
+            var sourceSummaries = sourceRows.Select(MapSourceSummaryRow).ToList();
 
             var orderedSources = new[]
             {
@@ -166,7 +176,7 @@ public class MoneyOperationsController : ControllerBase
             var orderedSourceRows = orderedSources
                 .Select(sourceKey =>
                 {
-                    var periodRow = sourceRows.FirstOrDefault(row => row.Source == sourceKey);
+                    var periodRow = sourceSummaries.FirstOrDefault(row => row.Source == sourceKey);
                     var openingRow = openingRows.FirstOrDefault(row => row.Source == sourceKey);
                     var startBalance = openingRow?.EndBalance ?? 0m;
                     var incomeAmount = periodRow?.Income ?? 0m;
@@ -242,52 +252,56 @@ public class MoneyOperationsController : ControllerBase
                     .Where(item => item.AccountName != null && item.AccountName != "")
                 : null;
 
-            var openingRows = openingQuery is null
-                ? new List<MoneyOperationAccountSummaryDto>()
-                : await openingQuery
+            var openingRows = new List<MoneyOperationAccountSummaryDto>();
+            if (openingQuery is not null)
+            {
+                var openingSummaryRows = await openingQuery
                     .GroupBy(item => new { item.Source, item.AccountName })
-                    .Select(group => new MoneyOperationAccountSummaryDto
+                    .Select(group => new MoneyOperationAccountSummaryQueryRow
                     {
                         Source = group.Key.Source,
                         AccountName = group.Key.AccountName!,
                         StartBalance = 0m,
                         Income = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Income)
+                            .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                             .Sum(item => item.Amount),
                         Expense = group
-                            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                            .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                             .Sum(item => item.Amount),
                         EndBalance =
-                            group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
-                            group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
+                            group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                            group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
                     })
                     .ToListAsync(cancellationToken);
+                openingRows = openingSummaryRows.Select(MapAccountSummaryRow).ToList();
+            }
 
             var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .GroupBy(item => new { item.Source, item.AccountName })
-                .Select(group => new MoneyOperationAccountSummaryDto
+                .Select(group => new MoneyOperationAccountSummaryQueryRow
                 {
                     Source = group.Key.Source,
                     AccountName = group.Key.AccountName!,
                     StartBalance = 0m,
                     Income = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
                         .Sum(item => item.Amount),
                     Expense = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
                         .Sum(item => item.Amount),
                     EndBalance =
-                        group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Amount) -
-                        group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Amount),
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                        group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                        group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
                 })
                 .ToListAsync(cancellationToken);
+            var periodSummaries = periodRows.Select(MapAccountSummaryRow).ToList();
 
             var keys = openingRows
                 .Select(row => new { row.Source, row.AccountName })
-                .Concat(periodRows.Select(row => new { row.Source, row.AccountName }))
+                .Concat(periodSummaries.Select(row => new { row.Source, row.AccountName }))
                 .Distinct()
                 .OrderBy(row => row.AccountName)
                 .ThenBy(row => row.Source)
@@ -297,7 +311,7 @@ public class MoneyOperationsController : ControllerBase
                 .Select(key =>
                 {
                     var opening = openingRows.FirstOrDefault(row => row.Source == key.Source && row.AccountName == key.AccountName);
-                    var period = periodRows.FirstOrDefault(row => row.Source == key.Source && row.AccountName == key.AccountName);
+                    var period = periodSummaries.FirstOrDefault(row => row.Source == key.Source && row.AccountName == key.AccountName);
                     var startBalance = opening?.EndBalance ?? 0m;
                     var income = period?.Income ?? 0m;
                     var expense = period?.Expense ?? 0m;
@@ -320,7 +334,7 @@ public class MoneyOperationsController : ControllerBase
         return Ok(summaries);
     }
 
-    private IQueryable<MoneyOperationListItemDto> BuildMoneyOperationsQuery(
+    private IQueryable<MoneyOperationQueryRow> BuildMoneyOperationsQuery(
         DateTime? from,
         DateTime? to,
         MoneyOperationSource? source,
@@ -338,12 +352,24 @@ public class MoneyOperationsController : ControllerBase
                 accountingType,
                 accountName,
                 search)
-            .Select(operation => new MoneyOperationListItemDto
+            .Select(operation => new MoneyOperationQueryRow
             {
                 Id = operation.Id,
-                Source = operation.Source,
-                Direction = operation.Direction,
-                AccountingType = operation.AccountingType,
+                Source = operation.Source == MoneyOperationSource.Cash
+                    ? nameof(MoneyOperationSource.Cash)
+                    : operation.Source == MoneyOperationSource.Card
+                        ? nameof(MoneyOperationSource.Card)
+                        : operation.Source == MoneyOperationSource.EMoney
+                            ? nameof(MoneyOperationSource.EMoney)
+                            : nameof(MoneyOperationSource.Bank),
+                Direction = operation.Direction == MoneyOperationDirection.Income
+                    ? nameof(MoneyOperationDirection.Income)
+                    : operation.Direction == MoneyOperationDirection.Expense
+                        ? nameof(MoneyOperationDirection.Expense)
+                        : nameof(MoneyOperationDirection.Transfer),
+                AccountingType = operation.AccountingType == MoneyOperationAccountingType.Fact
+                    ? nameof(MoneyOperationAccountingType.Fact)
+                    : nameof(MoneyOperationAccountingType.Plan),
                 AccountName = operation.AccountName,
                 CounterpartyName = operation.CounterpartyName,
                 CategoryName = operation.CategoryName,
@@ -378,7 +404,11 @@ public class MoneyOperationsController : ControllerBase
                 CashOrderStatus = _db.CashOrders
                     .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
                     .OrderByDescending(order => order.Id)
-                    .Select(order => (CashOrderStatus?)order.Status)
+                    .Select(order => order.Status == CashOrderStatus.Posted
+                        ? nameof(CashOrderStatus.Posted)
+                        : order.Status == CashOrderStatus.Draft
+                            ? nameof(CashOrderStatus.Draft)
+                            : nameof(CashOrderStatus.Cancelled))
                     .FirstOrDefault(),
                 CanCreateCashOrder =
                     operation.Source == MoneyOperationSource.Cash &&
@@ -398,7 +428,7 @@ public class MoneyOperationsController : ControllerBase
                 accountingType,
                 accountName,
                 search)
-            .Select(payment => new MoneyOperationListItemDto
+            .Select(payment => new MoneyOperationQueryRow
             {
                 Id = -payment.Id,
                 Source =
@@ -408,19 +438,19 @@ public class MoneyOperationsController : ControllerBase
                      payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
                      payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
                      payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken))
-                        ? MoneyOperationSource.Cash
+                        ? nameof(MoneyOperationSource.Cash)
                         : payment.PaymentSource != null &&
                           payment.PaymentSource.Name != null &&
                           (payment.PaymentSource.Name.Contains(CardSourceToken) ||
                            payment.PaymentSource.Name.Contains(CardSourceTitleToken))
-                            ? MoneyOperationSource.Card
-                            : MoneyOperationSource.Bank,
+                            ? nameof(MoneyOperationSource.Card)
+                            : nameof(MoneyOperationSource.Bank),
                 Direction = payment.Type == PaymentType.Income
-                    ? MoneyOperationDirection.Income
-                    : MoneyOperationDirection.Expense,
+                    ? nameof(MoneyOperationDirection.Income)
+                    : nameof(MoneyOperationDirection.Expense),
                 AccountingType = payment.Status == PaymentStatus.Completed
-                    ? MoneyOperationAccountingType.Fact
-                    : MoneyOperationAccountingType.Plan,
+                    ? nameof(MoneyOperationAccountingType.Fact)
+                    : nameof(MoneyOperationAccountingType.Plan),
                 AccountName = payment.Account,
                 CounterpartyName = payment.CounterpartyName,
                 CategoryName = payment.ClientCase != null ? payment.ClientCase.Title : null,
@@ -460,7 +490,11 @@ public class MoneyOperationsController : ControllerBase
                 CashOrderStatus = _db.CashOrders
                     .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
                     .OrderByDescending(order => order.Id)
-                    .Select(order => (CashOrderStatus?)order.Status)
+                    .Select(order => order.Status == CashOrderStatus.Posted
+                        ? nameof(CashOrderStatus.Posted)
+                        : order.Status == CashOrderStatus.Draft
+                            ? nameof(CashOrderStatus.Draft)
+                            : nameof(CashOrderStatus.Cancelled))
                     .FirstOrDefault(),
                 CanCreateCashOrder =
                     payment.PaymentSource != null &&
@@ -925,6 +959,69 @@ public class MoneyOperationsController : ControllerBase
                     ? part.ToUpperInvariant()
                     : char.ToUpperInvariant(part[0]) + part[1..]));
 
+    private static MoneyOperationListItemDto MapMoneyOperationRow(MoneyOperationQueryRow row)
+        => new()
+        {
+            Id = row.Id,
+            Source = ParseEnum<MoneyOperationSource>(row.Source),
+            Direction = ParseEnum<MoneyOperationDirection>(row.Direction),
+            AccountingType = ParseEnum<MoneyOperationAccountingType>(row.AccountingType),
+            AccountName = row.AccountName,
+            CounterpartyName = row.CounterpartyName,
+            CategoryName = row.CategoryName,
+            Amount = row.Amount,
+            Currency = row.Currency,
+            PaymentOrderNumber = row.PaymentOrderNumber,
+            Date = row.Date,
+            RecognitionDate = row.RecognitionDate,
+            IsAdvancePayment = row.IsAdvancePayment,
+            Purpose = row.Purpose,
+            PaidInvoiceNumber = row.PaidInvoiceNumber,
+            PaidAmount = row.PaidAmount,
+            ProjectName = row.ProjectName,
+            DirectionName = row.DirectionName,
+            SalesPointName = row.SalesPointName,
+            PaymentPriority = row.PaymentPriority,
+            PaidAccountName = row.PaidAccountName,
+            CreatedAt = row.CreatedAt,
+            UpdatedAt = row.UpdatedAt,
+            IsReadonly = row.IsReadonly,
+            RelatedPaymentId = row.RelatedPaymentId,
+            CashOrderId = row.CashOrderId,
+            CashOrderNumber = row.CashOrderNumber,
+            CashOrderStatus = string.IsNullOrWhiteSpace(row.CashOrderStatus)
+                ? null
+                : ParseEnum<CashOrderStatus>(row.CashOrderStatus),
+            CanCreateCashOrder = row.CanCreateCashOrder,
+        };
+
+    private static MoneyOperationSourceSummaryDto MapSourceSummaryRow(MoneyOperationSourceSummaryQueryRow row)
+        => new()
+        {
+            Source = ParseEnum<MoneyOperationSource>(row.Source),
+            StartBalance = row.StartBalance,
+            Income = row.Income,
+            Expense = row.Expense,
+            EndBalance = row.EndBalance,
+        };
+
+    private static MoneyOperationAccountSummaryDto MapAccountSummaryRow(MoneyOperationAccountSummaryQueryRow row)
+        => new()
+        {
+            Source = ParseEnum<MoneyOperationSource>(row.Source),
+            AccountName = row.AccountName,
+            StartBalance = row.StartBalance,
+            Income = row.Income,
+            Expense = row.Expense,
+            EndBalance = row.EndBalance,
+            IncomeCount = row.IncomeCount,
+            ExpenseCount = row.ExpenseCount,
+        };
+
+    private static TEnum ParseEnum<TEnum>(string value)
+        where TEnum : struct, Enum
+        => Enum.TryParse<TEnum>(value, out var parsed) ? parsed : default;
+
     private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date)
     {
         var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
@@ -1370,6 +1467,60 @@ public class MoneyOperationsController : ControllerBase
         }
 
         return decimal.TryParse(normalized, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out amount);
+    }
+
+    private sealed class MoneyOperationQueryRow
+    {
+        public int Id { get; init; }
+        public string Source { get; init; } = string.Empty;
+        public string Direction { get; init; } = string.Empty;
+        public string AccountingType { get; init; } = string.Empty;
+        public string? AccountName { get; init; }
+        public string? CounterpartyName { get; init; }
+        public string? CategoryName { get; init; }
+        public decimal Amount { get; init; }
+        public string? Currency { get; init; }
+        public string? PaymentOrderNumber { get; init; }
+        public DateTime Date { get; init; }
+        public DateTime? RecognitionDate { get; init; }
+        public bool IsAdvancePayment { get; init; }
+        public string? Purpose { get; init; }
+        public string? PaidInvoiceNumber { get; init; }
+        public decimal? PaidAmount { get; init; }
+        public string? ProjectName { get; init; }
+        public string? DirectionName { get; init; }
+        public string? SalesPointName { get; init; }
+        public int? PaymentPriority { get; init; }
+        public string? PaidAccountName { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime? UpdatedAt { get; init; }
+        public bool IsReadonly { get; init; }
+        public int? RelatedPaymentId { get; init; }
+        public int? CashOrderId { get; init; }
+        public string? CashOrderNumber { get; init; }
+        public string? CashOrderStatus { get; init; }
+        public bool CanCreateCashOrder { get; init; }
+    }
+
+    private sealed class MoneyOperationSourceSummaryQueryRow
+    {
+        public string Source { get; init; } = string.Empty;
+        public decimal StartBalance { get; init; }
+        public decimal Income { get; init; }
+        public decimal Expense { get; init; }
+        public decimal EndBalance { get; init; }
+    }
+
+    private sealed class MoneyOperationAccountSummaryQueryRow
+    {
+        public string Source { get; init; } = string.Empty;
+        public string AccountName { get; init; } = string.Empty;
+        public decimal StartBalance { get; init; }
+        public decimal Income { get; init; }
+        public decimal Expense { get; init; }
+        public decimal EndBalance { get; init; }
+        public int IncomeCount { get; init; }
+        public int ExpenseCount { get; init; }
     }
 
     private sealed class StatementHeaderMap

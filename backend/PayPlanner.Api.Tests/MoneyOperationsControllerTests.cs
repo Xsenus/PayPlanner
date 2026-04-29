@@ -8,6 +8,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Invoices;
+using System.Reflection;
 using System.Text;
 using Xunit;
 
@@ -399,6 +400,40 @@ public class MoneyOperationsControllerTests
         Assert.Equal(3_000m, eMoney.Income);
         Assert.Equal(3_000m, eMoney.EndBalance);
         Assert.Equal(2_000m, page.Summary.EndBalance);
+    }
+
+    [Fact]
+    public void MoneyJournal_PostgreSqlQueryUsesTextValuesForUnionEnums()
+    {
+        var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+            .UseNpgsql("Host=localhost;Database=payplanner_test;Username=test;Password=test")
+            .Options;
+        using var db = new PostgreSqlPaymentContext(options);
+        var controller = CreateController(db);
+
+        var method = typeof(MoneyOperationsController).GetMethod(
+            "BuildMoneyOperationsQuery",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var query = Assert.IsAssignableFrom<IQueryable>(method.Invoke(controller, new object?[]
+        {
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        }));
+        var sql = query.ToQueryString();
+
+        Assert.Contains("'Cash'", sql);
+        Assert.Contains("'Bank'", sql);
+        Assert.Contains("'Income'", sql);
+        Assert.Contains("'Fact'", sql);
+        Assert.DoesNotContain("ELSE 0", sql);
+        Assert.DoesNotContain("THEN 0", sql);
     }
 
     [Fact]
