@@ -437,6 +437,325 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task MoneyJournal_TotalViewCombinesManualOperationsAndCompletedPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var cashSource = new PaymentSource
+        {
+            Name = "\u041A\u0430\u0441\u0441\u0430",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var cardSource = new PaymentSource
+        {
+            Name = "\u041A\u0430\u0440\u0442\u0430",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Bank",
+                CounterpartyName = "Manual income",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Card,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Card",
+                CounterpartyName = "Manual card expense",
+                Amount = 300m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.EMoney,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Online wallet",
+                CounterpartyName = "Manual e-money income",
+                Amount = 700m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 12),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Plan,
+                AccountName = "Bank",
+                CounterpartyName = "Planned income",
+                Amount = 999m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 13),
+                CreatedAt = DateTime.UtcNow,
+            });
+        db.Payments.AddRange(
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 2_500m,
+                PaidAmount = 2_500m,
+                Account = "Cashbox",
+                Date = new DateTime(2026, 4, 14),
+                PaidDate = new DateTime(2026, 4, 14),
+                LastPaymentDate = new DateTime(2026, 4, 14),
+                CounterpartyName = "Cash client",
+                PaymentSource = cashSource,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Completed,
+                Amount = 400m,
+                PaidAmount = 400m,
+                Account = "Card",
+                Date = new DateTime(2026, 4, 15),
+                PaidDate = new DateTime(2026, 4, 15),
+                LastPaymentDate = new DateTime(2026, 4, 15),
+                CounterpartyName = "Card supplier",
+                PaymentSource = cardSource,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: null,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            search: null,
+            page: 1,
+            pageSize: 25);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        Assert.Equal(6, page.Total);
+        Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.Cash && item.IsReadonly && item.RelatedPaymentId.HasValue);
+        Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.Card && item.Direction == MoneyOperationDirection.Expense && item.IsReadonly);
+        Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.EMoney && !item.IsReadonly);
+        Assert.Contains(page.Items, item => item.AccountingType == MoneyOperationAccountingType.Plan);
+
+        Assert.Equal(4_200m, page.Summary.Income);
+        Assert.Equal(700m, page.Summary.Expense);
+        Assert.Equal(3_500m, page.Summary.EndBalance);
+        Assert.Equal(3, page.Summary.IncomeCount);
+        Assert.Equal(2, page.Summary.ExpenseCount);
+        Assert.Equal(4, page.Summary.BySource.Count);
+        Assert.Equal(2_500m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Cash).Income);
+        Assert.Equal(1_000m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Bank).Income);
+        Assert.Equal(700m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Card).Expense);
+        Assert.Equal(700m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.EMoney).Income);
+    }
+
+    [Fact]
+    public async Task MoneyJournal_SourceFiltersSeparateCashBankCardAndEMoney()
+    {
+        await using var db = await CreateContextAsync();
+        var cashSource = new PaymentSource
+        {
+            Name = "\u041D\u0430\u043B\u0438\u0447\u043D\u044B\u0435",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var cardSource = new PaymentSource
+        {
+            Name = "\u041A\u0430\u0440\u0442\u0430",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Bank",
+                CounterpartyName = "Bank operation",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.EMoney,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Wallet",
+                CounterpartyName = "Wallet operation",
+                Amount = 2_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        db.Payments.AddRange(
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 3_000m,
+                PaidAmount = 3_000m,
+                Account = "Cashbox",
+                Date = new DateTime(2026, 4, 12),
+                PaidDate = new DateTime(2026, 4, 12),
+                LastPaymentDate = new DateTime(2026, 4, 12),
+                CounterpartyName = "Cash client",
+                PaymentSource = cashSource,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Completed,
+                Amount = 400m,
+                PaidAmount = 400m,
+                Account = "Card",
+                Date = new DateTime(2026, 4, 13),
+                PaidDate = new DateTime(2026, 4, 13),
+                LastPaymentDate = new DateTime(2026, 4, 13),
+                CounterpartyName = "Card supplier",
+                PaymentSource = cardSource,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var cashPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Cash);
+        var bankPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
+        var cardPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Card);
+        var eMoneyPage = await GetMoneyPageAsync(controller, MoneyOperationSource.EMoney);
+
+        Assert.Single(cashPage.Items);
+        Assert.Equal(MoneyOperationSource.Cash, cashPage.Items[0].Source);
+        Assert.Equal(3_000m, cashPage.Summary.Income);
+
+        Assert.Single(bankPage.Items);
+        Assert.Equal(MoneyOperationSource.Bank, bankPage.Items[0].Source);
+        Assert.Equal(1_000m, bankPage.Summary.Income);
+
+        Assert.Single(cardPage.Items);
+        Assert.Equal(MoneyOperationSource.Card, cardPage.Items[0].Source);
+        Assert.Equal(400m, cardPage.Summary.Expense);
+
+        Assert.Single(eMoneyPage.Items);
+        Assert.Equal(MoneyOperationSource.EMoney, eMoneyPage.Items[0].Source);
+        Assert.Equal(2_000m, eMoneyPage.Summary.Income);
+    }
+
+    [Fact]
+    public async Task MoneyJournal_PaginationClampsPageSizeAndKeepsStableDateOrder()
+    {
+        await using var db = await CreateContextAsync();
+        for (var day = 1; day <= 8; day++)
+        {
+            db.MoneyOperations.Add(new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Bank",
+                CounterpartyName = $"Operation {day}",
+                Amount = day * 100m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, day),
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            search: null,
+            page: 2,
+            pageSize: 1);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        Assert.Equal(8, page.Total);
+        Assert.Equal(2, page.Page);
+        Assert.Equal(5, page.PageSize);
+        Assert.Equal(3, page.Items.Count);
+        Assert.Equal(
+            new[] { new DateTime(2026, 4, 3), new DateTime(2026, 4, 2), new DateTime(2026, 4, 1) },
+            page.Items.Select(item => item.Date).ToArray());
+    }
+
+    [Fact]
+    public async Task MoneyJournal_AccountsEndpointIncludesManualAndPaymentAccountsDistinctly()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Bank main",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Bank main",
+                Amount = 500m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        db.Payments.Add(new Payment
+        {
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 2_500m,
+            PaidAmount = 2_500m,
+            Account = "Bank payment account",
+            Date = new DateTime(2026, 4, 12),
+            PaidDate = new DateTime(2026, 4, 12),
+            LastPaymentDate = new DateTime(2026, 4, 12),
+            CounterpartyName = "Payment client",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetAccounts(MoneyOperationSource.Bank);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var accounts = Assert.IsAssignableFrom<IReadOnlyList<string>>(ok.Value);
+        Assert.Equal(new[] { "Bank main", "Bank payment account" }, accounts);
+    }
+
+    [Fact]
     public async Task ManualCashOperation_CreatesAndSyncsCashOrder()
     {
         await using var db = await CreateContextAsync();
@@ -1102,6 +1421,25 @@ public class MoneyOperationsControllerTests
     private static MoneyOperationsController CreateController(PaymentContext db)
     {
         return new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance);
+    }
+
+    private static async Task<MoneyOperationsPageResponse> GetMoneyPageAsync(
+        MoneyOperationsController controller,
+        MoneyOperationSource source)
+    {
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: source,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            search: null,
+            page: 1,
+            pageSize: 25);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        return Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
     }
 
     private static IFormFile CreateFormFile(string content, string fileName)

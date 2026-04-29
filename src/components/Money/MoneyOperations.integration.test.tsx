@@ -482,9 +482,9 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Поставщик А');
-    expect(screen.getByText('Банковские счета')).toBeTruthy();
     expect(screen.getByText('Поставщик Б')).toBeTruthy();
 
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), 'Резервный счёт');
 
     await waitFor(() =>
@@ -496,11 +496,7 @@ describe('MoneyOperations integration', () => {
     expect(document.body.textContent).toContain('Расход: 1 500,00 ₽');
     expect(screen.queryByText('Поставщик А')).toBeNull();
 
-    const allAccountsCard = screen
-      .getAllByRole('button')
-      .find((button) => button.textContent?.includes('Все счета'));
-    expect(allAccountsCard).toBeTruthy();
-    await user.click(allAccountsCard!);
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '');
 
     expect(await screen.findByText('Поставщик А')).toBeTruthy();
     expect(screen.getByText('Поставщик Б')).toBeTruthy();
@@ -562,6 +558,7 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('E-money')).toBeTruthy();
     expect(screen.getByText('Операции по электронным кошелькам')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: /Фильтр/ }));
     expect(screen.getByLabelText('Кошелёк')).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Все кошельки' })).toBeTruthy();
     expect(screen.getByText('Онлайн клиент')).toBeTruthy();

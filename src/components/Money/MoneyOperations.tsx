@@ -76,13 +76,6 @@ const SOURCE_ALL_ACCOUNTS_LABELS: Record<MoneyOperationSource, string> = {
   EMoney: 'Все кошельки',
 };
 
-const SOURCE_ACCOUNT_SECTION_LABELS: Record<MoneyOperationSource, string> = {
-  Bank: 'Банковские счета',
-  Cash: 'Кассы',
-  Card: 'Карты',
-  EMoney: 'E-money',
-};
-
 const SOURCE_MODAL_LABELS: Record<MoneyOperationSource, string> = {
   Bank: 'банку',
   Cash: 'кассе',
@@ -1181,19 +1174,6 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
   );
-  const accountSummaryTotals = useMemo(
-    () =>
-      accountSummaries.reduce(
-        (acc, account) => ({
-          startBalance: acc.startBalance + account.startBalance,
-          income: acc.income + account.income,
-          expense: acc.expense + account.expense,
-          endBalance: acc.endBalance + account.endBalance,
-        }),
-        { startBalance: 0, income: 0, expense: 0, endBalance: 0 },
-      ),
-    [accountSummaries],
-  );
   const activeMoneyFilters = useMemo(() => {
     const filters: Array<{ key: string; label: string; value: string; onClear: () => void }> = [];
 
@@ -1718,32 +1698,6 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">{SOURCE_LABELS[source]}</h1>
           <p className="text-sm text-slate-500">{SOURCE_OPERATION_SUBTITLES[source]}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-400" htmlFor="money-account-filter">
-              {SOURCE_ACCOUNT_FILTER_LABELS[source]}
-            </label>
-            <select
-              id="money-account-filter"
-              value={accountName}
-              onChange={(event) => setAccountName(event.target.value)}
-              className="min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-500 focus:outline-none">
-              <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
-              {accountSummaries.map((account) => (
-                <option key={`${account.source}-${account.accountName}`} value={account.accountName}>
-                  {account.accountName}
-                </option>
-              ))}
-            </select>
-          </div>
-          {selectedAccountSummary && (
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              <span>
-                Остаток: <strong className="font-semibold text-slate-800">{formatMoney(selectedAccountSummary.endBalance)} ₽</strong>
-              </span>
-              <span className="text-emerald-600">Приход: {formatMoney(selectedAccountSummary.income)} ₽</span>
-              <span className="text-rose-600">Расход: {formatMoney(selectedAccountSummary.expense)} ₽</span>
-            </div>
-          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {source === 'Bank' && (
@@ -1826,53 +1780,6 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {accountSummaries.length > 0 && (
-        <div className="mt-6">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-            {SOURCE_ACCOUNT_SECTION_LABELS[source]}
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <button
-              type="button"
-              onClick={() => setAccountName('')}
-              className={[
-                'rounded-xl border p-4 text-left transition-colors',
-                accountName === ''
-                  ? 'border-blue-500 bg-blue-50 text-blue-900'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
-              ].join(' ')}>
-              <div className="text-sm font-semibold">Все счета</div>
-              <div className="mt-2 text-lg font-semibold">{formatMoney(accountSummaryTotals.endBalance)} ₽</div>
-              <div className="mt-2 flex items-center justify-between text-xs">
-                <span className="text-emerald-600">+ {formatMoney(accountSummaryTotals.income)} ₽</span>
-                <span className="text-rose-600">- {formatMoney(accountSummaryTotals.expense)} ₽</span>
-              </div>
-            </button>
-            {accountSummaries.map((account) => (
-              <button
-                key={`${account.source}-${account.accountName}`}
-                type="button"
-                onClick={() => setAccountName(account.accountName)}
-                className={[
-                  'rounded-xl border p-4 text-left transition-colors',
-                  accountName === account.accountName
-                    ? 'border-blue-500 bg-blue-50 text-blue-900'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
-                ].join(' ')}>
-                <div className="truncate text-sm font-semibold" title={account.accountName}>
-                  {account.accountName}
-                </div>
-                <div className="mt-2 text-lg font-semibold">{formatMoney(account.endBalance)} ₽</div>
-                <div className="mt-2 flex items-center justify-between text-xs">
-                  <span className="text-emerald-600">+ {formatMoney(account.income)} ₽</span>
-                  <span className="text-rose-600">- {formatMoney(account.expense)} ₽</span>
-                </div>
-              </button>
-            ))}
-          </div>
         </div>
       )}
 
@@ -1968,6 +1875,31 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                 <div className="absolute right-0 top-12 z-10 w-80 rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
                   <div className="grid gap-3 text-sm text-slate-600">
                     <label className="flex flex-col gap-1">
+                      {SOURCE_ACCOUNT_FILTER_LABELS[source]}
+                      <select
+                        value={accountName}
+                        onChange={(event) => setAccountName(event.target.value)}
+                        className="rounded-lg border border-slate-200 px-3 py-2">
+                        <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
+                        {accountSummaries.map((account) => (
+                          <option key={`${account.source}-${account.accountName}`} value={account.accountName}>
+                            {account.accountName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedAccountSummary && (
+                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
+                        <div className="font-medium text-slate-800">
+                          Остаток: {formatMoney(selectedAccountSummary.endBalance)} ₽
+                        </div>
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span className="text-emerald-600">Приход: {formatMoney(selectedAccountSummary.income)} ₽</span>
+                          <span className="text-rose-600">Расход: {formatMoney(selectedAccountSummary.expense)} ₽</span>
+                        </div>
+                      </div>
+                    )}
+                    <label className="flex flex-col gap-1">
                       Приход/Расход
                       <select
                         value={directionFilter}
@@ -1993,6 +1925,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                       <button
                         type="button"
                         onClick={() => {
+                          setAccountName('');
                           setDirectionFilter('all');
                           setAccountingTypeFilter('all');
                           setShowFilters(false);
