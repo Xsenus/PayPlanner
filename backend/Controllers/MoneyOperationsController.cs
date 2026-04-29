@@ -160,6 +160,7 @@ public class MoneyOperationsController : ControllerBase
                 MoneyOperationSource.Cash,
                 MoneyOperationSource.Bank,
                 MoneyOperationSource.Card,
+                MoneyOperationSource.EMoney,
             };
 
             var orderedSourceRows = orderedSources

@@ -51,13 +51,54 @@ const SOURCE_LABELS: Record<MoneyTab, string> = {
   Bank: 'Банк',
   Cash: 'Касса',
   Card: 'Карты',
+  EMoney: 'E-money',
   Total: 'Итого',
+};
+
+const SOURCE_OPERATION_SUBTITLES: Record<MoneyOperationSource, string> = {
+  Bank: 'Операции по банковским счетам',
+  Cash: 'Операции по кассе и наличным',
+  Card: 'Операции по картам',
+  EMoney: 'Операции по электронным кошелькам',
+};
+
+const SOURCE_ACCOUNT_FILTER_LABELS: Record<MoneyOperationSource, string> = {
+  Bank: 'Банковский счёт',
+  Cash: 'Касса',
+  Card: 'Счёт',
+  EMoney: 'Кошелёк',
+};
+
+const SOURCE_ALL_ACCOUNTS_LABELS: Record<MoneyOperationSource, string> = {
+  Bank: 'Все счета',
+  Cash: 'Все кассы',
+  Card: 'Все карты',
+  EMoney: 'Все кошельки',
+};
+
+const SOURCE_ACCOUNT_SECTION_LABELS: Record<MoneyOperationSource, string> = {
+  Bank: 'Банковские счета',
+  Cash: 'Кассы',
+  Card: 'Карты',
+  EMoney: 'E-money',
 };
 
 const SOURCE_MODAL_LABELS: Record<MoneyOperationSource, string> = {
   Bank: 'банку',
   Cash: 'кассе',
   Card: 'картам',
+  EMoney: 'E-money',
+};
+
+const MONEY_DIRECTION_FILTER_LABELS: Record<MoneyOperationDirection, string> = {
+  Income: 'Приход',
+  Expense: 'Расход',
+  Transfer: 'Между счетами',
+};
+
+const MONEY_ACCOUNTING_FILTER_LABELS: Record<MoneyOperationAccountingType, string> = {
+  Fact: 'Факт',
+  Plan: 'План',
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -1042,6 +1083,8 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [directionFilter, setDirectionFilter] = useState<'all' | MoneyOperationDirection>('all');
+  const [accountingTypeFilter, setAccountingTypeFilter] = useState<'all' | MoneyOperationAccountingType>('all');
   const [accountName, setAccountName] = useState('');
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1111,6 +1154,8 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     from,
     to,
     source: apiSource,
+    direction: directionFilter === 'all' ? undefined : directionFilter,
+    accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
     accountName: accountName || undefined,
     search: debouncedSearch,
     page: source === 'Total' ? 1 : page,
@@ -1136,6 +1181,49 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
   );
+  const accountSummaryTotals = useMemo(
+    () =>
+      accountSummaries.reduce(
+        (acc, account) => ({
+          startBalance: acc.startBalance + account.startBalance,
+          income: acc.income + account.income,
+          expense: acc.expense + account.expense,
+          endBalance: acc.endBalance + account.endBalance,
+        }),
+        { startBalance: 0, income: 0, expense: 0, endBalance: 0 },
+      ),
+    [accountSummaries],
+  );
+  const activeMoneyFilters = useMemo(() => {
+    const filters: Array<{ key: string; label: string; value: string; onClear: () => void }> = [];
+
+    if (accountName) {
+      filters.push({
+        key: 'accountName',
+        label: 'Счет',
+        value: accountName,
+        onClear: () => setAccountName(''),
+      });
+    }
+    if (directionFilter !== 'all') {
+      filters.push({
+        key: 'direction',
+        label: 'Движение',
+        value: MONEY_DIRECTION_FILTER_LABELS[directionFilter],
+        onClear: () => setDirectionFilter('all'),
+      });
+    }
+    if (accountingTypeFilter !== 'all') {
+      filters.push({
+        key: 'accountingType',
+        label: 'Учет',
+        value: MONEY_ACCOUNTING_FILTER_LABELS[accountingTypeFilter],
+        onClear: () => setAccountingTypeFilter('all'),
+      });
+    }
+
+    return filters;
+  }, [accountName, accountingTypeFilter, directionFilter]);
 
   useEffect(() => {
     if (source === 'Total') {
@@ -1172,6 +1260,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
       { key: 'Bank', label: 'Банк' },
       { key: 'Cash', label: 'Касса' },
       { key: 'Card', label: 'Карты' },
+      { key: 'EMoney', label: 'E-money' },
     ] as const).map((row) => {
       const data = bySource.get(row.key) ?? {
         startBalance: 0,
@@ -1443,7 +1532,7 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   useEffect(() => {
     if (source === 'Total') return;
     setPage(1);
-  }, [accountName, debouncedSearch, from, pageSize, source, to]);
+  }, [accountName, accountingTypeFilter, debouncedSearch, directionFilter, from, pageSize, source, to]);
 
   useEffect(() => {
     if (source === 'Total') return;
@@ -1627,18 +1716,18 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         <>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Добавить счёт или кассу</h1>
-          <p className="text-sm text-slate-500">Операции по деньгам ({SOURCE_LABELS[source]})</p>
+          <h1 className="text-xl font-semibold text-slate-900">{SOURCE_LABELS[source]}</h1>
+          <p className="text-sm text-slate-500">{SOURCE_OPERATION_SUBTITLES[source]}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-slate-400" htmlFor="money-account-filter">
-              {source === 'Bank' ? 'Банковский счёт' : source === 'Cash' ? 'Касса' : 'Счёт'}
+              {SOURCE_ACCOUNT_FILTER_LABELS[source]}
             </label>
             <select
               id="money-account-filter"
               value={accountName}
               onChange={(event) => setAccountName(event.target.value)}
               className="min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-500 focus:outline-none">
-              <option value="">Все счета</option>
+              <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
               {accountSummaries.map((account) => (
                 <option key={`${account.source}-${account.accountName}`} value={account.accountName}>
                   {account.accountName}
@@ -1740,6 +1829,53 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         </div>
       )}
 
+      {accountSummaries.length > 0 && (
+        <div className="mt-6">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            {SOURCE_ACCOUNT_SECTION_LABELS[source]}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => setAccountName('')}
+              className={[
+                'rounded-xl border p-4 text-left transition-colors',
+                accountName === ''
+                  ? 'border-blue-500 bg-blue-50 text-blue-900'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
+              ].join(' ')}>
+              <div className="text-sm font-semibold">Все счета</div>
+              <div className="mt-2 text-lg font-semibold">{formatMoney(accountSummaryTotals.endBalance)} ₽</div>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-emerald-600">+ {formatMoney(accountSummaryTotals.income)} ₽</span>
+                <span className="text-rose-600">- {formatMoney(accountSummaryTotals.expense)} ₽</span>
+              </div>
+            </button>
+            {accountSummaries.map((account) => (
+              <button
+                key={`${account.source}-${account.accountName}`}
+                type="button"
+                onClick={() => setAccountName(account.accountName)}
+                className={[
+                  'rounded-xl border p-4 text-left transition-colors',
+                  accountName === account.accountName
+                    ? 'border-blue-500 bg-blue-50 text-blue-900'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
+                ].join(' ')}>
+                <div className="truncate text-sm font-semibold" title={account.accountName}>
+                  {account.accountName}
+                </div>
+                <div className="mt-2 text-lg font-semibold">{formatMoney(account.endBalance)} ₽</div>
+                <div className="mt-2 flex items-center justify-between text-xs">
+                  <span className="text-emerald-600">+ {formatMoney(account.income)} ₽</span>
+                  <span className="text-rose-600">- {formatMoney(account.expense)} ₽</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_260px]">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1833,29 +1969,41 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                   <div className="grid gap-3 text-sm text-slate-600">
                     <label className="flex flex-col gap-1">
                       Приход/Расход
-                      <select className="rounded-lg border border-slate-200 px-3 py-2">
-                        <option>Все</option>
-                        <option>Приход</option>
-                        <option>Расход</option>
+                      <select
+                        value={directionFilter}
+                        onChange={(event) => setDirectionFilter(event.target.value as 'all' | MoneyOperationDirection)}
+                        className="rounded-lg border border-slate-200 px-3 py-2">
+                        <option value="all">Все</option>
+                        <option value="Income">Приход</option>
+                        <option value="Expense">Расход</option>
                       </select>
                     </label>
                     <label className="flex flex-col gap-1">
-                      Статья
-                      <select className="rounded-lg border border-slate-200 px-3 py-2">
-                        <option>Все статьи</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Контрагент
-                      <select className="rounded-lg border border-slate-200 px-3 py-2">
-                        <option>Все контрагенты</option>
+                      Учет
+                      <select
+                        value={accountingTypeFilter}
+                        onChange={(event) => setAccountingTypeFilter(event.target.value as 'all' | MoneyOperationAccountingType)}
+                        className="rounded-lg border border-slate-200 px-3 py-2">
+                        <option value="all">Факт и план</option>
+                        <option value="Fact">Факт</option>
+                        <option value="Plan">План</option>
                       </select>
                     </label>
                     <div className="flex items-center justify-between pt-2">
-                      <button className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDirectionFilter('all');
+                          setAccountingTypeFilter('all');
+                          setShowFilters(false);
+                        }}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
                         Сбросить
                       </button>
-                      <button className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700">
+                      <button
+                        type="button"
+                        onClick={() => setShowFilters(false)}
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700">
                         Применить
                       </button>
                     </div>
@@ -1881,6 +2029,24 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
             </button>
           </div>
         </div>
+
+        {activeMoneyFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Активные фильтры</span>
+            {activeMoneyFilters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={filter.onClear}
+                aria-label={`Сбросить фильтр ${filter.value}`}
+                className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
+                <span className="text-slate-400">{filter.label}:</span>
+                <span className="font-medium">{filter.value}</span>
+                <X className="h-3.5 w-3.5 text-slate-400" />
+              </button>
+            ))}
+          </div>
+        )}
 
         {showAdvancedSearch && (
           <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">

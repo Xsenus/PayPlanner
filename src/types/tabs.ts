@@ -23,6 +23,7 @@ export type Tab =
   | 'moneyBank'
   | 'moneyCash'
   | 'moneyCards'
+  | 'moneyEMoney'
   | 'moneyTotal'
   | 'contracts'
   | 'contractCreate'

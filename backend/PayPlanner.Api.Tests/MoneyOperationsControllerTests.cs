@@ -352,6 +352,56 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task MoneyJournal_TotalSummaryIncludesEMoneySource()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.EMoney,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "ЮMoney",
+                CounterpartyName = "Онлайн клиент",
+                Amount = 3_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Поставщик",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: null,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            search: null);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var eMoney = Assert.Single(page.Summary.BySource, item => item.Source == MoneyOperationSource.EMoney);
+
+        Assert.Equal(3_000m, eMoney.Income);
+        Assert.Equal(3_000m, eMoney.EndBalance);
+        Assert.Equal(2_000m, page.Summary.EndBalance);
+    }
+
+    [Fact]
     public async Task ManualCashOperation_CreatesAndSyncsCashOrder()
     {
         await using var db = await CreateContextAsync();

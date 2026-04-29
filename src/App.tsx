@@ -106,6 +106,7 @@ function AppContent() {
       moneyBank: 'Деньги: банк',
       moneyCash: 'Деньги: касса',
       moneyCards: 'Деньги: карты',
+      moneyEMoney: 'Деньги: E-money',
       moneyTotal: 'Деньги: итого',
       contracts: 'Договоры',
       contractCreate: 'Новый договор',
@@ -168,6 +169,9 @@ function AppContent() {
         { tab: 'paymentsIncome' as Tab, allowed: permissions.payments.canView },
         { tab: 'paymentsExpense' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyBank' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyCash' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyCards' as Tab, allowed: permissions.payments.canView },
+        { tab: 'moneyEMoney' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
@@ -218,11 +222,11 @@ function AppContent() {
         case 'paymentsIncome':
         case 'paymentsExpense':
         case 'moneyBank':
-        case 'moneyTotal':
-          return permissions.payments.canView;
         case 'moneyCash':
         case 'moneyCards':
-          return false;
+        case 'moneyEMoney':
+        case 'moneyTotal':
+          return permissions.payments.canView;
         case 'contracts':
         case 'contractDetail':
           return permissions.contracts.canView;
@@ -554,12 +558,6 @@ function AppContent() {
       localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
     } catch {
       // ignore storage issues
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === 'moneyCash' || activeTab === 'moneyCards') {
-      setActiveTab('moneyBank');
     }
   }, [activeTab]);
 
@@ -1021,6 +1019,11 @@ function AppContent() {
       case 'moneyCards':
         return permissions.payments.canView
           ? <MoneyOperations source="Card" />
+          : renderNoAccess('Раздел денег недоступен для вашей роли.');
+
+      case 'moneyEMoney':
+        return permissions.payments.canView
+          ? <MoneyOperations source="EMoney" />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyTotal':

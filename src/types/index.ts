@@ -481,7 +481,7 @@ export interface DealType {
 export type PaymentKind = 'Income' | 'Expense';
 
 export type MoneyOperationDirection = 'Income' | 'Expense' | 'Transfer';
-export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card';
+export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
 export type MoneyOperationAccountingType = 'Fact' | 'Plan';
 export type CashOrderStatus = 'Draft' | 'Posted' | 'Cancelled';
 export type CashOrderType = 'Incoming' | 'Outgoing';

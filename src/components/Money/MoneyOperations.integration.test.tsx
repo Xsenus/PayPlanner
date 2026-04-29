@@ -140,19 +140,22 @@ function createSummary(items: MoneyOperation[]): MoneyOperationsSummary {
       expenseItems.reduce((sum, item) => sum + item.amount, 0),
     incomeCount: incomeItems.length,
     expenseCount: expenseItems.length,
-    bySource: [
-      { source: 'Cash', startBalance: 0, income: 0, expense: 0, endBalance: 0 },
-      {
-        source: 'Bank',
+    bySource: (['Cash', 'Bank', 'Card', 'EMoney'] as const).map((source) => {
+      const sourceIncome = incomeItems
+        .filter((item) => item.source === source)
+        .reduce((sum, item) => sum + item.amount, 0);
+      const sourceExpense = expenseItems
+        .filter((item) => item.source === source)
+        .reduce((sum, item) => sum + item.amount, 0);
+
+      return {
+        source,
         startBalance: 0,
-        income: incomeItems.reduce((sum, item) => sum + item.amount, 0),
-        expense: expenseItems.reduce((sum, item) => sum + item.amount, 0),
-        endBalance:
-          incomeItems.reduce((sum, item) => sum + item.amount, 0) -
-          expenseItems.reduce((sum, item) => sum + item.amount, 0),
-      },
-      { source: 'Card', startBalance: 0, income: 0, expense: 0, endBalance: 0 },
-    ],
+        income: sourceIncome,
+        expense: sourceExpense,
+        endBalance: sourceIncome - sourceExpense,
+      };
+    }),
   };
 }
 
@@ -230,7 +233,7 @@ describe('MoneyOperations integration', () => {
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     vi.spyOn(window, 'open').mockImplementation(() => null);
 
-    getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' }) =>
+    getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
       Array.from(
         new Set(
           operations
@@ -240,7 +243,7 @@ describe('MoneyOperations integration', () => {
         ),
       ),
     );
-    getMoneyOperationAccountSummariesMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' }) => {
+    getMoneyOperationAccountSummariesMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) => {
       const accountNames = Array.from(
         new Set(
           operations
@@ -273,11 +276,18 @@ describe('MoneyOperations integration', () => {
     });
 
     getMoneyOperationsPagedMock.mockImplementation(
-      async (params?: { source?: 'Bank' | 'Cash' | 'Card'; accountName?: string }) => {
+      async (params?: {
+        source?: 'Bank' | 'Cash' | 'Card' | 'EMoney';
+        accountName?: string;
+        direction?: 'Income' | 'Expense' | 'Transfer';
+        accountingType?: 'Fact' | 'Plan';
+      }) => {
       const filtered = operations.filter(
         (item) =>
           (!params?.source || item.source === params.source) &&
-          (!params?.accountName || item.accountName === params.accountName),
+          (!params?.accountName || item.accountName === params.accountName) &&
+          (!params?.direction || item.direction === params.direction) &&
+          (!params?.accountingType || item.accountingType === params.accountingType),
       );
       return {
         items: filtered,
@@ -472,6 +482,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Поставщик А');
+    expect(screen.getByText('Банковские счета')).toBeTruthy();
     expect(screen.getByText('Поставщик Б')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), 'Резервный счёт');
@@ -484,6 +495,15 @@ describe('MoneyOperations integration', () => {
     expect(await screen.findByText('Поставщик Б')).toBeTruthy();
     expect(document.body.textContent).toContain('Расход: 1 500,00 ₽');
     expect(screen.queryByText('Поставщик А')).toBeNull();
+
+    const allAccountsCard = screen
+      .getAllByRole('button')
+      .find((button) => button.textContent?.includes('Все счета'));
+    expect(allAccountsCard).toBeTruthy();
+    await user.click(allAccountsCard!);
+
+    expect(await screen.findByText('Поставщик А')).toBeTruthy();
+    expect(screen.getByText('Поставщик Б')).toBeTruthy();
   });
 
   it('shows total turnover cards across all money sources', async () => {
@@ -504,6 +524,14 @@ describe('MoneyOperations integration', () => {
         accountName: 'Касса',
         counterpartyName: 'Поставщик',
       }),
+      createOperation({
+        id: 3,
+        source: 'EMoney',
+        direction: 'Income',
+        amount: 3000,
+        accountName: 'ЮMoney',
+        counterpartyName: 'Онлайн клиент',
+      }),
     ];
 
     render(<MoneyOperations source="Total" />);
@@ -511,10 +539,105 @@ describe('MoneyOperations integration', () => {
     expect(await screen.findByText('Общий баланс')).toBeTruthy();
     expect(screen.getByText('Приход за период')).toBeTruthy();
     expect(screen.getByText('Расход за период')).toBeTruthy();
-    expect(document.body.textContent).toContain('25 000,00 ₽');
-    expect(document.body.textContent).toContain('5 000,00 ₽');
-    expect(document.body.textContent).toContain('20 000,00 ₽');
+    expect(screen.getByText('E-money')).toBeTruthy();
+    expect(document.body.textContent).toContain('25 000,00');
+    expect(document.body.textContent).toContain('3 000,00');
+    expect(document.body.textContent).toContain('5 000,00');
+    expect(document.body.textContent).toContain('23 000,00 ₽');
   });
+
+  it('renders the e-money journal with wallet labels', async () => {
+    operations = [
+      createOperation({
+        id: 1,
+        source: 'EMoney',
+        direction: 'Income',
+        amount: 3000,
+        accountName: 'ЮMoney',
+        counterpartyName: 'Онлайн клиент',
+      }),
+    ];
+
+    render(<MoneyOperations source="EMoney" />);
+
+    expect(await screen.findByText('E-money')).toBeTruthy();
+    expect(screen.getByText('Операции по электронным кошелькам')).toBeTruthy();
+    expect(screen.getByLabelText('Кошелёк')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Все кошельки' })).toBeTruthy();
+    expect(screen.getByText('Онлайн клиент')).toBeTruthy();
+    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ source: 'EMoney' }),
+    );
+  });
+
+  it('applies direction and accounting filters to the money journal request', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 1,
+        direction: 'Income',
+        accountingType: 'Fact',
+        counterpartyName: 'Клиент факт',
+        amount: 9000,
+      }),
+      createOperation({
+        id: 2,
+        direction: 'Expense',
+        accountingType: 'Fact',
+        counterpartyName: 'Расход факт',
+        amount: 3000,
+      }),
+      createOperation({
+        id: 3,
+        direction: 'Income',
+        accountingType: 'Plan',
+        counterpartyName: 'Клиент план',
+        amount: 7000,
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Клиент факт');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Приход/Расход'), 'Income');
+    await user.selectOptions(screen.getByLabelText('Учет'), 'Fact');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ direction: 'Income', accountingType: 'Fact' }),
+      ),
+    );
+    expect(await screen.findByText('Клиент факт')).toBeTruthy();
+    expect(screen.queryByText('Расход факт')).toBeNull();
+    expect(screen.queryByText('Клиент план')).toBeNull();
+    expect(screen.getByText('Активные фильтры')).toBeTruthy();
+    expect(screen.getByText('Приход')).toBeTruthy();
+    expect(screen.getByText('Факт')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить фильтр Приход' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ accountingType: 'Fact' }),
+      ),
+    );
+    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ direction: 'Income' }),
+    );
+    expect(await screen.findByText('Расход факт')).toBeTruthy();
+    expect(screen.queryByText('Клиент план')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.click(screen.getByRole('button', { name: 'Сбросить' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({ direction: 'Income', accountingType: 'Fact' }),
+      ),
+    );
+  }, 15000);
 
   it('normalizes API dates in the edit form and updates the operation', async () => {
     const user = userEvent.setup();
